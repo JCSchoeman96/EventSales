@@ -6,10 +6,15 @@ import Config
 # to provide built-in test partitioning in CI environment.
 # Run `mix help test` for more information.
 config :event_sales, EventSales.Repo,
-  username: "postgres",
-  password: "postgres",
-  hostname: "localhost",
-  database: "event_sales_test#{System.get_env("MIX_TEST_PARTITION")}",
+  username: System.get_env("TEST_DATABASE_USERNAME", "postgres"),
+  password: System.get_env("TEST_DATABASE_PASSWORD", "postgres"),
+  hostname: System.get_env("TEST_DATABASE_HOST", "localhost"),
+  port: String.to_integer(System.get_env("TEST_DATABASE_PORT", "5432")),
+  database:
+    System.get_env(
+      "TEST_DATABASE_NAME",
+      "event_sales_test#{System.get_env("MIX_TEST_PARTITION")}"
+    ),
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: System.schedulers_online() * 2
 
@@ -20,7 +25,9 @@ config :event_sales, EventSalesWeb.Endpoint,
   secret_key_base: "UK6gckLT7AiM/VwG9t4M3p4GHD8+EHC9f8pY1h/MwQWXTWm471spFxMc2+evtDDN",
   server: false
 
-config :event_sales, :start_repo, false
+config :event_sales, :start_repo, true
+
+config :event_sales, Oban, testing: :manual
 
 # Print only warnings and errors during test
 config :logger, level: :warning

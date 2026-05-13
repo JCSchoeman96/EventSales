@@ -2,14 +2,24 @@ defmodule EventSales.RuntimeConfigTest do
   use ExUnit.Case, async: false
 
   @runtime_config_path Path.expand("../../config/runtime.exs", __DIR__)
+  @managed_env_keys [
+    "DATABASE_URL",
+    "DIRECT_DATABASE_URL",
+    "EVENTSALES_BUSINESS_TIMEZONE",
+    "EVENTSALES_DEFAULT_CURRENCY",
+    "PHX_SERVER",
+    "PHX_HOST",
+    "SECRET_KEY_BASE"
+  ]
 
   setup do
-    original_timezone = System.get_env("EVENTSALES_BUSINESS_TIMEZONE")
-    original_currency = System.get_env("EVENTSALES_DEFAULT_CURRENCY")
+    original_env =
+      for key <- @managed_env_keys, into: %{} do
+        {key, System.get_env(key)}
+      end
 
     on_exit(fn ->
-      restore_env("EVENTSALES_BUSINESS_TIMEZONE", original_timezone)
-      restore_env("EVENTSALES_DEFAULT_CURRENCY", original_currency)
+      Enum.each(original_env, fn {key, value} -> restore_env(key, value) end)
     end)
 
     :ok
@@ -26,6 +36,31 @@ defmodule EventSales.RuntimeConfigTest do
 
     assert Keyword.get(app_config, :business_timezone) == "Africa/Johannesburg"
     assert Keyword.get(app_config, :default_currency) == "ZAR"
+  end
+
+  test "prod runtime config keeps the direct migration path separate from the repo url" do
+    System.put_env("DATABASE_URL", "ecto://pooled-user:pooled-pass@db.internal/event_sales")
+
+    System.put_env(
+      "DIRECT_DATABASE_URL",
+      "ecto://direct-user:direct-pass@db.internal/event_sales"
+    )
+
+    System.put_env("SECRET_KEY_BASE", String.duplicate("a", 64))
+    System.put_env("PHX_HOST", "eventsales.example.com")
+
+    app_config =
+      @runtime_config_path
+      |> Config.Reader.read!(env: :prod)
+      |> Keyword.get(:event_sales, [])
+
+    repo_config = Keyword.fetch!(app_config, EventSales.Repo)
+
+    assert Keyword.fetch!(repo_config, :url) ==
+             "ecto://pooled-user:pooled-pass@db.internal/event_sales"
+
+    assert Keyword.get(app_config, :direct_database_url) ==
+             "ecto://direct-user:direct-pass@db.internal/event_sales"
   end
 
   defp restore_env(key, nil), do: System.delete_env(key)

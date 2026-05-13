@@ -11,6 +11,11 @@ config :event_sales,
   ecto_repos: [EventSales.Repo],
   generators: [timestamp_type: :utc_datetime, binary_id: true]
 
+config :event_sales, Oban,
+  repo: EventSales.Repo,
+  plugins: false,
+  queues: [default: 10]
+
 # Configure the endpoint
 config :event_sales, EventSalesWeb.Endpoint,
   url: [host: "localhost"],

@@ -20,7 +20,10 @@ if System.get_env("PHX_SERVER") do
   config :event_sales, EventSalesWeb.Endpoint, server: true
 end
 
+direct_database_url = System.get_env("DIRECT_DATABASE_URL")
+
 config :event_sales,
+  direct_database_url: direct_database_url,
   business_timezone: System.get_env("EVENTSALES_BUSINESS_TIMEZONE", "Africa/Johannesburg"),
   default_currency: System.get_env("EVENTSALES_DEFAULT_CURRENCY", "ZAR")
 

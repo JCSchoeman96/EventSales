@@ -11,6 +11,7 @@ defmodule EventSales.Application do
       [
         EventSalesWeb.Telemetry,
         repo_child(),
+        oban_child(),
         {DNSCluster, query: Application.get_env(:event_sales, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: EventSales.PubSub},
         # Start a worker by calling: EventSales.Worker.start_link(arg)
@@ -38,5 +39,9 @@ defmodule EventSales.Application do
     if Application.get_env(:event_sales, :start_repo, true) do
       EventSales.Repo
     end
+  end
+
+  defp oban_child do
+    {Oban, Application.fetch_env!(:event_sales, Oban)}
   end
 end

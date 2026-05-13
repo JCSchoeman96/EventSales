@@ -387,6 +387,15 @@ mix credo --strict
 MIX_ENV=test mix ash.codegen --dry-run
 ```
 
+Postgres-backed test baseline:
+
+```text
+Since Slice 0.2, mix test requires Postgres to be reachable.
+Local: start Postgres, then run MIX_ENV=test mix ecto.create && MIX_ENV=test mix ecto.migrate before mix test when the test DB is not ready yet.
+CI: only the test job gets a Postgres service.
+Do not add Redis to CI until a slice explicitly requires it.
+```
+
 ## Quality gates
 
 Use [`docs/development/quality-gates.md`](docs/development/quality-gates.md) as the local and CI quality-gate reference.
@@ -401,6 +410,8 @@ Before push
 Task is not complete unless required checks pass.
 Do not add Ash-specific checks until Ash exists.
 Do not add DB/Redis CI services until tests require them.
+Postgres is now required for the CI test job because the Repo and Oban start in :test.
+Keep Redis out of CI until a later slice requires it.
 ```
 
 Mandatory coverage areas:
