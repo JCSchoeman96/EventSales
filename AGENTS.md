@@ -387,6 +387,22 @@ mix credo --strict
 MIX_ENV=test mix ash.codegen --dry-run
 ```
 
+## Quality gates
+
+Use [`docs/development/quality-gates.md`](docs/development/quality-gates.md) as the local and CI quality-gate reference.
+
+```text
+Before commit
+|> mix quality.fast
+
+Before push
+|> mix quality.ci
+
+Task is not complete unless required checks pass.
+Do not add Ash-specific checks until Ash exists.
+Do not add DB/Redis CI services until tests require them.
+```
+
 Mandatory coverage areas:
 
 ```text

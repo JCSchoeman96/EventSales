@@ -10,6 +10,7 @@ defmodule EventSales.MixProject do
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
+      dialyzer: [plt_add_apps: [:ex_unit]],
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
       listeners: [Phoenix.CodeReloader]
     ]
@@ -27,7 +28,13 @@ defmodule EventSales.MixProject do
 
   def cli do
     [
-      preferred_envs: [precommit: :test]
+      preferred_envs: [
+        {:precommit, :test},
+        {:dialyzer, :test},
+        {:"quality.fast", :test},
+        {:quality, :test},
+        {:"quality.ci", :test}
+      ]
     ]
   end
 
@@ -52,7 +59,11 @@ defmodule EventSales.MixProject do
       {:telemetry_poller, "~> 1.0"},
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
-      {:bandit, "~> 1.5"}
+      {:bandit, "~> 1.5"},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:sobelow, "~> 0.14.1", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
+      {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false}
     ]
   end
 
@@ -68,7 +79,27 @@ defmodule EventSales.MixProject do
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["test"],
-      precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"]
+      precommit: ["quality.fast"],
+      "quality.fast": [
+        "format --check-formatted",
+        "compile --warnings-as-errors",
+        "deps.unlock --check-unused",
+        "cmd ./scripts/check_no_web_woocommerce_refs.sh"
+      ],
+      quality: ["quality.fast", "credo --strict", "sobelow"],
+      "quality.ci": [
+        "deps.get --check-locked",
+        "format --check-formatted",
+        "compile --warnings-as-errors",
+        "deps.unlock --check-unused",
+        "cmd ./scripts/check_no_web_woocommerce_refs.sh",
+        "credo --strict",
+        "sobelow",
+        "deps.audit",
+        "cmd mix hex.audit",
+        "test",
+        "dialyzer"
+      ]
     ]
   end
 end
