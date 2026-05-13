@@ -114,6 +114,15 @@ defmodule EventSales.TelemetryTest do
     metric.__struct__ == expected_metric.__struct__ and
       metric.name == expected_metric.name and
       metric.event_name == expected_metric.event_name and
-      metric.measurement == expected_metric.measurement
+      measurement_matches?(metric, expected_metric.measurement)
+  end
+
+  defp measurement_matches?(%{measurement: measurement, name: name}, expected_measurement)
+       when is_function(measurement, 1) do
+    List.last(name) == expected_measurement
+  end
+
+  defp measurement_matches?(%{measurement: measurement}, expected_measurement) do
+    measurement == expected_measurement
   end
 end
