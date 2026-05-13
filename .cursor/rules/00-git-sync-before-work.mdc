@@ -1,0 +1,33 @@
+---
+description: Run the safe Git sync script before starting work.
+globs:
+  - "**/*"
+alwaysApply: true
+---
+
+# Git Sync Before Work
+
+Before implementing any task, run:
+
+```bash
+scripts/sync_with_origin_main.sh --check
+```
+
+If the script reports that syncing is safe and the task has not started, run:
+
+```bash
+scripts/sync_with_origin_main.sh --sync
+```
+
+Stop and report if the script stops because of dirty work, divergence, conflicts, missing origin/main, or shared-branch risk.
+
+Never run:
+
+```bash
+git reset --hard
+git clean -fd
+git push --force
+git pull --rebase
+```
+
+unless explicitly approved by the user.
