@@ -96,6 +96,26 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    env:
+      TEST_DATABASE_HOST: 127.0.0.1
+      TEST_DATABASE_PORT: "5432"
+      TEST_DATABASE_USERNAME: postgres
+      TEST_DATABASE_PASSWORD: postgres
+      TEST_DATABASE_NAME: event_sales_test
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: event_sales_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d event_sales_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - uses: actions/checkout@v4
@@ -121,6 +141,12 @@ jobs:
 
       - name: Fetch locked dependencies
         run: mix deps.get --check-locked
+
+      - name: Create test database
+        run: mix ecto.create
+
+      - name: Run test migrations
+        run: mix ecto.migrate
 
       - name: Run tests
         run: mix test

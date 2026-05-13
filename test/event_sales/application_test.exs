@@ -1,7 +1,7 @@
 defmodule EventSales.ApplicationTest do
   use ExUnit.Case, async: true
 
-  test "repo is not supervised in test" do
-    refute Process.whereis(EventSales.Repo)
+  test "repo is supervised in test" do
+    assert Process.whereis(EventSales.Repo)
   end
 end

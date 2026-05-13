@@ -1,6 +1,6 @@
 # Quality Gates
 
-Slice 0.1 adds the first local and CI guardrails for EventSales. These checks are intentionally limited to the current Phoenix scaffold and do not pull future-slice Ash, Oban, Redis, or service-backed checks forward.
+Slice `0.2` keeps the original local and CI guardrails from Slice `0.1`, and now adds the minimum Postgres-backed test baseline required for `EventSales.Repo` and Oban to start in `:test`.
 
 ## Local Commands
 
@@ -25,6 +25,8 @@ Slice 0.1 adds the first local and CI guardrails for EventSales. These checks ar
   - Runs `mix hex.audit` in a fresh Mix invocation
   - Runs `mix test`
   - Runs `mix dialyzer`
+
+Because the app now starts `EventSales.Repo` and Oban in `:test`, any command that runs `mix test` or a test-only smoke check requires a reachable Postgres instance.
 
 `mix sobelow` currently runs without a custom Sobelow config file. Add a config later only if the project needs one.
 
@@ -94,6 +96,9 @@ Jobs:
   - Runs `mix deps.audit`
   - Runs `mix hex.audit`
 - `test`
+  - Starts a Postgres service
+  - Runs `mix ecto.create`
+  - Runs `mix ecto.migrate`
   - Runs the current ExUnit suite
 - `dialyzer`
   - Runs Dialyzer under `MIX_ENV=test`
@@ -114,8 +119,8 @@ If a version file is added later, treat that file as the CI source of truth and 
 These are intentionally deferred to later slices:
 
 - Ash-specific checks
-- Ash, Oban, or Redis dependencies
-- Database-backed or Redis-backed CI services
+- Ash or Redis dependencies beyond the minimal Slice `0.2` baseline
+- Redis-backed CI services
 - Coverage thresholds
 - Business-logic checks outside the current scaffold baseline
 
