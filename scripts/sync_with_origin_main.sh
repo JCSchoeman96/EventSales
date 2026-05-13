@@ -108,9 +108,12 @@ echo "|> compared-to-origin-main: ahead=${AHEAD} behind=${BEHIND}"
 echo "|> origin/main: ${ORIGIN_MAIN_STATE}"
 
 if [[ "$MODE" == "--check" ]]; then
-  echo "|> action: none"
+  CHECK_SAFE="yes"
+  CHECK_ACTION="none"
 
   if [[ "$DIRTY_TREE" == "yes" ]]; then
+    CHECK_SAFE="no"
+    CHECK_ACTION="stopped"
     problem \
       "working tree has local changes" \
       "syncing should only happen after you intentionally commit, stash, or discard local work" \
@@ -118,6 +121,8 @@ if [[ "$MODE" == "--check" ]]; then
   fi
 
   if [[ "$HAS_CONFLICTS" == "yes" ]]; then
+    CHECK_SAFE="no"
+    CHECK_ACTION="stopped"
     problem \
       "branch has unresolved conflicts" \
       "rebases and pulls must not continue while conflicts are unresolved" \
@@ -125,13 +130,43 @@ if [[ "$MODE" == "--check" ]]; then
   fi
 
   if [[ "$IN_PROGRESS" == "yes" ]]; then
+    CHECK_SAFE="no"
+    CHECK_ACTION="stopped"
     problem \
       "another Git operation is already in progress" \
       "merge, rebase, cherry-pick, revert, or bisect state must be completed first" \
       "finish or abort the in-progress operation before running --sync"
   fi
 
-  exit 0
+  if [[ "$CURRENT_BRANCH" == "main" && "$ORIGIN_MAIN_STATE" == "ahead" ]]; then
+    CHECK_SAFE="no"
+    CHECK_ACTION="stopped"
+    problem \
+      "main is ahead of origin/main" \
+      "starting fresh work on a local-only main branch risks stacking work on top of unreviewed history" \
+      "inspect main manually before starting work"
+  fi
+
+  if [[ "$ORIGIN_MAIN_STATE" == "diverged" ]]; then
+    CHECK_SAFE="no"
+    CHECK_ACTION="stopped"
+    problem \
+      "branch has diverged from origin/main" \
+      "starting work before reconciling both histories risks conflicts and accidental history rewrites later" \
+      "inspect the branch manually and reconcile it before starting work"
+  fi
+
+  if [[ "$CHECK_SAFE" == "yes" && "$ORIGIN_MAIN_STATE" == "behind" ]]; then
+    CHECK_ACTION="sync-available"
+  fi
+
+  echo "|> action: ${CHECK_ACTION}"
+
+  if [[ "$CHECK_SAFE" == "yes" ]]; then
+    exit 0
+  fi
+
+  exit 1
 fi
 
 if [[ "$DIRTY_TREE" == "yes" ]]; then
