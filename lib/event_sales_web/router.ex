@@ -15,10 +15,13 @@ defmodule EventSalesWeb.Router do
   end
 
   scope "/", EventSalesWeb do
+    get "/health", HealthController, :show
+  end
+
+  scope "/", EventSalesWeb do
     pipe_through :browser
 
     get "/", PageController, :home
-    get "/health", HealthController, :show
   end
 
   # Other scopes may use custom stacks.
