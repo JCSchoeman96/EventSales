@@ -1,12 +1,18 @@
 defmodule EventSalesWeb.Telemetry do
+  @moduledoc """
+  Supervised telemetry metrics for Phoenix and EventSales operational events.
+  """
+
   use Supervisor
   import Telemetry.Metrics
 
+  @spec start_link(term()) :: Supervisor.on_start()
   def start_link(arg) do
     Supervisor.start_link(__MODULE__, arg, name: __MODULE__)
   end
 
   @impl true
+  @spec init(term()) :: {:ok, {Supervisor.sup_flags(), [Supervisor.child_spec()]}}
   def init(_arg) do
     children = [
       # Telemetry poller will execute the given period measurements
@@ -19,6 +25,7 @@ defmodule EventSalesWeb.Telemetry do
     Supervisor.init(children, strategy: :one_for_one)
   end
 
+  @spec metrics() :: [Telemetry.Metrics.t()]
   def metrics do
     [
       # Phoenix Metrics
@@ -73,6 +80,79 @@ defmodule EventSalesWeb.Telemetry do
         unit: {:native, :millisecond},
         description:
           "The time the connection spent waiting before being checked out for the query"
+      ),
+
+      # EventSales Operational Metrics
+      counter("event_sales.webhook.accepted.count",
+        event_name: EventSales.Telemetry.webhook_accepted(),
+        measurement: :count,
+        tags: [:topic, :source],
+        description: "Accepted WooCommerce webhooks"
+      ),
+      counter("event_sales.webhook.rejected.count",
+        event_name: EventSales.Telemetry.webhook_rejected(),
+        measurement: :count,
+        tags: [:topic, :reason, :source],
+        description: "Rejected WooCommerce webhooks"
+      ),
+      summary("event_sales.rest.request.stop.duration",
+        event_name: EventSales.Telemetry.rest_request_stop(),
+        measurement: :duration,
+        tags: [:operation, :status, :source],
+        unit: {:native, :millisecond},
+        description: "WooCommerce REST request duration"
+      ),
+      counter("event_sales.rest.request.exception.count",
+        event_name: EventSales.Telemetry.rest_request_exception(),
+        measurement: :count,
+        tags: [:operation, :reason, :source],
+        description: "WooCommerce REST request failures"
+      ),
+      counter("event_sales.hot_state.rebuild.start.count",
+        event_name: EventSales.Telemetry.hot_state_rebuild_start(),
+        measurement: :count,
+        tags: [:source],
+        description: "HotStateAggregator rebuild starts"
+      ),
+      summary("event_sales.hot_state.rebuild.stop.duration",
+        event_name: EventSales.Telemetry.hot_state_rebuild_stop(),
+        measurement: :duration,
+        tags: [:result, :source],
+        unit: {:native, :millisecond},
+        description: "HotStateAggregator rebuild duration"
+      ),
+      counter("event_sales.hot_state.rebuild.exception.count",
+        event_name: EventSales.Telemetry.hot_state_rebuild_exception(),
+        measurement: :count,
+        tags: [:reason, :source],
+        description: "HotStateAggregator rebuild failures"
+      ),
+
+      # Oban Metrics
+      last_value("oban.supervisor.init.system_time",
+        event_name: [:oban, :supervisor, :init],
+        measurement: :system_time,
+        unit: {:native, :millisecond},
+        description: "Oban supervisor initialization time"
+      ),
+      counter("oban.job.start.system_time",
+        event_name: [:oban, :job, :start],
+        measurement: :system_time,
+        tags: [:queue, :worker],
+        description: "Started Oban jobs"
+      ),
+      summary("oban.job.stop.duration",
+        event_name: [:oban, :job, :stop],
+        measurement: :duration,
+        tags: [:queue, :worker],
+        unit: {:native, :millisecond},
+        description: "Successful Oban job duration"
+      ),
+      counter("oban.job.exception.duration",
+        event_name: [:oban, :job, :exception],
+        measurement: :duration,
+        tags: [:queue, :worker],
+        description: "Failed Oban jobs"
       ),
 
       # VM Metrics
