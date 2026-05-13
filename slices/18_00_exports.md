@@ -7,7 +7,7 @@ Allow admins to export event sales summaries.
 ## Implementation scope
 
 ```text
-Event summary CSV, order list CSV, PII-aware policy, streamed response, audit.
+Event summary CSV, order list CSV, reconciliation report CSV grouped by event/ticket type/mismatch status/payment method, PII-aware policy, streamed response, audit.
 ```
 
 ## Copy-paste TOON prompt
@@ -16,15 +16,18 @@ Event summary CSV, order list CSV, PII-aware policy, streamed response, audit.
 |---|---|
 | Task | Implement Slice 18.0 — Exports for EventSales. |
 | Objective | Allow admins to export event sales summaries. |
-| Output | Event summary CSV, order list CSV, PII-aware policy, streamed response, audit. |
+| Output | Event summary CSV, order list CSV, reconciliation report CSV grouped by event/ticket type/mismatch status/payment method, PII-aware policy, streamed response, audit. |
 | Note | Do not load entire export into memory. Include strict tests listed below. Do not violate project-wide rules. |
 
 ## Strict tests
 
 - Admin exports summary/list
+- Admin exports reconciliation report
 - Event scope respected
 - PII policy respected
 - Unmapped excluded from metrics
+- Reconciliation export includes payment method
+- Large reconciliation export streamed/paginated
 - Large export streamed/paginated
 - Audit written
 

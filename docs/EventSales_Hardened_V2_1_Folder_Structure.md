@@ -48,10 +48,16 @@ lib/
         webhook_delivery_failure.ex
         sync_run.ex
         sync_cursor.ex
+        # Future Slice 14.5
+        tickera_attendee_sync_run.ex
+        tickera_attendee_snapshot.ex
         csv_import_batch.ex
         csv_import_row.ex
       workers/
         process_webhook_worker.ex
+        # Future Slice 14.5
+        sync_tickera_attendees_worker.ex
+        reconcile_tickera_attendees_worker.ex
         missing_catalog_resolution_worker.ex
         reconcile_orders_worker.ex
         backfill_orders_worker.ex
@@ -61,6 +67,8 @@ lib/
       clients/
         woocommerce_client.ex
         woocommerce_error.ex
+        # Future Slice 14.5
+        tickera_client.ex
       security/
         raw_body_reader.ex
         webhook_signature.ex
@@ -84,6 +92,9 @@ lib/
       resources/
         event_aggregate_snapshot.ex
         daily_sales_aggregate_snapshot.ex
+        # Future Slice 14.5
+        attendee_reconciliation_result.ex
+        attendee_reconciliation_summary.ex
       workers/
         rebuild_hot_state_worker.ex
         refresh_snapshot_worker.ex
