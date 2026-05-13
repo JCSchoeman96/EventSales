@@ -24,14 +24,14 @@ container_running() {
 start_container() {
   if container_running; then
     echo "Dev Postgres already running."
-    status_container
+    wait_for_ready
     return 0
   fi
 
   if container_exists; then
     docker start "${CONTAINER_NAME}" >/dev/null
     echo "Started existing dev Postgres container."
-    status_container
+    wait_for_ready
     return 0
   fi
 
@@ -45,7 +45,23 @@ start_container() {
     "${IMAGE_NAME}" >/dev/null
 
   echo "Started new dev Postgres container."
-  status_container
+  wait_for_ready
+}
+
+wait_for_ready() {
+  local attempts=30
+
+  for _ in $(seq 1 "${attempts}"); do
+    if docker exec "${CONTAINER_NAME}" pg_isready -U "${POSTGRES_USER_VALUE}" -d "${POSTGRES_DB_VALUE}" >/dev/null 2>&1; then
+      echo "Dev Postgres is ready."
+      return 0
+    fi
+
+    sleep 1
+  done
+
+  echo "Problem: Dev Postgres did not become ready within ${attempts}s." >&2
+  return 1
 }
 
 stop_container() {
