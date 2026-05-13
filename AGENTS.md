@@ -50,6 +50,31 @@ Understand task
 |> report result plainly
 ```
 
+## Git sync before work
+
+Before starting any task:
+
+```bash
+scripts/sync_with_origin_main.sh --check
+```
+
+If the branch is clean and sync is safe:
+
+```bash
+scripts/sync_with_origin_main.sh --sync
+```
+
+Rules:
+
+```text
+Never reset hard.
+Never clean files.
+Never force push.
+Never auto-resolve conflicts.
+Never rebase pushed/shared branches without approval.
+Stop if the working tree is dirty.
+```
+
 Never code from vibes. Use factual backing: existing code, canonical docs, official package docs, or explicit user direction.
 
 If unsure:
