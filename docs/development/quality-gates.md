@@ -1,6 +1,6 @@
 # Quality Gates
 
-Slice `0.2` keeps the original local and CI guardrails from Slice `0.1`, and now adds the minimum Postgres-backed test baseline required for `EventSales.Repo` and Oban to start in `:test`.
+Slice `0.2` established the Postgres-backed test baseline required for `EventSales.Repo` and Oban to start in `:test`. Slice `0.4` keeps those guardrails and adds the Ash ecosystem proof surface under `EventSales.AshBaseline`.
 
 ## Local Commands
 
@@ -26,7 +26,24 @@ Slice `0.2` keeps the original local and CI guardrails from Slice `0.1`, and now
   - Runs `mix test`
   - Runs `mix dialyzer`
 
-Because the app now starts `EventSales.Repo` and Oban in `:test`, any command that runs `mix test` or a test-only smoke check requires a reachable Postgres instance.
+## Slice 0.4 Ash Baseline Checks
+
+Slice `0.4` adds proof-only Ash verification on top of the existing local commands:
+
+- `MIX_ENV=test mix ash.codegen --dry-run`
+  - Confirms the Ash/AshPostgres proof resources and snapshots are in sync
+  - Is required as part of Slice `0.4` verification
+  - Is enforced by `mix quality.ci`
+  - Is enforced in the CI test job after `mix ecto.migrate`
+- Focused proof tests:
+  - `mix test test/event_sales/ash_baseline/auth_user_support_test.exs`
+  - `mix test test/event_sales/ash_baseline/state_machine_proof_test.exs`
+  - `mix test test/event_sales/ash_baseline/paper_trail_proof_test.exs`
+  - `mix test test/event_sales_web/ash_admin_access_test.exs`
+
+These checks prove ecosystem readiness only. They do not mean the real Accounts, Catalog, Sales, Ingestion, or Audit resources have shipped.
+
+Because the app now starts `EventSales.Repo` and Oban in `:test`, any command that runs `mix test`, `mix ash.codegen --dry-run`, or a test-only smoke check requires a reachable Postgres instance.
 
 `mix sobelow` currently runs without a custom Sobelow config file. Add a config later only if the project needs one.
 
@@ -118,11 +135,12 @@ If a version file is added later, treat that file as the CI source of truth and 
 
 These are intentionally deferred to later slices:
 
-- Ash-specific checks
-- Ash or Redis dependencies beyond the minimal Slice `0.2` baseline
+- broad Ash checks in every CI job
 - Redis-backed CI services
-- Coverage thresholds
-- Business-logic checks outside the current scaffold baseline
+- coverage thresholds
+- business-logic checks outside the current scaffold baseline
+
+Slice `0.4` does not add Redis to CI, does not add PgBouncer to CI, and does not add broad Ash policy gates beyond the proof-specific checks above.
 
 ## Emergency Bypass
 

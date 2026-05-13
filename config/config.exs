@@ -8,8 +8,11 @@
 import Config
 
 config :event_sales,
+  ash_domains: [EventSales.AshBaseline.Domain],
   ecto_repos: [EventSales.Repo],
   generators: [timestamp_type: :utc_datetime, binary_id: true]
+
+config :event_sales, :internal_tools, ash_admin_enabled: config_env() in [:dev, :test]
 
 config :event_sales, Oban,
   repo: EventSales.Repo,

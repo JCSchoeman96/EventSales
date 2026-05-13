@@ -1,8 +1,8 @@
 defmodule EventSales.ReleaseTest do
   use ExUnit.Case, async: true
 
-  alias EventSales.Repo
   alias EventSales.Release
+  alias EventSales.Repo
 
   describe "migration_database_url/1" do
     test "prefers DIRECT_DATABASE_URL over DATABASE_URL" do

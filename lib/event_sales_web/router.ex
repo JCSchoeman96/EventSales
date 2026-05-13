@@ -1,5 +1,6 @@
 defmodule EventSalesWeb.Router do
   use EventSalesWeb, :router
+  import AshAdmin.Router
 
   @content_security_policy (case Mix.env() do
                               :dev ->
@@ -28,6 +29,10 @@ defmodule EventSalesWeb.Router do
     plug :accepts, ["json"]
   end
 
+  pipeline :internal_tools do
+    plug EventSalesWeb.Plugs.InternalOnly
+  end
+
   scope "/", EventSalesWeb do
     get "/health", HealthController, :show
   end
@@ -36,6 +41,12 @@ defmodule EventSalesWeb.Router do
     pipe_through :browser
 
     get "/", PageController, :home
+  end
+
+  scope "/" do
+    pipe_through [:browser, :internal_tools]
+
+    ash_admin("/internal/ash-admin")
   end
 
   # Other scopes may use custom stacks.
