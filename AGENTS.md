@@ -222,6 +222,9 @@ Ingestion
 |> CsvImportBatch
 |> CsvImportRow
 |> WooCommerceClient
+|> TickeraClient
+|> TickeraAttendeeSyncRun
+|> TickeraAttendeeSnapshot
 |> RedisWebhookBuffer
 |> REST rate limiter/circuit breaker
 
@@ -232,6 +235,8 @@ Analytics
 |> DashboardCache
 |> EventAggregateSnapshot
 |> DailySalesAggregateSnapshot
+|> AttendeeReconciliationResult
+|> AttendeeReconciliationSummary
 
 Audit
 |> AuditLog
@@ -431,6 +436,8 @@ PII masking
 audit logging
 HotStateAggregator rebuild safety
 full webhook-to-dashboard E2E
+Woo-vs-Tickera attendee reconciliation
+payment-method mismatch reporting
 ```
 
 ## Feedback format to user

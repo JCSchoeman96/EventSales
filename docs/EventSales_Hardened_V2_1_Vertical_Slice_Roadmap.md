@@ -1266,3 +1266,29 @@ Do not launch unless these are true:
 [ ] aggregate event idempotency tests pass
 [ ] dashboard never calls WooCommerce REST
 ```
+
+
+## Slice 14.5 — WooCommerce vs Tickera Attendee Reconciliation
+
+### Goal
+Compare WooCommerce completed ticket sales against Tickera attendee registrations and expose mismatch reporting grouped by event, ticket type, order, attendee, and payment method.
+
+### Build
+```text
+Tickera API client boundary, attendee snapshot storage, attendee sync run tracking, reconciliation result records, reconciliation summary query path, admin report, streamed export support, telemetry, audit logging.
+```
+
+### Strict tests
+- Tickera sync requires event/date scope
+- Tickera API key and endpoint loaded from env only
+- Worker/service-module-only Tickera API access
+- Woo/Tickera match and mismatch classifications correct
+- Payment method included in reconciliation results and summary grouping
+- Typed Tickera API error handling for 401/403/404/429/500/timeout
+- 429/timeouts pause sync and record failure
+- Reconciliation idempotent on rerun
+- Export streamed/paginated
+- Admin-only access and audit logging enforced
+
+### Guardrails / performance notes
+No Tickera API calls from LiveView/components/controllers. Scope sync by event/date, never full-scan during peak, and use indexed comparison query paths only.

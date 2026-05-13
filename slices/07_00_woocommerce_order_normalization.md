@@ -17,7 +17,7 @@ WooCommerceOrderParser, status mapper, line item parser, decimal parser, custome
 | Task | Implement Slice 7.0 — WooCommerce Order Normalization for EventSales. |
 | Objective | Parse realistic WooCommerce order payloads into internal order data. |
 | Output | WooCommerceOrderParser, status mapper, line item parser, decimal parser, customer sanitizer, coupon parser, OrderUpserter. |
-| Note | Parser tolerant, but never silently corrupts money/status. Include strict tests listed below. Do not violate project-wide rules. |
+| Note | Parser tolerant, but never silently corrupts money/status. Payment method parsing must preserve the stable gateway key separately from the human-readable title. Documentation only; do not implement parser changes in this slice. Include strict tests listed below. Do not violate project-wide rules. |
 
 ## Strict tests
 
@@ -28,11 +28,13 @@ WooCommerceOrderParser, status mapper, line item parser, decimal parser, custome
 - Product/variation IDs preserved
 - Line total after discount parsed
 - Missing optional fields safe
+- Payment method fields parse from Woo order payload when present
+- Missing payment method fields are safe and do not break parsing
 - Malformed required fields controlled error
 
 ## Architecture guardrails
 
-Parser tolerant, but never silently corrupts money/status.
+Parser tolerant, but never silently corrupts money/status. Payment method parsing must preserve the stable gateway key separately from the human-readable title. Documentation only; do not implement parser changes in this slice.
 
 ## Completion checklist
 

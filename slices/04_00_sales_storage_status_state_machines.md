@@ -34,6 +34,8 @@ Order, OrderItem, CouponSnapshot, Order status state machine, OrderItem mapping_
 
 Slice 4.0 owns initial sales state machines. Slice 8.6 later hardens all state machines across domains.
 
+Future reconciliation planning: `Order` should retain WooCommerce payment metadata (`payment_method`, `payment_method_title`, and optional `payment_gateway_transaction_id`) to support payment-method mismatch analysis in Slice 14.5. Documentation only; do not implement fields or migrations in this slice.
+
 ## Completion checklist
 
 - [ ] Files/modules for this slice are created in the approved folder structure.

@@ -1692,3 +1692,56 @@ variation updated
 ```
 
 Compare them against the fixtures and record all gaps in `docs/architecture/fixture-verification.md`.
+
+
+## Ingestion — TickeraAttendeeSyncRun (Planned Slice 14.5)
+**Domain:** Ingestion
+**Purpose:** Track scoped Tickera attendee sync executions by event/date with observable outcomes and retry-safe status.
+**Durable data ownership:** Postgres durable truth for sync run metadata, scope, status, and failure reasons.
+**Relationships:** belongs_to SourceSystem/Event; has_many TickeraAttendeeSnapshot and AttendeeReconciliationResult via sync run ID.
+**Actions planned:** create/run/start/complete/fail scoped sync lifecycle actions.
+**Permissions/policies planned:** admin/staff scoped to authorized events; no public access.
+**Indexes required:** source_system_id, event_id, sync_status, started_at, finished_at.
+**Cache/PubSub rules:** invalidate reconciliation summary caches and broadcast scoped refresh after completion/failure writes.
+**Telemetry rules:** emit sync start/stop duration, attendee count, API error, and circuit-breaker pause metrics.
+**Strict tests:** event/date scope required, idempotent rerun behavior, typed API failures captured, admin-only initiation.
+**Edge cases:** partial page failures, API throttling, timeout pauses, repeated reruns with same scope.
+
+## Ingestion — TickeraAttendeeSnapshot (Planned Slice 14.5)
+**Domain:** Ingestion
+**Purpose:** Persist imported Tickera attendee records as durable reconciliation input.
+**Durable data ownership:** Postgres durable attendee snapshot keyed to source identifiers and sync run context.
+**Relationships:** belongs_to TickeraAttendeeSyncRun/Event/TicketType where resolvable.
+**Actions planned:** upsert snapshot rows scoped to sync run and attendee identity.
+**Permissions/policies planned:** internal ingestion writes; admin/staff read through reconciliation views only.
+**Indexes required:** event_id, ticket_type_id, tickera_attendee_id, tickera_ticket_code, woo_order_id, sync_run_id.
+**Cache/PubSub rules:** no direct cache truth; summary caches invalidated only after durable writes complete.
+**Telemetry rules:** per-page import counts, upsert latency, duplicate suppression counts.
+**Strict tests:** no duplicate rows on rerun, scoped imports only, sensitive fields sanitized in logs/fixtures.
+**Edge cases:** missing order correlation fields, duplicate attendee IDs, out-of-order source updates.
+
+## Analytics — AttendeeReconciliationResult (Planned Slice 14.5)
+**Domain:** Analytics
+**Purpose:** Durable Woo-vs-Tickera comparison output per reconciliation unit.
+**Durable data ownership:** Postgres durable status/mismatch reason/payment method context for audit-safe reporting.
+**Relationships:** belongs_to Event/TicketType/Order/SyncRun where available.
+**Actions planned:** classify matched/mismatched states and persist idempotent comparison rows.
+**Permissions/policies planned:** admin/staff event-scoped read; internal workers write.
+**Indexes required:** event_id, ticket_type_id, woo_order_id, woo_line_item_id, reconciliation_status, payment_method, sync_run_id.
+**Cache/PubSub rules:** summary cache invalidation and scoped PubSub broadcast after durable reconciliation writes.
+**Telemetry rules:** mismatch counts by status and payment method, classification latency, weak-match warning counts.
+**Strict tests:** status taxonomy coverage, completed-only Woo counting, payment-method persistence, idempotent reruns.
+**Edge cases:** quantity > 1 mapping, mapping drift, weak heuristic fallback flagged for review only.
+
+## Analytics — AttendeeReconciliationSummary (Planned Slice 14.5)
+**Domain:** Analytics
+**Purpose:** Query-optimized/cached summary grouped by event, ticket type, mismatch status, and payment method.
+**Durable data ownership:** Derived query path over durable reconciliation results; Redis/Cachex used for short-lived summary cache only.
+**Relationships:** aggregates AttendeeReconciliationResult by scoped dimensions.
+**Actions planned:** read/list grouped summaries and export query paths.
+**Permissions/policies planned:** admin/staff event-scoped read; no public exposure.
+**Indexes required:** event_id, ticket_type_id, reconciliation_status, payment_method, sync_run_id.
+**Cache/PubSub rules:** TTL 30s-5m; invalidate on attendee sync completion, Woo order update, mapping change, manual rerun.
+**Telemetry rules:** summary query latency, cache hit/miss, export stream throughput.
+**Strict tests:** payment-method grouping accuracy, streamed/paginated export behavior, cache invalidation triggers.
+**Edge cases:** large event cardinality, stale cache after rerun, empty payment method buckets.
