@@ -148,6 +148,9 @@ jobs:
       - name: Run test migrations
         run: mix ecto.migrate
 
+      - name: Verify Ash codegen is in sync
+        run: mix ash.codegen --dry-run
+
       - name: Run tests
         run: mix test
 

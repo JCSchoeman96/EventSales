@@ -47,6 +47,12 @@ defmodule EventSales.MixProject do
   # Type `mix help deps` for examples and options.
   defp deps do
     [
+      {:ash, "~> 3.24"},
+      {:ash_postgres, "~> 2.9"},
+      {:ash_authentication, "~> 4.13"},
+      {:ash_admin, "~> 1.1"},
+      {:ash_state_machine, "~> 0.2.13"},
+      {:ash_paper_trail, "~> 0.5.7"},
       {:phoenix, "~> 1.8.7"},
       {:phoenix_ecto, "~> 4.5"},
       {:ecto_sql, "~> 3.13"},
@@ -94,6 +100,7 @@ defmodule EventSales.MixProject do
         "compile --warnings-as-errors",
         "deps.unlock --check-unused",
         "cmd ./scripts/check_no_web_woocommerce_refs.sh",
+        "ash.codegen --dry-run",
         "credo --strict",
         "sobelow",
         "deps.audit",
