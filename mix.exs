@@ -5,7 +5,8 @@ defmodule EventSales.MixProject do
     [
       app: :event_sales,
       version: "0.1.0",
-      elixir: "~> 1.15",
+      elixir: "1.19.3",
+      erlang: "28.1.1",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
