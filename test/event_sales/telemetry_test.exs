@@ -1,7 +1,7 @@
 defmodule EventSales.TelemetryTest do
   use ExUnit.Case, async: true
 
-  alias EventSales.Telemetry
+  alias EventSales.Telemetry, as: EventSalesTelemetry
   alias Telemetry.Metrics.{Counter, LastValue, Summary}
 
   test "telemetry supervisor starts under the application supervisor" do
@@ -15,7 +15,7 @@ defmodule EventSales.TelemetryTest do
     :ok =
       :telemetry.attach(
         handler_id,
-        Telemetry.webhook_accepted(),
+        EventSalesTelemetry.webhook_accepted(),
         fn event_name, measurements, metadata, _config ->
           send(test_pid, {:telemetry_event, event_name, measurements, metadata})
         end,
@@ -24,7 +24,9 @@ defmodule EventSales.TelemetryTest do
 
     on_exit(fn -> :telemetry.detach(handler_id) end)
 
-    Telemetry.emit(Telemetry.webhook_accepted(), %{count: 1}, %{topic: "order.created"})
+    EventSalesTelemetry.emit(EventSalesTelemetry.webhook_accepted(), %{count: 1}, %{
+      topic: "order.created"
+    })
 
     assert_receive {:telemetry_event, [:event_sales, :webhook, :accepted], %{count: 1},
                     %{topic: "order.created"}}
