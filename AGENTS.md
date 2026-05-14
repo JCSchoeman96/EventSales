@@ -55,13 +55,13 @@ Understand task
 Before starting any task:
 
 ```bash
-scripts/sync_with_origin_main.sh --check
+bash scripts/sync_with_origin_main.sh --check
 ```
 
 If the branch is clean and sync is safe:
 
 ```bash
-scripts/sync_with_origin_main.sh --sync
+bash scripts/sync_with_origin_main.sh --sync
 ```
 
 Rules:
@@ -85,6 +85,37 @@ say unsure
 |> ask concise question
 |> do not invent architecture
 ```
+## Repo helper scripts
+
+Use repo scripts instead of inventing ad-hoc commands.
+
+Prefer `bash scripts/<name>.sh ...` so commands work even when executable bits are not preserved across machines, worktrees, zip downloads, or Windows tooling.
+
+```text
+Before starting work
+|> bash scripts/sync_with_origin_main.sh --check
+|> if clean and safe: bash scripts/sync_with_origin_main.sh --sync
+
+Local Postgres
+|> bash scripts/dev_postgres.sh start
+|> bash scripts/dev_postgres.sh status
+|> bash scripts/dev_postgres.sh logs
+|> bash scripts/dev_postgres.sh stop
+|> bash scripts/dev_postgres.sh reset only when data loss is intended
+
+Git hooks
+|> bash scripts/install_git_hooks.sh
+|> installs .githooks as the repo-local hooks path
+
+Architecture guardrail
+|> bash scripts/check_no_web_woocommerce_refs.sh
+|> verifies LiveView/controllers/components/MappingResolver do not call WooCommerce REST or direct HTTP clients
+
+Railway smoke test
+|> scripts/smoke_test_railway_release.sh is currently a placeholder for Slice 24.0
+|> do not rely on it until that slice implements the real smoke test
+```
+
 
 ## Hard rules
 
