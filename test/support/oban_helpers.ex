@@ -20,4 +20,9 @@ defmodule EventSales.TestSupport.ObanHelpers do
     |> TestWorker.new()
     |> Oban.insert!()
   end
+
+  @spec drain_default_queue() :: map()
+  def drain_default_queue do
+    Oban.drain_queue(queue: :default)
+  end
 end
