@@ -92,7 +92,7 @@ defmodule EventSales.MixProject do
         "format --check-formatted",
         "compile --warnings-as-errors",
         "deps.unlock --check-unused",
-        "cmd ./scripts/check_no_web_woocommerce_refs.sh"
+        "cmd bash scripts/check_no_web_woocommerce_refs.sh"
       ],
       quality: ["quality.fast", "credo --strict", "sobelow"],
       "quality.ci": [
@@ -100,7 +100,7 @@ defmodule EventSales.MixProject do
         "format --check-formatted",
         "compile --warnings-as-errors",
         "deps.unlock --check-unused",
-        "cmd ./scripts/check_no_web_woocommerce_refs.sh",
+        "cmd bash scripts/check_no_web_woocommerce_refs.sh",
         "ash.codegen --dry-run",
         "credo --strict",
         "sobelow",
