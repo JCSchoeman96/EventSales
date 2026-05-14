@@ -10,7 +10,7 @@ defmodule EventSales.AshBaseline.Domain do
     extensions: [AshAdmin.Domain, AshPaperTrail.Domain]
 
   admin do
-    show?(true)
+    show?(false)
   end
 
   paper_trail do
