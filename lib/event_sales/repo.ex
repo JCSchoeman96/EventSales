@@ -2,7 +2,7 @@ defmodule EventSales.Repo do
   use AshPostgres.Repo, otp_app: :event_sales
 
   def installed_extensions do
-    ["ash-functions"]
+    ["ash-functions", "citext"]
   end
 
   def min_pg_version do

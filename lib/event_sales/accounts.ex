@@ -6,4 +6,11 @@ defmodule EventSales.Accounts do
   """
 
   use Ash.Domain
+
+  resources do
+    resource EventSales.Accounts.Resources.User
+    resource EventSales.Accounts.Resources.Role
+    resource EventSales.Accounts.Resources.UserRole
+    resource EventSales.Accounts.Resources.EventAccessGrant
+  end
 end

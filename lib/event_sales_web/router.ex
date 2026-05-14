@@ -29,8 +29,10 @@ defmodule EventSalesWeb.Router do
     plug :accepts, ["json"]
   end
 
-  pipeline :internal_tools do
+  pipeline :internal_admin_tools do
     plug EventSalesWeb.Plugs.InternalOnly
+    plug EventSalesWeb.Plugs.LoadCurrentUser
+    plug EventSalesWeb.Plugs.AdminOnly
   end
 
   scope "/", EventSalesWeb do
@@ -44,7 +46,7 @@ defmodule EventSalesWeb.Router do
   end
 
   scope "/" do
-    pipe_through [:browser, :internal_tools]
+    pipe_through [:browser, :internal_admin_tools]
 
     ash_admin("/internal/ash-admin")
   end
