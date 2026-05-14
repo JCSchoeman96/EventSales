@@ -52,7 +52,7 @@ jobs:
         run: mix deps.unlock --check-unused
 
       - name: Check WooCommerce web-layer boundary
-        run: ./scripts/check_no_web_woocommerce_refs.sh
+        run: bash scripts/check_no_web_woocommerce_refs.sh
 
   lint_security:
     runs-on: ubuntu-latest
