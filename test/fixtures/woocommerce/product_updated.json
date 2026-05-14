@@ -1,3 +1,31 @@
 {
-  "placeholder": "Slice 1.6 fixture pending"
+  "_event_sales_fixture_status": "synthetic_placeholder",
+  "_event_sales_fixture_note": "Synthetic sanitized Slice 1.6 placeholder. Replace with real_sanitized after local raw payload verification.",
+  "id": 501,
+  "name": "Synthetic General Admission",
+  "slug": "synthetic-general-admission",
+  "permalink": "https://woocommerce.example.test/product/synthetic-general-admission/",
+  "date_created_gmt": "2026-04-01T08:00:00",
+  "date_modified_gmt": "2026-05-01T08:00:00",
+  "type": "variable",
+  "status": "publish",
+  "featured": false,
+  "catalog_visibility": "visible",
+  "sku": "SYN-GA",
+  "price": "450.00",
+  "regular_price": "",
+  "sale_price": "",
+  "variations": [601],
+  "meta_data": [
+    {
+      "id": 101,
+      "key": "tickera_event_name",
+      "value": "Synthetic Event"
+    },
+    {
+      "id": 102,
+      "key": "event_sales_product_kind",
+      "value": "ticket"
+    }
+  ]
 }

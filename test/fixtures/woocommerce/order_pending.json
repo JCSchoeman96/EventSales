@@ -1,5 +1,6 @@
 {
-  "_event_sales_fixture_note": "Synthetic sanitized Slice 1.5 acceptance fixture. Real WooCommerce payload verification happens in Slice 1.6.",
+  "_event_sales_fixture_status": "synthetic_placeholder",
+  "_event_sales_fixture_note": "Synthetic sanitized Slice 1.6 placeholder. Replace with real_sanitized after local raw payload verification.",
   "id": 10002,
   "parent_id": 0,
   "number": "ES-10002",
@@ -23,19 +24,18 @@
     "first_name": "Synthetic",
     "last_name": "Pending",
     "company": "",
-    "address_1": "Sanitized",
+    "address_1": "redacted",
     "address_2": "",
     "city": "Johannesburg",
     "state": "GP",
     "postcode": "0000",
     "country": "ZA",
     "email": "synthetic.pending@example.test",
-    "phone": "+27000000001"
+    "phone": "redacted"
   },
   "payment_method": "payfast",
   "payment_method_title": "Synthetic PayFast",
   "transaction_id": "",
-  "customer_ip_address": "192.0.2.11",
   "customer_user_agent": "EventSales synthetic fixture",
   "line_items": [
     {
@@ -53,7 +53,7 @@
       "price": 450.0,
       "meta_data": [
         {
-          "id": 2,
+          "id": 3,
           "key": "ticket_type",
           "value": "General Admission"
         }

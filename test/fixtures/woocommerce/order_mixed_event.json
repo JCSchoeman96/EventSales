@@ -1,3 +1,103 @@
 {
-  "placeholder": "Slice 1.6 fixture pending"
+  "_event_sales_fixture_status": "synthetic_placeholder",
+  "_event_sales_fixture_note": "Synthetic sanitized Slice 1.6 placeholder. Replace with real_sanitized after local raw payload verification.",
+  "id": 10004,
+  "parent_id": 0,
+  "number": "ES-10004",
+  "order_key": "wc_order_synthetic_mixed_event",
+  "created_via": "checkout",
+  "version": "8.0.0-synthetic",
+  "status": "completed",
+  "currency": "ZAR",
+  "date_created_gmt": "2026-05-03T08:00:00",
+  "date_modified_gmt": "2026-05-03T08:06:00",
+  "date_completed_gmt": "2026-05-03T08:06:00",
+  "discount_total": "50.00",
+  "discount_tax": "0.00",
+  "shipping_total": "0.00",
+  "shipping_tax": "0.00",
+  "cart_tax": "0.00",
+  "total": "1300.00",
+  "total_tax": "0.00",
+  "customer_id": 0,
+  "billing": {
+    "first_name": "Synthetic",
+    "last_name": "Mixed",
+    "company": "",
+    "address_1": "redacted",
+    "address_2": "",
+    "city": "Johannesburg",
+    "state": "GP",
+    "postcode": "0000",
+    "country": "ZA",
+    "email": "synthetic.mixed@example.test",
+    "phone": "redacted"
+  },
+  "payment_method": "payfast",
+  "payment_method_title": "Synthetic PayFast",
+  "transaction_id": "synthetic-txn-mixed",
+  "customer_user_agent": "EventSales synthetic fixture",
+  "line_items": [
+    {
+      "id": 70004,
+      "name": "Synthetic Event A General Admission",
+      "product_id": 501,
+      "variation_id": 601,
+      "quantity": 2,
+      "tax_class": "",
+      "subtotal": "900.00",
+      "subtotal_tax": "0.00",
+      "total": "850.00",
+      "total_tax": "0.00",
+      "sku": "SYN-A-GA",
+      "price": 425.0,
+      "meta_data": [
+        {
+          "id": 5,
+          "key": "tickera_event_name",
+          "value": "Synthetic Event A"
+        },
+        {
+          "id": 6,
+          "key": "ticket_type",
+          "value": "General Admission"
+        }
+      ]
+    },
+    {
+      "id": 70005,
+      "name": "Synthetic Event B VIP",
+      "product_id": 502,
+      "variation_id": 602,
+      "quantity": 1,
+      "tax_class": "",
+      "subtotal": "450.00",
+      "subtotal_tax": "0.00",
+      "total": "450.00",
+      "total_tax": "0.00",
+      "sku": "SYN-B-VIP",
+      "price": 450.0,
+      "meta_data": [
+        {
+          "id": 7,
+          "key": "tickera_event_name",
+          "value": "Synthetic Event B"
+        },
+        {
+          "id": 8,
+          "key": "ticket_type",
+          "value": "VIP"
+        }
+      ]
+    }
+  ],
+  "coupon_lines": [
+    {
+      "id": 90004,
+      "code": "SYNTHETIC50",
+      "discount": "50.00",
+      "discount_tax": "0.00"
+    }
+  ],
+  "refunds": []
 }
