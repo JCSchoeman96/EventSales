@@ -8,7 +8,15 @@
 import Config
 
 config :event_sales,
-  ash_domains: [EventSales.AshBaseline.Domain],
+  ash_domains: [
+    EventSales.AshBaseline.Domain,
+    EventSales.Accounts,
+    EventSales.Catalog,
+    EventSales.Sales,
+    EventSales.Ingestion,
+    EventSales.Analytics,
+    EventSales.Audit
+  ],
   ecto_repos: [EventSales.Repo],
   generators: [timestamp_type: :utc_datetime, binary_id: true]
 
