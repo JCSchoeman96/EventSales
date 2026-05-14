@@ -39,8 +39,15 @@ defmodule EventSales.DomainBoundariesTest do
            ]
   end
 
-  test "business Ash domains are intentionally empty in slice 1.0" do
-    for domain <- @business_domains do
+  test "business Ash domains expose only resources owned by completed slices" do
+    assert Ash.Domain.Info.resources(EventSales.Accounts) == [
+             EventSales.Accounts.Resources.User,
+             EventSales.Accounts.Resources.Role,
+             EventSales.Accounts.Resources.UserRole,
+             EventSales.Accounts.Resources.EventAccessGrant
+           ]
+
+    for domain <- @business_domains -- [EventSales.Accounts] do
       assert Ash.Domain.Info.resources(domain) == []
     end
   end

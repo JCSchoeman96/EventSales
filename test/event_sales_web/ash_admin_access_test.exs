@@ -24,12 +24,12 @@ defmodule EventSalesWeb.AshAdminAccessTest do
     assert response(conn, 404) == "Not Found"
   end
 
-  test "allows the internal ash admin route when the gate is enabled", %{conn: conn} do
+  test "requires authentication after the internal ash admin gate is enabled", %{conn: conn} do
     Application.put_env(:event_sales, :internal_tools, ash_admin_enabled: true)
 
     conn = get(%{conn | remote_ip: {127, 0, 0, 1}}, "/internal/ash-admin")
 
-    assert conn.status in [200, 302]
+    assert response(conn, 401) == "Unauthorized"
   end
 
   test "returns not found for non-loopback requests even when enabled", %{conn: conn} do
