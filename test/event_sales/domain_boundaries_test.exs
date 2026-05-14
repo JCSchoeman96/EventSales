@@ -9,6 +9,20 @@ defmodule EventSales.DomainBoundariesTest do
     EventSales.Analytics,
     EventSales.Audit
   ]
+  @accounts_resources [
+    EventSales.Accounts.Resources.User,
+    EventSales.Accounts.Resources.Role,
+    EventSales.Accounts.Resources.UserRole,
+    EventSales.Accounts.Resources.EventAccessGrant
+  ]
+  @hidden_ash_admin_domains [
+    EventSales.AshBaseline.Domain,
+    EventSales.Catalog,
+    EventSales.Sales,
+    EventSales.Ingestion,
+    EventSales.Analytics,
+    EventSales.Audit
+  ]
 
   @forbidden_woocommerce_rest_patterns [
     "WooCommerceClient",
@@ -40,15 +54,22 @@ defmodule EventSales.DomainBoundariesTest do
   end
 
   test "business Ash domains expose only resources owned by completed slices" do
-    assert Ash.Domain.Info.resources(EventSales.Accounts) == [
-             EventSales.Accounts.Resources.User,
-             EventSales.Accounts.Resources.Role,
-             EventSales.Accounts.Resources.UserRole,
-             EventSales.Accounts.Resources.EventAccessGrant
-           ]
+    assert Ash.Domain.Info.resources(EventSales.Accounts) == @accounts_resources
 
     for domain <- @business_domains -- [EventSales.Accounts] do
       assert Ash.Domain.Info.resources(domain) == []
+    end
+  end
+
+  test "AshAdmin only exposes the Accounts domain and its owned resources" do
+    assert AshAdmin.Domain.show?(EventSales.Accounts)
+
+    assert EventSales.Accounts
+           |> AshAdmin.Domain.show_resources()
+           |> Enum.sort() == Enum.sort(@accounts_resources)
+
+    for domain <- @hidden_ash_admin_domains do
+      refute AshAdmin.Domain.show?(domain)
     end
   end
 

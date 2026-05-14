@@ -5,7 +5,12 @@ defmodule EventSales.Accounts do
   Slice 1.0 registers the domain boundary only. Resources are added by their owning slices.
   """
 
-  use Ash.Domain
+  use Ash.Domain,
+    extensions: [AshAdmin.Domain]
+
+  admin do
+    show?(true)
+  end
 
   resources do
     resource EventSales.Accounts.Resources.User
