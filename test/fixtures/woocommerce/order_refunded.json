@@ -1,3 +1,71 @@
 {
-  "placeholder": "Slice 1.6 fixture pending"
+  "_event_sales_fixture_status": "synthetic_placeholder",
+  "_event_sales_fixture_note": "Synthetic sanitized Slice 1.6 placeholder. Replace with real_sanitized after local raw payload verification.",
+  "id": 10003,
+  "parent_id": 0,
+  "number": "ES-10003",
+  "order_key": "wc_order_synthetic_refunded",
+  "created_via": "checkout",
+  "version": "8.0.0-synthetic",
+  "status": "refunded",
+  "currency": "ZAR",
+  "date_created_gmt": "2026-05-01T10:00:00",
+  "date_modified_gmt": "2026-05-02T08:00:00",
+  "date_completed_gmt": "2026-05-01T10:05:00",
+  "discount_total": "0.00",
+  "discount_tax": "0.00",
+  "shipping_total": "0.00",
+  "shipping_tax": "0.00",
+  "cart_tax": "0.00",
+  "total": "0.00",
+  "total_tax": "0.00",
+  "customer_id": 0,
+  "billing": {
+    "first_name": "Synthetic",
+    "last_name": "Refunded",
+    "company": "",
+    "address_1": "redacted",
+    "address_2": "",
+    "city": "Johannesburg",
+    "state": "GP",
+    "postcode": "0000",
+    "country": "ZA",
+    "email": "synthetic.refunded@example.test",
+    "phone": "redacted"
+  },
+  "payment_method": "payfast",
+  "payment_method_title": "Synthetic PayFast",
+  "transaction_id": "synthetic-txn-refunded",
+  "customer_user_agent": "EventSales synthetic fixture",
+  "line_items": [
+    {
+      "id": 70003,
+      "name": "Synthetic General Admission",
+      "product_id": 501,
+      "variation_id": 601,
+      "quantity": 1,
+      "tax_class": "",
+      "subtotal": "450.00",
+      "subtotal_tax": "0.00",
+      "total": "450.00",
+      "total_tax": "0.00",
+      "sku": "SYN-GA",
+      "price": 450.0,
+      "meta_data": [
+        {
+          "id": 4,
+          "key": "ticket_type",
+          "value": "General Admission"
+        }
+      ]
+    }
+  ],
+  "coupon_lines": [],
+  "refunds": [
+    {
+      "id": 91003,
+      "reason": "Synthetic refund",
+      "total": "-450.00"
+    }
+  ]
 }

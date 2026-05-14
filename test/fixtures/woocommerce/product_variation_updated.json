@@ -1,3 +1,34 @@
 {
-  "placeholder": "Slice 1.6 fixture pending"
+  "_event_sales_fixture_status": "synthetic_placeholder",
+  "_event_sales_fixture_note": "Synthetic sanitized Slice 1.6 placeholder. Replace with real_sanitized after local raw payload verification.",
+  "id": 601,
+  "parent_id": 501,
+  "name": "Synthetic General Admission - Standard",
+  "date_created_gmt": "2026-04-01T08:00:00",
+  "date_modified_gmt": "2026-05-01T08:00:00",
+  "type": "variation",
+  "status": "publish",
+  "sku": "SYN-GA-STANDARD",
+  "price": "450.00",
+  "regular_price": "450.00",
+  "sale_price": "",
+  "attributes": [
+    {
+      "id": 201,
+      "name": "Ticket Tier",
+      "option": "Standard"
+    }
+  ],
+  "meta_data": [
+    {
+      "id": 103,
+      "key": "tickera_ticket_type",
+      "value": "General Admission"
+    },
+    {
+      "id": 104,
+      "key": "event_sales_product_kind",
+      "value": "ticket"
+    }
+  ]
 }

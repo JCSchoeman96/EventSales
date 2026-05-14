@@ -1,28 +1,28 @@
 {
   "_event_sales_fixture_status": "synthetic_placeholder",
   "_event_sales_fixture_note": "Synthetic sanitized Slice 1.6 placeholder. Replace with real_sanitized after local raw payload verification.",
-  "id": 10001,
+  "id": 10006,
   "parent_id": 0,
-  "number": "ES-10001",
-  "order_key": "wc_order_synthetic_completed",
+  "number": "ES-10006",
+  "order_key": "wc_order_synthetic_variation_ticket",
   "created_via": "checkout",
   "version": "8.0.0-synthetic",
   "status": "completed",
   "currency": "ZAR",
-  "date_created_gmt": "2026-05-01T08:00:00",
-  "date_modified_gmt": "2026-05-01T08:05:00",
-  "date_completed_gmt": "2026-05-01T08:05:00",
-  "discount_total": "100.00",
+  "date_created_gmt": "2026-05-05T08:00:00",
+  "date_modified_gmt": "2026-05-05T08:03:00",
+  "date_completed_gmt": "2026-05-05T08:03:00",
+  "discount_total": "0.00",
   "discount_tax": "0.00",
   "shipping_total": "0.00",
   "shipping_tax": "0.00",
   "cart_tax": "0.00",
-  "total": "900.00",
+  "total": "1200.00",
   "total_tax": "0.00",
   "customer_id": 0,
   "billing": {
     "first_name": "Synthetic",
-    "last_name": "Buyer",
+    "last_name": "Variation",
     "company": "",
     "address_1": "redacted",
     "address_2": "",
@@ -30,48 +30,41 @@
     "state": "GP",
     "postcode": "0000",
     "country": "ZA",
-    "email": "synthetic.completed@example.test",
+    "email": "synthetic.variation@example.test",
     "phone": "redacted"
   },
   "payment_method": "payfast",
   "payment_method_title": "Synthetic PayFast",
-  "transaction_id": "synthetic-txn-completed",
+  "transaction_id": "synthetic-txn-variation",
   "customer_user_agent": "EventSales synthetic fixture",
   "line_items": [
     {
-      "id": 70001,
-      "name": "Synthetic General Admission",
-      "product_id": 501,
-      "variation_id": 601,
-      "quantity": 2,
+      "id": 70007,
+      "name": "Synthetic VIP Table - Row A",
+      "product_id": 503,
+      "variation_id": 603,
+      "quantity": 4,
       "tax_class": "",
-      "subtotal": "1000.00",
+      "subtotal": "1200.00",
       "subtotal_tax": "0.00",
-      "total": "900.00",
+      "total": "1200.00",
       "total_tax": "0.00",
-      "sku": "SYN-GA",
-      "price": 450.0,
+      "sku": "SYN-VIP-A",
+      "price": 300.0,
       "meta_data": [
         {
-          "id": 1,
-          "key": "ticket_type",
-          "value": "General Admission"
+          "id": 10,
+          "key": "attribute_pa_ticket-tier",
+          "value": "VIP"
         },
         {
-          "id": 2,
+          "id": 11,
           "key": "tickera_event_name",
-          "value": "Synthetic Event"
+          "value": "Synthetic Variation Event"
         }
       ]
     }
   ],
-  "coupon_lines": [
-    {
-      "id": 90001,
-      "code": "SYNTHETIC100",
-      "discount": "100.00",
-      "discount_tax": "0.00"
-    }
-  ],
+  "coupon_lines": [],
   "refunds": []
 }
