@@ -87,8 +87,10 @@ defmodule EventSales.Fixtures.WooCommerceFixtureVerificationTest do
 
       invalid_placeholders =
         FixtureVerificationHelpers.committed_woocommerce_fixtures()
-        |> Enum.reject(&MapSet.member?(required_files, &1.file))
-        |> Enum.reject(&FixtureVerificationHelpers.future_placeholder_allowed?/1)
+        |> Enum.reject(fn fixture ->
+          MapSet.member?(required_files, fixture.file) or
+            FixtureVerificationHelpers.future_placeholder_allowed?(fixture)
+        end)
 
       assert invalid_placeholders == [],
              "unexpected non-required placeholder fixtures: #{inspect(Enum.map(invalid_placeholders, & &1.file))}"
