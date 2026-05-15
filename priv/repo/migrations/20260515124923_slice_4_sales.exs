@@ -53,11 +53,6 @@ defmodule EventSales.Repo.Migrations.Slice4Sales do
 
     create index(:sales_orders, [:source_system_id], name: "sales_orders_source_system_id_idx")
 
-    create index(:sales_orders, [:source_system_id, :woo_order_id],
-             name: "sales_orders_unique_source_order_idx",
-             unique: true
-           )
-
     create unique_index(:sales_orders, [:source_system_id, :woo_order_id],
              name: "sales_orders_unique_source_order_index"
            )
@@ -100,7 +95,7 @@ defmodule EventSales.Repo.Migrations.Slice4Sales do
             name: "sales_order_items_event_id_fkey",
             type: :uuid,
             prefix: "public",
-            on_delete: :nilify_all,
+            on_delete: :restrict,
             on_update: :update_all
           )
 
@@ -110,7 +105,7 @@ defmodule EventSales.Repo.Migrations.Slice4Sales do
             name: "sales_order_items_ticket_type_id_fkey",
             type: :uuid,
             prefix: "public",
-            on_delete: :nilify_all,
+            on_delete: :restrict,
             on_update: :update_all
           )
     end
@@ -134,11 +129,6 @@ defmodule EventSales.Repo.Migrations.Slice4Sales do
     create index(:sales_order_items, [:event_id], name: "sales_order_items_event_id_idx")
 
     create index(:sales_order_items, [:order_id], name: "sales_order_items_order_id_idx")
-
-    create index(:sales_order_items, [:order_id, :woo_line_item_id],
-             name: "sales_order_items_unique_order_line_idx",
-             unique: true
-           )
 
     create unique_index(:sales_order_items, [:order_id, :woo_line_item_id],
              name: "sales_order_items_unique_order_line_index"
@@ -174,11 +164,6 @@ defmodule EventSales.Repo.Migrations.Slice4Sales do
              name: "sales_coupon_snapshots_order_id_idx"
            )
 
-    create index(:sales_coupon_snapshots, [:order_id, :code],
-             name: "sales_coupon_snapshots_unique_order_code_idx",
-             unique: true
-           )
-
     create unique_index(:sales_coupon_snapshots, [:order_id, :code],
              name: "sales_coupon_snapshots_unique_order_code_index"
            )
@@ -189,10 +174,6 @@ defmodule EventSales.Repo.Migrations.Slice4Sales do
 
     drop_if_exists unique_index(:sales_coupon_snapshots, [:order_id, :code],
                      name: "sales_coupon_snapshots_unique_order_code_index"
-                   )
-
-    drop_if_exists index(:sales_coupon_snapshots, [:order_id, :code],
-                     name: "sales_coupon_snapshots_unique_order_code_idx"
                    )
 
     drop_if_exists index(:sales_coupon_snapshots, [:order_id],
@@ -209,10 +190,6 @@ defmodule EventSales.Repo.Migrations.Slice4Sales do
 
     drop_if_exists unique_index(:sales_order_items, [:order_id, :woo_line_item_id],
                      name: "sales_order_items_unique_order_line_index"
-                   )
-
-    drop_if_exists index(:sales_order_items, [:order_id, :woo_line_item_id],
-                     name: "sales_order_items_unique_order_line_idx"
                    )
 
     drop_if_exists index(:sales_order_items, [:order_id], name: "sales_order_items_order_id_idx")
@@ -241,10 +218,6 @@ defmodule EventSales.Repo.Migrations.Slice4Sales do
 
     drop_if_exists unique_index(:sales_orders, [:source_system_id, :woo_order_id],
                      name: "sales_orders_unique_source_order_index"
-                   )
-
-    drop_if_exists index(:sales_orders, [:source_system_id, :woo_order_id],
-                     name: "sales_orders_unique_source_order_idx"
                    )
 
     drop_if_exists index(:sales_orders, [:source_system_id],

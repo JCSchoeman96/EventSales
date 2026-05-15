@@ -46,10 +46,6 @@ defmodule EventSales.Sales.Resources.Order do
     end
 
     custom_indexes do
-      index [:source_system_id, :woo_order_id],
-        unique: true,
-        name: "sales_orders_unique_source_order_idx"
-
       index :source_system_id, name: "sales_orders_source_system_id_idx"
       index :status, name: "sales_orders_status_idx"
       index :completed_at, name: "sales_orders_completed_at_idx"

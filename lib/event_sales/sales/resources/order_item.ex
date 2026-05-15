@@ -40,15 +40,11 @@ defmodule EventSales.Sales.Resources.OrderItem do
 
     references do
       reference :order, on_delete: :delete, on_update: :update
-      reference :event, on_delete: :nilify, on_update: :update
-      reference :ticket_type, on_delete: :nilify, on_update: :update
+      reference :event, on_delete: :restrict, on_update: :update
+      reference :ticket_type, on_delete: :restrict, on_update: :update
     end
 
     custom_indexes do
-      index [:order_id, :woo_line_item_id],
-        unique: true,
-        name: "sales_order_items_unique_order_line_idx"
-
       index :order_id, name: "sales_order_items_order_id_idx"
       index :event_id, name: "sales_order_items_event_id_idx"
       index :ticket_type_id, name: "sales_order_items_ticket_type_id_idx"
@@ -74,6 +70,7 @@ defmodule EventSales.Sales.Resources.OrderItem do
     update :apply_mapping do
       accept [:event_id, :ticket_type_id, :woo_product_id, :woo_variation_id, :name]
       require_atomic? false
+      validate present([:event_id, :ticket_type_id])
       change ValidateTicketTypeEvent
       change transition_state(:mapped)
       change set_attribute(:item_kind, :ticket)

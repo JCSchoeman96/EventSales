@@ -85,6 +85,53 @@ defmodule EventSales.Sales.SalesStorageStatusStateMachinesTest do
                action: :apply_mapping,
                domain: Sales
              )
+
+    reloaded = Ash.get!(OrderItem, item.id, domain: Sales)
+    assert reloaded.mapping_status == :pending_mapping_resolution
+  end
+
+  test "apply_mapping without event_id is rejected and does not map" do
+    source = SalesHelpers.create_source_system!()
+    order = SalesHelpers.create_order_from_fixture!(:order_completed, source)
+    line = hd(FixtureHelpers.decode_json_fixture!(:woocommerce, :order_completed)["line_items"])
+
+    item =
+      SalesHelpers.create_order_item_from_line!(order, line, %{
+        mapping_status: :pending_mapping_resolution
+      })
+
+    event = SalesHelpers.create_event!(source, %{name: "Event Only", slug: "event-only"})
+    ticket = SalesHelpers.create_ticket_type!(event, %{name: "GA"})
+
+    assert {:error, _} =
+             Ash.update(item, %{ticket_type_id: ticket.id}, action: :apply_mapping, domain: Sales)
+
+    reloaded = Ash.get!(OrderItem, item.id, domain: Sales)
+    assert reloaded.mapping_status == :pending_mapping_resolution
+    refute reloaded.item_kind == :ticket
+  end
+
+  test "apply_mapping without ticket_type_id is rejected and does not map" do
+    source = SalesHelpers.create_source_system!()
+    order = SalesHelpers.create_order_from_fixture!(:order_completed, source)
+    line = hd(FixtureHelpers.decode_json_fixture!(:woocommerce, :order_completed)["line_items"])
+
+    item =
+      SalesHelpers.create_order_item_from_line!(order, line, %{
+        mapping_status: :pending_mapping_resolution
+      })
+
+    event =
+      SalesHelpers.create_event!(source, %{
+        name: "Event Missing Ticket",
+        slug: "event-missing-ticket"
+      })
+
+    assert {:error, _} =
+             Ash.update(item, %{event_id: event.id}, action: :apply_mapping, domain: Sales)
+
+    reloaded = Ash.get!(OrderItem, item.id, domain: Sales)
+    assert reloaded.mapping_status == :pending_mapping_resolution
   end
 
   test "completed order status is stored" do

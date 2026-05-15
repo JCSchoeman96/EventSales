@@ -21,7 +21,19 @@
       "references": null,
       "scale": null,
       "size": null,
-      "source": "woo_order_id",
+      "source": "woo_line_item_id",
+      "type": "bigint"
+    },
+    {
+      "allow_nil?": false,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "woo_product_id",
       "type": "bigint"
     },
     {
@@ -33,32 +45,8 @@
       "references": null,
       "scale": null,
       "size": null,
-      "source": "order_number",
-      "type": "text"
-    },
-    {
-      "allow_nil?": false,
-      "default": "\"pending\"",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": null,
-      "scale": null,
-      "size": null,
-      "source": "status",
-      "type": "text"
-    },
-    {
-      "allow_nil?": false,
-      "default": "nil",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": null,
-      "scale": null,
-      "size": null,
-      "source": "currency",
-      "type": "text"
+      "source": "woo_variation_id",
+      "type": "bigint"
     },
     {
       "allow_nil?": true,
@@ -69,55 +57,7 @@
       "references": null,
       "scale": null,
       "size": null,
-      "source": "completed_at",
-      "type": "utc_datetime_usec"
-    },
-    {
-      "allow_nil?": false,
-      "default": "nil",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": null,
-      "scale": null,
-      "size": null,
-      "source": "created_at_source",
-      "type": "utc_datetime_usec"
-    },
-    {
-      "allow_nil?": false,
-      "default": "nil",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": null,
-      "scale": null,
-      "size": null,
-      "source": "updated_at_source",
-      "type": "utc_datetime_usec"
-    },
-    {
-      "allow_nil?": true,
-      "default": "nil",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": null,
-      "scale": null,
-      "size": null,
-      "source": "customer_name",
-      "type": "text"
-    },
-    {
-      "allow_nil?": true,
-      "default": "nil",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": null,
-      "scale": null,
-      "size": null,
-      "source": "customer_email",
+      "source": "name",
       "type": "text"
     },
     {
@@ -129,7 +69,31 @@
       "references": null,
       "scale": null,
       "size": null,
-      "source": "raw_total",
+      "source": "quantity",
+      "type": "bigint"
+    },
+    {
+      "allow_nil?": false,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "line_subtotal",
+      "type": "decimal"
+    },
+    {
+      "allow_nil?": false,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "line_total",
       "type": "decimal"
     },
     {
@@ -141,20 +105,32 @@
       "references": null,
       "scale": null,
       "size": null,
-      "source": "raw_discount_total",
+      "source": "discount_total",
       "type": "decimal"
     },
     {
       "allow_nil?": false,
-      "default": "\"0\"",
+      "default": "\"unknown\"",
       "generated?": false,
       "precision": null,
       "primary_key?": false,
       "references": null,
       "scale": null,
       "size": null,
-      "source": "raw_tax_total",
-      "type": "decimal"
+      "source": "item_kind",
+      "type": "text"
+    },
+    {
+      "allow_nil?": false,
+      "default": "\"pending_mapping_resolution\"",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "mapping_status",
+      "type": "text"
     },
     {
       "allow_nil?": false,
@@ -199,16 +175,78 @@
           "global": null,
           "strategy": null
         },
-        "name": "sales_orders_source_system_id_fkey",
+        "name": "sales_order_items_order_id_fkey",
+        "on_delete": "delete",
+        "on_update": "update",
+        "primary_key?": true,
+        "schema": "public",
+        "table": "sales_orders"
+      },
+      "scale": null,
+      "size": null,
+      "source": "order_id",
+      "type": "uuid"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": {
+        "deferrable": false,
+        "destination_attribute": "id",
+        "destination_attribute_default": null,
+        "destination_attribute_generated": null,
+        "index?": false,
+        "match_type": null,
+        "match_with": null,
+        "multitenancy": {
+          "attribute": null,
+          "global": null,
+          "strategy": null
+        },
+        "name": "sales_order_items_event_id_fkey",
         "on_delete": "restrict",
         "on_update": "update",
         "primary_key?": true,
         "schema": "public",
-        "table": "catalog_source_systems"
+        "table": "catalog_events"
       },
       "scale": null,
       "size": null,
-      "source": "source_system_id",
+      "source": "event_id",
+      "type": "uuid"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": {
+        "deferrable": false,
+        "destination_attribute": "id",
+        "destination_attribute_default": null,
+        "destination_attribute_generated": null,
+        "index?": false,
+        "match_type": null,
+        "match_with": null,
+        "multitenancy": {
+          "attribute": null,
+          "global": null,
+          "strategy": null
+        },
+        "name": "sales_order_items_ticket_type_id_fkey",
+        "on_delete": "restrict",
+        "on_update": "update",
+        "primary_key?": true,
+        "schema": "public",
+        "table": "catalog_ticket_types"
+      },
+      "scale": null,
+      "size": null,
+      "source": "ticket_type_id",
       "type": "uuid"
     }
   ],
@@ -220,44 +258,110 @@
       "all_tenants?": false,
       "concurrently": false,
       "error_fields": [
-        "source_system_id",
-        "woo_order_id"
+        "order_id"
       ],
       "fields": [
         {
           "type": "atom",
-          "value": "source_system_id"
+          "value": "order_id"
+        }
+      ],
+      "include": null,
+      "message": null,
+      "name": "sales_order_items_order_id_idx",
+      "nulls_distinct": true,
+      "prefix": null,
+      "table": null,
+      "unique": false,
+      "using": null,
+      "where": null
+    },
+    {
+      "all_tenants?": false,
+      "concurrently": false,
+      "error_fields": [
+        "event_id"
+      ],
+      "fields": [
+        {
+          "type": "atom",
+          "value": "event_id"
+        }
+      ],
+      "include": null,
+      "message": null,
+      "name": "sales_order_items_event_id_idx",
+      "nulls_distinct": true,
+      "prefix": null,
+      "table": null,
+      "unique": false,
+      "using": null,
+      "where": null
+    },
+    {
+      "all_tenants?": false,
+      "concurrently": false,
+      "error_fields": [
+        "ticket_type_id"
+      ],
+      "fields": [
+        {
+          "type": "atom",
+          "value": "ticket_type_id"
+        }
+      ],
+      "include": null,
+      "message": null,
+      "name": "sales_order_items_ticket_type_id_idx",
+      "nulls_distinct": true,
+      "prefix": null,
+      "table": null,
+      "unique": false,
+      "using": null,
+      "where": null
+    },
+    {
+      "all_tenants?": false,
+      "concurrently": false,
+      "error_fields": [
+        "mapping_status"
+      ],
+      "fields": [
+        {
+          "type": "atom",
+          "value": "mapping_status"
+        }
+      ],
+      "include": null,
+      "message": null,
+      "name": "sales_order_items_mapping_status_idx",
+      "nulls_distinct": true,
+      "prefix": null,
+      "table": null,
+      "unique": false,
+      "using": null,
+      "where": null
+    },
+    {
+      "all_tenants?": false,
+      "concurrently": false,
+      "error_fields": [
+        "woo_product_id",
+        "woo_variation_id"
+      ],
+      "fields": [
+        {
+          "type": "atom",
+          "value": "woo_product_id"
         },
         {
           "type": "atom",
-          "value": "woo_order_id"
+          "value": "woo_variation_id"
         }
       ],
       "include": null,
       "message": null,
-      "name": "sales_orders_unique_source_order_idx",
-      "nulls_distinct": true,
-      "prefix": null,
-      "table": null,
-      "unique": true,
-      "using": null,
-      "where": null
-    },
-    {
-      "all_tenants?": false,
-      "concurrently": false,
-      "error_fields": [
-        "source_system_id"
-      ],
-      "fields": [
-        {
-          "type": "atom",
-          "value": "source_system_id"
-        }
-      ],
-      "include": null,
-      "message": null,
-      "name": "sales_orders_source_system_id_idx",
+      "name": "sales_order_items_woo_product_variation_idx",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -269,83 +373,22 @@
       "all_tenants?": false,
       "concurrently": false,
       "error_fields": [
-        "status"
+        "event_id",
+        "mapping_status"
       ],
       "fields": [
         {
           "type": "atom",
-          "value": "status"
-        }
-      ],
-      "include": null,
-      "message": null,
-      "name": "sales_orders_status_idx",
-      "nulls_distinct": true,
-      "prefix": null,
-      "table": null,
-      "unique": false,
-      "using": null,
-      "where": null
-    },
-    {
-      "all_tenants?": false,
-      "concurrently": false,
-      "error_fields": [
-        "completed_at"
-      ],
-      "fields": [
+          "value": "event_id"
+        },
         {
           "type": "atom",
-          "value": "completed_at"
+          "value": "mapping_status"
         }
       ],
       "include": null,
       "message": null,
-      "name": "sales_orders_completed_at_idx",
-      "nulls_distinct": true,
-      "prefix": null,
-      "table": null,
-      "unique": false,
-      "using": null,
-      "where": null
-    },
-    {
-      "all_tenants?": false,
-      "concurrently": false,
-      "error_fields": [
-        "updated_at_source"
-      ],
-      "fields": [
-        {
-          "type": "atom",
-          "value": "updated_at_source"
-        }
-      ],
-      "include": null,
-      "message": null,
-      "name": "sales_orders_updated_at_source_idx",
-      "nulls_distinct": true,
-      "prefix": null,
-      "table": null,
-      "unique": false,
-      "using": null,
-      "where": null
-    },
-    {
-      "all_tenants?": false,
-      "concurrently": false,
-      "error_fields": [
-        "order_number"
-      ],
-      "fields": [
-        {
-          "type": "atom",
-          "value": "order_number"
-        }
-      ],
-      "include": null,
-      "message": null,
-      "name": "sales_orders_order_number_idx",
+      "name": "sales_order_items_event_mapping_status_idx",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -356,23 +399,23 @@
   ],
   "custom_statements": [],
   "has_create_action": true,
-  "hash": "851069CC0A0F421D5B2CB9C4F437B2D85F2FE3CE55DEBA2B00D7858401AB1F4A",
+  "hash": "0FFE105A2CEE7D995A052EFB674C2DC0D06F414BE2AF05102AD027341874722D",
   "identities": [
     {
       "all_tenants?": false,
       "base_filter": null,
-      "index_name": "sales_orders_unique_source_order_index",
+      "index_name": "sales_order_items_unique_order_line_index",
       "keys": [
         {
           "type": "atom",
-          "value": "source_system_id"
+          "value": "order_id"
         },
         {
           "type": "atom",
-          "value": "woo_order_id"
+          "value": "woo_line_item_id"
         }
       ],
-      "name": "unique_source_order",
+      "name": "unique_order_line",
       "nils_distinct?": true,
       "where": null
     }
@@ -384,5 +427,5 @@
   },
   "repo": "Elixir.EventSales.Repo",
   "schema": null,
-  "table": "sales_orders"
+  "table": "sales_order_items"
 }

@@ -16,7 +16,6 @@ defmodule EventSales.Sales.Resources.CouponSnapshot do
     end
 
     custom_indexes do
-      index [:order_id, :code], unique: true, name: "sales_coupon_snapshots_unique_order_code_idx"
       index :order_id, name: "sales_coupon_snapshots_order_id_idx"
     end
   end
