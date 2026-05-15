@@ -128,6 +128,7 @@ No over-engineering.
 No hidden rewrites outside the slice.
 No secrets in code, tests, logs, fixtures, or docs.
 No real customer data in fixtures.
+MUST - Always open or update a PR after meaningful work
 ```
 
 ## Project-Wide Rules
@@ -147,6 +148,7 @@ Must obey:
 |> manual dashboard refresh must never call WooCommerce
 |> WooCommerce REST max concurrency is 2
 |> return 2xx for webhooks only after Postgres persistence or explicitly accepted Redis degraded-mode buffering
+|> MUST - Always open or update a PR after meaningful work
 
 Required runtime config:
 |> EVENTSALES_BUSINESS_TIMEZONE=Africa/Johannesburg
