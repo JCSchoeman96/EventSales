@@ -9,7 +9,9 @@ defmodule EventSales.RuntimeConfigTest do
     "EVENTSALES_DEFAULT_CURRENCY",
     "PHX_SERVER",
     "PHX_HOST",
-    "SECRET_KEY_BASE"
+    "SECRET_KEY_BASE",
+    "WEBHOOK_PATH_TOKEN",
+    "WOOCOMMERCE_WEBHOOK_SECRET"
   ]
 
   setup do
@@ -48,6 +50,8 @@ defmodule EventSales.RuntimeConfigTest do
 
     System.put_env("SECRET_KEY_BASE", String.duplicate("a", 64))
     System.put_env("PHX_HOST", "eventsales.example.com")
+    System.put_env("WEBHOOK_PATH_TOKEN", "prod-webhook-token")
+    System.put_env("WOOCOMMERCE_WEBHOOK_SECRET", "prod-webhook-secret")
 
     app_config =
       @runtime_config_path
@@ -61,6 +65,11 @@ defmodule EventSales.RuntimeConfigTest do
 
     assert Keyword.get(app_config, :direct_database_url) ==
              "ecto://direct-user:direct-pass@db.internal/event_sales"
+
+    webhook_intake = Keyword.get(app_config, :webhook_intake, [])
+
+    assert Keyword.get(webhook_intake, :path_token) == "prod-webhook-token"
+    assert Keyword.get(webhook_intake, :secret) == "prod-webhook-secret"
   end
 
   defp restore_env(key, nil), do: System.delete_env(key)

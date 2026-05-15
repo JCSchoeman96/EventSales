@@ -1,9 +1,12 @@
 defmodule EventSales.Ingestion.Workers.ProcessWebhookWorker do
   @moduledoc """
-  Placeholder for Slice 1.0.
+  Async webhook processing entrypoint.
 
-  Do not implement business logic here before the owning slice.
+  Slice 5.0 enqueues only; Slice 6.0 implements order normalization and idempotency.
   """
 
-  # TODO: Implement in Slice 1.0.
+  use Oban.Worker, queue: :webhooks, max_attempts: 3
+
+  @impl Oban.Worker
+  def perform(%Oban.Job{args: %{"webhook_event_id" => _webhook_event_id}}), do: :ok
 end

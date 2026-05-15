@@ -28,6 +28,10 @@ defmodule EventSales.DomainBoundariesTest do
     EventSales.Sales.Resources.OrderItem,
     EventSales.Sales.Resources.CouponSnapshot
   ]
+  @ingestion_resources [
+    EventSales.Ingestion.Resources.WebhookEvent,
+    EventSales.Ingestion.Resources.WebhookDeliveryFailure
+  ]
   @hidden_ash_admin_domains [
     EventSales.AshBaseline.Domain,
     EventSales.Catalog,
@@ -71,8 +75,11 @@ defmodule EventSales.DomainBoundariesTest do
     assert Ash.Domain.Info.resources(EventSales.Catalog) == @catalog_resources
 
     assert Ash.Domain.Info.resources(EventSales.Sales) == @sales_resources
+    assert Ash.Domain.Info.resources(EventSales.Ingestion) == @ingestion_resources
 
-    for domain <- @business_domains -- [EventSales.Accounts, EventSales.Catalog, EventSales.Sales] do
+    for domain <-
+          @business_domains --
+            [EventSales.Accounts, EventSales.Catalog, EventSales.Sales, EventSales.Ingestion] do
       assert Ash.Domain.Info.resources(domain) == []
     end
   end
