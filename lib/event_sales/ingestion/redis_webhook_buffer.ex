@@ -56,7 +56,7 @@ defmodule EventSales.Ingestion.RedisWebhookBuffer do
   def claim, do: adapter_module().claim()
 
   @doc "Acknowledges successful drain of a processing entry."
-  @spec ack(binary()) :: :ok
+  @spec ack(binary()) :: :ok | {:error, :unavailable}
   def ack(entry) when is_binary(entry), do: adapter_module().ack(entry)
 
   @doc "Returns a processing entry to pending when retryable."

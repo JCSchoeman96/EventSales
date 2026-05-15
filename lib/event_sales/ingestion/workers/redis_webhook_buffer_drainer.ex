@@ -57,8 +57,7 @@ defmodule EventSales.Ingestion.Workers.RedisWebhookBufferDrainer do
       {:error, :poison} ->
         log_poison(entry)
         emit_backpressure(:poison_buffer_entry)
-        RedisWebhookBuffer.ack(entry)
-        :acked
+        ack_or_retry(entry)
     end
   end
 
@@ -72,8 +71,7 @@ defmodule EventSales.Ingestion.Workers.RedisWebhookBufferDrainer do
       {:duplicate_payload_mismatch, _existing} ->
         log_poison(entry)
         emit_backpressure(:poison_buffer_entry)
-        RedisWebhookBuffer.ack(entry)
-        :acked
+        ack_or_retry(entry)
 
       :new ->
         persist_and_enqueue(entry, intake)
@@ -83,8 +81,7 @@ defmodule EventSales.Ingestion.Workers.RedisWebhookBufferDrainer do
   defp finalize_duplicate(entry, event) do
     case WebhookEnqueue.enqueue_processing_once(event) do
       :ok ->
-        RedisWebhookBuffer.ack(entry)
-        :acked
+        ack_or_retry(entry)
 
       {:error, :enqueue_failed} ->
         handle_transient_failure(entry)
@@ -98,8 +95,7 @@ defmodule EventSales.Ingestion.Workers.RedisWebhookBufferDrainer do
       {:ok, event} ->
         case WebhookEnqueue.enqueue_processing_once(event) do
           :ok ->
-            RedisWebhookBuffer.ack(entry)
-            :acked
+            ack_or_retry(entry)
 
           {:error, :enqueue_failed} ->
             handle_transient_failure(entry)
@@ -113,9 +109,19 @@ defmodule EventSales.Ingestion.Workers.RedisWebhookBufferDrainer do
           {:other, _} ->
             log_poison(entry)
             emit_backpressure(:poison_buffer_entry)
-            RedisWebhookBuffer.ack(entry)
-            :acked
+            ack_or_retry(entry)
         end
+    end
+  end
+
+  defp ack_or_retry(entry) do
+    case RedisWebhookBuffer.ack(entry) do
+      :ok ->
+        :acked
+
+      {:error, :unavailable} ->
+        emit_backpressure(:ack_failed)
+        {:retryable, :ack_failed}
     end
   end
 
@@ -169,9 +175,8 @@ defmodule EventSales.Ingestion.Workers.RedisWebhookBufferDrainer do
   end
 
   defp log_poison(entry) do
-    Logger.warning("redis_webhook_buffer_poison_entry",
-      byte_size: byte_size(entry),
-      adapter: RedisWebhookBuffer.adapter_name()
+    Logger.warning(
+      "redis_webhook_buffer_poison_entry adapter=#{RedisWebhookBuffer.adapter_name()} byte_size=#{byte_size(entry)}"
     )
   end
 

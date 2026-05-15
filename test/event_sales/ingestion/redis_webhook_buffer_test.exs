@@ -35,6 +35,23 @@ defmodule EventSales.Ingestion.RedisWebhookBufferTest do
     assert RedisWebhookBuffer.processing_depth() == 0
   end
 
+  test "requeue when pending full leaves entry in processing" do
+    assert :ok = RedisWebhookBuffer.push(%{"n" => 1})
+    assert :ok = RedisWebhookBuffer.push(%{"n" => 2})
+    assert :ok = RedisWebhookBuffer.push(%{"n" => 3})
+    assert {:ok, encoded} = RedisWebhookBuffer.claim()
+    assert :ok = RedisWebhookBuffer.push(%{"n" => 4})
+    assert RedisWebhookBuffer.depth() == 3
+
+    assert {:error, :full} = RedisWebhookBuffer.requeue(encoded)
+    assert RedisWebhookBuffer.processing_depth() == 1
+    assert RedisWebhookBuffer.depth() == 3
+  end
+
+  test "ack returns unavailable when entry is not in processing" do
+    assert {:error, :unavailable} = RedisWebhookBuffer.ack("not-in-processing")
+  end
+
   test "requeue returns entry to pending when room" do
     encoded = "buffer-entry-2"
 

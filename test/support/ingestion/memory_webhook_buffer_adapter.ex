@@ -43,21 +43,38 @@ defmodule EventSales.TestSupport.Ingestion.MemoryWebhookBufferAdapter do
   def ack(entry) when is_binary(entry) do
     table = ensure_table!()
     state = get_state(table)
-    :ets.insert(table, {:state, %{state | processing: List.delete(state.processing, entry)}})
-    :ok
+
+    if entry in state.processing do
+      :ets.insert(table, {:state, %{state | processing: List.delete(state.processing, entry)}})
+      :ok
+    else
+      {:error, :unavailable}
+    end
   end
 
   @impl true
   def requeue(entry) when is_binary(entry) do
     table = ensure_table!()
     state = get_state(table)
-    state = %{state | processing: List.delete(state.processing, entry)}
 
-    if length(state.pending) >= max_entries() do
-      {:error, :full}
-    else
-      :ets.insert(table, {:state, %{state | pending: state.pending ++ [entry]}})
-      :ok
+    cond do
+      entry not in state.processing ->
+        {:error, :unavailable}
+
+      length(state.pending) >= max_entries() ->
+        {:error, :full}
+
+      true ->
+        :ets.insert(
+          table,
+          {:state,
+           %{
+             pending: state.pending ++ [entry],
+             processing: List.delete(state.processing, entry)
+           }}
+        )
+
+        :ok
     end
   end
 

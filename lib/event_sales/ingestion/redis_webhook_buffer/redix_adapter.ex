@@ -8,6 +8,7 @@ defmodule EventSales.Ingestion.RedisWebhookBuffer.RedixAdapter do
   alias EventSales.Ingestion.RedisWebhookBuffer
 
   @push_script_path "priv/redis/push_when_not_full.lua"
+  @requeue_script_path "priv/redis/requeue_when_room.lua"
 
   @impl true
   def push(entry) when is_binary(entry) do
@@ -21,11 +22,7 @@ defmodule EventSales.Ingestion.RedisWebhookBuffer.RedixAdapter do
              max_entries(),
              entry
            ]) do
-      case result do
-        1 -> :ok
-        0 -> {:error, :full}
-        _ -> {:error, :unavailable}
-      end
+      map_push_result(result)
     else
       _ -> {:error, :unavailable}
     end
@@ -45,32 +42,33 @@ defmodule EventSales.Ingestion.RedisWebhookBuffer.RedixAdapter do
 
   @impl true
   def ack(entry) when is_binary(entry) do
-    with {:ok, conn} <- connection() do
-      _ = Redix.command(conn, ["LREM", processing_key(), 1, entry])
-      :ok
-    else
-      _ -> :ok
+    case connection() do
+      {:ok, conn} ->
+        case Redix.command(conn, ["LREM", processing_key(), 1, entry]) do
+          {:ok, n} when n > 0 -> :ok
+          {:ok, 0} -> {:error, :unavailable}
+          _ -> {:error, :unavailable}
+        end
+
+      {:error, _} ->
+        {:error, :unavailable}
     end
   end
 
   @impl true
   def requeue(entry) when is_binary(entry) do
     with {:ok, conn} <- connection(),
-         {:ok, pending_len} <- Redix.command(conn, ["LLEN", pending_key()]),
-         {:ok, removed} <- Redix.command(conn, ["LREM", processing_key(), 1, entry]) do
-      cond do
-        removed == 0 ->
-          {:error, :unavailable}
-
-        pending_len >= max_entries() ->
-          {:error, :full}
-
-        true ->
-          case Redix.command(conn, ["RPUSH", pending_key(), entry]) do
-            {:ok, _} -> :ok
-            _ -> {:error, :unavailable}
-          end
-      end
+         {:ok, result} <-
+           Redix.command(conn, [
+             "EVAL",
+             requeue_script_source(),
+             2,
+             pending_key(),
+             processing_key(),
+             max_entries(),
+             entry
+           ]) do
+      map_requeue_result(result)
     else
       _ -> {:error, :unavailable}
     end
@@ -96,6 +94,15 @@ defmodule EventSales.Ingestion.RedisWebhookBuffer.RedixAdapter do
     end
   end
 
+  defp map_push_result(1), do: :ok
+  defp map_push_result(0), do: {:error, :full}
+  defp map_push_result(_), do: {:error, :unavailable}
+
+  defp map_requeue_result(1), do: :ok
+  defp map_requeue_result(0), do: {:error, :full}
+  defp map_requeue_result(-1), do: {:error, :unavailable}
+  defp map_requeue_result(_), do: {:error, :unavailable}
+
   defp connection do
     case RedisWebhookBuffer.redix_name() |> Process.whereis() do
       nil -> {:error, :no_connection}
@@ -104,8 +111,11 @@ defmodule EventSales.Ingestion.RedisWebhookBuffer.RedixAdapter do
   end
 
   defp push_script_source do
-    Application.app_dir(:event_sales, @push_script_path)
-    |> File.read!()
+    Application.app_dir(:event_sales, @push_script_path) |> File.read!()
+  end
+
+  defp requeue_script_source do
+    Application.app_dir(:event_sales, @requeue_script_path) |> File.read!()
   end
 
   defp pending_key, do: RedisWebhookBuffer.key("pending")
