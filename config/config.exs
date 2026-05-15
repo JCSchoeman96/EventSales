@@ -25,7 +25,7 @@ config :event_sales, :internal_tools, ash_admin_enabled: config_env() in [:dev, 
 config :event_sales, Oban,
   repo: EventSales.Repo,
   plugins: false,
-  queues: [default: 10]
+  queues: [default: 10, webhooks: 10]
 
 # Configure the endpoint
 config :event_sales, EventSalesWeb.Endpoint,

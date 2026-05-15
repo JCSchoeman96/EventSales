@@ -6,4 +6,9 @@ defmodule EventSales.Ingestion do
   """
 
   use Ash.Domain
+
+  resources do
+    resource EventSales.Ingestion.Resources.WebhookEvent
+    resource EventSales.Ingestion.Resources.WebhookDeliveryFailure
+  end
 end

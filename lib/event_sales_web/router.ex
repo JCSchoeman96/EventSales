@@ -29,6 +29,11 @@ defmodule EventSalesWeb.Router do
     plug :accepts, ["json"]
   end
 
+  pipeline :webhook_intake do
+    # Plug.Parsers already ran at Endpoint (with RawBodyReader body_reader).
+    # Do not call :fetch_session, :protect_from_forgery, or browser plugs.
+  end
+
   pipeline :internal_admin_tools do
     plug EventSalesWeb.Plugs.InternalOnly
     plug EventSalesWeb.Plugs.LoadCurrentUser
@@ -37,6 +42,12 @@ defmodule EventSalesWeb.Router do
 
   scope "/", EventSalesWeb do
     get "/health", HealthController, :show
+  end
+
+  scope "/webhooks", EventSalesWeb do
+    pipe_through :webhook_intake
+
+    post "/woocommerce/:path_token", WebhookController, :woocommerce
   end
 
   scope "/", EventSalesWeb do

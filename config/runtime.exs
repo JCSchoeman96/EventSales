@@ -75,6 +75,18 @@ if config_env() == :prod do
     ],
     secret_key_base: secret_key_base
 
+  webhook_path_token =
+    System.get_env("WEBHOOK_PATH_TOKEN") ||
+      raise "environment variable WEBHOOK_PATH_TOKEN is missing."
+
+  woocommerce_webhook_secret =
+    System.get_env("WOOCOMMERCE_WEBHOOK_SECRET") ||
+      raise "environment variable WOOCOMMERCE_WEBHOOK_SECRET is missing."
+
+  config :event_sales, :webhook_intake,
+    path_token: webhook_path_token,
+    secret: woocommerce_webhook_secret
+
   # ## SSL Support
   #
   # To get SSL working, you will need to add the `https` key

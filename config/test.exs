@@ -29,6 +29,10 @@ config :event_sales, :start_repo, true
 
 config :event_sales, Oban, testing: :manual
 
+config :event_sales, :webhook_intake,
+  path_token: "test-token",
+  secret: "slice_1_5_webhook_secret"
+
 # Print only warnings and errors during test
 config :logger, level: :warning
 
