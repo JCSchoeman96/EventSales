@@ -123,6 +123,30 @@ defmodule EventSalesWeb.WebhookControllerTest do
     end
   end
 
+  test "duplicate delivery_id with different body returns 200 without second event", %{conn: conn} do
+    delivery_id = unique_delivery_id()
+    raw_body_a = ~s({"id":10001,"status":"completed"})
+    raw_body_b = ~s({"id":10001,"status":"pending"})
+
+    conn = post_webhook(conn, signed_headers(raw_body_a, delivery_id: delivery_id), raw_body_a)
+    assert response(conn, 200) == "ok"
+
+    conn =
+      post_webhook(
+        build_conn(),
+        signed_headers(raw_body_b, delivery_id: delivery_id),
+        raw_body_b
+      )
+
+    assert response(conn, 200) == "ok"
+    assert length(Ash.read!(WebhookEvent, domain: Ingestion)) == 1
+
+    assert [%{reason: :duplicate_payload_mismatch}] =
+             Ash.read!(WebhookDeliveryFailure, domain: Ingestion)
+
+    assert length(all_enqueued(worker: ProcessWebhookWorker)) == 1
+  end
+
   test "duplicate delivery returns 200 without second event", %{conn: conn} do
     raw_body = FixtureHelpers.read_fixture!(:woocommerce, :order_completed)
     delivery_id = unique_delivery_id()

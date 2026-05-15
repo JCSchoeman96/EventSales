@@ -15,6 +15,8 @@ defmodule EventSales.Ingestion.WebhookIntake do
   alias EventSales.Ingestion.Workers.ProcessWebhookWorker
   alias EventSales.Telemetry
 
+  @unique_delivery_id_constraint "ingestion_webhook_events_unique_delivery_id_index"
+
   @type accept_input :: %{
           required(:path_token) => String.t(),
           required(:raw_body) => String.t(),
@@ -33,7 +35,8 @@ defmodule EventSales.Ingestion.WebhookIntake do
              | :invalid_signature
              | :invalid_json
              | :no_source_system
-             | :enqueue_failed}
+             | :enqueue_failed
+             | :persist_failed}
 
   @spec accept(accept_input()) :: accept_result()
   def accept(%{path_token: path_token, raw_body: raw_body, headers: headers} = input) do
@@ -187,8 +190,13 @@ defmodule EventSales.Ingestion.WebhookIntake do
             error
         end
 
-      {:error, _} ->
-        resolve_duplicate_after_race(ctx)
+      {:error, error} ->
+        if unique_delivery_id_error?(error) do
+          resolve_duplicate_after_race(ctx)
+        else
+          emit_rejected(:persist_failed)
+          {:error, :persist_failed}
+        end
     end
   end
 
@@ -225,9 +233,35 @@ defmodule EventSales.Ingestion.WebhookIntake do
         {:ignored, :duplicate_payload_mismatch}
 
       :new ->
-        {:error, :enqueue_failed}
+        emit_rejected(:persist_failed)
+        {:error, :persist_failed}
     end
   end
+
+  defp unique_delivery_id_error?(%Ash.Error.Invalid{errors: errors}) do
+    Enum.any?(errors, &unique_delivery_id_constraint_error?/1)
+  end
+
+  defp unique_delivery_id_error?(error) do
+    error
+    |> Ash.Error.to_error_class()
+    |> case do
+      %Ash.Error.Invalid{errors: errors} ->
+        Enum.any?(errors, &unique_delivery_id_constraint_error?/1)
+
+      _ ->
+        false
+    end
+  end
+
+  defp unique_delivery_id_constraint_error?(%Ash.Error.Changes.InvalidAttribute{
+         field: :delivery_id,
+         private_vars: private_vars
+       }) do
+    private_vars[:constraint] == @unique_delivery_id_constraint
+  end
+
+  defp unique_delivery_id_constraint_error?(_), do: false
 
   defp log_duplicate_payload_mismatch(ctx) do
     %{

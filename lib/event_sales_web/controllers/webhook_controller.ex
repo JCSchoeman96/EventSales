@@ -40,8 +40,12 @@ defmodule EventSalesWeb.WebhookController do
   defp response_for_accept_result({:error, :wrong_path_token}, conn), do: not_found(conn)
   defp response_for_accept_result({:error, :invalid_signature}, conn), do: unauthorized(conn)
   defp response_for_accept_result({:error, :invalid_json}, conn), do: bad_request(conn)
-  defp response_for_accept_result({:error, :no_source_system}, conn), do: service_unavailable(conn)
+
+  defp response_for_accept_result({:error, :no_source_system}, conn),
+    do: service_unavailable(conn)
+
   defp response_for_accept_result({:error, :enqueue_failed}, conn), do: service_unavailable(conn)
+  defp response_for_accept_result({:error, :persist_failed}, conn), do: service_unavailable(conn)
 
   defp ok_response(conn) do
     conn
