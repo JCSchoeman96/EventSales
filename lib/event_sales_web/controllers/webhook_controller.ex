@@ -12,27 +12,36 @@ defmodule EventSalesWeb.WebhookController do
   alias EventSalesWeb.Plugs.RawBodyReader
 
   def woocommerce(conn, %{"path_token" => path_token}) do
-    with {:ok, raw_body} <- RawBodyReader.fetch_raw_body(conn) do
-      case WebhookIntake.accept(%{
-             path_token: path_token,
-             raw_body: raw_body,
-             headers: normalize_headers(conn),
-             remote_ip: conn.remote_ip,
-             user_agent: get_req_header(conn, "user-agent") |> List.first()
-           }) do
-        {:ok, _event} -> ok_response(conn)
-        {:ignored, _, _} -> ok_response(conn)
-        {:ignored, _} -> ok_response(conn)
-        {:error, :wrong_path_token} -> not_found(conn)
-        {:error, :invalid_signature} -> unauthorized(conn)
-        {:error, :invalid_json} -> bad_request(conn)
-        {:error, :no_source_system} -> service_unavailable(conn)
-        {:error, :enqueue_failed} -> service_unavailable(conn)
-      end
-    else
-      {:error, :missing_raw_body} -> internal_error(conn)
+    case RawBodyReader.fetch_raw_body(conn) do
+      {:ok, raw_body} ->
+        conn
+        |> intake_params(path_token, raw_body)
+        |> WebhookIntake.accept()
+        |> then(&response_for_accept_result(&1, conn))
+
+      {:error, :missing_raw_body} ->
+        internal_error(conn)
     end
   end
+
+  defp intake_params(conn, path_token, raw_body) do
+    %{
+      path_token: path_token,
+      raw_body: raw_body,
+      headers: normalize_headers(conn),
+      remote_ip: conn.remote_ip,
+      user_agent: get_req_header(conn, "user-agent") |> List.first()
+    }
+  end
+
+  defp response_for_accept_result({:ok, _event}, conn), do: ok_response(conn)
+  defp response_for_accept_result({:ignored, _, _}, conn), do: ok_response(conn)
+  defp response_for_accept_result({:ignored, _}, conn), do: ok_response(conn)
+  defp response_for_accept_result({:error, :wrong_path_token}, conn), do: not_found(conn)
+  defp response_for_accept_result({:error, :invalid_signature}, conn), do: unauthorized(conn)
+  defp response_for_accept_result({:error, :invalid_json}, conn), do: bad_request(conn)
+  defp response_for_accept_result({:error, :no_source_system}, conn), do: service_unavailable(conn)
+  defp response_for_accept_result({:error, :enqueue_failed}, conn), do: service_unavailable(conn)
 
   defp ok_response(conn) do
     conn

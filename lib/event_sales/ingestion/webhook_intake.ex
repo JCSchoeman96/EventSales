@@ -102,17 +102,17 @@ defmodule EventSales.Ingestion.WebhookIntake do
         {:ignored, :duplicate, event}
 
       {:duplicate_payload_mismatch, existing} ->
-        log_duplicate_payload_mismatch(
-          source_system.id,
-          headers,
-          remote_ip,
-          user_agent,
-          delivery_id,
-          existing,
-          incoming_hash,
-          resource_type,
-          resource_id
-        )
+        log_duplicate_payload_mismatch(%{
+          source_system_id: source_system.id,
+          headers: headers,
+          remote_ip: remote_ip,
+          user_agent: user_agent,
+          delivery_id: delivery_id,
+          existing: existing,
+          incoming_hash: incoming_hash,
+          resource_type: resource_type,
+          resource_id: resource_id
+        })
 
         {:ignored, :duplicate_payload_mismatch}
 
@@ -143,36 +143,34 @@ defmodule EventSales.Ingestion.WebhookIntake do
             {:ignored, :stale_replay}
 
           :ok ->
-            create_event_and_enqueue(
-              source_system,
-              raw_body,
-              headers,
-              payload,
-              incoming_hash,
-              delivery_id,
-              resource_type,
-              resource_id,
-              source_updated_at,
-              remote_ip,
-              user_agent
-            )
+            create_event_and_enqueue(%{
+              source_system: source_system,
+              raw_body: raw_body,
+              headers: headers,
+              payload: payload,
+              incoming_hash: incoming_hash,
+              delivery_id: delivery_id,
+              resource_type: resource_type,
+              resource_id: resource_id,
+              source_updated_at: source_updated_at,
+              remote_ip: remote_ip,
+              user_agent: user_agent
+            })
         end
     end
   end
 
-  defp create_event_and_enqueue(
-         source_system,
-         raw_body,
-         headers,
-         payload,
-         incoming_hash,
-         delivery_id,
-         resource_type,
-         resource_id,
-         source_updated_at,
-         remote_ip,
-         user_agent
-       ) do
+  defp create_event_and_enqueue(ctx) do
+    %{
+      source_system: source_system,
+      raw_body: raw_body,
+      headers: headers,
+      payload: payload,
+      source_updated_at: source_updated_at,
+      remote_ip: remote_ip,
+      user_agent: user_agent
+    } = ctx
+
     case persist_webhook_event(source_system, raw_body, headers, payload, source_updated_at) do
       {:ok, event} ->
         case enqueue_processing(event) do
@@ -190,46 +188,39 @@ defmodule EventSales.Ingestion.WebhookIntake do
         end
 
       {:error, _} ->
-        resolve_duplicate_after_race(
-          delivery_id,
-          incoming_hash,
-          source_system,
-          headers,
-          remote_ip,
-          user_agent,
-          resource_type,
-          resource_id
-        )
+        resolve_duplicate_after_race(ctx)
     end
   end
 
-  defp resolve_duplicate_after_race(
-         delivery_id,
-         incoming_hash,
-         source_system,
-         headers,
-         remote_ip,
-         user_agent,
-         resource_type,
-         resource_id
-       ) do
+  defp resolve_duplicate_after_race(ctx) do
+    %{
+      source_system: source_system,
+      headers: headers,
+      remote_ip: remote_ip,
+      user_agent: user_agent,
+      delivery_id: delivery_id,
+      incoming_hash: incoming_hash,
+      resource_type: resource_type,
+      resource_id: resource_id
+    } = ctx
+
     case WebhookReplayGuard.classify_duplicate(delivery_id, incoming_hash) do
       {:duplicate, event} ->
         emit_accepted(event)
         {:ignored, :duplicate, event}
 
       {:duplicate_payload_mismatch, existing} ->
-        log_duplicate_payload_mismatch(
-          source_system.id,
-          headers,
-          remote_ip,
-          user_agent,
-          delivery_id,
-          existing,
-          incoming_hash,
-          resource_type,
-          resource_id
-        )
+        log_duplicate_payload_mismatch(%{
+          source_system_id: source_system.id,
+          headers: headers,
+          remote_ip: remote_ip,
+          user_agent: user_agent,
+          delivery_id: delivery_id,
+          existing: existing,
+          incoming_hash: incoming_hash,
+          resource_type: resource_type,
+          resource_id: resource_id
+        })
 
         {:ignored, :duplicate_payload_mismatch}
 
@@ -238,17 +229,19 @@ defmodule EventSales.Ingestion.WebhookIntake do
     end
   end
 
-  defp log_duplicate_payload_mismatch(
-         source_system_id,
-         headers,
-         remote_ip,
-         user_agent,
-         delivery_id,
-         existing,
-         incoming_hash,
-         resource_type,
-         resource_id
-       ) do
+  defp log_duplicate_payload_mismatch(ctx) do
+    %{
+      source_system_id: source_system_id,
+      headers: headers,
+      remote_ip: remote_ip,
+      user_agent: user_agent,
+      delivery_id: delivery_id,
+      existing: existing,
+      incoming_hash: incoming_hash,
+      resource_type: resource_type,
+      resource_id: resource_id
+    } = ctx
+
     log_failure(
       :duplicate_payload_mismatch,
       source_system_id,
