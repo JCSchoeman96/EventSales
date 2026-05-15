@@ -1,24 +1,35 @@
 # Oban and PgBouncer
 
-## Slice 0.2 Decision
+## Selected Topology
 
 - Oban shares the normal `DATABASE_URL` runtime path.
-- That runtime path is PgBouncer session pooling, not transaction pooling.
+- That runtime path is PgBouncer **session pooling**, not transaction pooling.
 - `DIRECT_DATABASE_URL` is reserved for migrations, release tasks, and session-sensitive maintenance.
-- Slice `0.2` keeps Oban intentionally minimal: one supervised Oban instance, no plugins, no cron, no Oban Web, and no real ingestion workers.
+- Oban is explicitly configured with `notifier: Oban.Notifiers.Postgres`.
+- Queue config is `default: 10` and `webhooks: 10`.
 
-## Current Risk
+## Notifier Decision
 
-PgBouncer transaction pooling can break PostgreSQL `LISTEN/NOTIFY` semantics. That means the default Postgres notifier must not be assumed safe under transaction pooling without an explicit smoke test.
+`Oban.Notifiers.Postgres` uses PostgreSQL notifications and is the selected notifier for the current session-pooling topology. The notifier is explicit in config so smoke-test output can report the selected strategy instead of relying on hidden Oban defaults.
 
-## Deferred Work
+PgBouncer transaction pooling can break PostgreSQL `LISTEN/NOTIFY` semantics. EventSales does not rely on transaction pooling for Oban, and it does not claim transaction-pooling compatibility.
 
-- Transaction-pooling compatibility is deferred.
-- A PgBouncer-compatible notifier or polling strategy is future work if the project moves away from session pooling.
-- Slice `5.7` is the first slice that should claim production-like Oban/PgBouncer proof.
+`Oban.Notifiers.PG` is not selected in Slice `5.7` because it requires a functional Distributed Erlang cluster to broadcast notifications across nodes. EventSales has not introduced clustering in this slice.
 
-## Slice 0.2 Smoke Scope
+## Slice 5.7 Smoke Scope
 
-- Enqueue a test job in `:test`.
-- Drain the queue synchronously.
-- Verify the job completes without relying on sleeps or production queue assumptions.
+- `SMOKE_TOPOLOGY_MODE=local` may run with Mix against local Postgres.
+- `SMOKE_TOPOLOGY_MODE=production_like` must run real Oban queues and poll persisted `oban_jobs`.
+- The script must not use SQL sandbox, `test/support`, or `Oban.drain_queue/1`.
+- The script inserts one success job and one fail-once job.
+- The fail-once job must persist an error, retry, and finish `completed` with `attempt > 1`.
+- The output reports runtime DB source, migration DB source, notifier, queue config, timeout, poll interval, job IDs, final states, attempt count, and error count.
+
+## Out Of Scope
+
+- PgBouncer transaction pooling.
+- `prepare: :unnamed`.
+- `Oban.Notifiers.PG`.
+- Distributed Erlang clustering.
+- Alternative Oban engines.
+- Oban Web.

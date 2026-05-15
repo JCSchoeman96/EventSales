@@ -24,7 +24,8 @@ config :event_sales, :internal_tools, ash_admin_enabled: config_env() in [:dev, 
 
 config :event_sales, Oban,
   repo: EventSales.Repo,
-  plugins: false,
+  notifier: Oban.Notifiers.Postgres,
+  plugins: [],
   queues: [default: 10, webhooks: 10]
 
 config :event_sales, :redis_webhook_buffer,
