@@ -103,6 +103,7 @@ defmodule EventSales.MixProject do
         "deps.unlock --check-unused",
         "cmd bash scripts/check_no_web_woocommerce_refs.sh",
         "ash.codegen --dry-run",
+        "cmd git diff --exit-code priv/repo/migrations priv/resource_snapshots",
         "credo --strict",
         "sobelow",
         "deps.audit",

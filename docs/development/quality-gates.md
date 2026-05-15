@@ -19,6 +19,8 @@ Slice `0.2` established the Postgres-backed test baseline required for `EventSal
   - Runs `mix compile --warnings-as-errors`
   - Verifies `mix.lock` has no unused dependencies with `mix deps.unlock --check-unused`
   - Runs `./scripts/check_no_web_woocommerce_refs.sh`
+  - Runs `mix ash.codegen --dry-run`
+  - Verifies Ash-generated migrations and resource snapshots are unchanged
   - Runs `mix credo --strict`
   - Runs `mix sobelow`
   - Runs `mix deps.audit`
@@ -35,11 +37,17 @@ Slice `0.4` adds proof-only Ash verification on top of the existing local comman
   - Is required as part of Slice `0.4` verification
   - Is enforced by `mix quality.ci`
   - Is enforced in the CI test job after `mix ecto.migrate`
+  - Is also enforced by the dedicated CI `ash_codegen` job for a clear GitHub status signal
+- `git diff --exit-code priv/repo/migrations priv/resource_snapshots`
+  - Confirms Ash-related checks did not leave generated migrations or resource snapshots unstaged
+  - Is enforced by `mix quality.ci`
+  - Is enforced after Ash dry-run in both the CI `test` and `ash_codegen` jobs
 - Focused proof tests:
   - `mix test test/event_sales/ash_baseline/auth_user_support_test.exs`
   - `mix test test/event_sales/ash_baseline/state_machine_proof_test.exs`
   - `mix test test/event_sales/ash_baseline/paper_trail_proof_test.exs`
   - `mix test test/event_sales_web/ash_admin_access_test.exs`
+  - `mix test test/event_sales/ash_resource_smoke_test.exs`
 
 These checks prove ecosystem readiness only. They do not mean the real Accounts, Catalog, Sales, Ingestion, or Audit resources have shipped.
 
@@ -116,7 +124,16 @@ Jobs:
   - Starts a Postgres service
   - Runs `mix ecto.create`
   - Runs `mix ecto.migrate`
+  - Runs `mix ash.codegen --dry-run`
+  - Verifies `priv/repo/migrations` and `priv/resource_snapshots` are unchanged
   - Runs the current ExUnit suite
+- `ash_codegen`
+  - Starts a Postgres service
+  - Runs `mix ecto.create`
+  - Runs `mix ecto.migrate`
+  - Runs `mix ash.codegen --dry-run`
+  - Verifies `priv/repo/migrations` and `priv/resource_snapshots` are unchanged
+  - Exists so Ash drift reports as an explicit GitHub job failure instead of only a general test failure
 - `dialyzer`
   - Runs Dialyzer under `MIX_ENV=test`
 
