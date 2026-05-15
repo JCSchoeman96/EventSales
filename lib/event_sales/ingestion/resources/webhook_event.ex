@@ -9,6 +9,7 @@ defmodule EventSales.Ingestion.Resources.WebhookEvent do
 
   @statuses [:queued, :processing, :processed, :failed, :ignored, :buffered]
   @accepted_via_values [:postgres, :redis_buffer]
+  @ignore_reasons [:unsupported_topic, :stale_source_version, :duplicate_resource_hash]
 
   postgres do
     table "ingestion_webhook_events"
@@ -24,6 +25,9 @@ defmodule EventSales.Ingestion.Resources.WebhookEvent do
 
       index [:source_system_id, :resource_type, :resource_id, :source_updated_at],
         name: "ingestion_webhook_events_resource_source_updated_at_idx"
+
+      index [:source_system_id, :resource_type, :resource_id, :payload_hash],
+        name: "ingestion_webhook_events_resource_payload_hash_idx"
     end
   end
 
@@ -57,6 +61,32 @@ defmodule EventSales.Ingestion.Resources.WebhookEvent do
                ])
 
       change set_attribute(:status, :queued)
+    end
+
+    update :mark_processing do
+      accept [:processing_attempt_count, :processing_started_at]
+      change set_attribute(:status, :processing)
+    end
+
+    update :mark_processed do
+      accept [:processed_at, :failed_at, :error_message, :ignore_reason]
+      change set_attribute(:status, :processed)
+    end
+
+    update :mark_failed do
+      accept [:failed_at, :error_message]
+      change set_attribute(:status, :failed)
+    end
+
+    update :mark_retryable do
+      accept [:error_message]
+      change set_attribute(:status, :queued)
+    end
+
+    update :mark_ignored do
+      accept [:ignore_reason, :processed_at]
+      validate present([:ignore_reason])
+      change set_attribute(:status, :ignored)
     end
   end
 
@@ -123,6 +153,34 @@ defmodule EventSales.Ingestion.Resources.WebhookEvent do
     end
 
     attribute :source_updated_at, :utc_datetime_usec do
+      public? true
+    end
+
+    attribute :processing_started_at, :utc_datetime_usec do
+      public? true
+    end
+
+    attribute :processed_at, :utc_datetime_usec do
+      public? true
+    end
+
+    attribute :failed_at, :utc_datetime_usec do
+      public? true
+    end
+
+    attribute :error_message, :string do
+      public? true
+    end
+
+    attribute :ignore_reason, :atom do
+      constraints one_of: @ignore_reasons
+      public? true
+    end
+
+    attribute :processing_attempt_count, :integer do
+      allow_nil? false
+      default 0
+      constraints min: 0
       public? true
     end
 
