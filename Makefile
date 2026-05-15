@@ -54,9 +54,10 @@ deps:
 	@$(MIX) local.rebar --force
 
 	@echo ""
-	@echo "=== 6. Fetching Elixir Dependencies ==="
+	@echo "=== 6. Fetching and Compiling Elixir Dependencies ==="
 	@$(MIX) deps.get
 	@$(MIX) deps.compile
+	@MIX_ENV=test $(MIX) deps.compile
 
 infra:
 	@echo ""
@@ -94,10 +95,8 @@ reset-db:
 	@echo "=== Resetting EventSales Dev Postgres ==="
 	@bash scripts/dev_postgres.sh reset
 	@bash scripts/dev_postgres.sh start
-	@$(MIX) ecto.create
-	@$(MIX) ecto.migrate
-	@MIX_ENV=test $(MIX) ecto.create
-	@MIX_ENV=test $(MIX) ecto.migrate
+	@$(MAKE) db
+	@$(MAKE) db-test
 
 stop-db:
 	@echo ""
