@@ -12,6 +12,7 @@ defmodule EventSales.Application do
         EventSalesWeb.Telemetry,
         repo_child(),
         oban_child(),
+        redis_child(),
         {DNSCluster, query: Application.get_env(:event_sales, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: EventSales.PubSub},
         # Start a worker by calling: EventSales.Worker.start_link(arg)
@@ -43,5 +44,17 @@ defmodule EventSales.Application do
 
   defp oban_child do
     {Oban, Application.fetch_env!(:event_sales, Oban)}
+  end
+
+  defp redis_child do
+    cfg = Application.get_env(:event_sales, :redis_webhook_buffer, [])
+
+    with true <- Keyword.get(cfg, :enabled, false),
+         true <- Keyword.get(cfg, :durability_accepted, false),
+         url when is_binary(url) and url != "" <- Keyword.get(cfg, :redis_url) do
+      {Redix, {url, name: EventSales.Ingestion.RedisWebhookBuffer.redix_name()}}
+    else
+      _ -> nil
+    end
   end
 end

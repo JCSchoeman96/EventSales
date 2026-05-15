@@ -87,6 +87,34 @@ if config_env() == :prod do
     path_token: webhook_path_token,
     secret: woocommerce_webhook_secret
 
+  buffer_enabled? = System.get_env("WEBHOOK_REDIS_BUFFER_ENABLED") in ~w(true 1)
+  durability_accepted? = System.get_env("WEBHOOK_REDIS_BUFFER_DURABILITY_ACCEPTED") in ~w(true 1)
+
+  if buffer_enabled? and durability_accepted? do
+    redis_url =
+      System.get_env("REDIS_URL") ||
+        raise """
+        REDIS_URL is required when WEBHOOK_REDIS_BUFFER_ENABLED=true and \
+        WEBHOOK_REDIS_BUFFER_DURABILITY_ACCEPTED=true. \
+        Degraded-mode buffering cannot run without Redis.
+        """
+
+    config :event_sales, :redis_webhook_buffer,
+      enabled: true,
+      durability_accepted: true,
+      redis_url: redis_url,
+      max_entries:
+        String.to_integer(System.get_env("WEBHOOK_REDIS_BUFFER_MAX_ENTRIES") || "5000"),
+      max_entry_bytes:
+        String.to_integer(System.get_env("WEBHOOK_REDIS_BUFFER_MAX_ENTRY_BYTES") || "256000"),
+      adapter: EventSales.Ingestion.RedisWebhookBuffer.RedixAdapter,
+      key_prefix: "eventsales:webhook_buffer:v1"
+  else
+    config :event_sales, :redis_webhook_buffer,
+      enabled: false,
+      durability_accepted: false
+  end
+
   # ## SSL Support
   #
   # To get SSL working, you will need to add the `https` key

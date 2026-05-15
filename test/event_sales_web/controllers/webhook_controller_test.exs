@@ -191,6 +191,24 @@ defmodule EventSalesWeb.WebhookControllerTest do
     assert length(all_enqueued(worker: ProcessWebhookWorker)) == 1
   end
 
+  test "pool saturated with buffer enabled returns 200 without persisting", %{conn: conn} do
+    err = %DBConnection.ConnectionError{message: "queue_timeout", reason: :queue_timeout}
+
+    EventSales.TestSupport.Ingestion.StubWebhookEventStore.set_persist_error(err)
+    on_exit(fn -> EventSales.TestSupport.Ingestion.StubWebhookEventStore.clear!() end)
+    EventSales.TestSupport.Ingestion.MemoryWebhookBufferAdapter.reset!()
+    on_exit(fn -> EventSales.TestSupport.Ingestion.MemoryWebhookBufferAdapter.reset!() end)
+
+    raw_body = FixtureHelpers.read_fixture!(:woocommerce, :order_completed)
+    headers = signed_headers(raw_body, delivery_id: unique_delivery_id())
+
+    conn = post_webhook(conn, headers, raw_body)
+
+    assert response(conn, 200) == "ok"
+    assert [] = Ash.read!(WebhookEvent, domain: Ingestion)
+    refute_enqueued(worker: ProcessWebhookWorker)
+  end
+
   test "no source system returns service unavailable", %{conn: conn} do
     alias EventSales.Catalog
     alias EventSales.Catalog.Resources.SourceSystem

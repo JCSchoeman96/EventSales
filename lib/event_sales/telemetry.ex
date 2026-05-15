@@ -12,6 +12,9 @@ defmodule EventSales.Telemetry do
 
   @webhook_accepted [:event_sales, :webhook, :accepted]
   @webhook_rejected [:event_sales, :webhook, :rejected]
+  @webhook_backpressure [:event_sales, :webhook, :backpressure]
+  @webhook_buffered [:event_sales, :webhook, :buffered]
+  @webhook_drained [:event_sales, :webhook, :drained]
   @rest_request_stop [:event_sales, :rest, :request, :stop]
   @rest_request_exception [:event_sales, :rest, :request, :exception]
   @hot_state_rebuild_start [:event_sales, :hot_state, :rebuild, :start]
@@ -27,6 +30,9 @@ defmodule EventSales.Telemetry do
     [
       webhook_accepted(),
       webhook_rejected(),
+      webhook_backpressure(),
+      webhook_buffered(),
+      webhook_drained(),
       rest_request_stop(),
       rest_request_exception(),
       hot_state_rebuild_start(),
@@ -43,6 +49,18 @@ defmodule EventSales.Telemetry do
   @doc "Webhook was rejected before durable intake."
   @spec webhook_rejected() :: event_name()
   def webhook_rejected, do: @webhook_rejected
+
+  @doc "Webhook intake backpressure (pool saturation, buffer full, etc.)."
+  @spec webhook_backpressure() :: event_name()
+  def webhook_backpressure, do: @webhook_backpressure
+
+  @doc "Webhook accepted into degraded-mode Redis buffer."
+  @spec webhook_buffered() :: event_name()
+  def webhook_buffered, do: @webhook_buffered
+
+  @doc "Buffered webhooks drained to Postgres."
+  @spec webhook_drained() :: event_name()
+  def webhook_drained, do: @webhook_drained
 
   @doc "WooCommerce REST request completed."
   @spec rest_request_stop() :: event_name()

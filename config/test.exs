@@ -33,6 +33,15 @@ config :event_sales, :webhook_intake,
   path_token: "test-token",
   secret: "slice_1_5_webhook_secret"
 
+config :event_sales, :webhook_event_store, EventSales.TestSupport.Ingestion.StubWebhookEventStore
+
+config :event_sales, :redis_webhook_buffer,
+  enabled: true,
+  durability_accepted: true,
+  max_entries: 3,
+  max_entry_bytes: 256_000,
+  adapter: EventSales.TestSupport.Ingestion.MemoryWebhookBufferAdapter
+
 # Print only warnings and errors during test
 config :logger, level: :warning
 

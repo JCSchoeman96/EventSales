@@ -27,6 +27,15 @@ config :event_sales, Oban,
   plugins: false,
   queues: [default: 10, webhooks: 10]
 
+config :event_sales, :redis_webhook_buffer,
+  enabled: false,
+  durability_accepted: false,
+  max_entries: 5_000,
+  max_entry_bytes: 256_000,
+  adapter: EventSales.Ingestion.RedisWebhookBuffer.RedixAdapter,
+  redis_url: nil,
+  key_prefix: "eventsales:webhook_buffer:v1"
+
 # Configure the endpoint
 config :event_sales, EventSalesWeb.Endpoint,
   url: [host: "localhost"],
