@@ -43,7 +43,8 @@ defmodule EventSales.Ingestion.Resources.WebhookEvent do
         :signature_validated_at,
         :received_at,
         :source_updated_at,
-        :sanitized_headers_snapshot
+        :sanitized_headers_snapshot,
+        :accepted_via
       ]
 
       validate present([
@@ -56,7 +57,6 @@ defmodule EventSales.Ingestion.Resources.WebhookEvent do
                ])
 
       change set_attribute(:status, :queued)
-      change set_attribute(:accepted_via, :postgres)
     end
   end
 

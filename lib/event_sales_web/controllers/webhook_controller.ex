@@ -44,8 +44,16 @@ defmodule EventSalesWeb.WebhookController do
   defp response_for_accept_result({:error, :no_source_system}, conn),
     do: service_unavailable(conn)
 
+  defp response_for_accept_result({:buffered, _}, conn), do: ok_response(conn)
   defp response_for_accept_result({:error, :enqueue_failed}, conn), do: service_unavailable(conn)
   defp response_for_accept_result({:error, :persist_failed}, conn), do: service_unavailable(conn)
+  defp response_for_accept_result({:error, :buffer_full}, conn), do: service_unavailable(conn)
+
+  defp response_for_accept_result({:error, :buffer_too_large}, conn),
+    do: service_unavailable(conn)
+
+  defp response_for_accept_result({:error, :intake_unavailable}, conn),
+    do: service_unavailable(conn)
 
   defp ok_response(conn) do
     conn

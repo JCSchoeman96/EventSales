@@ -95,6 +95,24 @@ defmodule EventSalesWeb.Telemetry do
         tags: [:topic, :reason, :source],
         description: "Rejected WooCommerce webhooks"
       ),
+      counter("event_sales.webhook.backpressure.count",
+        event_name: EventSales.Telemetry.webhook_backpressure(),
+        measurement: :count,
+        tags: [:reason, :adapter],
+        description: "Webhook intake backpressure signals"
+      ),
+      counter("event_sales.webhook.buffered.count",
+        event_name: EventSales.Telemetry.webhook_buffered(),
+        measurement: :count,
+        tags: [:adapter, :accepted_via],
+        description: "Webhooks accepted into degraded-mode buffer"
+      ),
+      counter("event_sales.webhook.drained.count",
+        event_name: EventSales.Telemetry.webhook_drained(),
+        measurement: :count,
+        tags: [:adapter, :accepted_via],
+        description: "Buffered webhooks drained to Postgres"
+      ),
       summary("event_sales.rest.request.stop.duration",
         event_name: EventSales.Telemetry.rest_request_stop(),
         measurement: :duration,

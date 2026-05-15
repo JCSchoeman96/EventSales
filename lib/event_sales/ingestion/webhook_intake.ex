@@ -10,9 +10,12 @@ defmodule EventSales.Ingestion.WebhookIntake do
   alias EventSales.Catalog
   alias EventSales.Catalog.Resources.SourceSystem
   alias EventSales.Ingestion
+  alias EventSales.Ingestion.IntakeBackpressure
+  alias EventSales.Ingestion.RedisWebhookBuffer
   alias EventSales.Ingestion.Resources.{WebhookDeliveryFailure, WebhookEvent}
   alias EventSales.Ingestion.Security.{WebhookReplayGuard, WebhookSignature}
-  alias EventSales.Ingestion.Workers.ProcessWebhookWorker
+  alias EventSales.Ingestion.WebhookEnqueue
+  alias EventSales.Ingestion.WebhookEventStore
   alias EventSales.Telemetry
 
   @unique_delivery_id_constraint "ingestion_webhook_events_unique_delivery_id_index"
@@ -30,13 +33,17 @@ defmodule EventSales.Ingestion.WebhookIntake do
           | {:ignored, :duplicate, WebhookEvent.t()}
           | {:ignored, :stale_replay}
           | {:ignored, :duplicate_payload_mismatch}
+          | {:buffered, %{buffer_depth: non_neg_integer()}}
           | {:error,
              :wrong_path_token
              | :invalid_signature
              | :invalid_json
              | :no_source_system
              | :enqueue_failed
-             | :persist_failed}
+             | :persist_failed
+             | :buffer_full
+             | :buffer_too_large
+             | :intake_unavailable}
 
   @spec accept(accept_input()) :: accept_result()
   def accept(%{path_token: path_token, raw_body: raw_body, headers: headers} = input) do
@@ -166,15 +173,12 @@ defmodule EventSales.Ingestion.WebhookIntake do
   defp create_event_and_enqueue(ctx) do
     %{
       source_system: source_system,
-      raw_body: raw_body,
       headers: headers,
-      payload: payload,
-      source_updated_at: source_updated_at,
       remote_ip: remote_ip,
       user_agent: user_agent
     } = ctx
 
-    case persist_webhook_event(source_system, raw_body, headers, payload, source_updated_at) do
+    case persist_webhook_event(ctx) do
       {:ok, event} ->
         case enqueue_processing(event) do
           :ok ->
@@ -191,13 +195,55 @@ defmodule EventSales.Ingestion.WebhookIntake do
         end
 
       {:error, error} ->
-        if unique_delivery_id_error?(error) do
-          resolve_duplicate_after_race(ctx)
-        else
-          emit_rejected(:persist_failed)
-          {:error, :persist_failed}
+        cond do
+          unique_delivery_id_error?(error) ->
+            resolve_duplicate_after_race(ctx)
+
+          match?({:pool_saturated, _}, IntakeBackpressure.classify_persist_error(error)) ->
+            try_buffer_fallback(ctx)
+
+          true ->
+            emit_rejected(:persist_failed)
+            {:error, :persist_failed}
         end
     end
+  end
+
+  defp try_buffer_fallback(ctx) do
+    entry = RedisWebhookBuffer.entry_from_intake_context(ctx)
+
+    case RedisWebhookBuffer.push(entry) do
+      :ok ->
+        depth = RedisWebhookBuffer.depth()
+
+        Telemetry.emit(
+          Telemetry.webhook_buffered(),
+          %{count: 1, buffer_depth: depth},
+          %{adapter: RedisWebhookBuffer.adapter_name(), accepted_via: :redis_buffer}
+        )
+
+        {:buffered, %{buffer_depth: depth}}
+
+      {:error, :full} ->
+        emit_backpressure(:buffer_full)
+        {:error, :buffer_full}
+
+      {:error, :too_large} ->
+        emit_backpressure(:buffer_too_large)
+        {:error, :buffer_too_large}
+
+      {:error, _} ->
+        emit_backpressure(:intake_unavailable)
+        {:error, :intake_unavailable}
+    end
+  end
+
+  defp emit_backpressure(reason) do
+    Telemetry.emit(
+      Telemetry.webhook_backpressure(),
+      %{count: 1},
+      %{reason: reason, adapter: RedisWebhookBuffer.adapter_name()}
+    )
   end
 
   defp resolve_duplicate_after_race(ctx) do
@@ -329,17 +375,28 @@ defmodule EventSales.Ingestion.WebhookIntake do
     end
   end
 
-  defp persist_webhook_event(source_system, raw_body, headers, payload, source_updated_at) do
+  defp persist_webhook_event(ctx) do
+    %{
+      source_system: source_system,
+      raw_body: raw_body,
+      headers: headers,
+      payload: payload,
+      resource_id: resource_id,
+      delivery_id: delivery_id,
+      incoming_hash: incoming_hash,
+      source_updated_at: source_updated_at
+    } = ctx
+
     now = DateTime.utc_now()
 
     attrs = %{
       source_system_id: source_system.id,
       topic: header_value(headers, "x-wc-webhook-topic") || "unknown",
       resource_type: header_value(headers, "x-wc-webhook-resource") || "unknown",
-      resource_id: resource_id_from_payload(payload),
-      delivery_id: header_value(headers, "x-wc-webhook-delivery-id") || "unknown",
+      resource_id: resource_id,
+      delivery_id: delivery_id,
       payload: payload,
-      payload_hash: WebhookReplayGuard.payload_hash(raw_body),
+      payload_hash: incoming_hash,
       raw_body_size: byte_size(raw_body),
       signature_validated_at: now,
       received_at: now,
@@ -347,19 +404,11 @@ defmodule EventSales.Ingestion.WebhookIntake do
       sanitized_headers_snapshot: WebhookReplayGuard.sanitize_headers(headers)
     }
 
-    WebhookEvent
-    |> Ash.Changeset.for_create(:receive, attrs)
-    |> Ash.create(domain: Ingestion)
+    WebhookEventStore.create_receive(attrs)
   end
 
-  defp enqueue_processing(%WebhookEvent{id: id}) do
-    case %{webhook_event_id: id}
-         |> ProcessWebhookWorker.new()
-         |> Oban.insert() do
-      {:ok, _job} -> :ok
-      {:error, _} -> {:error, :enqueue_failed}
-    end
-  end
+  defp enqueue_processing(%WebhookEvent{} = event),
+    do: WebhookEnqueue.enqueue_processing_once(event)
 
   defp log_failure(reason, source_system_id, headers, remote_ip, user_agent, metadata) do
     now = DateTime.utc_now()

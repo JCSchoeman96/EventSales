@@ -17,7 +17,7 @@ PgBouncer-safe notes, DB pool saturation handling, optional Redis buffer fallbac
 | Task | Implement Slice 5.5 — Flash-Sale Webhook Intake Protection for EventSales. |
 | Objective | Protect webhook intake during high-concurrency bursts. |
 | Output | PgBouncer-safe notes, DB pool saturation handling, optional Redis buffer fallback, RedisWebhookBuffer, RedisWebhookBufferDrainer, backpressure telemetry. |
-| Note | Redis fallback is a degraded-mode safety valve, not canonical durable truth. Return 2xx only after Postgres persistence or after an explicitly enabled, bounded, monitored Redis degraded-mode buffer accepts the payload and its durability risk has been accepted. Include strict tests listed below. Do not violate project-wide rules. |
+| Note | Redis buffer push must be atomic and reject when full. Do not use LPUSH + LTRIM in a way that silently drops older accepted entries. Use Lua or an equivalent atomic length-check-and-push. Draining must not destructively pop before Postgres persistence; use a processing/inflight list or equivalent ACK pattern. A buffered webhook may receive 2xx only if the bounded buffer accepted it without dropping another entry. Do not enqueue Oban drainer jobs from the saturated request path. Drainer must use enqueue_processing_once/1 so duplicate drain/retry does not create multiple ProcessWebhookWorker jobs per webhook_event_id. Prod: if buffer enabled and durability accepted, REDIS_URL required or boot fails. Poison buffer entries: ACK and log, do not requeue. Telemetry must not use delivery_id/resource_id/payload_hash as metric tags. WebhookEvent.accepted_via must preserve :redis_buffer when supplied by the drainer. Include strict tests listed below. Do not violate project-wide rules. |
 
 ## Strict tests
 
