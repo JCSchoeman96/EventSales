@@ -17,6 +17,7 @@ defmodule EventSales.Telemetry do
   @hot_state_rebuild_start [:event_sales, :hot_state, :rebuild, :start]
   @hot_state_rebuild_stop [:event_sales, :hot_state, :rebuild, :stop]
   @hot_state_rebuild_exception [:event_sales, :hot_state, :rebuild, :exception]
+  @cache_invalidate [:event_sales, :cache, :invalidate]
 
   @doc """
   Returns every custom EventSales telemetry event name defined in Slice 0.8.
@@ -30,7 +31,8 @@ defmodule EventSales.Telemetry do
       rest_request_exception(),
       hot_state_rebuild_start(),
       hot_state_rebuild_stop(),
-      hot_state_rebuild_exception()
+      hot_state_rebuild_exception(),
+      cache_invalidate()
     ]
   end
 
@@ -61,6 +63,10 @@ defmodule EventSales.Telemetry do
   @doc "HotStateAggregator rebuild failed."
   @spec hot_state_rebuild_exception() :: event_name()
   def hot_state_rebuild_exception, do: @hot_state_rebuild_exception
+
+  @doc "Cache invalidation signal for an event scope (Slice 3.0 telemetry-only facade)."
+  @spec cache_invalidate() :: event_name()
+  def cache_invalidate, do: @cache_invalidate
 
   @doc """
   Emits a telemetry event through the standard `:telemetry` application.
