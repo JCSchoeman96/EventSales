@@ -15,6 +15,14 @@ defmodule EventSales.DomainBoundariesTest do
     EventSales.Accounts.Resources.UserRole,
     EventSales.Accounts.Resources.EventAccessGrant
   ]
+  @catalog_resources [
+    EventSales.Catalog.Resources.ProductMapping.Version,
+    EventSales.Catalog.Resources.SourceSystem,
+    EventSales.Catalog.Resources.Event,
+    EventSales.Catalog.Resources.TicketType,
+    EventSales.Catalog.Resources.ProductMapping,
+    EventSales.Catalog.Resources.EventDashboardSetting
+  ]
   @hidden_ash_admin_domains [
     EventSales.AshBaseline.Domain,
     EventSales.Catalog,
@@ -55,8 +63,9 @@ defmodule EventSales.DomainBoundariesTest do
 
   test "business Ash domains expose only resources owned by completed slices" do
     assert Ash.Domain.Info.resources(EventSales.Accounts) == @accounts_resources
+    assert Ash.Domain.Info.resources(EventSales.Catalog) == @catalog_resources
 
-    for domain <- @business_domains -- [EventSales.Accounts] do
+    for domain <- @business_domains -- [EventSales.Accounts, EventSales.Catalog] do
       assert Ash.Domain.Info.resources(domain) == []
     end
   end

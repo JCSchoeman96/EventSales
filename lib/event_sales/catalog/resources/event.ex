@@ -1,9 +1,107 @@
 defmodule EventSales.Catalog.Resources.Event do
   @moduledoc """
-  Placeholder for Slice 3.0.
-
-  Do not implement business logic here before the owning slice.
+  Event-level reporting and permission scope for catalog mappings.
   """
 
-  # TODO: Implement in Slice 3.0.
+  use Ash.Resource,
+    data_layer: AshPostgres.DataLayer,
+    domain: EventSales.Catalog
+
+  alias EventSales.Catalog.Changes.ValidateEventDates
+
+  postgres do
+    table "catalog_events"
+    repo EventSales.Repo
+
+    references do
+      reference :source_system, on_delete: :restrict, on_update: :update
+    end
+  end
+
+  actions do
+    defaults [:read]
+
+    create :create do
+      accept [:source_system_id, :name, :slug, :starts_at, :ends_at, :capacity, :status]
+      change ValidateEventDates
+    end
+
+    update :update do
+      accept [:name, :slug, :starts_at, :ends_at, :capacity, :status]
+      require_atomic? false
+      change ValidateEventDates
+    end
+
+    update :archive do
+      accept []
+      require_atomic? false
+      change set_attribute(:status, :archived)
+    end
+  end
+
+  attributes do
+    uuid_primary_key :id
+
+    attribute :name, :string do
+      allow_nil? false
+      public? true
+    end
+
+    attribute :slug, :string do
+      allow_nil? false
+      public? true
+    end
+
+    attribute :starts_at, :utc_datetime_usec do
+      public? true
+    end
+
+    attribute :ends_at, :utc_datetime_usec do
+      public? true
+    end
+
+    attribute :capacity, :integer do
+      public? true
+      constraints min: 0
+    end
+
+    attribute :status, :atom do
+      allow_nil? false
+      default :draft
+      constraints one_of: [:draft, :active, :archived, :cancelled]
+      public? true
+    end
+
+    create_timestamp :inserted_at
+    update_timestamp :updated_at
+  end
+
+  relationships do
+    belongs_to :source_system, EventSales.Catalog.Resources.SourceSystem do
+      allow_nil? false
+      public? true
+    end
+
+    has_many :ticket_types, EventSales.Catalog.Resources.TicketType do
+      destination_attribute :event_id
+    end
+
+    has_many :product_mappings, EventSales.Catalog.Resources.ProductMapping do
+      destination_attribute :event_id
+    end
+
+    has_one :dashboard_setting, EventSales.Catalog.Resources.EventDashboardSetting do
+      destination_attribute :event_id
+    end
+  end
+
+  identities do
+    identity :unique_slug_per_source, [:source_system_id, :slug]
+  end
+
+  validations do
+    validate present([:name, :slug, :source_system_id]) do
+      on [:create]
+    end
+  end
 end

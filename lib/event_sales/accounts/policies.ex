@@ -63,10 +63,26 @@ defmodule EventSales.Accounts.Policies do
   def has_unexpired_event_grant?(_user, _event_id, _role), do: false
 
   @doc """
-  Revenue is admin-only by default until a later dashboard settings slice owns it.
+  Revenue visibility is admin-true by default; event roles consult dashboard settings.
   """
   @spec can_view_revenue?(User.t() | nil, Ecto.UUID.t()) :: boolean()
-  def can_view_revenue?(user, _event_id), do: global_admin?(user)
+  def can_view_revenue?(user, event_id) do
+    cond do
+      global_admin?(user) ->
+        true
+
+      has_unexpired_event_grant?(user, event_id, :event_owner) &&
+          dashboard_setting_allows?(event_id, :revenue_visible_to_event_owner) ->
+        true
+
+      has_unexpired_event_grant?(user, event_id, :event_staff) &&
+          dashboard_setting_allows?(event_id, :revenue_visible_to_event_staff) ->
+        true
+
+      true ->
+        false
+    end
+  end
 
   @spec has_global_role?(User.t() | nil, atom()) :: boolean()
   defp has_global_role?(%User{id: user_id}, role) when role in @global_roles do
@@ -86,6 +102,37 @@ defmodule EventSales.Accounts.Policies do
   end
 
   defp has_global_role?(_user, _role), do: false
+
+  defp dashboard_setting_allows?(event_id, :revenue_visible_to_event_owner) do
+    dashboard_flag?(event_id, "revenue_visible_to_event_owner")
+  end
+
+  defp dashboard_setting_allows?(event_id, :revenue_visible_to_event_staff) do
+    dashboard_flag?(event_id, "revenue_visible_to_event_staff")
+  end
+
+  defp dashboard_flag?(event_id, column)
+       when column in ["revenue_visible_to_event_owner", "revenue_visible_to_event_staff"] do
+    case Ecto.UUID.cast(event_id) do
+      {:ok, event_uuid} ->
+        {:ok, dumped_event_id} = Ecto.UUID.dump(event_uuid)
+
+        case Repo.query!(
+               """
+               SELECT #{column}
+               FROM catalog_event_dashboard_settings
+               WHERE event_id = $1
+               """,
+               [dumped_event_id]
+             ) do
+          %{rows: [[true]]} -> true
+          _ -> false
+        end
+
+      :error ->
+        false
+    end
+  end
 
   defp dump_uuid!(uuid) do
     {:ok, dumped_uuid} = Ecto.UUID.dump(uuid)
