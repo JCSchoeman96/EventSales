@@ -117,13 +117,16 @@ defmodule EventSales.Accounts.Policies do
       {:ok, event_uuid} ->
         {:ok, dumped_event_id} = Ecto.UUID.dump(event_uuid)
 
+        now = DateTime.utc_now()
+
         case Repo.query!(
                """
                SELECT #{column}
                FROM catalog_event_dashboard_settings
                WHERE event_id = $1
+                 AND (access_expires_at IS NULL OR access_expires_at > $2)
                """,
-               [dumped_event_id]
+               [dumped_event_id, now]
              ) do
           %{rows: [[true]]} -> true
           _ -> false

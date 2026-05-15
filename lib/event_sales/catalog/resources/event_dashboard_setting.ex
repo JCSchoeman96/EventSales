@@ -1,6 +1,9 @@
 defmodule EventSales.Catalog.Resources.EventDashboardSetting do
   @moduledoc """
   Per-event dashboard visibility configuration for revenue, orders, and PII.
+
+  `access_expires_at` is enforced by `EventSales.Accounts.Policies` when consulting
+  revenue visibility flags. When set and in the past, dashboard-derived access is denied.
   """
 
   use Ash.Resource,

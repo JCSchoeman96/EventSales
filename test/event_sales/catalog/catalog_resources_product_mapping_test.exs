@@ -268,6 +268,27 @@ defmodule EventSales.Catalog.CatalogResourcesProductMappingTest do
     assert Policies.can_view_revenue?(staff, event.id)
   end
 
+  test "expired dashboard access_expires_at denies revenue visibility for event roles" do
+    source = create_source_system!()
+    event = create_event!(source, %{name: "Expiry Event", slug: "expiry-event"})
+    owner = create_user!("catalog-expiry-owner@example.com")
+
+    create_event_grant!(owner, event.id, :event_owner)
+
+    Ash.create!(
+      EventDashboardSetting,
+      %{
+        event_id: event.id,
+        revenue_visible_to_event_owner: true,
+        access_expires_at: DateTime.add(DateTime.utc_now(), -60, :second)
+      },
+      action: :create,
+      domain: Catalog
+    )
+
+    refute Policies.can_view_revenue?(owner, event.id)
+  end
+
   defp mapping_context! do
     source = create_source_system!()
     event = create_event!(source, %{name: "Mapped Event", slug: "mapped-event"})
