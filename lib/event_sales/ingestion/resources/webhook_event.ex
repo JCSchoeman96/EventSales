@@ -21,6 +21,9 @@ defmodule EventSales.Ingestion.Resources.WebhookEvent do
     custom_indexes do
       index :status, name: "ingestion_webhook_events_status_idx"
       index :received_at, name: "ingestion_webhook_events_received_at_idx"
+
+      index [:source_system_id, :resource_type, :resource_id, :source_updated_at],
+        name: "ingestion_webhook_events_resource_source_updated_at_idx"
     end
   end
 
@@ -38,7 +41,9 @@ defmodule EventSales.Ingestion.Resources.WebhookEvent do
         :payload_hash,
         :raw_body_size,
         :signature_validated_at,
-        :received_at
+        :received_at,
+        :source_updated_at,
+        :sanitized_headers_snapshot
       ]
 
       validate present([
@@ -114,6 +119,16 @@ defmodule EventSales.Ingestion.Resources.WebhookEvent do
       allow_nil? false
       default :postgres
       constraints one_of: @accepted_via_values
+      public? true
+    end
+
+    attribute :source_updated_at, :utc_datetime_usec do
+      public? true
+    end
+
+    attribute :sanitized_headers_snapshot, :map do
+      allow_nil? false
+      default %{}
       public? true
     end
 
