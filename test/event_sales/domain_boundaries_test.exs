@@ -23,6 +23,11 @@ defmodule EventSales.DomainBoundariesTest do
     EventSales.Catalog.Resources.ProductMapping,
     EventSales.Catalog.Resources.EventDashboardSetting
   ]
+  @sales_resources [
+    EventSales.Sales.Resources.Order,
+    EventSales.Sales.Resources.OrderItem,
+    EventSales.Sales.Resources.CouponSnapshot
+  ]
   @hidden_ash_admin_domains [
     EventSales.AshBaseline.Domain,
     EventSales.Catalog,
@@ -65,7 +70,9 @@ defmodule EventSales.DomainBoundariesTest do
     assert Ash.Domain.Info.resources(EventSales.Accounts) == @accounts_resources
     assert Ash.Domain.Info.resources(EventSales.Catalog) == @catalog_resources
 
-    for domain <- @business_domains -- [EventSales.Accounts, EventSales.Catalog] do
+    assert Ash.Domain.Info.resources(EventSales.Sales) == @sales_resources
+
+    for domain <- @business_domains -- [EventSales.Accounts, EventSales.Catalog, EventSales.Sales] do
       assert Ash.Domain.Info.resources(domain) == []
     end
   end
