@@ -11,9 +11,11 @@ defmodule EventSales.Ingestion.WebhookIntake do
   alias EventSales.Catalog.Resources.SourceSystem
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.{WebhookDeliveryFailure, WebhookEvent}
-  alias EventSales.Ingestion.Security.WebhookSignature
+  alias EventSales.Ingestion.Security.{WebhookReplayGuard, WebhookSignature}
   alias EventSales.Ingestion.Workers.ProcessWebhookWorker
   alias EventSales.Telemetry
+
+  @unique_delivery_id_constraint "ingestion_webhook_events_unique_delivery_id_index"
 
   @type accept_input :: %{
           required(:path_token) => String.t(),
@@ -23,14 +25,20 @@ defmodule EventSales.Ingestion.WebhookIntake do
           optional(:user_agent) => String.t() | nil
         }
 
-  @spec accept(accept_input()) ::
+  @type accept_result ::
           {:ok, WebhookEvent.t()}
+          | {:ignored, :duplicate, WebhookEvent.t()}
+          | {:ignored, :stale_replay}
+          | {:ignored, :duplicate_payload_mismatch}
           | {:error,
              :wrong_path_token
              | :invalid_signature
              | :invalid_json
              | :no_source_system
-             | :enqueue_failed}
+             | :enqueue_failed
+             | :persist_failed}
+
+  @spec accept(accept_input()) :: accept_result()
   def accept(%{path_token: path_token, raw_body: raw_body, headers: headers} = input) do
     config = Application.get_env(:event_sales, :webhook_intake, [])
     remote_ip = Map.get(input, :remote_ip)
@@ -38,41 +46,251 @@ defmodule EventSales.Ingestion.WebhookIntake do
 
     with :ok <- verify_path_token(path_token, config),
          :ok <- verify_signature(raw_body, config, headers),
-         {:ok, source_system} <- fetch_active_woocommerce_source_system(),
-         {:ok, payload} <- decode_json(raw_body),
-         {:ok, event} <-
-           persist_webhook_event(source_system, raw_body, headers, payload),
-         :ok <- enqueue_processing(event) do
-      emit_accepted(event)
-      {:ok, event}
+         {:ok, source_system} <- fetch_active_woocommerce_source_system() do
+      case decode_json(raw_body) do
+        {:ok, payload} ->
+          process_after_decode(%{
+            source_system: source_system,
+            raw_body: raw_body,
+            headers: headers,
+            payload: payload,
+            remote_ip: remote_ip,
+            user_agent: user_agent
+          })
+
+        {:error, :invalid_json} = error ->
+          log_failure(:invalid_json, source_system.id, headers, remote_ip, user_agent, %{
+            "byte_size" => byte_size(raw_body)
+          })
+
+          emit_rejected(:invalid_json)
+          error
+      end
     else
       {:error, :wrong_path_token} = error ->
-        log_failure(:wrong_path_token, headers, remote_ip, user_agent, %{})
+        log_failure(:wrong_path_token, nil, headers, remote_ip, user_agent, %{})
         emit_rejected(:wrong_path_token)
         error
 
       {:error, :invalid_signature} = error ->
-        log_failure(:invalid_signature, headers, remote_ip, user_agent, %{})
+        log_failure(:invalid_signature, nil, headers, remote_ip, user_agent, %{})
         emit_rejected(:invalid_signature)
         error
 
       {:error, :no_source_system} = error ->
-        log_failure(:no_source_system, headers, remote_ip, user_agent, %{})
+        log_failure(:no_source_system, nil, headers, remote_ip, user_agent, %{})
         emit_rejected(:no_source_system)
         error
+    end
+  end
 
-      {:error, :invalid_json} = error ->
-        log_failure(:invalid_json, headers, remote_ip, user_agent, %{
-          "byte_size" => byte_size(raw_body)
+  defp process_after_decode(ctx) do
+    %{
+      source_system: source_system,
+      raw_body: raw_body,
+      headers: headers,
+      payload: payload,
+      remote_ip: remote_ip,
+      user_agent: user_agent
+    } = ctx
+
+    incoming_hash = WebhookReplayGuard.payload_hash(raw_body)
+    delivery_id = header_value(headers, "x-wc-webhook-delivery-id") || "unknown"
+    resource_type = header_value(headers, "x-wc-webhook-resource") || "unknown"
+    resource_id = resource_id_from_payload(payload)
+
+    case WebhookReplayGuard.classify_duplicate(delivery_id, incoming_hash) do
+      {:duplicate, event} ->
+        emit_accepted(event)
+        {:ignored, :duplicate, event}
+
+      {:duplicate_payload_mismatch, existing} ->
+        log_duplicate_payload_mismatch(%{
+          source_system_id: source_system.id,
+          headers: headers,
+          remote_ip: remote_ip,
+          user_agent: user_agent,
+          delivery_id: delivery_id,
+          existing: existing,
+          incoming_hash: incoming_hash,
+          resource_type: resource_type,
+          resource_id: resource_id
         })
 
-        emit_rejected(:invalid_json)
-        error
+        {:ignored, :duplicate_payload_mismatch}
 
-      {:error, :enqueue_failed} = error ->
-        emit_rejected(:enqueue_failed)
-        error
+      :new ->
+        source_updated_at = WebhookReplayGuard.source_updated_at_from_payload(payload)
+
+        case WebhookReplayGuard.check_stale(
+               source_system.id,
+               resource_type,
+               resource_id,
+               source_updated_at
+             ) do
+          {:stale_replay, metadata} ->
+            log_failure(
+              :stale_replay,
+              source_system.id,
+              headers,
+              remote_ip,
+              user_agent,
+              Map.merge(metadata, %{
+                "delivery_id" => delivery_id,
+                "resource_type" => resource_type,
+                "resource_id" => resource_id
+              })
+            )
+
+            emit_rejected(:stale_replay)
+            {:ignored, :stale_replay}
+
+          :ok ->
+            create_event_and_enqueue(%{
+              source_system: source_system,
+              raw_body: raw_body,
+              headers: headers,
+              payload: payload,
+              incoming_hash: incoming_hash,
+              delivery_id: delivery_id,
+              resource_type: resource_type,
+              resource_id: resource_id,
+              source_updated_at: source_updated_at,
+              remote_ip: remote_ip,
+              user_agent: user_agent
+            })
+        end
     end
+  end
+
+  defp create_event_and_enqueue(ctx) do
+    %{
+      source_system: source_system,
+      raw_body: raw_body,
+      headers: headers,
+      payload: payload,
+      source_updated_at: source_updated_at,
+      remote_ip: remote_ip,
+      user_agent: user_agent
+    } = ctx
+
+    case persist_webhook_event(source_system, raw_body, headers, payload, source_updated_at) do
+      {:ok, event} ->
+        case enqueue_processing(event) do
+          :ok ->
+            emit_accepted(event)
+            {:ok, event}
+
+          {:error, :enqueue_failed} = error ->
+            log_failure(:enqueue_failed, source_system.id, headers, remote_ip, user_agent, %{
+              "webhook_event_id" => event.id
+            })
+
+            emit_rejected(:enqueue_failed)
+            error
+        end
+
+      {:error, error} ->
+        if unique_delivery_id_error?(error) do
+          resolve_duplicate_after_race(ctx)
+        else
+          emit_rejected(:persist_failed)
+          {:error, :persist_failed}
+        end
+    end
+  end
+
+  defp resolve_duplicate_after_race(ctx) do
+    %{
+      source_system: source_system,
+      headers: headers,
+      remote_ip: remote_ip,
+      user_agent: user_agent,
+      delivery_id: delivery_id,
+      incoming_hash: incoming_hash,
+      resource_type: resource_type,
+      resource_id: resource_id
+    } = ctx
+
+    case WebhookReplayGuard.classify_duplicate(delivery_id, incoming_hash) do
+      {:duplicate, event} ->
+        emit_accepted(event)
+        {:ignored, :duplicate, event}
+
+      {:duplicate_payload_mismatch, existing} ->
+        log_duplicate_payload_mismatch(%{
+          source_system_id: source_system.id,
+          headers: headers,
+          remote_ip: remote_ip,
+          user_agent: user_agent,
+          delivery_id: delivery_id,
+          existing: existing,
+          incoming_hash: incoming_hash,
+          resource_type: resource_type,
+          resource_id: resource_id
+        })
+
+        {:ignored, :duplicate_payload_mismatch}
+
+      :new ->
+        emit_rejected(:persist_failed)
+        {:error, :persist_failed}
+    end
+  end
+
+  defp unique_delivery_id_error?(%Ash.Error.Invalid{errors: errors}) do
+    Enum.any?(errors, &unique_delivery_id_constraint_error?/1)
+  end
+
+  defp unique_delivery_id_error?(error) do
+    error
+    |> Ash.Error.to_error_class()
+    |> case do
+      %Ash.Error.Invalid{errors: errors} ->
+        Enum.any?(errors, &unique_delivery_id_constraint_error?/1)
+
+      _ ->
+        false
+    end
+  end
+
+  defp unique_delivery_id_constraint_error?(%Ash.Error.Changes.InvalidAttribute{
+         field: :delivery_id,
+         private_vars: private_vars
+       }) do
+    private_vars[:constraint] == @unique_delivery_id_constraint
+  end
+
+  defp unique_delivery_id_constraint_error?(_), do: false
+
+  defp log_duplicate_payload_mismatch(ctx) do
+    %{
+      source_system_id: source_system_id,
+      headers: headers,
+      remote_ip: remote_ip,
+      user_agent: user_agent,
+      delivery_id: delivery_id,
+      existing: existing,
+      incoming_hash: incoming_hash,
+      resource_type: resource_type,
+      resource_id: resource_id
+    } = ctx
+
+    log_failure(
+      :duplicate_payload_mismatch,
+      source_system_id,
+      headers,
+      remote_ip,
+      user_agent,
+      %{
+        "delivery_id" => delivery_id,
+        "existing_webhook_event_id" => existing.id,
+        "existing_payload_hash" => existing.payload_hash,
+        "incoming_payload_hash" => incoming_hash,
+        "resource_type" => resource_type,
+        "resource_id" => resource_id
+      }
+    )
   end
 
   defp verify_path_token(path_token, config) do
@@ -111,7 +329,7 @@ defmodule EventSales.Ingestion.WebhookIntake do
     end
   end
 
-  defp persist_webhook_event(source_system, raw_body, headers, payload) do
+  defp persist_webhook_event(source_system, raw_body, headers, payload, source_updated_at) do
     now = DateTime.utc_now()
 
     attrs = %{
@@ -121,10 +339,12 @@ defmodule EventSales.Ingestion.WebhookIntake do
       resource_id: resource_id_from_payload(payload),
       delivery_id: header_value(headers, "x-wc-webhook-delivery-id") || "unknown",
       payload: payload,
-      payload_hash: payload_hash(raw_body),
+      payload_hash: WebhookReplayGuard.payload_hash(raw_body),
       raw_body_size: byte_size(raw_body),
       signature_validated_at: now,
-      received_at: now
+      received_at: now,
+      source_updated_at: source_updated_at,
+      sanitized_headers_snapshot: WebhookReplayGuard.sanitize_headers(headers)
     }
 
     WebhookEvent
@@ -141,22 +361,29 @@ defmodule EventSales.Ingestion.WebhookIntake do
     end
   end
 
-  defp log_failure(reason, headers, remote_ip, user_agent, metadata) do
+  defp log_failure(reason, source_system_id, headers, remote_ip, user_agent, metadata) do
     now = DateTime.utc_now()
 
-    attrs = %{
-      reason: reason,
-      topic: header_value(headers, "x-wc-webhook-topic"),
-      remote_ip_hash: hash_term(remote_ip),
-      user_agent_hash: hash_string(user_agent),
-      metadata: metadata,
-      received_at: now
-    }
+    attrs =
+      %{
+        reason: reason,
+        topic: header_value(headers, "x-wc-webhook-topic"),
+        remote_ip_hash: hash_term(remote_ip),
+        user_agent_hash: hash_string(user_agent),
+        metadata: metadata,
+        received_at: now
+      }
+      |> maybe_put_source_system_id(source_system_id)
 
     WebhookDeliveryFailure
     |> Ash.Changeset.for_create(:log_failure, attrs)
     |> Ash.create(domain: Ingestion)
   end
+
+  defp maybe_put_source_system_id(attrs, nil), do: attrs
+
+  defp maybe_put_source_system_id(attrs, source_system_id),
+    do: Map.put(attrs, :source_system_id, source_system_id)
 
   defp header_value(headers, name) do
     downcased = String.downcase(name)
@@ -172,11 +399,6 @@ defmodule EventSales.Ingestion.WebhookIntake do
 
   defp resource_id_from_payload(%{"id" => id}) when not is_nil(id), do: to_string(id)
   defp resource_id_from_payload(_), do: "unknown"
-
-  defp payload_hash(raw_body) do
-    :crypto.hash(:sha256, raw_body)
-    |> Base.encode16(case: :lower)
-  end
 
   defp hash_term(nil), do: nil
 

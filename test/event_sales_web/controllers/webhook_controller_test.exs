@@ -60,6 +60,17 @@ defmodule EventSalesWeb.WebhookControllerTest do
     assert_enqueued(worker: ProcessWebhookWorker, queue: :webhooks)
   end
 
+  test "missing signature header is rejected", %{conn: conn} do
+    raw_body = ~s({"id":1})
+    headers = signed_headers(raw_body, delivery_id: unique_delivery_id())
+    headers = Enum.reject(headers, fn {name, _} -> name == "x-wc-webhook-signature" end)
+
+    conn = post_webhook(conn, headers, raw_body)
+
+    assert response(conn, 401) == "unauthorized"
+    assert [] = Ash.read!(WebhookEvent, domain: Ingestion)
+  end
+
   test "invalid signature is rejected", %{conn: conn} do
     raw_body = ~s({"id":1})
 
@@ -110,6 +121,74 @@ defmodule EventSalesWeb.WebhookControllerTest do
       |> put_req_header("content-type", "application/json")
       |> post("/does-not-exist", "not-json")
     end
+  end
+
+  test "duplicate delivery_id with different body returns 200 without second event", %{conn: conn} do
+    delivery_id = unique_delivery_id()
+    raw_body_a = ~s({"id":10001,"status":"completed"})
+    raw_body_b = ~s({"id":10001,"status":"pending"})
+
+    conn = post_webhook(conn, signed_headers(raw_body_a, delivery_id: delivery_id), raw_body_a)
+    assert response(conn, 200) == "ok"
+
+    conn =
+      post_webhook(
+        build_conn(),
+        signed_headers(raw_body_b, delivery_id: delivery_id),
+        raw_body_b
+      )
+
+    assert response(conn, 200) == "ok"
+    assert length(Ash.read!(WebhookEvent, domain: Ingestion)) == 1
+
+    assert [%{reason: :duplicate_payload_mismatch}] =
+             Ash.read!(WebhookDeliveryFailure, domain: Ingestion)
+
+    assert length(all_enqueued(worker: ProcessWebhookWorker)) == 1
+  end
+
+  test "duplicate delivery returns 200 without second event", %{conn: conn} do
+    raw_body = FixtureHelpers.read_fixture!(:woocommerce, :order_completed)
+    delivery_id = unique_delivery_id()
+    headers = signed_headers(raw_body, delivery_id: delivery_id)
+
+    conn = post_webhook(conn, headers, raw_body)
+    assert response(conn, 200) == "ok"
+
+    conn = post_webhook(build_conn(), headers, raw_body)
+    assert response(conn, 200) == "ok"
+    assert length(Ash.read!(WebhookEvent, domain: Ingestion)) == 1
+    assert length(all_enqueued(worker: ProcessWebhookWorker)) == 1
+  end
+
+  test "stale replay returns 200 with failure metadata only", %{conn: conn, source: source} do
+    base = FixtureHelpers.decode_json_fixture!(:woocommerce, :order_completed)
+    newer = Map.put(base, "date_modified_gmt", "2026-05-01T08:10:00")
+    older = Map.put(base, "date_modified_gmt", "2026-05-01T08:05:00")
+
+    newer_raw = Jason.encode!(newer)
+    older_raw = Jason.encode!(older)
+
+    conn =
+      post_webhook(conn, signed_headers(newer_raw, delivery_id: unique_delivery_id()), newer_raw)
+
+    assert response(conn, 200) == "ok"
+
+    conn =
+      post_webhook(
+        build_conn(),
+        signed_headers(older_raw, delivery_id: unique_delivery_id()),
+        older_raw
+      )
+
+    assert response(conn, 200) == "ok"
+    assert length(Ash.read!(WebhookEvent, domain: Ingestion)) == 1
+
+    assert [%{reason: :stale_replay, source_system_id: sid}] =
+             Ash.read!(WebhookDeliveryFailure, domain: Ingestion)
+
+    assert sid == source.id
+    assert length(all_enqueued(worker: ProcessWebhookWorker)) == 1
   end
 
   test "no source system returns service unavailable", %{conn: conn} do

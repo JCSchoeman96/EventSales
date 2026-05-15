@@ -14,7 +14,9 @@ defmodule EventSales.Ingestion.Resources.WebhookDeliveryFailure do
     :wrong_path_token,
     :invalid_json,
     :no_source_system,
-    :enqueue_failed
+    :enqueue_failed,
+    :stale_replay,
+    :duplicate_payload_mismatch
   ]
 
   @metadata_max_bytes 2048

@@ -9,11 +9,11 @@ defmodule EventSales.TestSupport.WooCommerceWebhookHelpers do
   @default_topic "order.updated"
   @default_webhook_id "slice-1-5-webhook"
 
+  alias EventSales.Ingestion.Security.WebhookSignature
+
   @spec sign_raw_body(iodata(), iodata()) :: String.t()
   def sign_raw_body(raw_body, secret) do
-    :hmac
-    |> :crypto.mac(:sha256, IO.iodata_to_binary(secret), IO.iodata_to_binary(raw_body))
-    |> Base.encode64()
+    WebhookSignature.sign(raw_body, secret)
   end
 
   @spec signed_headers(iodata(), keyword()) :: [{String.t(), String.t()}]
