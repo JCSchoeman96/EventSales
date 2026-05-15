@@ -21,7 +21,6 @@ defmodule EventSales.Ingestion.Workers.RedisWebhookBufferDrainer do
   @impl Oban.Worker
   def perform(%Oban.Job{}) do
     drain_batch(@batch_size)
-    :ok
   end
 
   @spec drain_batch(non_neg_integer()) :: :ok | {:error, :retry}

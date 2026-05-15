@@ -8,6 +8,7 @@ defmodule EventSales.Ingestion.RedisWebhookBufferDrainerTest do
   alias EventSales.Ingestion.RedisWebhookBuffer
   alias EventSales.Ingestion.Resources.WebhookEvent
   alias EventSales.Ingestion.Workers.{ProcessWebhookWorker, RedisWebhookBufferDrainer}
+  alias EventSales.Telemetry
   alias EventSales.TestSupport.FixtureHelpers
   alias EventSales.TestSupport.Ingestion.MemoryWebhookBufferAdapter
   alias EventSales.TestSupport.SalesHelpers
@@ -59,6 +60,30 @@ defmodule EventSales.Ingestion.RedisWebhookBufferDrainerTest do
 
     assert length(Ash.read!(WebhookEvent, domain: Ingestion)) == 1
     assert length(process_webhook_jobs()) == 1
+  end
+
+  test "perform returns retry when ack fails and entry stays in processing", %{source: source} do
+    raw_body = FixtureHelpers.read_fixture!(:woocommerce, :order_completed)
+    delivery_id = unique_delivery_id()
+    encoded = buffer_entry(source, raw_body, delivery_id)
+
+    assert :ok = MemoryWebhookBufferAdapter.push(encoded)
+    MemoryWebhookBufferAdapter.force_ack_unavailable!()
+
+    handler_id = attach_backpressure_telemetry()
+
+    assert {:error, :retry} = RedisWebhookBufferDrainer.perform(%Oban.Job{args: %{}})
+
+    assert_receive {:telemetry_backpressure, %{count: 1},
+                    %{reason: :ack_failed, adapter: adapter}}
+
+    assert adapter == RedisWebhookBuffer.adapter_name()
+    assert length(Ash.read!(WebhookEvent, domain: Ingestion)) == 1
+    assert_enqueued(worker: ProcessWebhookWorker)
+    assert RedisWebhookBuffer.depth() == 0
+    assert RedisWebhookBuffer.processing_depth() == 1
+
+    :telemetry.detach(handler_id)
   end
 
   test "enqueue once repairs missing job on duplicate drain", %{source: source} do
@@ -115,5 +140,21 @@ defmodule EventSales.Ingestion.RedisWebhookBufferDrainerTest do
 
   defp unique_delivery_id do
     "delivery-#{System.unique_integer([:positive])}"
+  end
+
+  defp attach_backpressure_telemetry do
+    handler_id = "webhook-drainer-backpressure-#{System.unique_integer()}"
+
+    :ok =
+      :telemetry.attach(
+        handler_id,
+        Telemetry.webhook_backpressure(),
+        fn _event, measurements, metadata, _config ->
+          send(self(), {:telemetry_backpressure, measurements, metadata})
+        end,
+        nil
+      )
+
+    handler_id
   end
 end

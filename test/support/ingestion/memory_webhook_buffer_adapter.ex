@@ -6,6 +6,19 @@ defmodule EventSales.TestSupport.Ingestion.MemoryWebhookBufferAdapter do
   @behaviour EventSales.Ingestion.RedisWebhookBuffer.Adapter
 
   @table __MODULE__
+  @force_ack_unavailable_key :memory_webhook_buffer_force_ack_unavailable
+
+  @doc false
+  def force_ack_unavailable! do
+    Process.put(@force_ack_unavailable_key, true)
+    :ok
+  end
+
+  @doc false
+  def clear_ack_override! do
+    Process.delete(@force_ack_unavailable_key)
+    :ok
+  end
 
   @impl true
   def push(entry) when is_binary(entry) do
@@ -41,6 +54,14 @@ defmodule EventSales.TestSupport.Ingestion.MemoryWebhookBufferAdapter do
 
   @impl true
   def ack(entry) when is_binary(entry) do
+    if Process.get(@force_ack_unavailable_key) do
+      {:error, :unavailable}
+    else
+      do_ack(entry)
+    end
+  end
+
+  defp do_ack(entry) do
     table = ensure_table!()
     state = get_state(table)
 
@@ -92,6 +113,7 @@ defmodule EventSales.TestSupport.Ingestion.MemoryWebhookBufferAdapter do
 
   @doc false
   def reset! do
+    clear_ack_override!()
     table = ensure_table!()
     :ets.insert(table, {:state, %{pending: [], processing: []}})
     :ok
