@@ -50,11 +50,6 @@ defmodule EventSales.Repo.Migrations.Slice5WebhookIntake do
              name: "ingestion_webhook_events_status_idx"
            )
 
-    create index(:ingestion_webhook_events, [:delivery_id],
-             name: "ingestion_webhook_events_delivery_id_idx",
-             unique: true
-           )
-
     create unique_index(:ingestion_webhook_events, [:delivery_id],
              name: "ingestion_webhook_events_unique_delivery_id_index"
            )
@@ -116,10 +111,6 @@ defmodule EventSales.Repo.Migrations.Slice5WebhookIntake do
 
     drop_if_exists unique_index(:ingestion_webhook_events, [:delivery_id],
                      name: "ingestion_webhook_events_unique_delivery_id_index"
-                   )
-
-    drop_if_exists index(:ingestion_webhook_events, [:delivery_id],
-                     name: "ingestion_webhook_events_delivery_id_idx"
                    )
 
     drop_if_exists index(:ingestion_webhook_events, [:status],

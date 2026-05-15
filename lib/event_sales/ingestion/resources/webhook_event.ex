@@ -19,7 +19,6 @@ defmodule EventSales.Ingestion.Resources.WebhookEvent do
     end
 
     custom_indexes do
-      index :delivery_id, unique: true, name: "ingestion_webhook_events_delivery_id_idx"
       index :status, name: "ingestion_webhook_events_status_idx"
       index :received_at, name: "ingestion_webhook_events_received_at_idx"
     end

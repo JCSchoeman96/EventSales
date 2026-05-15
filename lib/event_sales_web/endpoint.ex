@@ -42,7 +42,7 @@ defmodule EventSalesWeb.Endpoint do
   plug Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
     pass: ["*/*"],
-    json_decoder: EventSalesWeb.Plugs.JsonDecoder,
+    json_decoder: Phoenix.json_library(),
     body_reader: {EventSalesWeb.Plugs.RawBodyReader, :read_body, []}
 
   plug Plug.MethodOverride

@@ -92,21 +92,24 @@ defmodule EventSalesWeb.WebhookControllerTest do
     assert response(conn, 404)
   end
 
-  test "invalid json does not store full body in failure metadata", %{conn: conn} do
+  test "malformed JSON webhook fails at parser without persisting intake records", %{conn: conn} do
     raw_body = "not-json"
     headers = signed_headers(raw_body, delivery_id: unique_delivery_id())
 
-    conn = post_webhook(conn, headers, raw_body)
+    assert_raise Plug.Parsers.ParseError, fn ->
+      post_webhook(conn, headers, raw_body)
+    end
 
-    assert response(conn, 400) == "bad request"
+    assert [] = Ash.read!(WebhookEvent, domain: Ingestion)
+    assert [] = Ash.read!(WebhookDeliveryFailure, domain: Ingestion)
+  end
 
-    assert [%{metadata: metadata}] = Ash.read!(WebhookDeliveryFailure, domain: Ingestion)
-
-    assert Map.get(metadata, "byte_size") ||
-             Map.get(metadata, :byte_size) ==
-               byte_size(raw_body)
-
-    refute Map.has_key?(metadata, "line_items")
+  test "malformed JSON on non-webhook routes still fails at parser", %{conn: conn} do
+    assert_raise Plug.Parsers.ParseError, fn ->
+      conn
+      |> put_req_header("content-type", "application/json")
+      |> post("/does-not-exist", "not-json")
+    end
   end
 
   test "no source system returns service unavailable", %{conn: conn} do
