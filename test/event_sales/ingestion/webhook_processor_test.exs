@@ -171,17 +171,21 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
     assert String.length(failed.error_message) == 512
   end
 
-  test "transient failures are returned for Oban retry", %{source: source} do
+  test "transient failures return retryable error and leave event queued", %{source: source} do
     {:ok, event} = create_event(source, %{topic: "order.updated"})
+    long_reason = String.duplicate("timeout-", 200)
 
-    assert {:error, {:transient, :timeout}} =
+    assert {:error, {:transient, ^long_reason}} =
              WebhookProcessor.process(event.id,
-               handler: fn _event -> {:error, {:transient, :timeout}} end
+               handler: fn _event -> {:error, {:transient, long_reason}} end
              )
 
-    processing = reload!(event.id)
-    assert processing.status == :processing
-    assert processing.processing_attempt_count == 1
+    queued = reload!(event.id)
+    assert queued.status == :queued
+    assert queued.processing_attempt_count == 1
+    assert queued.processing_started_at
+    assert String.length(queued.error_message) == 512
+    refute queued.failed_at
   end
 
   test "missing event is discarded" do

@@ -25,6 +25,12 @@ defmodule EventSales.Ingestion.ProcessWebhookWorkerTest do
     assert :discard = perform(%{"webhook_event_id" => Ecto.UUID.generate()})
   end
 
+  test "malformed args without a binary webhook_event_id are discarded safely" do
+    assert :discard = perform(%{})
+    assert :discard = perform(%{"webhook_event_id" => nil})
+    assert :discard = perform(%{"webhook_event_id" => 123})
+  end
+
   test "delegates processing decisions to the configured processor", %{source: source} do
     {:ok, event} = create_event(source)
     send_to = self()

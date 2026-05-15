@@ -78,6 +78,11 @@ defmodule EventSales.Ingestion.Resources.WebhookEvent do
       change set_attribute(:status, :failed)
     end
 
+    update :mark_retryable do
+      accept [:error_message]
+      change set_attribute(:status, :queued)
+    end
+
     update :mark_ignored do
       accept [:ignore_reason, :processed_at]
       validate present([:ignore_reason])

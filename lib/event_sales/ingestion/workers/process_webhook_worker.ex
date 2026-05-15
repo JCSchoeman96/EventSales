@@ -2,7 +2,8 @@ defmodule EventSales.Ingestion.Workers.ProcessWebhookWorker do
   @moduledoc """
   Async webhook processing entrypoint.
 
-  Slice 5.0 enqueues only; Slice 6.0 implements order normalization and idempotency.
+  Slice 5.0 enqueues only. Slice 6.0 implements lifecycle/idempotency only.
+  Slice 7.0 owns order normalization.
   """
 
   use Oban.Worker,
@@ -17,6 +18,16 @@ defmodule EventSales.Ingestion.Workers.ProcessWebhookWorker do
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"webhook_event_id" => webhook_event_id}}) do
+    if is_binary(webhook_event_id) do
+      process_webhook_event(webhook_event_id)
+    else
+      :discard
+    end
+  end
+
+  def perform(%Oban.Job{args: _args}), do: :discard
+
+  defp process_webhook_event(webhook_event_id) do
     case processor().process(webhook_event_id) do
       :ok -> :ok
       {:discard, :not_found} -> :discard

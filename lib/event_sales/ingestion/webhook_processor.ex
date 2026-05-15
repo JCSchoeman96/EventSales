@@ -67,6 +67,7 @@ defmodule EventSales.Ingestion.WebhookProcessor do
         mark_failed(event, reason)
 
       {:error, {:transient, reason}} ->
+        mark_retryable(event, reason)
         {:error, {:transient, reason}}
     end
   end
@@ -153,6 +154,15 @@ defmodule EventSales.Ingestion.WebhookProcessor do
     )
 
     :ok
+  end
+
+  defp mark_retryable(%WebhookEvent{} = event, reason) do
+    Ash.update!(
+      event,
+      %{error_message: bounded_error_message(reason)},
+      action: :mark_retryable,
+      domain: Ingestion
+    )
   end
 
   defp mark_ignored(%WebhookEvent{} = event, reason) do
