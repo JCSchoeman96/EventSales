@@ -88,9 +88,8 @@ defmodule EventSales.Sales.OrderUpserter do
   end
 
   defp upsert_child_rows(%Order{} = order, normalized) do
-    with :ok <- upsert_order_items(order, normalized.line_items),
-         :ok <- upsert_coupons(order, normalized.coupons) do
-      :ok
+    with :ok <- upsert_order_items(order, normalized.line_items) do
+      upsert_coupons(order, normalized.coupons)
     end
   end
 
