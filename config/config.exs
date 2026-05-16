@@ -8,6 +8,7 @@
 import Config
 
 config :event_sales,
+  env: config_env(),
   ash_domains: [
     EventSales.AshBaseline.Domain,
     EventSales.Accounts,
@@ -36,6 +37,21 @@ config :event_sales, :redis_webhook_buffer,
   adapter: EventSales.Ingestion.RedisWebhookBuffer.RedixAdapter,
   redis_url: nil,
   key_prefix: "eventsales:webhook_buffer:v1"
+
+config :event_sales, :woocommerce_rest,
+  base_url: nil,
+  consumer_key: nil,
+  consumer_secret: nil,
+  timeout_ms: 5_000,
+  queue_timeout_ms: 5_000,
+  per_page: 100,
+  max_pages: 50,
+  max_concurrency: 2,
+  transport: EventSales.Ingestion.Clients.HttpcTransport
+
+config :event_sales, :rest_circuit_breaker,
+  failure_threshold: 3,
+  cooldown_ms: 30_000
 
 # Configure the endpoint
 config :event_sales, EventSalesWeb.Endpoint,

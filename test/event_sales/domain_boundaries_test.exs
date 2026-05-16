@@ -111,6 +111,26 @@ defmodule EventSales.DomainBoundariesTest do
     end
   end
 
+  test "WooCommerceClient is not wired into business workflows in Slice 7.5" do
+    allowed_prefixes = [
+      "lib/event_sales/ingestion/clients/"
+    ]
+
+    matches =
+      implementation_files("lib/event_sales")
+      |> Enum.reject(fn path ->
+        normalized =
+          path
+          |> Path.relative_to_cwd()
+          |> String.replace("\\", "/")
+
+        Enum.any?(allowed_prefixes, &String.starts_with?(normalized, &1))
+      end)
+      |> files_containing("WooCommerceClient")
+
+    assert [] = matches
+  end
+
   defp implementation_files(path) do
     path
     |> Path.join("**/*.ex")

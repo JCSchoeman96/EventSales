@@ -31,6 +31,18 @@ config :event_sales, EventSalesWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
 if config_env() == :prod do
+  config :event_sales, :woocommerce_rest,
+    base_url: System.get_env("WOOCOMMERCE_REST_BASE_URL"),
+    consumer_key: System.get_env("WOOCOMMERCE_CONSUMER_KEY"),
+    consumer_secret: System.get_env("WOOCOMMERCE_CONSUMER_SECRET"),
+    timeout_ms: String.to_integer(System.get_env("WOOCOMMERCE_REST_TIMEOUT_MS", "5000")),
+    queue_timeout_ms:
+      String.to_integer(System.get_env("WOOCOMMERCE_REST_QUEUE_TIMEOUT_MS", "5000")),
+    per_page: String.to_integer(System.get_env("WOOCOMMERCE_REST_PER_PAGE", "100")),
+    max_pages: String.to_integer(System.get_env("WOOCOMMERCE_REST_MAX_PAGES", "50")),
+    max_concurrency: 2,
+    transport: EventSales.Ingestion.Clients.HttpcTransport
+
   database_url =
     System.get_env("DATABASE_URL") ||
       raise """

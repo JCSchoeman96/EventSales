@@ -11,6 +11,8 @@ defmodule EventSales.Application do
       [
         EventSalesWeb.Telemetry,
         repo_child(),
+        EventSales.Ingestion.RestRateLimiter,
+        EventSales.Ingestion.RestCircuitBreaker,
         oban_child(),
         redis_child(),
         {DNSCluster, query: Application.get_env(:event_sales, :dns_cluster_query) || :ignore},

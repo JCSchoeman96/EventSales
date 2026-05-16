@@ -5,15 +5,27 @@ Slice `0.2` established the Postgres-backed test baseline required for `EventSal
 ## Local Commands
 
 - `mix quality.fast`
+  - Quick local/pre-commit guard only; not sufficient before opening a PR
   - Runs `mix format --check-formatted`
   - Runs `mix compile --warnings-as-errors`
   - Verifies `mix.lock` has no unused dependencies with `mix deps.unlock --check-unused`
   - Runs `./scripts/check_no_web_woocommerce_refs.sh`
+- `mix quality.pr`
+  - Minimum gate before opening or updating a meaningful PR
+  - Runs `mix format --check-formatted`
+  - Runs `mix compile --warnings-as-errors`
+  - Verifies `mix.lock` has no unused dependencies with `mix deps.unlock --check-unused`
+  - Runs `./scripts/check_no_web_woocommerce_refs.sh`
+  - Runs `mix ash.codegen --dry-run`
+  - Verifies Ash-generated migrations and resource snapshots are unchanged
+  - Runs `mix credo --strict`
+  - Runs `mix test`
 - `mix quality`
   - Runs `mix quality.fast`
   - Runs `mix credo --strict`
   - Runs `mix sobelow`
 - `mix quality.ci`
+  - Final CI-equivalent gate before marking a PR ready for review or pre-merge
   - Runs `mix deps.get --check-locked`
   - Runs `mix format --check-formatted`
   - Runs `mix compile --warnings-as-errors`
@@ -100,6 +112,12 @@ Hook behavior:
 
 - Pre-commit runs `mix quality.fast`
 - Pre-push runs `mix quality.ci`
+
+PR behavior:
+
+- Do not open or update a meaningful PR until `mix quality.pr` passes.
+- Do not mark a PR ready for review until `mix quality.ci` passes.
+- Do not claim “all checks pass” unless Credo ran explicitly or through `mix quality`, `mix quality.pr`, or `mix quality.ci`.
 
 The installer sets `core.hooksPath` for this repository only.
 Because Git worktrees share repository config, that repository-level hooks path also applies to sibling worktrees for the same repo.

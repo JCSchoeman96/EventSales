@@ -42,6 +42,21 @@ config :event_sales, :redis_webhook_buffer,
   max_entry_bytes: 256_000,
   adapter: EventSales.TestSupport.Ingestion.MemoryWebhookBufferAdapter
 
+config :event_sales, :woocommerce_rest,
+  base_url: "https://woo.example.test",
+  consumer_key: "ck_test",
+  consumer_secret: "cs_test",
+  timeout_ms: 1_000,
+  queue_timeout_ms: 1_000,
+  per_page: 100,
+  max_pages: 50,
+  max_concurrency: 2,
+  transport: EventSales.Ingestion.Clients.HttpcTransport
+
+config :event_sales, :rest_circuit_breaker,
+  failure_threshold: 3,
+  cooldown_ms: 30_000
+
 # Print only warnings and errors during test
 config :logger, level: :warning
 

@@ -23,7 +23,7 @@ defmodule EventSales.MixProject do
   def application do
     [
       mod: {EventSales.Application, []},
-      extra_applications: [:logger, :runtime_tools]
+      extra_applications: [:logger, :runtime_tools, :inets, :ssl]
     ]
   end
 
@@ -33,6 +33,7 @@ defmodule EventSales.MixProject do
         {:precommit, :test},
         {:dialyzer, :test},
         {:"quality.fast", :test},
+        {:"quality.pr", :test},
         {:quality, :test},
         {:"quality.ci", :test}
       ]
@@ -94,6 +95,16 @@ defmodule EventSales.MixProject do
         "compile --warnings-as-errors",
         "deps.unlock --check-unused",
         "cmd bash scripts/check_no_web_woocommerce_refs.sh"
+      ],
+      "quality.pr": [
+        "format --check-formatted",
+        "compile --warnings-as-errors",
+        "deps.unlock --check-unused",
+        "cmd bash scripts/check_no_web_woocommerce_refs.sh",
+        "ash.codegen --dry-run",
+        "cmd git diff --exit-code priv/repo/migrations priv/resource_snapshots",
+        "credo --strict",
+        "test"
       ],
       quality: ["quality.fast", "credo --strict", "sobelow"],
       "quality.ci": [
