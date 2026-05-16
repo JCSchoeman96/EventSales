@@ -34,7 +34,10 @@ defmodule EventSales.Sales.Resources.Order do
     :customer_email,
     :raw_total,
     :raw_discount_total,
-    :raw_tax_total
+    :raw_tax_total,
+    :payment_method,
+    :payment_method_title,
+    :payment_gateway_transaction_id
   ]
 
   postgres do
@@ -63,6 +66,13 @@ defmodule EventSales.Sales.Resources.Order do
 
     update :sync_status_from_source do
       accept [:status, :updated_at_source, :completed_at]
+      require_atomic? false
+      change GuardSourceVersion
+      change SyncStatusFromSource
+    end
+
+    update :sync_from_normalized do
+      accept @create_accept
       require_atomic? false
       change GuardSourceVersion
       change SyncStatusFromSource
@@ -149,6 +159,18 @@ defmodule EventSales.Sales.Resources.Order do
     attribute :raw_tax_total, :decimal do
       allow_nil? false
       default Decimal.new(0)
+      public? true
+    end
+
+    attribute :payment_method, :string do
+      public? true
+    end
+
+    attribute :payment_method_title, :string do
+      public? true
+    end
+
+    attribute :payment_gateway_transaction_id, :string do
       public? true
     end
 

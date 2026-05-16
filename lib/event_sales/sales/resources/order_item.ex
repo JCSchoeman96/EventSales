@@ -67,6 +67,20 @@ defmodule EventSales.Sales.Resources.OrderItem do
       validate compare(:quantity, greater_than: 0)
     end
 
+    update :sync_from_order do
+      accept [
+        :woo_product_id,
+        :woo_variation_id,
+        :name,
+        :quantity,
+        :line_subtotal,
+        :line_total,
+        :discount_total
+      ]
+
+      validate compare(:quantity, greater_than: 0)
+    end
+
     update :apply_mapping do
       accept [:event_id, :ticket_type_id, :woo_product_id, :woo_variation_id, :name]
       require_atomic? false

@@ -7,6 +7,7 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
   alias EventSales.Ingestion.WebhookProcessor
   alias EventSales.Sales
   alias EventSales.Sales.Resources.{CouponSnapshot, Order, OrderItem}
+  alias EventSales.TestSupport.FixtureHelpers
   alias EventSales.TestSupport.SalesHelpers
 
   setup do
@@ -14,8 +15,14 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
     {:ok, source: source}
   end
 
-  test "processes a queued supported order event without mutating sales rows", %{source: source} do
-    {:ok, event} = create_event(source, %{topic: "order.updated"})
+  test "default handler normalizes a queued supported order event", %{source: source} do
+    {:ok, event} =
+      create_event(source, %{
+        topic: "order.updated",
+        resource_id: "10001",
+        payload: FixtureHelpers.decode_json_fixture!(:woocommerce, :order_completed),
+        source_updated_at: ~U[2026-05-01 08:05:00Z]
+      })
 
     assert :ok = WebhookProcessor.process(event.id)
 
@@ -28,17 +35,21 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
     refute processed.error_message
     refute processed.ignore_reason
 
-    assert Ash.count!(Order, domain: Sales) == 0
-    assert Ash.count!(OrderItem, domain: Sales) == 0
-    assert Ash.count!(CouponSnapshot, domain: Sales) == 0
+    assert Ash.count!(Order, domain: Sales) == 1
+    assert Ash.count!(OrderItem, domain: Sales) == 1
+    assert Ash.count!(CouponSnapshot, domain: Sales) == 1
   end
 
   test "processing a terminal event again is a no-op", %{source: source} do
     {:ok, event} = create_event(source, %{topic: "order.updated"})
-    assert :ok = WebhookProcessor.process(event.id)
+    assert :ok = WebhookProcessor.process(event.id, handler: fn _event -> :ok end)
 
     processed = reload!(event.id)
-    assert :ok = WebhookProcessor.process(event.id)
+
+    assert :ok =
+             WebhookProcessor.process(event.id,
+               handler: fn _event -> flunk("terminal event is no-op") end
+             )
 
     again = reload!(event.id)
     assert again.status == :processed
@@ -69,10 +80,14 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
     }
 
     {:ok, first} = create_event(source, attrs)
-    assert :ok = WebhookProcessor.process(first.id)
+    assert :ok = WebhookProcessor.process(first.id, handler: fn _event -> :ok end)
 
     {:ok, second} = create_event(source, Map.put(attrs, :delivery_id, unique_delivery_id()))
-    assert :ok = WebhookProcessor.process(second.id)
+
+    assert :ok =
+             WebhookProcessor.process(second.id,
+               handler: fn _event -> flunk("duplicate event must not call handler") end
+             )
 
     ignored = reload!(second.id)
     assert ignored.status == :ignored
@@ -99,7 +114,7 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
              )
 
     {:ok, current} = create_event(source, Map.put(attrs, :delivery_id, unique_delivery_id()))
-    assert :ok = WebhookProcessor.process(current.id)
+    assert :ok = WebhookProcessor.process(current.id, handler: fn _event -> :ok end)
 
     processed = reload!(current.id)
     assert processed.status == :processed
@@ -115,7 +130,7 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
     }
 
     {:ok, newer} = create_event(source, newer_attrs)
-    assert :ok = WebhookProcessor.process(newer.id)
+    assert :ok = WebhookProcessor.process(newer.id, handler: fn _event -> :ok end)
 
     {:ok, older} =
       create_event(source, %{
@@ -125,7 +140,10 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
         source_updated_at: ~U[2026-05-01 08:05:00Z]
       })
 
-    assert :ok = WebhookProcessor.process(older.id)
+    assert :ok =
+             WebhookProcessor.process(older.id,
+               handler: fn _event -> flunk("stale event must not call handler") end
+             )
 
     ignored = reload!(older.id)
     assert ignored.status == :ignored
@@ -149,7 +167,7 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
         source_updated_at: ~U[2026-05-01 08:05:00Z]
       })
 
-    assert :ok = WebhookProcessor.process(older.id)
+    assert :ok = WebhookProcessor.process(older.id, handler: fn _event -> :ok end)
 
     processed = reload!(older.id)
     assert processed.status == :processed

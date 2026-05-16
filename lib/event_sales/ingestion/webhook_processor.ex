@@ -10,6 +10,7 @@ defmodule EventSales.Ingestion.WebhookProcessor do
 
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.WebhookEvent
+  alias EventSales.Sales.OrderUpserter
 
   @terminal_statuses [:processed, :failed, :ignored]
   @supported_order_topics ~w(order.created order.updated)
@@ -25,7 +26,7 @@ defmodule EventSales.Ingestion.WebhookProcessor do
   """
   @spec process(Ecto.UUID.t(), keyword()) :: process_result()
   def process(webhook_event_id, opts \\ []) when is_binary(webhook_event_id) do
-    handler = Keyword.get(opts, :handler, fn _event -> :ok end)
+    handler = Keyword.get(opts, :handler, &default_handler/1)
 
     case load_event(webhook_event_id) do
       nil -> process_missing_event()
@@ -68,6 +69,19 @@ defmodule EventSales.Ingestion.WebhookProcessor do
 
       {:error, {:transient, reason}} ->
         mark_retryable(event, reason)
+        {:error, {:transient, reason}}
+    end
+  end
+
+  defp default_handler(%WebhookEvent{} = event) do
+    case OrderUpserter.upsert_from_webhook_event(event) do
+      {:ok, _order_or_noop} ->
+        :ok
+
+      {:error, {:invalid_order_payload, _field, _reason} = reason} ->
+        {:error, {:permanent, reason}}
+
+      {:error, reason} ->
         {:error, {:transient, reason}}
     end
   end
