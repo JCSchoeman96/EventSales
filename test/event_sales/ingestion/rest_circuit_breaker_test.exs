@@ -88,6 +88,18 @@ defmodule EventSales.Ingestion.RestCircuitBreakerTest do
     assert %{state: :open} = RestCircuitBreaker.snapshot()
   end
 
+  test "half-open local queue timeout does not close the breaker" do
+    open_breaker()
+    Process.sleep(30)
+
+    assert {:error, %WooCommerceError{reason: :queue_timeout}} =
+             RestCircuitBreaker.run(fn ->
+               {:error, %WooCommerceError{reason: :queue_timeout}}
+             end)
+
+    assert %{state: :open} = RestCircuitBreaker.snapshot()
+  end
+
   defp open_breaker do
     for _ <- 1..3 do
       RestCircuitBreaker.run(fn -> {:error, %WooCommerceError{reason: :timeout}} end)

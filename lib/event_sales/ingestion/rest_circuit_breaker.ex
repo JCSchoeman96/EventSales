@@ -107,18 +107,7 @@ defmodule EventSales.Ingestion.RestCircuitBreaker do
         _from,
         %{state: :half_open} = state
       ) do
-    state =
-      if retryable?(reason) do
-        open_state(state)
-      else
-        %{
-          closed_state()
-          | failure_threshold: state.failure_threshold,
-            cooldown_ms: state.cooldown_ms
-        }
-      end
-
-    {:reply, :ok, state}
+    {:reply, :ok, open_state_after_half_open_failure(state, reason)}
   end
 
   def handle_call({:after_request, _token, {:failure, reason}}, _from, state) do
@@ -143,6 +132,14 @@ defmodule EventSales.Ingestion.RestCircuitBreaker do
   defp classify(_other), do: :success
 
   defp retryable?(reason), do: MapSet.member?(@retryable_reasons, reason)
+
+  defp open_state_after_half_open_failure(state, reason) do
+    if retryable?(reason) do
+      open_state(state)
+    else
+      open_state(%{state | failures: state.failures})
+    end
+  end
 
   defp open_state(state) do
     %{state | state: :open, opened_at: now_ms(), probe_ref: nil, probe_in_flight?: false}

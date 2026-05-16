@@ -64,24 +64,9 @@ defmodule EventSales.Ingestion.Clients.WooCommerceClient do
   defp request_pages(operation, config, path, params) do
     page_result =
       Enum.reduce_while(1..config.max_pages, {:continue, []}, fn page, {:continue, acc} ->
-        query = page_query(params, page, config.per_page)
-
-        case guarded_request(operation, config, url(config, path, query)) do
-          {:ok, page_items} when is_list(page_items) ->
-            acc = acc ++ page_items
-
-            if length(page_items) < config.per_page do
-              {:halt, {:done, acc}}
-            else
-              {:cont, {:continue, acc}}
-            end
-
-          {:ok, _not_a_list} ->
-            {:halt, emit_exception(operation, :invalid_json)}
-
-          {:error, %WooCommerceError{} = error} ->
-            {:halt, {:error, error}}
-        end
+        operation
+        |> fetch_page(config, path, params, page)
+        |> continue_or_stop_page(operation, config.per_page, acc)
       end)
 
     case page_result do
@@ -89,6 +74,30 @@ defmodule EventSales.Ingestion.Clients.WooCommerceClient do
       {:continue, _acc} -> emit_exception(operation, :pagination_limit)
       other -> other
     end
+  end
+
+  defp fetch_page(operation, config, path, params, page) do
+    query = page_query(params, page, config.per_page)
+    guarded_request(operation, config, url(config, path, query))
+  end
+
+  defp continue_or_stop_page({:ok, page_items}, _operation, per_page, acc)
+       when is_list(page_items) do
+    acc = acc ++ page_items
+
+    if length(page_items) < per_page do
+      {:halt, {:done, acc}}
+    else
+      {:cont, {:continue, acc}}
+    end
+  end
+
+  defp continue_or_stop_page({:ok, _not_a_list}, operation, _per_page, _acc) do
+    {:halt, emit_exception(operation, :invalid_json)}
+  end
+
+  defp continue_or_stop_page({:error, %WooCommerceError{} = error}, _operation, _per_page, _acc) do
+    {:halt, {:error, error}}
   end
 
   defp guarded_request(operation, config, request_url) do
@@ -121,7 +130,7 @@ defmodule EventSales.Ingestion.Clients.WooCommerceClient do
     headers = auth_headers(config)
     opts = [timeout_ms: config.timeout_ms]
 
-    case config.transport.request(:get, request_url, headers, nil, opts) do
+    case transport_request(config.transport, request_url, headers, opts) do
       {:ok, status, _headers, body} ->
         duration = System.monotonic_time() - started_at
         emit_stop(operation, status, duration)
@@ -140,6 +149,15 @@ defmodule EventSales.Ingestion.Clients.WooCommerceClient do
       {:error, _reason} ->
         emit_exception(operation, :transport_error)
     end
+  end
+
+  defp transport_request(transport, request_url, headers, opts) do
+    transport.request(:get, request_url, headers, nil, opts)
+  rescue
+    _error -> {:error, :transport_failure}
+  catch
+    :exit, _reason -> {:error, :transport_failure}
+    :throw, _value -> {:error, :transport_failure}
   end
 
   defp decode_response(status, body) when status in 200..299 do

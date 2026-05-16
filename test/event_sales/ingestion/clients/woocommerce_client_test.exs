@@ -32,6 +32,12 @@ defmodule EventSales.Ingestion.Clients.WooCommerceClientTest do
         request = %{method: method, url: url, headers: headers, body: body, opts: opts}
         {response, %{state | responses: rest, requests: [request | requests]}}
       end)
+      |> case do
+        {:raise, message} -> raise message
+        {:throw, value} -> throw(value)
+        {:exit, reason} -> exit(reason)
+        response -> response
+      end
     end
   end
 
@@ -161,6 +167,15 @@ defmodule EventSales.Ingestion.Clients.WooCommerceClientTest do
 
       assert {:error, %WooCommerceError{reason: ^reason}} = WooCommerceClient.fetch_order(123)
     end
+  end
+
+  test "transport exceptions are normalized to typed transport errors" do
+    FakeTransport.reset!([{:raise, "transport exploded"}])
+
+    assert {:error, %WooCommerceError{reason: :transport_error}} =
+             WooCommerceClient.fetch_order(123)
+
+    assert %{active: 0} = EventSales.Ingestion.RestRateLimiter.snapshot()
   end
 
   test "missing and invalid production config return misconfigured before transport" do
