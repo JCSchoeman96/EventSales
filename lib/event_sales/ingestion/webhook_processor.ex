@@ -2,14 +2,15 @@ defmodule EventSales.Ingestion.WebhookProcessor do
   @moduledoc """
   Processing lifecycle and idempotency shell for stored WooCommerce webhooks.
 
-  Slice 6.0 intentionally stops at `WebhookEvent` lifecycle management. It does
-  not parse Woo payloads or mutate Sales resources.
+  Idempotency and stale-event gates run before order normalization. Supported
+  order events are normalized through the configured order upserter.
   """
 
   require Ash.Query
 
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.WebhookEvent
+  alias EventSales.Sales.OrderUpserter
 
   @terminal_statuses [:processed, :failed, :ignored]
   @supported_order_topics ~w(order.created order.updated)
@@ -25,7 +26,7 @@ defmodule EventSales.Ingestion.WebhookProcessor do
   """
   @spec process(Ecto.UUID.t(), keyword()) :: process_result()
   def process(webhook_event_id, opts \\ []) when is_binary(webhook_event_id) do
-    handler = Keyword.get(opts, :handler, fn _event -> :ok end)
+    handler = Keyword.get(opts, :handler, &default_handler/1)
 
     case load_event(webhook_event_id) do
       nil -> process_missing_event()
@@ -70,6 +71,49 @@ defmodule EventSales.Ingestion.WebhookProcessor do
         mark_retryable(event, reason)
         {:error, {:transient, reason}}
     end
+  end
+
+  defp default_handler(%WebhookEvent{} = event) do
+    case order_upserter().upsert_from_webhook_event(event) do
+      {:ok, _order_or_noop} ->
+        :ok
+
+      {:error, reason} ->
+        classify_upsert_error(reason)
+    end
+  end
+
+  defp classify_upsert_error({:invalid_order_payload, _field, _reason} = reason),
+    do: {:error, {:permanent, reason}}
+
+  defp classify_upsert_error(%Ash.Error.Invalid{} = reason), do: {:error, {:permanent, reason}}
+
+  defp classify_upsert_error(%DBConnection.ConnectionError{} = reason),
+    do: {:error, {:transient, reason}}
+
+  defp classify_upsert_error(%Postgrex.Error{postgres: %{code: code}} = reason)
+       when code in [
+              :connection_exception,
+              :connection_does_not_exist,
+              :connection_failure,
+              :sqlclient_unable_to_establish_sqlconnection,
+              :sqlserver_rejected_establishment_of_sqlconnection,
+              :transaction_resolution_unknown,
+              :protocol_violation,
+              :serialization_failure,
+              :deadlock_detected,
+              :query_canceled,
+              :lock_not_available
+            ],
+       do: {:error, {:transient, reason}}
+
+  defp classify_upsert_error(%Postgrex.Error{} = reason), do: {:error, {:permanent, reason}}
+  defp classify_upsert_error(:timeout), do: {:error, {:transient, :timeout}}
+  defp classify_upsert_error({:timeout, _detail} = reason), do: {:error, {:transient, reason}}
+  defp classify_upsert_error(reason), do: {:error, {:permanent, reason}}
+
+  defp order_upserter do
+    Application.get_env(:event_sales, :order_upserter, OrderUpserter)
   end
 
   defp load_event(webhook_event_id) do

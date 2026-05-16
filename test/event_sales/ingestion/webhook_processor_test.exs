@@ -1,5 +1,5 @@
 defmodule EventSales.Ingestion.WebhookProcessorTest do
-  use EventSales.DataCase, async: true
+  use EventSales.DataCase, async: false
 
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.WebhookEvent
@@ -7,15 +7,32 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
   alias EventSales.Ingestion.WebhookProcessor
   alias EventSales.Sales
   alias EventSales.Sales.Resources.{CouponSnapshot, Order, OrderItem}
+  alias EventSales.TestSupport.FixtureHelpers
   alias EventSales.TestSupport.SalesHelpers
 
   setup do
     source = SalesHelpers.create_source_system!()
+    original_upserter = Application.get_env(:event_sales, :order_upserter)
+
+    on_exit(fn ->
+      if original_upserter do
+        Application.put_env(:event_sales, :order_upserter, original_upserter)
+      else
+        Application.delete_env(:event_sales, :order_upserter)
+      end
+    end)
+
     {:ok, source: source}
   end
 
-  test "processes a queued supported order event without mutating sales rows", %{source: source} do
-    {:ok, event} = create_event(source, %{topic: "order.updated"})
+  test "default handler normalizes a queued supported order event", %{source: source} do
+    {:ok, event} =
+      create_event(source, %{
+        topic: "order.updated",
+        resource_id: "10001",
+        payload: FixtureHelpers.decode_json_fixture!(:woocommerce, :order_completed),
+        source_updated_at: ~U[2026-05-01 08:05:00Z]
+      })
 
     assert :ok = WebhookProcessor.process(event.id)
 
@@ -28,17 +45,21 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
     refute processed.error_message
     refute processed.ignore_reason
 
-    assert Ash.count!(Order, domain: Sales) == 0
-    assert Ash.count!(OrderItem, domain: Sales) == 0
-    assert Ash.count!(CouponSnapshot, domain: Sales) == 0
+    assert Ash.count!(Order, domain: Sales) == 1
+    assert Ash.count!(OrderItem, domain: Sales) == 1
+    assert Ash.count!(CouponSnapshot, domain: Sales) == 1
   end
 
   test "processing a terminal event again is a no-op", %{source: source} do
     {:ok, event} = create_event(source, %{topic: "order.updated"})
-    assert :ok = WebhookProcessor.process(event.id)
+    assert :ok = WebhookProcessor.process(event.id, handler: fn _event -> :ok end)
 
     processed = reload!(event.id)
-    assert :ok = WebhookProcessor.process(event.id)
+
+    assert :ok =
+             WebhookProcessor.process(event.id,
+               handler: fn _event -> flunk("terminal event is no-op") end
+             )
 
     again = reload!(event.id)
     assert again.status == :processed
@@ -69,10 +90,14 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
     }
 
     {:ok, first} = create_event(source, attrs)
-    assert :ok = WebhookProcessor.process(first.id)
+    assert :ok = WebhookProcessor.process(first.id, handler: fn _event -> :ok end)
 
     {:ok, second} = create_event(source, Map.put(attrs, :delivery_id, unique_delivery_id()))
-    assert :ok = WebhookProcessor.process(second.id)
+
+    assert :ok =
+             WebhookProcessor.process(second.id,
+               handler: fn _event -> flunk("duplicate event must not call handler") end
+             )
 
     ignored = reload!(second.id)
     assert ignored.status == :ignored
@@ -99,7 +124,7 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
              )
 
     {:ok, current} = create_event(source, Map.put(attrs, :delivery_id, unique_delivery_id()))
-    assert :ok = WebhookProcessor.process(current.id)
+    assert :ok = WebhookProcessor.process(current.id, handler: fn _event -> :ok end)
 
     processed = reload!(current.id)
     assert processed.status == :processed
@@ -115,7 +140,7 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
     }
 
     {:ok, newer} = create_event(source, newer_attrs)
-    assert :ok = WebhookProcessor.process(newer.id)
+    assert :ok = WebhookProcessor.process(newer.id, handler: fn _event -> :ok end)
 
     {:ok, older} =
       create_event(source, %{
@@ -125,7 +150,10 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
         source_updated_at: ~U[2026-05-01 08:05:00Z]
       })
 
-    assert :ok = WebhookProcessor.process(older.id)
+    assert :ok =
+             WebhookProcessor.process(older.id,
+               handler: fn _event -> flunk("stale event must not call handler") end
+             )
 
     ignored = reload!(older.id)
     assert ignored.status == :ignored
@@ -149,7 +177,7 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
         source_updated_at: ~U[2026-05-01 08:05:00Z]
       })
 
-    assert :ok = WebhookProcessor.process(older.id)
+    assert :ok = WebhookProcessor.process(older.id, handler: fn _event -> :ok end)
 
     processed = reload!(older.id)
     assert processed.status == :processed
@@ -188,8 +216,72 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
     refute queued.failed_at
   end
 
+  test "default handler treats Ash validation upsert errors as permanent", %{source: source} do
+    Application.put_env(:event_sales, :order_upserter, __MODULE__.InvalidUpserter)
+
+    {:ok, event} =
+      create_event(source, %{
+        topic: "order.updated",
+        payload: FixtureHelpers.decode_json_fixture!(:woocommerce, :order_completed),
+        source_updated_at: ~U[2026-05-01 08:05:00Z]
+      })
+
+    assert :ok = WebhookProcessor.process(event.id)
+
+    failed = reload!(event.id)
+    assert failed.status == :failed
+    assert failed.failed_at
+    assert failed.processing_attempt_count == 1
+    assert String.length(failed.error_message) <= 512
+    assert failed.error_message =~ "InvalidAttribute"
+  end
+
+  test "default handler treats DB connection upsert errors as transient", %{source: source} do
+    Application.put_env(:event_sales, :order_upserter, __MODULE__.TransientUpserter)
+
+    {:ok, event} =
+      create_event(source, %{
+        topic: "order.updated",
+        payload: FixtureHelpers.decode_json_fixture!(:woocommerce, :order_completed),
+        source_updated_at: ~U[2026-05-01 08:05:00Z]
+      })
+
+    assert {:error, {:transient, %DBConnection.ConnectionError{}}} =
+             WebhookProcessor.process(event.id)
+
+    queued = reload!(event.id)
+    assert queued.status == :queued
+    assert queued.processing_attempt_count == 1
+    refute queued.failed_at
+    assert queued.error_message
+  end
+
   test "missing event is discarded" do
     assert {:discard, :not_found} = WebhookProcessor.process(Ecto.UUID.generate())
+  end
+
+  defmodule InvalidUpserter do
+    @moduledoc false
+
+    def upsert_from_webhook_event(_event) do
+      {:error,
+       %Ash.Error.Invalid{
+         errors: [
+           %Ash.Error.Changes.InvalidAttribute{
+             field: :quantity,
+             message: String.duplicate("bad quantity ", 80)
+           }
+         ]
+       }}
+    end
+  end
+
+  defmodule TransientUpserter do
+    @moduledoc false
+
+    def upsert_from_webhook_event(_event) do
+      {:error, %DBConnection.ConnectionError{message: "connection not available"}}
+    end
   end
 
   defp create_event(source, attrs) do

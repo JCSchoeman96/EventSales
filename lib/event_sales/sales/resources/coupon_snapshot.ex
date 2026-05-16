@@ -26,6 +26,10 @@ defmodule EventSales.Sales.Resources.CouponSnapshot do
     create :create_snapshot do
       accept [:order_id, :code, :discount_amount, :discount_tax]
     end
+
+    update :sync_from_order do
+      accept [:discount_amount, :discount_tax]
+    end
   end
 
   attributes do
