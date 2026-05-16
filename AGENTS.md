@@ -442,10 +442,14 @@ Use [`docs/development/quality-gates.md`](docs/development/quality-gates.md) as 
 Before commit
 |> mix quality.fast
 
-Before push
+Before opening or updating a meaningful PR
+|> mix quality.pr
+
+Before marking a PR ready for review or pushing final changes
 |> mix quality.ci
 
 Task is not complete unless required checks pass.
+Do not claim “all checks pass” unless Credo ran explicitly or through mix quality, mix quality.pr, or mix quality.ci.
 Do not add Ash-specific checks until Ash exists.
 Do not add DB/Redis CI services until tests require them.
 Postgres is now required for the CI test job because the Repo and Oban start in :test.
