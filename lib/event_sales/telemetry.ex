@@ -20,6 +20,9 @@ defmodule EventSales.Telemetry do
   @hot_state_rebuild_start [:event_sales, :hot_state, :rebuild, :start]
   @hot_state_rebuild_stop [:event_sales, :hot_state, :rebuild, :stop]
   @hot_state_rebuild_exception [:event_sales, :hot_state, :rebuild, :exception]
+  @hot_state_event_applied [:event_sales, :hot_state, :event, :applied]
+  @hot_state_event_ignored [:event_sales, :hot_state, :event, :ignored]
+  @hot_state_snapshot_write [:event_sales, :hot_state, :snapshot, :write]
   @cache_invalidate [:event_sales, :cache, :invalidate]
   @missing_catalog_recovery_start [:event_sales, :catalog, :missing_catalog, :recovery, :start]
   @missing_catalog_recovery_stop [:event_sales, :catalog, :missing_catalog, :recovery, :stop]
@@ -50,6 +53,9 @@ defmodule EventSales.Telemetry do
       hot_state_rebuild_start(),
       hot_state_rebuild_stop(),
       hot_state_rebuild_exception(),
+      hot_state_event_applied(),
+      hot_state_event_ignored(),
+      hot_state_snapshot_write(),
       cache_invalidate(),
       missing_catalog_recovery_start(),
       missing_catalog_recovery_stop(),
@@ -99,6 +105,18 @@ defmodule EventSales.Telemetry do
   @doc "HotStateAggregator rebuild failed."
   @spec hot_state_rebuild_exception() :: event_name()
   def hot_state_rebuild_exception, do: @hot_state_rebuild_exception
+
+  @doc "HotStateAggregator applied a recompute event."
+  @spec hot_state_event_applied() :: event_name()
+  def hot_state_event_applied, do: @hot_state_event_applied
+
+  @doc "HotStateAggregator ignored or failed a recompute event."
+  @spec hot_state_event_ignored() :: event_name()
+  def hot_state_event_ignored, do: @hot_state_event_ignored
+
+  @doc "HotStateAggregator attempted to write a warm snapshot."
+  @spec hot_state_snapshot_write() :: event_name()
+  def hot_state_snapshot_write, do: @hot_state_snapshot_write
 
   @doc "Cache invalidation signal for an event scope (Slice 3.0 telemetry-only facade)."
   @spec cache_invalidate() :: event_name()

@@ -38,6 +38,13 @@ config :event_sales, :redis_webhook_buffer,
   redis_url: nil,
   key_prefix: "eventsales:webhook_buffer:v1"
 
+config :event_sales, :hot_state_aggregator,
+  snapshot_adapter: EventSales.Analytics.SnapshotStore.RedixAdapter,
+  snapshot_ttl_ms: :timer.hours(1),
+  max_applied_event_ids: 10_000,
+  redis_enabled: false,
+  redis_url: nil
+
 config :event_sales, :woocommerce_rest,
   base_url: nil,
   consumer_key: nil,
