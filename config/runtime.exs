@@ -145,6 +145,7 @@ if config_env() == :prod do
       redis_url: analytics_redis_url
   else
     config :event_sales, :hot_state_aggregator,
+      snapshot_adapter: EventSales.Analytics.SnapshotStore.NoopAdapter,
       redis_enabled: false,
       redis_url: nil
   end

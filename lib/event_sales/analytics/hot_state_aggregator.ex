@@ -210,6 +210,13 @@ defmodule EventSales.Analytics.HotStateAggregator do
 
   defp write_snapshot(%AggregateEvent{} = event, summary, opts) do
     adapter = Keyword.get(opts, :snapshot_adapter, snapshot_adapter())
+    do_write_snapshot(adapter, event, summary)
+  end
+
+  defp do_write_snapshot(EventSales.Analytics.SnapshotStore.NoopAdapter, _event, _summary),
+    do: :ok
+
+  defp do_write_snapshot(adapter, %AggregateEvent{} = event, summary) do
     key = CacheKeys.redis_event_snapshot(event.event_id)
     snapshot_opts = [ttl_ms: snapshot_ttl_ms()]
 
@@ -275,7 +282,7 @@ defmodule EventSales.Analytics.HotStateAggregator do
   defp snapshot_adapter do
     :event_sales
     |> Application.get_env(:hot_state_aggregator, [])
-    |> Keyword.get(:snapshot_adapter, EventSales.Analytics.SnapshotStore.RedixAdapter)
+    |> Keyword.get(:snapshot_adapter, EventSales.Analytics.SnapshotStore.NoopAdapter)
   end
 
   defp snapshot_ttl_ms do

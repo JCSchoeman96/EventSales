@@ -110,6 +110,47 @@ defmodule EventSales.Analytics.HotStateAggregatorTest do
                    500
   end
 
+  test "noop snapshot adapter keeps disabled Redis quiet", %{
+    source: source,
+    event: event,
+    ticket: ticket
+  } do
+    event_id = event.id
+
+    create_completed_sale!(source, event, ticket, %{
+      quantity: 1,
+      line_total: Decimal.new("450.00")
+    })
+
+    Phoenix.PubSub.subscribe(EventSales.PubSub, "analytics:event:#{event.id}")
+
+    handler_id = "hot-state-noop-snapshot-#{System.unique_integer([:positive])}"
+    test_pid = self()
+
+    :telemetry.attach(
+      handler_id,
+      Telemetry.hot_state_snapshot_write(),
+      fn event_name, measurements, metadata, _config ->
+        send(test_pid, {:telemetry, event_name, measurements, metadata})
+      end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+
+    assert :ok =
+             HotStateAggregator.apply_event(aggregate_event(event),
+               snapshot_adapter: EventSales.Analytics.SnapshotStore.NoopAdapter
+             )
+
+    assert {:ok, %{total_sold: 1}} = HotStateAggregator.summary_for_event(event.id)
+    assert_receive {:hot_state_updated, ^event_id, %DateTime{}}, 500
+
+    refute_receive {:telemetry, [:event_sales, :hot_state, :snapshot, :write], _measurements,
+                    _metadata},
+                   100
+  end
+
   test "duplicate event does not double count", %{source: source, event: event, ticket: ticket} do
     create_completed_sale!(source, event, ticket, %{
       quantity: 2,

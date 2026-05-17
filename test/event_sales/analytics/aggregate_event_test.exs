@@ -65,6 +65,29 @@ defmodule EventSales.Analytics.AggregateEventTest do
              })
   end
 
+  test "rejects manually constructed aggregate event struct with blank IDs" do
+    invalid_event = %AggregateEvent{
+      aggregate_event_id: "",
+      event_id: @event_id,
+      reason: :order_processed,
+      occurred_at: @occurred_at
+    }
+
+    assert {:error, {:missing_required_fields, [:aggregate_event_id]}} =
+             AggregateEvent.new(invalid_event)
+  end
+
+  test "rejects manually constructed aggregate event struct with invalid reason" do
+    invalid_event = %AggregateEvent{
+      aggregate_event_id: "agg-invalid-struct",
+      event_id: @event_id,
+      reason: :unknown,
+      occurred_at: @occurred_at
+    }
+
+    assert {:error, {:invalid_reason, :unknown}} = AggregateEvent.new(invalid_event)
+  end
+
   test "rejects sales deltas as part of the Slice 9.5 contract" do
     assert {:error, {:unsupported_fields, [:quantity_delta, :revenue_delta]}} =
              AggregateEvent.new(%{

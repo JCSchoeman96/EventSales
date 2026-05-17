@@ -52,7 +52,11 @@ defmodule EventSales.Analytics.AggregateEvent do
   recompute from durable rows instead of trusting event producers for math.
   """
   @spec new(map() | t()) :: {:ok, t()} | {:error, term()}
-  def new(%__MODULE__{} = event), do: {:ok, event}
+  def new(%__MODULE__{} = event) do
+    event
+    |> Map.from_struct()
+    |> new()
+  end
 
   def new(attrs) when is_map(attrs) do
     attrs = normalize_keys(attrs)
