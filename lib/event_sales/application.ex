@@ -13,6 +13,7 @@ defmodule EventSales.Application do
         repo_child(),
         EventSales.Ingestion.RestRateLimiter,
         EventSales.Ingestion.RestCircuitBreaker,
+        EventSales.Catalog.ProductMetadataCache,
         oban_child(),
         redis_child(),
         {DNSCluster, query: Application.get_env(:event_sales, :dns_cluster_query) || :ignore},
