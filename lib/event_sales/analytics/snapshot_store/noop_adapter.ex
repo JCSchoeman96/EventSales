@@ -10,4 +10,7 @@ defmodule EventSales.Analytics.SnapshotStore.NoopAdapter do
 
   @impl true
   def put(_key, _summary, _opts \\ []), do: :ok
+
+  @impl true
+  def list_event_summaries(_opts \\ []), do: {:ok, []}
 end

@@ -46,6 +46,11 @@ config :event_sales, :hot_state_aggregator,
   snapshot_adapter: EventSales.TestSupport.Analytics.MemorySnapshotStoreAdapter,
   snapshot_ttl_ms: 3_600_000,
   max_applied_event_ids: 1_000,
+  rebuild_batch_size: 50,
+  restore_scan_count: 100,
+  restore_max_snapshots: 1_000,
+  schedule_rebuild_on_boot?: false,
+  stale_after_ms: 300_000,
   redis_enabled: false,
   redis_url: nil
 
