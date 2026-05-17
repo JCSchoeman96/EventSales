@@ -42,6 +42,13 @@ config :event_sales, :redis_webhook_buffer,
   max_entry_bytes: 256_000,
   adapter: EventSales.TestSupport.Ingestion.MemoryWebhookBufferAdapter
 
+config :event_sales, :hot_state_aggregator,
+  snapshot_adapter: EventSales.TestSupport.Analytics.MemorySnapshotStoreAdapter,
+  snapshot_ttl_ms: 3_600_000,
+  max_applied_event_ids: 1_000,
+  redis_enabled: false,
+  redis_url: nil
+
 config :event_sales, :woocommerce_rest,
   base_url: "https://woo.example.test",
   consumer_key: "ck_test",

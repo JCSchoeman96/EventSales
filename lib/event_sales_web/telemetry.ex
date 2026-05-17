@@ -145,6 +145,24 @@ defmodule EventSalesWeb.Telemetry do
         tags: [:reason, :source],
         description: "HotStateAggregator rebuild failures"
       ),
+      counter("event_sales.hot_state.event.applied.count",
+        event_name: EventSales.Telemetry.hot_state_event_applied(),
+        measurement: :count,
+        tags: [:reason, :result, :source],
+        description: "HotStateAggregator applied recompute events"
+      ),
+      counter("event_sales.hot_state.event.ignored.count",
+        event_name: EventSales.Telemetry.hot_state_event_ignored(),
+        measurement: :count,
+        tags: [:reason, :result, :source],
+        description: "HotStateAggregator ignored or failed recompute events"
+      ),
+      counter("event_sales.hot_state.snapshot.write.count",
+        event_name: EventSales.Telemetry.hot_state_snapshot_write(),
+        measurement: :count,
+        tags: [:reason, :result, :source],
+        description: "HotStateAggregator warm snapshot writes"
+      ),
 
       # Oban Metrics
       last_value("oban.supervisor.init.system_time",

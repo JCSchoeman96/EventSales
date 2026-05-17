@@ -127,6 +127,29 @@ if config_env() == :prod do
       durability_accepted: false
   end
 
+  hot_state_redis_enabled? = System.get_env("HOT_STATE_REDIS_SNAPSHOTS_ENABLED") in ~w(true 1)
+
+  if hot_state_redis_enabled? do
+    analytics_redis_url =
+      System.get_env("HOT_STATE_REDIS_URL") ||
+        System.get_env("REDIS_URL") ||
+        raise "HOT_STATE_REDIS_URL or REDIS_URL is required when hot-state Redis snapshots are enabled."
+
+    config :event_sales, :hot_state_aggregator,
+      snapshot_adapter: EventSales.Analytics.SnapshotStore.RedixAdapter,
+      snapshot_ttl_ms:
+        String.to_integer(System.get_env("HOT_STATE_REDIS_SNAPSHOT_TTL_MS") || "3600000"),
+      max_applied_event_ids:
+        String.to_integer(System.get_env("HOT_STATE_MAX_APPLIED_EVENT_IDS") || "10000"),
+      redis_enabled: true,
+      redis_url: analytics_redis_url
+  else
+    config :event_sales, :hot_state_aggregator,
+      snapshot_adapter: EventSales.Analytics.SnapshotStore.NoopAdapter,
+      redis_enabled: false,
+      redis_url: nil
+  end
+
   # ## SSL Support
   #
   # To get SSL working, you will need to add the `https` key

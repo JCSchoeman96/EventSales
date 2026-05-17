@@ -18,6 +18,8 @@ defmodule EventSales.Application do
         redis_child(),
         {DNSCluster, query: Application.get_env(:event_sales, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: EventSales.PubSub},
+        analytics_redis_child(),
+        EventSales.Analytics.HotStateAggregator,
         # Start a worker by calling: EventSales.Worker.start_link(arg)
         # {EventSales.Worker, arg},
         # Start to serve requests, typically the last entry
@@ -56,6 +58,17 @@ defmodule EventSales.Application do
          true <- Keyword.get(cfg, :durability_accepted, false),
          url when is_binary(url) and url != "" <- Keyword.get(cfg, :redis_url) do
       {Redix, {url, name: EventSales.Ingestion.RedisWebhookBuffer.redix_name()}}
+    else
+      _ -> nil
+    end
+  end
+
+  defp analytics_redis_child do
+    cfg = Application.get_env(:event_sales, :hot_state_aggregator, [])
+
+    with true <- Keyword.get(cfg, :redis_enabled, false),
+         url when is_binary(url) and url != "" <- Keyword.get(cfg, :redis_url) do
+      {Redix, {url, name: EventSales.Analytics.SnapshotStore.RedixAdapter.redix_name()}}
     else
       _ -> nil
     end
