@@ -8,6 +8,7 @@ defmodule EventSales.Sales.OrderUpserter do
   alias EventSales.Ingestion.Parsers.WoocommerceOrderParser
   alias EventSales.Ingestion.Resources.WebhookEvent
   alias EventSales.Sales
+  alias EventSales.Sales.OrderItemMapper
   alias EventSales.Sales.Resources.{CouponSnapshot, Order, OrderItem}
   alias EventSales.Sales.SourceVersionGuard
 
@@ -88,8 +89,10 @@ defmodule EventSales.Sales.OrderUpserter do
   end
 
   defp upsert_child_rows(%Order{} = order, normalized) do
-    with :ok <- upsert_order_items(order, normalized.line_items) do
-      upsert_coupons(order, normalized.coupons)
+    with :ok <- upsert_order_items(order, normalized.line_items),
+         :ok <- upsert_coupons(order, normalized.coupons),
+         {:ok, _mapped_items} <- OrderItemMapper.map_pending_items_for_order(order) do
+      :ok
     end
   end
 

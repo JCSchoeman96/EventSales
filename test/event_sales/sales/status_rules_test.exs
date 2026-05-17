@@ -25,9 +25,16 @@ defmodule EventSales.Sales.StatusRulesTest do
   test "unmapped or non-ticket lines are excluded even when order is completed" do
     order = %Order{status: :completed}
 
+    pending = %OrderItem{
+      mapping_status: :pending_mapping_resolution,
+      quantity: 1,
+      item_kind: :unknown
+    }
+
     unmapped = %OrderItem{mapping_status: :unmapped, quantity: 1, item_kind: :ticket}
     non_ticket = %OrderItem{mapping_status: :mapped, quantity: 1, item_kind: :non_ticket}
 
+    refute StatusRules.counts_toward_sold_tickets?(order, pending)
     refute StatusRules.counts_toward_sold_tickets?(order, unmapped)
     refute StatusRules.counts_toward_sold_tickets?(order, non_ticket)
   end
