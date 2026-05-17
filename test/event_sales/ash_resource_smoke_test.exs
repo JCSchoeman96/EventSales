@@ -12,6 +12,7 @@ defmodule EventSales.AshResourceSmokeTest do
 
   @expected_resources_by_domain %{
     EventSales.Accounts => [
+      EventSales.Accounts.Resources.EventAccessGrant.Version,
       EventSales.Accounts.Resources.User,
       EventSales.Accounts.Resources.Role,
       EventSales.Accounts.Resources.UserRole,
@@ -35,7 +36,9 @@ defmodule EventSales.AshResourceSmokeTest do
       EventSales.Ingestion.Resources.WebhookDeliveryFailure
     ],
     EventSales.Analytics => [],
-    EventSales.Audit => []
+    EventSales.Audit => [
+      EventSales.Audit.Resources.AuditLog
+    ]
   }
 
   test "configured business Ash domains compile and load" do

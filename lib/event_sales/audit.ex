@@ -6,4 +6,8 @@ defmodule EventSales.Audit do
   """
 
   use Ash.Domain
+
+  resources do
+    resource EventSales.Audit.Resources.AuditLog
+  end
 end

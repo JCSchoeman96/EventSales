@@ -8,7 +8,8 @@ defmodule EventSales.Accounts.Resources.EventAccessGrant do
 
   use Ash.Resource,
     data_layer: AshPostgres.DataLayer,
-    domain: EventSales.Accounts
+    domain: EventSales.Accounts,
+    extensions: [AshPaperTrail.Resource]
 
   postgres do
     table "accounts_event_access_grants"
@@ -72,5 +73,14 @@ defmodule EventSales.Accounts.Resources.EventAccessGrant do
       allow_nil? false
       public? true
     end
+  end
+
+  paper_trail do
+    change_tracking_mode :changes_only
+    ignore_attributes [:inserted_at, :updated_at]
+    ignore_actions [:create]
+    on_actions [:update, :revoke]
+    store_action_name? true
+    table_name "accounts_event_access_grant_versions"
   end
 end
