@@ -10,6 +10,7 @@ defmodule EventSales.DomainBoundariesTest do
     EventSales.Audit
   ]
   @accounts_resources [
+    EventSales.Accounts.Resources.EventAccessGrant.Version,
     EventSales.Accounts.Resources.User,
     EventSales.Accounts.Resources.Role,
     EventSales.Accounts.Resources.UserRole,
@@ -31,6 +32,15 @@ defmodule EventSales.DomainBoundariesTest do
   @ingestion_resources [
     EventSales.Ingestion.Resources.WebhookEvent,
     EventSales.Ingestion.Resources.WebhookDeliveryFailure
+  ]
+  @audit_resources [
+    EventSales.Audit.Resources.AuditLog
+  ]
+  @accounts_ash_admin_resources [
+    EventSales.Accounts.Resources.User,
+    EventSales.Accounts.Resources.Role,
+    EventSales.Accounts.Resources.UserRole,
+    EventSales.Accounts.Resources.EventAccessGrant
   ]
   @hidden_ash_admin_domains [
     EventSales.AshBaseline.Domain,
@@ -77,9 +87,17 @@ defmodule EventSales.DomainBoundariesTest do
     assert Ash.Domain.Info.resources(EventSales.Sales) == @sales_resources
     assert Ash.Domain.Info.resources(EventSales.Ingestion) == @ingestion_resources
 
+    assert Ash.Domain.Info.resources(EventSales.Audit) == @audit_resources
+
     for domain <-
           @business_domains --
-            [EventSales.Accounts, EventSales.Catalog, EventSales.Sales, EventSales.Ingestion] do
+            [
+              EventSales.Accounts,
+              EventSales.Catalog,
+              EventSales.Sales,
+              EventSales.Ingestion,
+              EventSales.Audit
+            ] do
       assert Ash.Domain.Info.resources(domain) == []
     end
   end
@@ -89,11 +107,19 @@ defmodule EventSales.DomainBoundariesTest do
 
     assert EventSales.Accounts
            |> AshAdmin.Domain.show_resources()
-           |> Enum.sort() == Enum.sort(@accounts_resources)
+           |> Enum.sort() == Enum.sort(@accounts_ash_admin_resources)
 
     for domain <- @hidden_ash_admin_domains do
       refute AshAdmin.Domain.show?(domain)
     end
+
+    refute EventSales.Accounts.Resources.EventAccessGrant.Version in AshAdmin.Domain.show_resources(
+             EventSales.Accounts
+           )
+
+    refute EventSales.Audit.Resources.AuditLog in AshAdmin.Domain.show_resources(
+             EventSales.Accounts
+           )
   end
 
   test "web layer does not define Ash resources" do

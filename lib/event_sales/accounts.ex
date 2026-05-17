@@ -6,10 +6,21 @@ defmodule EventSales.Accounts do
   """
 
   use Ash.Domain,
-    extensions: [AshAdmin.Domain]
+    extensions: [AshAdmin.Domain, AshPaperTrail.Domain]
+
+  paper_trail do
+    include_versions? true
+  end
 
   admin do
     show?(true)
+
+    show_resources([
+      EventSales.Accounts.Resources.User,
+      EventSales.Accounts.Resources.Role,
+      EventSales.Accounts.Resources.UserRole,
+      EventSales.Accounts.Resources.EventAccessGrant
+    ])
   end
 
   resources do
