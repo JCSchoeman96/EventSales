@@ -24,6 +24,7 @@ defmodule EventSales.Analytics.HotStateAggregator do
   @default_restore_scan_count 100
   @default_restore_max_snapshots 1_000
   @default_stale_after_ms 300_000
+  @default_rebuild_in_flight_timeout_ms 600_000
 
   @type apply_result :: :ok | {:error, term()}
   @type lifecycle :: :warming | :ready | :stale
@@ -48,7 +49,12 @@ defmodule EventSales.Analytics.HotStateAggregator do
   @doc "Returns rebuild and restore status for dashboard-safe reads."
   @spec status() :: map()
   def status do
-    GenServer.call(__MODULE__, :status)
+    case Process.whereis(__MODULE__) do
+      nil -> not_running_status()
+      _pid -> GenServer.call(__MODULE__, :status)
+    end
+  catch
+    :exit, _reason -> not_running_status()
   end
 
   @doc "Requests an async hot-state rebuild when one is not already running."
@@ -122,10 +128,13 @@ defmodule EventSales.Analytics.HotStateAggregator do
 
   @impl true
   def handle_call(:status, _from, state) do
+    state = recover_stale_rebuild(state)
     {:reply, status_from_state(state), state}
   end
 
   def handle_call({:request_rebuild, reason}, _from, state) do
+    state = recover_stale_rebuild(state)
+
     case schedule_rebuild(state, reason) do
       {:ok, state} -> {:reply, :ok, state}
       {:already_running, state} -> {:reply, :already_running, state}
@@ -177,6 +186,19 @@ defmodule EventSales.Analytics.HotStateAggregator do
       nil -> {:error, :not_running}
       _pid -> GenServer.call(__MODULE__, message)
     end
+  end
+
+  defp not_running_status do
+    %{
+      state: :stale,
+      rebuild_in_flight?: false,
+      restored_snapshot_count: 0,
+      restore_finished?: false,
+      last_restore_finished_at: nil,
+      last_rebuild_started_at: nil,
+      last_rebuild_finished_at: nil,
+      last_failure: :not_running
+    }
   end
 
   defp restore_snapshots(state) do
@@ -269,6 +291,8 @@ defmodule EventSales.Analytics.HotStateAggregator do
     do: {:already_running, state}
 
   defp schedule_rebuild(state, reason) do
+    maybe_cancel_stale_rebuild_job(state)
+
     args = %{"scope" => "hot_state", "reason" => to_string(reason)}
 
     case args |> EventSales.Analytics.Workers.RebuildHotStateWorker.new() |> Oban.insert() do
@@ -288,6 +312,22 @@ defmodule EventSales.Analytics.HotStateAggregator do
     _ -> {{:error, :unavailable}, state}
   end
 
+  defp maybe_cancel_stale_rebuild_job(%{last_failure: :rebuild_timeout}) do
+    import Ecto.Query
+
+    Oban.Job
+    |> where(
+      [job],
+      job.worker == "EventSales.Analytics.Workers.RebuildHotStateWorker" and
+        job.state in ["available", "scheduled", "executing", "retryable"]
+    )
+    |> Oban.cancel_all_jobs()
+
+    :ok
+  end
+
+  defp maybe_cancel_stale_rebuild_job(_state), do: :ok
+
   defp mark_rebuild_finished(state, %{"result" => result} = payload) do
     payload
     |> atomize_result_payload(result)
@@ -296,15 +336,17 @@ defmodule EventSales.Analytics.HotStateAggregator do
 
   defp mark_rebuild_finished(state, %{result: :ok} = result) do
     finished_at = Map.get(result, :finished_at, DateTime.utc_now())
+    failed_count = Map.get(result, :failed_count, 0)
+    rebuilt_count = Map.get(result, :rebuilt_count, state.restored_snapshot_count)
 
     %{
       state
-      | lifecycle: :ready,
+      | lifecycle: lifecycle_for_rebuild_result(rebuilt_count, failed_count),
         rebuild_in_flight?: false,
-        restored_snapshot_count: Map.get(result, :rebuilt_count, state.restored_snapshot_count),
+        restored_snapshot_count: rebuilt_count,
         last_rebuild_finished_at: finished_at,
         last_fresh_at: finished_at,
-        last_failure: nil
+        last_failure: if(failed_count > 0, do: :partial_rebuild, else: nil)
     }
   end
 
@@ -351,6 +393,29 @@ defmodule EventSales.Analytics.HotStateAggregator do
       last_failure: state.last_failure
     }
   end
+
+  defp recover_stale_rebuild(
+         %{rebuild_in_flight?: true, last_rebuild_started_at: %DateTime{} = started_at} = state
+       ) do
+    if DateTime.diff(DateTime.utc_now(), started_at, :millisecond) >
+         rebuild_in_flight_timeout_ms() do
+      %{
+        state
+        | lifecycle: :stale,
+          rebuild_in_flight?: false,
+          last_failure: :rebuild_timeout
+      }
+    else
+      state
+    end
+  end
+
+  defp recover_stale_rebuild(state), do: state
+
+  defp lifecycle_for_rebuild_result(_rebuilt_count, failed_count) when failed_count > 0,
+    do: :stale
+
+  defp lifecycle_for_rebuild_result(_rebuilt_count, _failed_count), do: :ready
 
   defp stale_fresh_at?(%DateTime{} = fresh_at) do
     DateTime.diff(DateTime.utc_now(), fresh_at, :millisecond) > stale_after_ms()
@@ -577,5 +642,11 @@ defmodule EventSales.Analytics.HotStateAggregator do
     :event_sales
     |> Application.get_env(:hot_state_aggregator, [])
     |> Keyword.get(:stale_after_ms, @default_stale_after_ms)
+  end
+
+  defp rebuild_in_flight_timeout_ms do
+    :event_sales
+    |> Application.get_env(:hot_state_aggregator, [])
+    |> Keyword.get(:rebuild_in_flight_timeout_ms, @default_rebuild_in_flight_timeout_ms)
   end
 end

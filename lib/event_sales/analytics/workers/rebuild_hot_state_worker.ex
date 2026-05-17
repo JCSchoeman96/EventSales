@@ -27,13 +27,14 @@ defmodule EventSales.Analytics.Workers.RebuildHotStateWorker do
     emit_start()
 
     case rebuild_all_events() do
-      {:ok, rebuilt_count} ->
+      {:ok, %{rebuilt_count: rebuilt_count, failed_count: failed_count}} ->
         duration = System.monotonic_time() - started_at
-        emit_stop(duration, rebuilt_count)
+        emit_stop(duration, rebuilt_count, failed_count)
 
         HotStateAggregator.rebuild_finished(%{
           result: :ok,
           rebuilt_count: rebuilt_count,
+          failed_count: failed_count,
           finished_at: DateTime.utc_now()
         })
 
@@ -58,30 +59,36 @@ defmodule EventSales.Analytics.Workers.RebuildHotStateWorker do
   def timeout(_job), do: rebuild_timeout_ms()
 
   defp rebuild_all_events do
-    rebuild_pages(nil, 0)
+    rebuild_pages(nil, %{rebuilt_count: 0, failed_count: 0})
   end
 
-  defp rebuild_pages(after_event_id, rebuilt_count) do
+  defp rebuild_pages(after_event_id, counts) do
     batch = SnapshotQueries.event_ids_page(after_event_id, rebuild_batch_size())
 
-    case rebuild_batch(batch, rebuilt_count) do
-      {:ok, rebuilt_count} when batch == [] ->
-        {:ok, rebuilt_count}
+    case rebuild_batch(batch, counts) do
+      {:ok, counts} when batch == [] ->
+        {:ok, counts}
 
-      {:ok, rebuilt_count} ->
-        rebuild_pages(List.last(batch), rebuilt_count)
+      {:ok, counts} ->
+        rebuild_pages(List.last(batch), counts)
 
       {:error, reason} ->
         {:error, reason}
     end
+  rescue
+    _ -> {:error, :query_failed}
   end
 
-  defp rebuild_batch([], rebuilt_count), do: {:ok, rebuilt_count}
+  defp rebuild_batch([], counts), do: {:ok, counts}
 
-  defp rebuild_batch([event_id | rest], rebuilt_count) do
+  defp rebuild_batch([event_id | rest], counts) do
     case rebuild_event(event_id) do
-      :ok -> rebuild_batch(rest, rebuilt_count + 1)
-      {:error, reason} -> {:error, reason}
+      :ok ->
+        rebuild_batch(rest, Map.update!(counts, :rebuilt_count, &(&1 + 1)))
+
+      {:error, reason} ->
+        emit_event_failure(reason)
+        rebuild_batch(rest, Map.update!(counts, :failed_count, &(&1 + 1)))
     end
   end
 
@@ -115,11 +122,20 @@ defmodule EventSales.Analytics.Workers.RebuildHotStateWorker do
     Telemetry.emit(Telemetry.hot_state_rebuild_start(), %{count: 1}, %{source: :postgres})
   end
 
-  defp emit_stop(duration, rebuilt_count) do
+  defp emit_stop(duration, rebuilt_count, failed_count) do
     Telemetry.emit(Telemetry.hot_state_rebuild_stop(), %{duration: duration}, %{
       source: :postgres,
       result: :ok,
-      rebuilt_count: rebuilt_count
+      rebuilt_count: rebuilt_count,
+      failed_count: failed_count
+    })
+  end
+
+  defp emit_event_failure(reason) do
+    Telemetry.emit(Telemetry.hot_state_rebuild_exception(), %{count: 1}, %{
+      source: :postgres,
+      scope: :event,
+      reason: low_cardinality_reason(reason)
     })
   end
 

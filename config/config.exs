@@ -47,6 +47,7 @@ config :event_sales, :hot_state_aggregator,
   restore_max_snapshots: 1_000,
   schedule_rebuild_on_boot?: true,
   stale_after_ms: 300_000,
+  rebuild_in_flight_timeout_ms: 600_000,
   redis_enabled: false,
   redis_url: nil
 

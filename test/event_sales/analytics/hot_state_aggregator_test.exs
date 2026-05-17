@@ -112,6 +112,42 @@ defmodule EventSales.Analytics.HotStateAggregatorTest do
     assert %{rebuild_in_flight?: true} = HotStateAggregator.status()
   end
 
+  test "stale in-flight rebuild reports timeout and can schedule replacement" do
+    original = Application.get_env(:event_sales, :hot_state_aggregator)
+
+    try do
+      put_hot_state_config!(rebuild_in_flight_timeout_ms: 60_000)
+
+      assert :ok = HotStateAggregator.request_rebuild(:manual_refresh)
+      assert count_rebuild_jobs() == 1
+
+      put_hot_state_config!(rebuild_in_flight_timeout_ms: -1)
+
+      assert %{state: :stale, rebuild_in_flight?: false, last_failure: :rebuild_timeout} =
+               HotStateAggregator.status()
+
+      assert :ok = HotStateAggregator.request_rebuild(:manual_refresh)
+      assert count_rebuild_jobs() == 2
+    after
+      Application.put_env(:event_sales, :hot_state_aggregator, original)
+    end
+  end
+
+  test "status is dashboard-safe when process is not running" do
+    assert :ok = Supervisor.terminate_child(EventSales.Supervisor, HotStateAggregator)
+
+    assert %{
+             state: :stale,
+             rebuild_in_flight?: false,
+             restored_snapshot_count: 0,
+             restore_finished?: false,
+             last_failure: :not_running
+           } = HotStateAggregator.status()
+
+    assert {:ok, _pid} = Supervisor.restart_child(EventSales.Supervisor, HotStateAggregator)
+    wait_until(fn -> HotStateAggregator.status().restore_finished? end)
+  end
+
   test "restored summaries older than stale_after_ms report stale", %{event: event} do
     old_summary = summary(%{updated_at: DateTime.add(DateTime.utc_now(), -600, :second)})
 

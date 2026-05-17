@@ -93,6 +93,13 @@ defmodule EventSales.Analytics.RebuildHotStateWorkerTest do
 
     assert is_integer(duration)
 
+    EventSales.TestSupport.Analytics.SelectiveEventAggregator.reset!()
+
+    EventSales.TestSupport.Analytics.SelectiveEventAggregator.fail_event!(
+      event.id,
+      :db_unavailable
+    )
+
     original = Application.get_env(:event_sales, :hot_state_aggregator)
 
     Application.put_env(
@@ -101,18 +108,74 @@ defmodule EventSales.Analytics.RebuildHotStateWorkerTest do
       Keyword.put(
         original,
         :event_aggregator,
-        EventSales.TestSupport.Analytics.ErrorEventAggregator
+        EventSales.TestSupport.Analytics.SelectiveEventAggregator
       )
     )
 
     try do
-      assert {:error, :db_unavailable} = perform()
+      assert :ok = perform()
 
       assert_receive {:telemetry, [:event_sales, :hot_state, :rebuild, :exception], %{count: 1},
-                      %{source: :postgres, reason: :db_unavailable}},
+                      %{source: :postgres, scope: :event, reason: :db_unavailable}},
                      500
     after
       Application.put_env(:event_sales, :hot_state_aggregator, original)
+      EventSales.TestSupport.Analytics.SelectiveEventAggregator.reset!()
+    end
+  end
+
+  test "continues across individual event summary failures and reports failed count", %{
+    source: source,
+    event: event,
+    ticket: ticket
+  } do
+    create_completed_sale!(source, event, ticket, %{
+      quantity: 1,
+      line_total: Decimal.new("450.00")
+    })
+
+    failed_event =
+      SalesHelpers.create_event!(source, %{
+        name: "Broken Worker Event",
+        slug: "broken-worker-event"
+      })
+
+    failed_ticket = SalesHelpers.create_ticket_type!(failed_event, %{name: "Broken GA"})
+
+    create_completed_sale!(source, failed_event, failed_ticket, %{
+      quantity: 1,
+      line_total: Decimal.new("100.00")
+    })
+
+    EventSales.TestSupport.Analytics.SelectiveEventAggregator.reset!()
+
+    EventSales.TestSupport.Analytics.SelectiveEventAggregator.fail_event!(
+      failed_event.id,
+      :db_unavailable
+    )
+
+    original = Application.get_env(:event_sales, :hot_state_aggregator)
+
+    Application.put_env(
+      :event_sales,
+      :hot_state_aggregator,
+      Keyword.put(
+        original,
+        :event_aggregator,
+        EventSales.TestSupport.Analytics.SelectiveEventAggregator
+      )
+    )
+
+    try do
+      assert :ok = perform()
+
+      assert {:ok, %{total_sold: 1}} = DashboardCache.get_event_summary(event.id)
+      assert :miss = DashboardCache.get_event_summary(failed_event.id)
+
+      assert %{state: :stale, last_failure: :partial_rebuild} = HotStateAggregator.status()
+    after
+      Application.put_env(:event_sales, :hot_state_aggregator, original)
+      EventSales.TestSupport.Analytics.SelectiveEventAggregator.reset!()
     end
   end
 
