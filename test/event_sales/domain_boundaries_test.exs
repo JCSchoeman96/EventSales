@@ -111,9 +111,13 @@ defmodule EventSales.DomainBoundariesTest do
     end
   end
 
-  test "WooCommerceClient is not wired into business workflows in Slice 7.5" do
+  test "WooCommerceClient is wired only into approved ingestion REST boundaries" do
     allowed_prefixes = [
       "lib/event_sales/ingestion/clients/"
+    ]
+
+    allowed_files = [
+      "lib/event_sales/ingestion/workers/missing_catalog_resolution_worker.ex"
     ]
 
     matches =
@@ -124,7 +128,8 @@ defmodule EventSales.DomainBoundariesTest do
           |> Path.relative_to_cwd()
           |> String.replace("\\", "/")
 
-        Enum.any?(allowed_prefixes, &String.starts_with?(normalized, &1))
+        Enum.any?(allowed_prefixes, &String.starts_with?(normalized, &1)) or
+          normalized in allowed_files
       end)
       |> files_containing("WooCommerceClient")
 
