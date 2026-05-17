@@ -59,6 +59,8 @@ defmodule EventSalesWeb.Router do
   scope "/" do
     pipe_through [:browser, :internal_admin_tools]
 
+    live "/internal/mappings", EventSalesWeb.Live.Admin.MappingsLive
+
     ash_admin("/internal/ash-admin")
   end
 

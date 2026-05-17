@@ -3,6 +3,8 @@ defmodule EventSales.Sales.OrderUpserterTest do
 
   require Ash.Query
 
+  alias EventSales.Catalog
+  alias EventSales.Catalog.Resources.ProductMapping
   alias EventSales.Ingestion.Parsers.WoocommerceOrderParser
   alias EventSales.Sales
   alias EventSales.Sales.OrderUpserter
@@ -31,6 +33,42 @@ defmodule EventSales.Sales.OrderUpserterTest do
     assert line.item_kind == :unknown
 
     assert [%CouponSnapshot{code: "SYNTHETIC100"}] = coupons(order.id)
+  end
+
+  test "maps pending order items after durable upsert when local mapping exists", %{
+    source: source
+  } do
+    event = SalesHelpers.create_event!(source, %{name: "Mapped Event"})
+    ticket = SalesHelpers.create_ticket_type!(event, %{name: "General Admission"})
+
+    create_mapping!(source, event, ticket, %{
+      woo_product_id: 501,
+      woo_variation_id: 601
+    })
+
+    assert {:ok, order} = OrderUpserter.upsert_order(source.id, fixture(:order_completed))
+
+    assert [line] = order_items(order.id)
+    assert line.mapping_status == :mapped
+    assert line.item_kind == :ticket
+    assert line.event_id == event.id
+    assert line.ticket_type_id == ticket.id
+  end
+
+  test "unknown products stay pending mapping resolution after upsert", %{source: source} do
+    payload =
+      :order_completed
+      |> fixture()
+      |> put_in(["line_items", Access.at(0), "product_id"], 999_999)
+      |> put_in(["line_items", Access.at(0), "variation_id"], 0)
+
+    assert {:ok, order} = OrderUpserter.upsert_order(source.id, payload)
+
+    assert [line] = order_items(order.id)
+    assert line.mapping_status == :pending_mapping_resolution
+    assert line.item_kind == :unknown
+    assert line.event_id == nil
+    assert line.ticket_type_id == nil
   end
 
   test "rerunning the same payload is idempotent", %{source: source} do
@@ -136,5 +174,20 @@ defmodule EventSales.Sales.OrderUpserterTest do
     |> Ash.Query.filter(order_id == ^order_id)
     |> Ash.read!(domain: Sales)
     |> Enum.sort_by(& &1.code)
+  end
+
+  defp create_mapping!(source, event, ticket, attrs) do
+    defaults = %{
+      source_system_id: source.id,
+      event_id: event.id,
+      ticket_type_id: ticket.id,
+      woo_product_id: 1,
+      woo_variation_id: nil,
+      original_label: "Ticket",
+      current_label: "Ticket",
+      active: true
+    }
+
+    Ash.create!(ProductMapping, Map.merge(defaults, attrs), action: :create, domain: Catalog)
   end
 end
