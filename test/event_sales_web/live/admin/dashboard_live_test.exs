@@ -1,0 +1,251 @@
+defmodule EventSalesWeb.Live.Admin.DashboardLiveTest do
+  use EventSalesWeb.ConnCase, async: false
+  use Oban.Testing, repo: EventSales.Repo
+
+  require Ash.Query
+
+  import Phoenix.LiveViewTest
+
+  alias EventSales.Accounts
+  alias EventSales.Accounts.Resources.{Role, User, UserRole}
+  alias EventSales.Repo
+  alias EventSales.Sales
+  alias EventSales.Sales.Resources.{Order, OrderItem}
+  alias EventSales.TestSupport.SalesHelpers
+  alias EventSalesWeb.Live.Admin.ManualActionRateLimiter
+
+  setup do
+    EventSales.DataCase.setup_sandbox(%{async: false})
+    ManualActionRateLimiter.reset_for_test!()
+    delete_rebuild_jobs!()
+
+    on_exit(fn ->
+      ManualActionRateLimiter.reset_for_test!()
+      delete_rebuild_jobs!()
+    end)
+
+    :ok
+  end
+
+  test "rejects unauthenticated access", %{conn: conn} do
+    conn = get(conn, "/admin/dashboard")
+    assert response(conn, 401) == "Unauthorized"
+  end
+
+  test "rejects non-admin access", %{conn: conn} do
+    staff = create_user!("dashboard-staff@example.com")
+    create_global_role!(staff, :staff)
+
+    conn =
+      conn
+      |> sign_in_as(staff)
+      |> get("/admin/dashboard")
+
+    assert response(conn, 403) == "Forbidden"
+  end
+
+  test "admin can view dashboard data without PII", %{conn: conn} do
+    admin = create_user!("dashboard-admin@example.com")
+    create_global_role!(admin, :admin)
+
+    source = SalesHelpers.create_source_system!()
+
+    event =
+      SalesHelpers.create_event!(source, %{
+        name: "Admin Dashboard Event",
+        slug: unique_slug("admin")
+      })
+
+    ticket = SalesHelpers.create_ticket_type!(event, %{name: "GA"})
+    order = create_order!(source, :completed, order_number: "ES-DASH-1")
+
+    create_item!(order, event, ticket,
+      name: "GA Ticket",
+      quantity: 2,
+      line_total: Decimal.new("900.00"),
+      woo_line_item_id: 10
+    )
+
+    create_item!(order, event, ticket,
+      name: "Unmapped Ticket",
+      mapping_status: :pending_mapping_resolution,
+      item_kind: :unknown,
+      woo_product_id: 888,
+      woo_line_item_id: 11
+    )
+
+    {:ok, _view, html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/dashboard")
+
+    assert html =~ "Admin Dashboard"
+    assert html =~ "2"
+    assert html =~ "900.00"
+    assert html =~ "completed"
+    assert html =~ "Admin Dashboard Event"
+    assert html =~ "GA"
+    assert html =~ "ES-DASH-1"
+    assert html =~ "Unmapped Ticket"
+    refute html =~ "private@example.test"
+    refute html =~ "Private Customer"
+    refute html =~ "txn_private"
+  end
+
+  test "manual refresh requests hot-state rebuild and rate limits by user", %{conn: conn} do
+    first_admin = create_user!("dashboard-refresh-1@example.com")
+    second_admin = create_user!("dashboard-refresh-2@example.com")
+    create_global_role!(first_admin, :admin)
+    create_global_role!(second_admin, :admin)
+
+    {:ok, view, _html} =
+      conn
+      |> sign_in_as(first_admin)
+      |> live("/admin/dashboard")
+
+    assert render_click(view, "manual_refresh") =~ "Refresh requested"
+    assert rebuild_job_count() == 1
+    assert refresh_snapshot_job_count() == 0
+
+    assert render_click(view, "manual_refresh") =~ "Try again shortly"
+    assert rebuild_job_count() == 1
+    assert refresh_snapshot_job_count() == 0
+
+    {:ok, second_view, _html} =
+      Phoenix.ConnTest.build_conn()
+      |> sign_in_as(second_admin)
+      |> live("/admin/dashboard")
+
+    assert render_click(second_view, "manual_refresh") =~ "Refresh requested"
+  end
+
+  test "DashboardLive source stays inside approved boundaries" do
+    source = File.read!("lib/event_sales_web/live/admin/dashboard_live.ex")
+
+    for forbidden <- [
+          "EventAggregator",
+          "OrderItem",
+          "Repo",
+          "sales_order_items",
+          "SnapshotRefresh",
+          "WooCommerce",
+          "Redix",
+          "SnapshotStore"
+        ] do
+      refute source =~ forbidden
+    end
+  end
+
+  defp sign_in_as(conn, user) do
+    Plug.Test.init_test_session(conn, %{current_user_id: user.id})
+  end
+
+  defp create_user!(email, password \\ "valid-pass-123") do
+    Ash.create!(
+      User,
+      %{
+        email: email,
+        name: "Test User",
+        password: password,
+        password_confirmation: password
+      },
+      action: :register_with_password,
+      domain: Accounts
+    )
+  end
+
+  defp create_global_role!(user, role_name) do
+    role =
+      Role
+      |> Ash.Query.filter(name == ^role_name)
+      |> Ash.read_one!(domain: Accounts)
+      |> case do
+        nil -> Ash.create!(Role, %{name: role_name}, action: :create, domain: Accounts)
+        role -> role
+      end
+
+    Ash.create!(
+      UserRole,
+      %{user_id: user.id, role_id: role.id},
+      action: :create,
+      domain: Accounts
+    )
+  end
+
+  defp create_order!(source, status, attrs) do
+    defaults = %{
+      source_system_id: source.id,
+      woo_order_id: System.unique_integer([:positive]),
+      order_number: "DASH-#{System.unique_integer([:positive])}",
+      status: status,
+      currency: "ZAR",
+      completed_at: ~U[2026-05-17 08:00:00.000000Z],
+      created_at_source: ~U[2026-05-17 07:00:00.000000Z],
+      updated_at_source: ~U[2026-05-17 08:00:00.000000Z],
+      customer_name: "Private Customer",
+      customer_email: "private@example.test",
+      raw_total: Decimal.new("900.00"),
+      raw_discount_total: Decimal.new("0"),
+      raw_tax_total: Decimal.new("0"),
+      payment_gateway_transaction_id: "txn_private"
+    }
+
+    Ash.create!(Order, Map.merge(defaults, Map.new(attrs)),
+      action: :create_normalized,
+      domain: Sales
+    )
+  end
+
+  defp create_item!(order, event, ticket, attrs) do
+    defaults = %{
+      order_id: order.id,
+      event_id: event.id,
+      ticket_type_id: ticket.id,
+      woo_line_item_id: System.unique_integer([:positive]),
+      woo_product_id: System.unique_integer([:positive]),
+      woo_variation_id: nil,
+      name: "Dashboard Ticket",
+      quantity: 1,
+      line_subtotal: Decimal.new("450.00"),
+      line_total: Decimal.new("450.00"),
+      discount_total: Decimal.new("0"),
+      item_kind: :ticket,
+      mapping_status: :mapped
+    }
+
+    Ash.create!(OrderItem, Map.merge(defaults, Map.new(attrs)),
+      action: :create_normalized,
+      domain: Sales
+    )
+  end
+
+  defp delete_rebuild_jobs! do
+    import Ecto.Query
+
+    Oban.Job
+    |> where(
+      [job],
+      job.worker in [
+        "EventSales.Analytics.Workers.RebuildHotStateWorker",
+        "EventSales.Analytics.Workers.RefreshSnapshotWorker"
+      ]
+    )
+    |> Repo.delete_all()
+  end
+
+  defp rebuild_job_count do
+    count_jobs("EventSales.Analytics.Workers.RebuildHotStateWorker")
+  end
+
+  defp refresh_snapshot_job_count do
+    count_jobs("EventSales.Analytics.Workers.RefreshSnapshotWorker")
+  end
+
+  defp count_jobs(worker) do
+    import Ecto.Query
+
+    Repo.aggregate(from(job in Oban.Job, where: job.worker == ^worker), :count)
+  end
+
+  defp unique_slug(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
+end
