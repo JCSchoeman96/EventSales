@@ -163,6 +163,25 @@ defmodule EventSalesWeb.Telemetry do
         tags: [:reason, :result, :source],
         description: "HotStateAggregator warm snapshot writes"
       ),
+      counter("event_sales.snapshots.refresh.start.count",
+        event_name: EventSales.Telemetry.snapshot_refresh_start(),
+        measurement: :count,
+        tags: [:scope, :source],
+        description: "Historical reporting snapshot refresh starts"
+      ),
+      summary("event_sales.snapshots.refresh.stop.duration",
+        event_name: EventSales.Telemetry.snapshot_refresh_stop(),
+        measurement: :duration,
+        tags: [:result, :scope, :source],
+        unit: {:native, :millisecond},
+        description: "Historical reporting snapshot refresh duration"
+      ),
+      counter("event_sales.snapshots.refresh.exception.count",
+        event_name: EventSales.Telemetry.snapshot_refresh_exception(),
+        measurement: :count,
+        tags: [:reason, :scope, :source],
+        description: "Historical reporting snapshot refresh failures"
+      ),
 
       # Oban Metrics
       last_value("oban.supervisor.init.system_time",

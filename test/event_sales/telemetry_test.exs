@@ -106,6 +106,26 @@ defmodule EventSales.TelemetryTest do
     })
   end
 
+  test "historical snapshot refresh telemetry metrics are defined" do
+    assert_metric(%Counter{
+      name: [:event_sales, :snapshots, :refresh, :start, :count],
+      event_name: [:event_sales, :snapshots, :refresh, :start],
+      measurement: :count
+    })
+
+    assert_metric(%Summary{
+      name: [:event_sales, :snapshots, :refresh, :stop, :duration],
+      event_name: [:event_sales, :snapshots, :refresh, :stop],
+      measurement: :duration
+    })
+
+    assert_metric(%Counter{
+      name: [:event_sales, :snapshots, :refresh, :exception, :count],
+      event_name: [:event_sales, :snapshots, :refresh, :exception],
+      measurement: :count
+    })
+  end
+
   defp assert_metric(expected_metric) do
     assert Enum.any?(EventSalesWeb.Telemetry.metrics(), &metric_matches?(&1, expected_metric))
   end
