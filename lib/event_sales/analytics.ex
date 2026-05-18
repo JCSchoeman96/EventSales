@@ -6,4 +6,9 @@ defmodule EventSales.Analytics do
   """
 
   use Ash.Domain
+
+  resources do
+    resource EventSales.Analytics.Resources.EventAggregateSnapshot
+    resource EventSales.Analytics.Resources.DailySalesAggregateSnapshot
+  end
 end

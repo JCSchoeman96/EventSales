@@ -33,6 +33,10 @@ defmodule EventSales.DomainBoundariesTest do
     EventSales.Ingestion.Resources.WebhookEvent,
     EventSales.Ingestion.Resources.WebhookDeliveryFailure
   ]
+  @analytics_resources [
+    EventSales.Analytics.Resources.EventAggregateSnapshot,
+    EventSales.Analytics.Resources.DailySalesAggregateSnapshot
+  ]
   @audit_resources [
     EventSales.Audit.Resources.AuditLog
   ]
@@ -86,6 +90,7 @@ defmodule EventSales.DomainBoundariesTest do
 
     assert Ash.Domain.Info.resources(EventSales.Sales) == @sales_resources
     assert Ash.Domain.Info.resources(EventSales.Ingestion) == @ingestion_resources
+    assert Ash.Domain.Info.resources(EventSales.Analytics) == @analytics_resources
 
     assert Ash.Domain.Info.resources(EventSales.Audit) == @audit_resources
 
@@ -96,6 +101,7 @@ defmodule EventSales.DomainBoundariesTest do
               EventSales.Catalog,
               EventSales.Sales,
               EventSales.Ingestion,
+              EventSales.Analytics,
               EventSales.Audit
             ] do
       assert Ash.Domain.Info.resources(domain) == []
@@ -134,6 +140,25 @@ defmodule EventSales.DomainBoundariesTest do
 
     for pattern <- @forbidden_woocommerce_rest_patterns do
       assert [] = files_containing(scan_paths, pattern)
+    end
+  end
+
+  test "dashboard live code does not scan sales rows directly" do
+    forbidden_patterns = [
+      "EventAggregator",
+      "sales_order_items",
+      "OrderItem",
+      "Repo",
+      "WooCommerce"
+    ]
+
+    scan_paths = implementation_files("lib/event_sales_web/live/admin")
+
+    for path <- scan_paths,
+        path |> Path.basename() |> String.starts_with?("dashboard") do
+      for pattern <- forbidden_patterns do
+        assert [] = files_containing([path], pattern)
+      end
     end
   end
 

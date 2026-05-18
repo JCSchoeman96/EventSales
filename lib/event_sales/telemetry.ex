@@ -23,6 +23,9 @@ defmodule EventSales.Telemetry do
   @hot_state_event_applied [:event_sales, :hot_state, :event, :applied]
   @hot_state_event_ignored [:event_sales, :hot_state, :event, :ignored]
   @hot_state_snapshot_write [:event_sales, :hot_state, :snapshot, :write]
+  @snapshot_refresh_start [:event_sales, :snapshots, :refresh, :start]
+  @snapshot_refresh_stop [:event_sales, :snapshots, :refresh, :stop]
+  @snapshot_refresh_exception [:event_sales, :snapshots, :refresh, :exception]
   @cache_invalidate [:event_sales, :cache, :invalidate]
   @missing_catalog_recovery_start [:event_sales, :catalog, :missing_catalog, :recovery, :start]
   @missing_catalog_recovery_stop [:event_sales, :catalog, :missing_catalog, :recovery, :stop]
@@ -56,6 +59,9 @@ defmodule EventSales.Telemetry do
       hot_state_event_applied(),
       hot_state_event_ignored(),
       hot_state_snapshot_write(),
+      snapshot_refresh_start(),
+      snapshot_refresh_stop(),
+      snapshot_refresh_exception(),
       cache_invalidate(),
       missing_catalog_recovery_start(),
       missing_catalog_recovery_stop(),
@@ -117,6 +123,18 @@ defmodule EventSales.Telemetry do
   @doc "HotStateAggregator attempted to write a warm snapshot."
   @spec hot_state_snapshot_write() :: event_name()
   def hot_state_snapshot_write, do: @hot_state_snapshot_write
+
+  @doc "Historical reporting snapshot refresh started."
+  @spec snapshot_refresh_start() :: event_name()
+  def snapshot_refresh_start, do: @snapshot_refresh_start
+
+  @doc "Historical reporting snapshot refresh completed."
+  @spec snapshot_refresh_stop() :: event_name()
+  def snapshot_refresh_stop, do: @snapshot_refresh_stop
+
+  @doc "Historical reporting snapshot refresh failed."
+  @spec snapshot_refresh_exception() :: event_name()
+  def snapshot_refresh_exception, do: @snapshot_refresh_exception
 
   @doc "Cache invalidation signal for an event scope (Slice 3.0 telemetry-only facade)."
   @spec cache_invalidate() :: event_name()
