@@ -40,6 +40,11 @@ defmodule EventSalesWeb.Router do
     plug EventSalesWeb.Plugs.AdminOnly
   end
 
+  pipeline :admin_dashboard do
+    plug EventSalesWeb.Plugs.LoadCurrentUser
+    plug EventSalesWeb.Plugs.AdminOnly
+  end
+
   scope "/", EventSalesWeb do
     get "/health", HealthController, :show
   end
@@ -62,6 +67,12 @@ defmodule EventSalesWeb.Router do
     live "/internal/mappings", EventSalesWeb.Live.Admin.MappingsLive
 
     ash_admin("/internal/ash-admin")
+  end
+
+  scope "/admin", EventSalesWeb do
+    pipe_through [:browser, :admin_dashboard]
+
+    live "/dashboard", Live.Admin.DashboardLive
   end
 
   # Other scopes may use custom stacks.

@@ -1,9 +1,20 @@
 defmodule EventSalesWeb.Live.Components.StaleDataBanner do
   @moduledoc """
-  Placeholder for Slice 1.0.
-
-  Do not implement business logic here before the owning slice.
+  Presentational banner for dashboard hot-state freshness.
   """
 
-  # TODO: Implement in Slice 1.0.
+  use Phoenix.Component
+
+  attr :hot_state, :map, required: true
+
+  def banner(assigns) do
+    ~H"""
+    <div
+      :if={@hot_state[:state] in [:warming, :stale]}
+      class="mb-6 border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950"
+    >
+      Dashboard data is {@hot_state[:state]}.
+    </div>
+    """
+  end
 end

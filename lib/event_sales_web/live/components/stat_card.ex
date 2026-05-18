@@ -1,9 +1,19 @@
 defmodule EventSalesWeb.Live.Components.StatCard do
   @moduledoc """
-  Placeholder for Slice 1.0.
-
-  Do not implement business logic here before the owning slice.
+  Presentational statistic card for admin dashboard metrics.
   """
 
-  # TODO: Implement in Slice 1.0.
+  use Phoenix.Component
+
+  attr :title, :string, required: true
+  attr :value, :any, required: true
+
+  def card(assigns) do
+    ~H"""
+    <div class="border border-zinc-200 bg-white p-4">
+      <p class="text-xs font-semibold uppercase text-zinc-500">{@title}</p>
+      <p class="mt-2 text-2xl font-semibold text-zinc-900">{@value}</p>
+    </div>
+    """
+  end
 end
