@@ -34,8 +34,7 @@ defmodule EventSales.Ingestion.OrderReconciliation do
   }
 
   @type step_result ::
-          {:ok, SyncRun.t()}
-          | {:continue, SyncRun.t()}
+          {:continue, SyncRun.t()}
           | {:complete, SyncRun.t()}
           | {:pause, SyncRun.t(), atom(), pos_integer()}
           | {:error, term()}
@@ -375,8 +374,6 @@ defmodule EventSales.Ingestion.OrderReconciliation do
 
   defp emit_step_result(run, {:complete, _}), do: emit_stop(run, :completed)
   defp emit_step_result(run, {:continue, _}), do: emit_stop(run, :continued)
-  defp emit_step_result(run, {:ok, _}), do: emit_stop(run, :ok)
-  defp emit_step_result(_run, {:pause, _, _, _}), do: :ok
   defp emit_step_result(_run, {:error, _}), do: :ok
 
   defp emit_stop(%SyncRun{} = run, result) do

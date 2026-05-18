@@ -127,8 +127,6 @@ defmodule EventSales.Ingestion.Workers.ReconcileOrdersWorker do
     :ok
   end
 
-  defp handle_result({:ok, _run}), do: :ok
-
   defp handle_result({:error, reason}), do: {:error, reason}
 
   defp opts do

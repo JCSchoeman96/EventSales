@@ -79,7 +79,12 @@ defmodule EventSales.Analytics.OrderProcessedNotifier do
     }
   end
 
-  defp aggregate_reconciliation_event_id(%Order{} = order, %SyncRun{} = sync_run, event_id, source_updated_at) do
+  defp aggregate_reconciliation_event_id(
+         %Order{} = order,
+         %SyncRun{} = sync_run,
+         event_id,
+         source_updated_at
+       ) do
     source_timestamp =
       case source_updated_at do
         %DateTime{} = datetime -> DateTime.to_iso8601(datetime)
