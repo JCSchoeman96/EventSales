@@ -70,7 +70,7 @@ defmodule EventSales.Analytics.HistoricalReportingSnapshotsTest do
     assert second.currency == "ZAR"
     assert second.business_timezone == "Africa/Johannesburg"
     assert second.source_row_count == 6
-    assert second.source_watermark_at == ~U[2026-05-17 08:04:00.000000Z]
+    assert second.source_watermark_at == ~U[2026-05-17 08:03:00.000000Z]
     assert second.snapshot_version == 1
   end
 
@@ -230,9 +230,30 @@ defmodule EventSales.Analytics.HistoricalReportingSnapshotsTest do
   end
 
   defp create_completed_sale!(source, event, ticket, attrs) do
-    order = create_order!(source, :completed, attrs)
-    create_item!(order, event, ticket, attrs)
+    {order_attrs, item_attrs} = split_completed_sale_attrs(attrs)
+    order = create_order!(source, :completed, order_attrs)
+    create_item!(order, event, ticket, item_attrs)
     order
+  end
+
+  defp split_completed_sale_attrs(attrs) do
+    attrs = Keyword.new(attrs)
+
+    item_keys = [
+      :woo_line_item_id,
+      :woo_product_id,
+      :woo_variation_id,
+      :name,
+      :quantity,
+      :line_subtotal,
+      :line_total,
+      :discount_total,
+      :item_kind,
+      :mapping_status
+    ]
+
+    {item_attrs, order_attrs} = Keyword.split(attrs, item_keys)
+    {order_attrs, item_attrs}
   end
 
   defp create_order!(source, status, attrs) do
