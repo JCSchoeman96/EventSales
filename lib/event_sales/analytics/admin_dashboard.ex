@@ -98,10 +98,10 @@ defmodule EventSales.Analytics.AdminDashboard do
     end
   end
 
-  defp snapshot_or_bounded_summary(event_id, opts) do
+  defp snapshot_or_bounded_summary(event_id, _opts) do
     case SnapshotReader.summary_for_event(event_id) do
       {:ok, summary} -> normalize_summary(summary)
-      :miss -> bounded_summary(event_id, opts)
+      :miss -> empty_summary()
       {:error, _reason} -> empty_summary()
     end
   end
@@ -120,28 +120,6 @@ defmodule EventSales.Analytics.AdminDashboard do
       |> Map.put(:today_revenue, daily_summary.today_revenue)
     else
       _other -> summary
-    end
-  end
-
-  defp bounded_summary(event_id, opts) do
-    row_limit = limit(opts, :summary_row_limit, @default_row_limit)
-    now = Keyword.get_lazy(opts, :now, &DateTime.utc_now/0)
-
-    OrderItem
-    |> Ash.Query.filter(event_id == ^event_id)
-    |> Ash.Query.sort(updated_at: :desc)
-    |> Ash.Query.limit(row_limit)
-    |> Ash.Query.load(:order)
-    |> Ash.read(domain: Sales)
-    |> case do
-      {:ok, rows} ->
-        rows
-        |> MetricRules.summarize(now: now)
-        |> Map.update!(:status_breakdown, &normalize_status_breakdown/1)
-        |> normalize_summary()
-
-      {:error, _reason} ->
-        empty_summary()
     end
   end
 

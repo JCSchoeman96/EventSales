@@ -1,13 +1,16 @@
 defmodule EventSales.Analytics.AdminDashboardTest do
   use EventSales.DataCase, async: false
 
-  alias EventSales.Analytics.AdminDashboard
+  alias EventSales.Analytics.{AdminDashboard, DashboardCache, HotStateAggregator}
   alias EventSales.Catalog.Resources.{Event, TicketType}
   alias EventSales.Sales
   alias EventSales.Sales.Resources.{Order, OrderItem}
   alias EventSales.TestSupport.SalesHelpers
 
   setup do
+    HotStateAggregator.reset_for_test!()
+    on_exit(fn -> HotStateAggregator.reset_for_test!() end)
+
     source = SalesHelpers.create_source_system!()
 
     event =
@@ -30,7 +33,7 @@ defmodule EventSales.Analytics.AdminDashboardTest do
     }
   end
 
-  test "completed mapped ticket rows contribute to dashboard totals", %{
+  test "hot event summary contributes to dashboard totals", %{
     source: source,
     event: event,
     ga: ga
@@ -44,6 +47,15 @@ defmodule EventSales.Analytics.AdminDashboardTest do
       woo_line_item_id: 1
     )
 
+    DashboardCache.put_event_summary(event.id, %{
+      total_sold: 2,
+      total_revenue: Decimal.new("900.00"),
+      today_sold: 2,
+      today_revenue: Decimal.new("900.00"),
+      status_breakdown: %{"completed" => 1},
+      currency: "ZAR"
+    })
+
     assert {:ok, snapshot} = AdminDashboard.snapshot(now: ~U[2026-05-17 10:00:00Z])
 
     assert snapshot.kpis.total_sold == 2
@@ -51,6 +63,31 @@ defmodule EventSales.Analytics.AdminDashboardTest do
 
     assert %{event_name: "Dashboard Event", total_sold: 2} =
              Enum.find(snapshot.events, &(&1.event_id == event.id))
+  end
+
+  test "event KPI rows do not backfill totals from raw order items without hot or snapshot data",
+       %{
+         source: source,
+         event: event,
+         ga: ga
+       } do
+    completed =
+      create_order!(source, :completed, woo_order_id: 151, raw_total: Decimal.new("900.00"))
+
+    create_item!(completed, event, ga,
+      quantity: 2,
+      line_total: Decimal.new("900.00"),
+      woo_line_item_id: 15
+    )
+
+    assert {:ok, snapshot} = AdminDashboard.snapshot(now: ~U[2026-05-17 10:00:00Z])
+
+    assert %{event_name: "Dashboard Event", total_sold: 0, total_revenue: revenue} =
+             Enum.find(snapshot.events, &(&1.event_id == event.id))
+
+    assert revenue == Decimal.new("0")
+    assert snapshot.kpis.total_sold == 0
+    assert snapshot.kpis.total_revenue == Decimal.new("0")
   end
 
   test "non-completed statuses render but do not contribute to sold or revenue", %{
@@ -65,6 +102,15 @@ defmodule EventSales.Analytics.AdminDashboardTest do
     create_item!(pending, event, ga, woo_line_item_id: 2, line_total: Decimal.new("450.00"))
     create_item!(refunded, event, ga, woo_line_item_id: 3, line_total: Decimal.new("450.00"))
     create_item!(cancelled, event, ga, woo_line_item_id: 4, line_total: Decimal.new("450.00"))
+
+    DashboardCache.put_event_summary(event.id, %{
+      total_sold: 0,
+      total_revenue: Decimal.new("0"),
+      today_sold: 0,
+      today_revenue: Decimal.new("0"),
+      status_breakdown: %{"cancelled" => 1, "pending" => 1, "refunded" => 1},
+      currency: "ZAR"
+    })
 
     assert {:ok, snapshot} = AdminDashboard.snapshot()
 
