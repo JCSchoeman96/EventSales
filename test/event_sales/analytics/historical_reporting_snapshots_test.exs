@@ -1,6 +1,8 @@
 defmodule EventSales.Analytics.HistoricalReportingSnapshotsTest do
   use EventSales.DataCase, async: false
 
+  require Ash.Query
+
   alias EventSales.Analytics.{DashboardCache, SnapshotReader, SnapshotRefresh}
   alias EventSales.Analytics.Resources.{DailySalesAggregateSnapshot, EventAggregateSnapshot}
   alias EventSales.Catalog.Resources.{Event, TicketType}
@@ -99,7 +101,15 @@ defmodule EventSales.Analytics.HistoricalReportingSnapshotsTest do
     assert second.total_revenue == Decimal.new("900.00")
     assert second.today_sold == 2
     assert second.today_revenue == Decimal.new("900.00")
-    assert second.source_row_count == 3
+
+    assert second.status_breakdown == %{
+             "cancelled" => 1,
+             "completed" => 3,
+             "refunded" => 1
+           }
+
+    assert second.source_row_count == 5
+    assert second.source_watermark_at == ~U[2026-05-17 08:03:00.000000Z]
   end
 
   test "refresh invalidates dashboard cache for touched event", %{event: event} do
