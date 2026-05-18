@@ -15,6 +15,7 @@ defmodule EventSales.Telemetry do
   @webhook_backpressure [:event_sales, :webhook, :backpressure]
   @webhook_buffered [:event_sales, :webhook, :buffered]
   @webhook_drained [:event_sales, :webhook, :drained]
+  @webhook_replay_audit_failed [:event_sales, :webhook, :replay, :audit_failed]
   @rest_request_stop [:event_sales, :rest, :request, :stop]
   @rest_request_exception [:event_sales, :rest, :request, :exception]
   @hot_state_rebuild_start [:event_sales, :hot_state, :rebuild, :start]
@@ -51,6 +52,7 @@ defmodule EventSales.Telemetry do
       webhook_backpressure(),
       webhook_buffered(),
       webhook_drained(),
+      webhook_replay_audit_failed(),
       rest_request_stop(),
       rest_request_exception(),
       hot_state_rebuild_start(),
@@ -91,6 +93,10 @@ defmodule EventSales.Telemetry do
   @doc "Buffered webhooks drained to Postgres."
   @spec webhook_drained() :: event_name()
   def webhook_drained, do: @webhook_drained
+
+  @doc "Webhook replay was queued but replay audit logging failed."
+  @spec webhook_replay_audit_failed() :: event_name()
+  def webhook_replay_audit_failed, do: @webhook_replay_audit_failed
 
   @doc "WooCommerce REST request completed."
   @spec rest_request_stop() :: event_name()
