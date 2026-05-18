@@ -73,6 +73,8 @@ defmodule EventSalesWeb.Router do
     pipe_through [:browser, :admin_dashboard]
 
     live "/dashboard", Live.Admin.DashboardLive
+    live "/events", Live.Admin.EventsLive
+    live "/events/:id", Live.Admin.EventDetailLive
   end
 
   # Other scopes may use custom stacks.
