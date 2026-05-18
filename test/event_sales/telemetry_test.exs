@@ -126,6 +126,32 @@ defmodule EventSales.TelemetryTest do
     })
   end
 
+  test "reconciliation telemetry metrics are defined" do
+    assert_metric(%Counter{
+      name: [:event_sales, :reconciliation, :start, :count],
+      event_name: [:event_sales, :reconciliation, :start],
+      measurement: :count
+    })
+
+    assert_metric(%Counter{
+      name: [:event_sales, :reconciliation, :stop, :count],
+      event_name: [:event_sales, :reconciliation, :stop],
+      measurement: :count
+    })
+
+    assert_metric(%Counter{
+      name: [:event_sales, :reconciliation, :exception, :count],
+      event_name: [:event_sales, :reconciliation, :exception],
+      measurement: :count
+    })
+
+    assert_metric(%Counter{
+      name: [:event_sales, :reconciliation, :pause, :count],
+      event_name: [:event_sales, :reconciliation, :pause],
+      measurement: :count
+    })
+  end
+
   test "cache invalidation telemetry metric is defined with low-cardinality tags" do
     assert_metric_with_tags(%Counter{
       name: [:event_sales, :cache, :invalidate, :count],

@@ -31,7 +31,9 @@ defmodule EventSales.DomainBoundariesTest do
   ]
   @ingestion_resources [
     EventSales.Ingestion.Resources.WebhookEvent,
-    EventSales.Ingestion.Resources.WebhookDeliveryFailure
+    EventSales.Ingestion.Resources.WebhookDeliveryFailure,
+    EventSales.Ingestion.Resources.SyncRun,
+    EventSales.Ingestion.Resources.SyncCursor
   ]
   @analytics_resources [
     EventSales.Analytics.Resources.EventAggregateSnapshot,
@@ -168,7 +170,9 @@ defmodule EventSales.DomainBoundariesTest do
     ]
 
     allowed_files = [
-      "lib/event_sales/ingestion/workers/missing_catalog_resolution_worker.ex"
+      "lib/event_sales/ingestion/workers/missing_catalog_resolution_worker.ex",
+      "lib/event_sales/ingestion/workers/reconcile_orders_worker.ex",
+      "lib/event_sales/ingestion/order_reconciliation.ex"
     ]
 
     matches =

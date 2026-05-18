@@ -188,6 +188,30 @@ defmodule EventSalesWeb.Telemetry do
         tags: [:reason, :scope, :source],
         description: "Historical reporting snapshot refresh failures"
       ),
+      counter("event_sales.reconciliation.start.count",
+        event_name: EventSales.Telemetry.reconciliation_start(),
+        measurement: :count,
+        tags: [:sync_mode, :requested_via, :source],
+        description: "Scoped order reconciliation starts"
+      ),
+      counter("event_sales.reconciliation.stop.count",
+        event_name: EventSales.Telemetry.reconciliation_stop(),
+        measurement: :count,
+        tags: [:sync_mode, :requested_via, :result, :source],
+        description: "Scoped order reconciliation step completions"
+      ),
+      counter("event_sales.reconciliation.exception.count",
+        event_name: EventSales.Telemetry.reconciliation_exception(),
+        measurement: :count,
+        tags: [:sync_mode, :requested_via, :reason, :source],
+        description: "Scoped order reconciliation failures"
+      ),
+      counter("event_sales.reconciliation.pause.count",
+        event_name: EventSales.Telemetry.reconciliation_pause(),
+        measurement: :count,
+        tags: [:sync_mode, :requested_via, :pause_reason, :source],
+        description: "Scoped order reconciliation pauses"
+      ),
 
       # Oban Metrics
       last_value("oban.supervisor.init.system_time",

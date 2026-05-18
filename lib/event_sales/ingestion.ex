@@ -10,5 +10,7 @@ defmodule EventSales.Ingestion do
   resources do
     resource EventSales.Ingestion.Resources.WebhookEvent
     resource EventSales.Ingestion.Resources.WebhookDeliveryFailure
+    resource EventSales.Ingestion.Resources.SyncRun
+    resource EventSales.Ingestion.Resources.SyncCursor
   end
 end
