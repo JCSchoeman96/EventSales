@@ -15,7 +15,8 @@ defmodule EventSales.Analytics.HotStateAggregator do
     AggregateEvent,
     AggregateEventIdempotency,
     CacheKeys,
-    DashboardCache
+    DashboardCache,
+    DashboardPubSub
   }
 
   alias EventSales.Telemetry
@@ -553,11 +554,7 @@ defmodule EventSales.Analytics.HotStateAggregator do
   end
 
   defp broadcast_update(event_id, updated_at) do
-    Phoenix.PubSub.broadcast(
-      EventSales.PubSub,
-      "analytics:event:#{event_id}",
-      {:hot_state_updated, event_id, updated_at}
-    )
+    DashboardPubSub.broadcast_hot_state_updated(event_id, updated_at)
   end
 
   defp clear_table do

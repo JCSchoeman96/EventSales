@@ -7,12 +7,15 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
   alias EventSales.Ingestion.WebhookProcessor
   alias EventSales.Sales
   alias EventSales.Sales.Resources.{CouponSnapshot, Order, OrderItem}
+  alias EventSales.Telemetry
   alias EventSales.TestSupport.FixtureHelpers
   alias EventSales.TestSupport.SalesHelpers
 
   setup do
     source = SalesHelpers.create_source_system!()
     original_upserter = Application.get_env(:event_sales, :order_upserter)
+    original_notifier = Application.get_env(:event_sales, :order_processed_notifier)
+    Application.put_env(:event_sales, :webhook_processor_test_pid, self())
 
     on_exit(fn ->
       if original_upserter do
@@ -20,6 +23,14 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
       else
         Application.delete_env(:event_sales, :order_upserter)
       end
+
+      if original_notifier do
+        Application.put_env(:event_sales, :order_processed_notifier, original_notifier)
+      else
+        Application.delete_env(:event_sales, :order_processed_notifier)
+      end
+
+      Application.delete_env(:event_sales, :webhook_processor_test_pid)
     end)
 
     {:ok, source: source}
@@ -256,6 +267,78 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
     assert queued.error_message
   end
 
+  test "default handler calls notifier after successful durable order upsert", %{source: source} do
+    order = create_order!(source)
+    Application.put_env(:event_sales, :order_upserter, __MODULE__.SuccessfulUpserter)
+    Application.put_env(:event_sales, :order_processed_notifier, __MODULE__.Notifier)
+    Application.put_env(:event_sales, :webhook_processor_test_order, order)
+
+    {:ok, event} = create_event(source, %{topic: "order.updated"})
+
+    assert :ok = WebhookProcessor.process(event.id)
+
+    assert_receive {:notified, notified_order_id, notified_event_id}, 500
+    assert notified_order_id == order.id
+    assert notified_event_id == event.id
+
+    processed = reload!(event.id)
+    assert processed.status == :processed
+  end
+
+  test "default handler does not notify after stale noop", %{source: source} do
+    Application.put_env(:event_sales, :order_upserter, __MODULE__.StaleNoopUpserter)
+    Application.put_env(:event_sales, :order_processed_notifier, __MODULE__.Notifier)
+
+    {:ok, event} = create_event(source, %{topic: "order.updated"})
+
+    assert :ok = WebhookProcessor.process(event.id)
+
+    refute_receive {:notified, _order_id, _event_id}, 100
+
+    processed = reload!(event.id)
+    assert processed.status == :processed
+  end
+
+  test "notifier failure does not prevent processed status", %{source: source} do
+    order = create_order!(source)
+    Application.put_env(:event_sales, :order_upserter, __MODULE__.SuccessfulUpserter)
+    Application.put_env(:event_sales, :order_processed_notifier, __MODULE__.FailingNotifier)
+    Application.put_env(:event_sales, :webhook_processor_test_order, order)
+
+    handler_id = "webhook-processor-notifier-failure-#{System.unique_integer([:positive])}"
+    test_pid = self()
+
+    :ok =
+      :telemetry.attach(
+        handler_id,
+        Telemetry.hot_state_event_ignored(),
+        fn event_name, measurements, metadata, _config ->
+          send(test_pid, {:telemetry, event_name, measurements, metadata})
+        end,
+        nil
+      )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+
+    {:ok, event} = create_event(source, %{topic: "order.updated"})
+
+    assert :ok = WebhookProcessor.process(event.id)
+
+    processed = reload!(event.id)
+    assert processed.status == :processed
+    assert processed.processed_at
+    refute processed.failed_at
+
+    assert_receive {:telemetry, [:event_sales, :hot_state, :event, :ignored], %{count: 1},
+                    %{
+                      reason: :notifier_failed,
+                      event_reason: :order_processed,
+                      result: :ignored,
+                      source: :webhook
+                    }},
+                   500
+  end
+
   test "missing event is discarded" do
     assert {:discard, :not_found} = WebhookProcessor.process(Ecto.UUID.generate())
   end
@@ -282,6 +365,38 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
     def upsert_from_webhook_event(_event) do
       {:error, %DBConnection.ConnectionError{message: "connection not available"}}
     end
+  end
+
+  defmodule SuccessfulUpserter do
+    @moduledoc false
+
+    def upsert_from_webhook_event(_event) do
+      {:ok, Application.fetch_env!(:event_sales, :webhook_processor_test_order)}
+    end
+  end
+
+  defmodule StaleNoopUpserter do
+    @moduledoc false
+
+    def upsert_from_webhook_event(_event), do: {:ok, :stale_noop}
+  end
+
+  defmodule Notifier do
+    @moduledoc false
+
+    def notify_order_processed(order, event) do
+      :event_sales
+      |> Application.fetch_env!(:webhook_processor_test_pid)
+      |> send({:notified, order.id, event.id})
+
+      :ok
+    end
+  end
+
+  defmodule FailingNotifier do
+    @moduledoc false
+
+    def notify_order_processed(_order, _event), do: raise("notifier unavailable")
   end
 
   defp create_event(source, attrs) do
@@ -312,5 +427,26 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
 
   defp unique_delivery_id do
     "delivery-#{System.unique_integer([:positive])}"
+  end
+
+  defp create_order!(source) do
+    Ash.create!(
+      Order,
+      %{
+        source_system_id: source.id,
+        woo_order_id: System.unique_integer([:positive]),
+        order_number: "WP-#{System.unique_integer([:positive])}",
+        status: :completed,
+        currency: "ZAR",
+        completed_at: ~U[2026-05-17 08:00:00.000000Z],
+        created_at_source: ~U[2026-05-17 07:00:00.000000Z],
+        updated_at_source: ~U[2026-05-17 08:00:00.000000Z],
+        raw_total: Decimal.new("0"),
+        raw_discount_total: Decimal.new("0"),
+        raw_tax_total: Decimal.new("0")
+      },
+      action: :create_normalized,
+      domain: Sales
+    )
   end
 end

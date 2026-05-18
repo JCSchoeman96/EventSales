@@ -1,8 +1,7 @@
 defmodule EventSales.Analytics.HotStateAggregatorTest do
   use EventSales.DataCase, async: false
 
-  alias EventSales.Analytics.CacheKeys
-  alias EventSales.Analytics.HotStateAggregator
+  alias EventSales.Analytics.{CacheKeys, DashboardPubSub, HotStateAggregator}
   alias EventSales.Catalog.Resources.{Event, TicketType}
   alias EventSales.Sales
   alias EventSales.Sales.Resources.{Order, OrderItem}
@@ -169,7 +168,7 @@ defmodule EventSales.Analytics.HotStateAggregatorTest do
       line_total: Decimal.new("900.00")
     })
 
-    Phoenix.PubSub.subscribe(EventSales.PubSub, "analytics:event:#{event.id}")
+    DashboardPubSub.subscribe_event(event.id)
 
     assert :ok = HotStateAggregator.apply_event(aggregate_event(event))
 

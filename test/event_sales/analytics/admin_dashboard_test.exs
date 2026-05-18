@@ -65,6 +65,98 @@ defmodule EventSales.Analytics.AdminDashboardTest do
              Enum.find(snapshot.events, &(&1.event_id == event.id))
   end
 
+  test "event_row returns one event row from hot cache", %{event: event} do
+    DashboardCache.put_event_summary(event.id, %{
+      total_sold: 3,
+      total_revenue: Decimal.new("1350.00"),
+      today_sold: 1,
+      today_revenue: Decimal.new("450.00"),
+      status_breakdown: %{"completed" => 2},
+      currency: "ZAR",
+      updated_at: ~U[2026-05-17 10:00:00Z]
+    })
+
+    assert {:ok, row} = AdminDashboard.event_row(event.id)
+
+    assert row.event_id == event.id
+    assert row.event_name == "Dashboard Event"
+    assert row.total_sold == 3
+    assert row.total_revenue == Decimal.new("1350.00")
+    assert row.status_breakdown == %{"completed" => 2}
+    assert row.refreshed_at == ~U[2026-05-17 10:00:00Z]
+  end
+
+  test "event_row falls back to zero summary for known event without hot or snapshot data", %{
+    event: event
+  } do
+    assert {:ok, row} = AdminDashboard.event_row(event.id)
+
+    assert row.event_id == event.id
+    assert row.total_sold == 0
+    assert row.total_revenue == Decimal.new("0")
+    assert row.status_breakdown == %{}
+  end
+
+  test "event_row returns not_found for unknown event id" do
+    assert :not_found = AdminDashboard.event_row(Ecto.UUID.generate())
+  end
+
+  test "replace_event_row updates displayed row and recomputes totals", %{
+    event: event,
+    other_event: other_event
+  } do
+    snapshot = %{
+      kpis: %{total_sold: 1, total_revenue: Decimal.new("100.00")},
+      statuses: %{"completed" => 1},
+      events: [
+        row(event, %{total_sold: 1, total_revenue: Decimal.new("100.00")}),
+        row(other_event, %{
+          total_sold: 2,
+          total_revenue: Decimal.new("200.00"),
+          status_breakdown: %{"pending" => 2}
+        })
+      ],
+      ticket_types: [%{ticket_type_name: "GA"}],
+      recent_orders: [%{order_number: "R-1"}],
+      unmapped_alerts: [%{name: "Needs Mapping"}],
+      hot_state: %{state: :ready}
+    }
+
+    replacement =
+      row(event, %{
+        total_sold: 4,
+        total_revenue: Decimal.new("400.00"),
+        status_breakdown: %{"completed" => 4}
+      })
+
+    assert {:ok, updated} = AdminDashboard.replace_event_row(snapshot, replacement)
+
+    event_id = event.id
+    other_event_id = other_event.id
+
+    assert [
+             %{event_id: ^event_id, total_sold: 4},
+             %{event_id: ^other_event_id, total_sold: 2}
+           ] = updated.events
+
+    assert updated.kpis.total_sold == 6
+    assert updated.kpis.total_revenue == Decimal.new("600.00")
+    assert updated.statuses == %{"completed" => 4, "pending" => 2}
+    assert updated.ticket_types == snapshot.ticket_types
+    assert updated.recent_orders == snapshot.recent_orders
+    assert updated.unmapped_alerts == snapshot.unmapped_alerts
+    assert updated.hot_state == snapshot.hot_state
+  end
+
+  test "replace_event_row returns not_found when row is not displayed", %{
+    event: event,
+    other_event: other_event
+  } do
+    snapshot = %{events: [row(event, %{})]}
+
+    assert :not_found = AdminDashboard.replace_event_row(snapshot, row(other_event, %{}))
+  end
+
   test "event KPI rows do not backfill totals from raw order items without hot or snapshot data",
        %{
          source: source,
@@ -261,6 +353,22 @@ defmodule EventSales.Analytics.AdminDashboardTest do
       action: :create_normalized,
       domain: Sales
     )
+  end
+
+  defp row(%Event{} = event, attrs) do
+    defaults = %{
+      event_id: event.id,
+      event_name: event.name,
+      total_sold: 0,
+      total_revenue: Decimal.new("0"),
+      today_sold: 0,
+      today_revenue: Decimal.new("0"),
+      status_breakdown: %{},
+      currency: "ZAR",
+      refreshed_at: nil
+    }
+
+    Map.merge(defaults, Map.new(attrs))
   end
 
   defp unique_slug(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"

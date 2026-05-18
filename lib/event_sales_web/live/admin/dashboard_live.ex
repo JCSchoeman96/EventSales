@@ -6,6 +6,7 @@ defmodule EventSalesWeb.Live.Admin.DashboardLive do
   use EventSalesWeb, :live_view
 
   alias EventSales.Analytics.AdminDashboard
+  alias EventSales.Analytics.DashboardPubSub
   alias EventSales.Analytics.HotStateAggregator
   alias EventSalesWeb.Live.Admin.ManualActionRateLimiter
 
@@ -23,7 +24,9 @@ defmodule EventSalesWeb.Live.Admin.DashboardLive do
      socket
      |> assign(:page_title, "Admin Dashboard")
      |> assign(:current_user_id, current_user_id(session))
-     |> load_dashboard()}
+     |> assign(:subscribed_event_ids, MapSet.new())
+     |> load_dashboard()
+     |> maybe_subscribe_to_event_topics()}
   end
 
   @impl true
@@ -37,11 +40,24 @@ defmodule EventSalesWeb.Live.Admin.DashboardLive do
         {:noreply,
          socket
          |> put_refresh_flash(result)
-         |> load_dashboard()}
+         |> load_dashboard()
+         |> maybe_subscribe_to_event_topics()}
 
       {:error, :rate_limited} ->
         {:noreply, put_flash(socket, :error, "Try again shortly")}
     end
+  end
+
+  @impl true
+  def handle_info({:hot_state_updated, event_id, _updated_at}, socket) when is_binary(event_id) do
+    socket =
+      case AdminDashboard.event_row(event_id) do
+        {:ok, row} -> replace_event_row(socket, row)
+        :not_found -> socket
+        {:error, _reason} -> socket
+      end
+
+    {:noreply, socket}
   end
 
   @impl true
@@ -167,6 +183,36 @@ defmodule EventSalesWeb.Live.Admin.DashboardLive do
         |> assign(:load_error, reason)
         |> assign(:dashboard, empty_dashboard())
         |> put_flash(:error, "Dashboard data could not be loaded")
+    end
+  end
+
+  defp maybe_subscribe_to_event_topics(socket) do
+    if connected?(socket) do
+      subscribed_event_ids = socket.assigns.subscribed_event_ids
+
+      socket.assigns.dashboard.events
+      |> Enum.map(& &1.event_id)
+      |> Enum.reject(&MapSet.member?(subscribed_event_ids, &1))
+      |> Enum.each(&DashboardPubSub.subscribe_event/1)
+      |> then(fn _ ->
+        assign(socket, :subscribed_event_ids, all_displayed_event_ids(socket))
+      end)
+    else
+      socket
+    end
+  end
+
+  defp all_displayed_event_ids(socket) do
+    socket.assigns.dashboard.events
+    |> Enum.map(& &1.event_id)
+    |> MapSet.new()
+    |> MapSet.union(socket.assigns.subscribed_event_ids)
+  end
+
+  defp replace_event_row(socket, row) do
+    case AdminDashboard.replace_event_row(socket.assigns.dashboard, row) do
+      {:ok, dashboard} -> assign(socket, :dashboard, dashboard)
+      :not_found -> socket
     end
   end
 
