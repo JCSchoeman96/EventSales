@@ -145,7 +145,11 @@ defmodule EventSales.Ingestion.OrderReconciliation do
           %{counts | orders_stale_count: counts.orders_stale_count + 1}
 
         {:error, _reason} ->
-          %{counts | orders_failed_count: counts.orders_failed_count + 1, errors_count: counts.errors_count + 1}
+          %{
+            counts
+            | orders_failed_count: counts.orders_failed_count + 1,
+              errors_count: counts.errors_count + 1
+          }
       end
     else
       counts
@@ -163,7 +167,8 @@ defmodule EventSales.Ingestion.OrderReconciliation do
     else
       next_page = (cursor.page || 1) + 1
 
-      with {:ok, _cursor} <- upsert_cursor(cursor, %{page: next_page, last_seen_order_id: last_order_id}),
+      with {:ok, _cursor} <-
+             upsert_cursor(cursor, %{page: next_page, last_seen_order_id: last_order_id}),
            {:ok, updated} <- reload_run(run) do
         {:continue, updated}
       end
@@ -199,7 +204,10 @@ defmodule EventSales.Ingestion.OrderReconciliation do
       end
     else
       with {:ok, failed} <-
-             Ash.update(run, %{last_error: "woocommerce_#{reason}"}, action: :fail, domain: Ingestion) do
+             Ash.update(run, %{last_error: "woocommerce_#{reason}"},
+               action: :fail,
+               domain: Ingestion
+             ) do
         {:error, {:failed, failed, reason}}
       end
     end
@@ -350,9 +358,14 @@ defmodule EventSales.Ingestion.OrderReconciliation do
 
   defp notifier(opts) do
     cond do
-      Keyword.has_key?(opts, :notifier) -> Keyword.fetch!(opts, :notifier)
-      Keyword.has_key?(opts, :order_processed_notifier) -> Keyword.fetch!(opts, :order_processed_notifier)
-      true -> OrderProcessedNotifier
+      Keyword.has_key?(opts, :notifier) ->
+        Keyword.fetch!(opts, :notifier)
+
+      Keyword.has_key?(opts, :order_processed_notifier) ->
+        Keyword.fetch!(opts, :order_processed_notifier)
+
+      true ->
+        OrderProcessedNotifier
     end
   end
 
@@ -367,17 +380,25 @@ defmodule EventSales.Ingestion.OrderReconciliation do
   defp emit_step_result(_run, {:error, _}), do: :ok
 
   defp emit_stop(%SyncRun{} = run, result) do
-    Telemetry.emit(Telemetry.reconciliation_stop(), %{count: 1}, Map.put(telemetry_metadata(run), :result, result))
+    Telemetry.emit(
+      Telemetry.reconciliation_stop(),
+      %{count: 1},
+      Map.put(telemetry_metadata(run), :result, result)
+    )
   end
 
   defp emit_pause(%SyncRun{} = run, pause_reason) do
-    Telemetry.emit(Telemetry.reconciliation_pause(), %{count: 1},
+    Telemetry.emit(
+      Telemetry.reconciliation_pause(),
+      %{count: 1},
       Map.put(telemetry_metadata(run), :pause_reason, pause_reason)
     )
   end
 
   defp emit_exception(%SyncRun{} = run, reason) do
-    Telemetry.emit(Telemetry.reconciliation_exception(), %{count: 1},
+    Telemetry.emit(
+      Telemetry.reconciliation_exception(),
+      %{count: 1},
       Map.put(telemetry_metadata(run), :reason, reason)
     )
   end
