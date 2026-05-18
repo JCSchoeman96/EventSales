@@ -27,7 +27,7 @@ config :event_sales, Oban,
   repo: EventSales.Repo,
   notifier: Oban.Notifiers.Postgres,
   plugins: [],
-  queues: [default: 10, webhooks: 10]
+  queues: [default: 10, webhooks: 10, analytics_rebuilds: 1]
 
 config :event_sales, :redis_webhook_buffer,
   enabled: false,
@@ -42,6 +42,12 @@ config :event_sales, :hot_state_aggregator,
   snapshot_adapter: EventSales.Analytics.SnapshotStore.NoopAdapter,
   snapshot_ttl_ms: :timer.hours(1),
   max_applied_event_ids: 10_000,
+  rebuild_batch_size: 50,
+  restore_scan_count: 100,
+  restore_max_snapshots: 1_000,
+  schedule_rebuild_on_boot?: true,
+  stale_after_ms: 300_000,
+  rebuild_in_flight_timeout_ms: 600_000,
   redis_enabled: false,
   redis_url: nil
 

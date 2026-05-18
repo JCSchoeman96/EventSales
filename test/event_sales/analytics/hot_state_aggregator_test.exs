@@ -1,6 +1,7 @@
 defmodule EventSales.Analytics.HotStateAggregatorTest do
   use EventSales.DataCase, async: false
 
+  alias EventSales.Analytics.CacheKeys
   alias EventSales.Analytics.HotStateAggregator
   alias EventSales.Catalog.Resources.{Event, TicketType}
   alias EventSales.Sales
@@ -10,10 +11,12 @@ defmodule EventSales.Analytics.HotStateAggregatorTest do
   alias EventSales.TestSupport.SalesHelpers
 
   setup do
+    delete_rebuild_jobs!()
     HotStateAggregator.reset_for_test!()
     MemorySnapshotStoreAdapter.reset!()
 
     on_exit(fn ->
+      delete_rebuild_jobs!()
       HotStateAggregator.reset_for_test!()
       MemorySnapshotStoreAdapter.reset!()
     end)
@@ -28,6 +31,132 @@ defmodule EventSales.Analytics.HotStateAggregatorTest do
   test "starts under supervision" do
     assert pid = Process.whereis(HotStateAggregator)
     assert Process.alive?(pid)
+  end
+
+  test "init is lightweight and defers restore to handle_continue" do
+    assert {:ok, state, {:continue, :restore_snapshots}} =
+             HotStateAggregator.init(
+               event_aggregator: EventSales.TestSupport.Analytics.ErrorEventAggregator
+             )
+
+    assert state.lifecycle == :warming
+    assert state.rebuild_in_flight? == false
+  end
+
+  test "Redis snapshot restore populates DashboardCache and transitions ready", %{event: event} do
+    summary =
+      summary(%{
+        total_sold: 4,
+        total_revenue: Decimal.new("1200.00"),
+        updated_at: DateTime.utc_now()
+      })
+
+    assert :ok = MemorySnapshotStoreAdapter.put(CacheKeys.redis_event_snapshot(event.id), summary)
+
+    restart_hot_state_aggregator!()
+
+    assert {:ok, %{total_sold: 4}} = HotStateAggregator.summary_for_event(event.id)
+    assert %{state: :ready, restored_snapshot_count: 1} = HotStateAggregator.status()
+    assert count_rebuild_jobs() == 0
+  end
+
+  test "malformed snapshots are skipped and restore remains bounded", %{event: event} do
+    valid_summary = summary(%{total_sold: 2, updated_at: DateTime.utc_now()})
+
+    for index <- 1..3 do
+      key = CacheKeys.redis_event_snapshot("00000000-0000-0000-0000-00000000000#{index}")
+      MemorySnapshotStoreAdapter.put_raw_snapshot_for_test!(key, "{")
+    end
+
+    assert :ok =
+             MemorySnapshotStoreAdapter.put(
+               CacheKeys.redis_event_snapshot(event.id),
+               valid_summary
+             )
+
+    original = Application.get_env(:event_sales, :hot_state_aggregator)
+    put_hot_state_config!(restore_max_snapshots: 4)
+
+    try do
+      restart_hot_state_aggregator!()
+
+      assert :miss = HotStateAggregator.summary_for_event("00000000-0000-0000-0000-000000000001")
+      assert {:ok, %{total_sold: 2}} = HotStateAggregator.summary_for_event(event.id)
+      assert %{restored_snapshot_count: 1} = HotStateAggregator.status()
+      assert Keyword.fetch!(MemorySnapshotStoreAdapter.last_list_opts(), :max_snapshots) == 4
+    after
+      Application.put_env(:event_sales, :hot_state_aggregator, original)
+    end
+  end
+
+  test "missing snapshots schedule exactly one rebuild" do
+    MemorySnapshotStoreAdapter.reset!()
+    original = Application.get_env(:event_sales, :hot_state_aggregator)
+    put_hot_state_config!(schedule_rebuild_on_boot?: true)
+
+    try do
+      restart_hot_state_aggregator!()
+
+      assert %{state: :warming, rebuild_in_flight?: true} = HotStateAggregator.status()
+      assert count_rebuild_jobs() == 1
+    after
+      Application.put_env(:event_sales, :hot_state_aggregator, original)
+    end
+  end
+
+  test "repeated rebuild request is single-flight" do
+    assert :ok = HotStateAggregator.request_rebuild(:manual_refresh)
+    assert :already_running = HotStateAggregator.request_rebuild(:manual_refresh)
+
+    assert count_rebuild_jobs() == 1
+    assert %{rebuild_in_flight?: true} = HotStateAggregator.status()
+  end
+
+  test "stale in-flight rebuild reports timeout and can schedule replacement" do
+    original = Application.get_env(:event_sales, :hot_state_aggregator)
+
+    try do
+      put_hot_state_config!(rebuild_in_flight_timeout_ms: 60_000)
+
+      assert :ok = HotStateAggregator.request_rebuild(:manual_refresh)
+      assert count_rebuild_jobs() == 1
+
+      put_hot_state_config!(rebuild_in_flight_timeout_ms: -1)
+
+      assert %{state: :stale, rebuild_in_flight?: false, last_failure: :rebuild_timeout} =
+               HotStateAggregator.status()
+
+      assert :ok = HotStateAggregator.request_rebuild(:manual_refresh)
+      assert count_rebuild_jobs() == 2
+    after
+      Application.put_env(:event_sales, :hot_state_aggregator, original)
+    end
+  end
+
+  test "status is dashboard-safe when process is not running" do
+    assert :ok = Supervisor.terminate_child(EventSales.Supervisor, HotStateAggregator)
+
+    assert %{
+             state: :stale,
+             rebuild_in_flight?: false,
+             restored_snapshot_count: 0,
+             restore_finished?: false,
+             last_failure: :not_running
+           } = HotStateAggregator.status()
+
+    assert {:ok, _pid} = Supervisor.restart_child(EventSales.Supervisor, HotStateAggregator)
+    wait_until(fn -> HotStateAggregator.status().restore_finished? end)
+  end
+
+  test "restored summaries older than stale_after_ms report stale", %{event: event} do
+    old_summary = summary(%{updated_at: DateTime.add(DateTime.utc_now(), -600, :second)})
+
+    assert :ok =
+             MemorySnapshotStoreAdapter.put(CacheKeys.redis_event_snapshot(event.id), old_summary)
+
+    restart_hot_state_aggregator!()
+
+    assert %{state: :stale, restored_snapshot_count: 1} = HotStateAggregator.status()
   end
 
   test "recomputes durable summary, writes hot and warm cache, and broadcasts", %{
@@ -201,6 +330,62 @@ defmodule EventSales.Analytics.HotStateAggregatorTest do
       source_updated_at: ~U[2026-05-17 10:00:00Z],
       payload_hash: "payload-hash"
     }
+  end
+
+  defp summary(overrides) do
+    %{
+      total_sold: 0,
+      total_revenue: Decimal.new("0"),
+      today_sold: 0,
+      today_revenue: Decimal.new("0"),
+      status_breakdown: %{},
+      updated_at: ~U[2026-05-17 10:00:00Z]
+    }
+    |> Map.merge(overrides)
+  end
+
+  defp restart_hot_state_aggregator! do
+    :ok = Supervisor.terminate_child(EventSales.Supervisor, HotStateAggregator)
+    {:ok, _pid} = Supervisor.restart_child(EventSales.Supervisor, HotStateAggregator)
+    wait_until(fn -> HotStateAggregator.status().restore_finished? end)
+  end
+
+  defp wait_until(fun, attempts \\ 20)
+
+  defp wait_until(fun, attempts) when attempts > 0 do
+    if fun.() do
+      :ok
+    else
+      Process.sleep(25)
+      wait_until(fun, attempts - 1)
+    end
+  end
+
+  defp wait_until(_fun, 0), do: flunk("condition was not met before timeout")
+
+  defp delete_rebuild_jobs! do
+    import Ecto.Query
+
+    Repo.delete_all(
+      from job in Oban.Job,
+        where: job.worker == "EventSales.Analytics.Workers.RebuildHotStateWorker"
+    )
+  end
+
+  defp count_rebuild_jobs do
+    import Ecto.Query
+
+    Repo.aggregate(
+      from(job in Oban.Job,
+        where: job.worker == "EventSales.Analytics.Workers.RebuildHotStateWorker"
+      ),
+      :count
+    )
+  end
+
+  defp put_hot_state_config!(overrides) do
+    current = Application.get_env(:event_sales, :hot_state_aggregator, [])
+    Application.put_env(:event_sales, :hot_state_aggregator, Keyword.merge(current, overrides))
   end
 
   defp create_completed_sale!(source, %Event{} = event, %TicketType{} = ticket, attrs) do
