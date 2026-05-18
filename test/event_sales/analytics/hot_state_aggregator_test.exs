@@ -1,8 +1,8 @@
 defmodule EventSales.Analytics.HotStateAggregatorTest do
   use EventSales.DataCase, async: false
 
-  alias EventSales.Analytics.HotStateAggregator
   alias EventSales.Analytics.CacheKeys
+  alias EventSales.Analytics.HotStateAggregator
   alias EventSales.Catalog.Resources.{Event, TicketType}
   alias EventSales.Sales
   alias EventSales.Sales.Resources.{Order, OrderItem}

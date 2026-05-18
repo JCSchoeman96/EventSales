@@ -71,9 +71,6 @@ defmodule EventSales.Analytics.Workers.RebuildHotStateWorker do
 
       {:ok, counts} ->
         rebuild_pages(List.last(batch), counts)
-
-      {:error, reason} ->
-        {:error, reason}
     end
   rescue
     _ -> {:error, :query_failed}
@@ -98,9 +95,9 @@ defmodule EventSales.Analytics.Workers.RebuildHotStateWorker do
         updated_at = DateTime.utc_now()
         summary = Map.put(summary, :updated_at, updated_at)
 
-        with :ok <- DashboardCache.put_event_summary(event_id, summary),
-             :ok <- write_snapshot(event_id, summary) do
-          :ok
+        case DashboardCache.put_event_summary(event_id, summary) do
+          :ok -> write_snapshot(event_id, summary)
+          {:error, reason} -> {:error, reason}
         end
 
       {:error, reason} ->

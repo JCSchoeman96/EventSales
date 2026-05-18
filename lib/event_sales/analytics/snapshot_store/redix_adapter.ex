@@ -45,10 +45,6 @@ defmodule EventSales.Analytics.SnapshotStore.RedixAdapter do
       {:error, reason} ->
         emit_restore(:error, reason, 0)
         {:error, reason}
-
-      _ ->
-        emit_restore(:error, :unavailable, 0)
-        {:error, :unavailable}
     end
   rescue
     _ ->
