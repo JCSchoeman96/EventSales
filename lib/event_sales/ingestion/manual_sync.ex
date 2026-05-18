@@ -3,6 +3,7 @@ defmodule EventSales.Ingestion.ManualSync do
   Admin workflow for queuing scoped manual order reconciliation runs.
   """
 
+  alias EventSales.Accounts.Policies
   alias EventSales.Audit.Logger, as: AuditLogger
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.SyncRun
@@ -27,7 +28,9 @@ defmodule EventSales.Ingestion.ManualSync do
           optional(:metadata) => map()
         }
 
-  @type result :: {:ok, %{sync_run: SyncRun.t(), job: Oban.Job.t()}} | {:error, term()}
+  @type result ::
+          {:ok, %{sync_run: SyncRun.t(), job: Oban.Job.t()}}
+          | {:error, :forbidden | :enqueue_failed | term()}
 
   @doc """
   Queues a scoped manual sync run, audits on success, and enqueues reconciliation.
@@ -36,10 +39,25 @@ defmodule EventSales.Ingestion.ManualSync do
   def queue_manual_scoped(run_attrs, audit_attrs, opts \\ []) do
     now = Keyword.get_lazy(opts, :now, &DateTime.utc_now/0)
 
-    with {:ok, run} <- create_sync_run(run_attrs, now),
-         {:ok, job} <- enqueue_worker(run),
-         {:ok, _audit} <- audit_success(run, audit_attrs) do
-      {:ok, %{sync_run: run, job: job}}
+    with :ok <- authorize(opts),
+         {:ok, run} <- create_sync_run(run_attrs, now),
+         {:ok, _audit} <- audit_requested(run, audit_attrs) do
+      case enqueue_worker(run) do
+        {:ok, job} ->
+          {:ok, %{sync_run: run, job: job}}
+
+        {:error, _reason} ->
+          _ = cancel_run_after_enqueue_failure(run)
+          {:error, :enqueue_failed}
+      end
+    end
+  end
+
+  defp authorize(opts) do
+    if opts |> Keyword.get(:actor) |> Policies.global_admin?() do
+      :ok
+    else
+      {:error, :forbidden}
     end
   end
 
@@ -60,7 +78,11 @@ defmodule EventSales.Ingestion.ManualSync do
     |> Oban.insert()
   end
 
-  defp audit_success(%SyncRun{} = run, audit_attrs) do
+  defp cancel_run_after_enqueue_failure(%SyncRun{} = run) do
+    Ash.update(run, %{}, action: :cancel, domain: Ingestion)
+  end
+
+  defp audit_requested(%SyncRun{} = run, audit_attrs) do
     metadata =
       audit_attrs
       |> Map.get(:metadata, %{})

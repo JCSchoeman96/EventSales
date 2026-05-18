@@ -5,7 +5,7 @@ defmodule EventSales.Ingestion.ManualSyncTest do
   require Ash.Query
 
   alias EventSales.Accounts
-  alias EventSales.Accounts.Resources.User
+  alias EventSales.Accounts.Resources.{Role, User, UserRole}
   alias EventSales.Audit
   alias EventSales.Audit.Resources.AuditLog
   alias EventSales.Ingestion.ManualSync
@@ -16,15 +16,19 @@ defmodule EventSales.Ingestion.ManualSyncTest do
   @off_peak ~U[2026-05-16 12:00:00.000000Z]
 
   setup do
-    user = create_user!("admin-sync@example.com")
+    admin = create_user!("admin-sync@example.com")
+    staff = create_user!("staff-sync@example.com")
+    create_global_role!(admin, :admin)
+    create_global_role!(staff, :staff)
+
     source = SalesHelpers.create_source_system!()
     event = SalesHelpers.create_event!(source, %{name: "Manual", slug: unique_slug("manual")})
 
-    {:ok, user: user, source: source, event: event}
+    {:ok, admin: admin, staff: staff, source: source, event: event}
   end
 
   test "queue_manual_scoped creates run, audits success, and enqueues worker", %{
-    user: user,
+    admin: admin,
     source: source,
     event: event
   } do
@@ -39,10 +43,11 @@ defmodule EventSales.Ingestion.ManualSyncTest do
                },
                %{
                  actor_type: :user,
-                 actor_user_id: user.id,
+                 actor_user_id: admin.id,
                  actor_role: :admin,
                  source: :admin
                },
+               actor: admin,
                now: @off_peak
              )
 
@@ -65,7 +70,45 @@ defmodule EventSales.Ingestion.ManualSyncTest do
     assert audit.metadata["result"] == "queued"
   end
 
-  test "rejected scope does not audit or enqueue", %{source: source, user: user} do
+  test "non-admin and nil actors are forbidden without side effects", %{
+    admin: admin,
+    staff: staff,
+    source: source,
+    event: event
+  } do
+    attrs = %{
+      source_system_id: source.id,
+      event_id: event.id,
+      date_from: ~U[2026-05-01 00:00:00Z],
+      date_to: ~U[2026-05-02 00:00:00Z],
+      sync_mode: :shallow
+    }
+
+    audit_attrs = %{
+      actor_type: :user,
+      actor_user_id: admin.id,
+      actor_role: :admin,
+      source: :admin
+    }
+
+    runs_before = Ash.count!(SyncRun, domain: EventSales.Ingestion)
+
+    assert {:error, :forbidden} =
+             ManualSync.queue_manual_scoped(attrs, audit_attrs, actor: staff, now: @off_peak)
+
+    assert {:error, :forbidden} =
+             ManualSync.queue_manual_scoped(attrs, audit_attrs, actor: nil, now: @off_peak)
+
+    refute_enqueued(worker: ReconcileOrdersWorker)
+    assert Ash.count!(SyncRun, domain: EventSales.Ingestion) == runs_before
+
+    assert {:ok, []} =
+             AuditLog
+             |> Ash.Query.filter(event_type == :manual_sync_requested)
+             |> Ash.read(domain: Audit)
+  end
+
+  test "rejected scope does not audit or enqueue", %{admin: admin, source: source} do
     assert {:error, _} =
              ManualSync.queue_manual_scoped(
                %{
@@ -77,10 +120,11 @@ defmodule EventSales.Ingestion.ManualSyncTest do
                },
                %{
                  actor_type: :user,
-                 actor_user_id: user.id,
+                 actor_user_id: admin.id,
                  actor_role: :admin,
                  source: :admin
                },
+               actor: admin,
                now: @off_peak
              )
 
@@ -93,9 +137,9 @@ defmodule EventSales.Ingestion.ManualSyncTest do
   end
 
   test "deep sync is rejected during peak without audit", %{
+    admin: admin,
     source: source,
-    event: event,
-    user: user
+    event: event
   } do
     peak_monday = ~U[2026-05-18 12:00:00.000000Z]
     runs_before = Ash.count!(SyncRun, domain: EventSales.Ingestion)
@@ -111,10 +155,11 @@ defmodule EventSales.Ingestion.ManualSyncTest do
                },
                %{
                  actor_type: :user,
-                 actor_user_id: user.id,
+                 actor_user_id: admin.id,
                  actor_role: :admin,
                  source: :admin
                },
+               actor: admin,
                now: peak_monday
              )
 
@@ -132,6 +177,24 @@ defmodule EventSales.Ingestion.ManualSyncTest do
         password_confirmation: password
       },
       action: :register_with_password,
+      domain: Accounts
+    )
+  end
+
+  defp create_global_role!(user, role_name) do
+    role =
+      Role
+      |> Ash.Query.filter(name == ^role_name)
+      |> Ash.read_one!(domain: Accounts)
+      |> case do
+        nil -> Ash.create!(Role, %{name: role_name}, action: :create, domain: Accounts)
+        role -> role
+      end
+
+    Ash.create!(
+      UserRole,
+      %{user_id: user.id, role_id: role.id},
+      action: :create,
       domain: Accounts
     )
   end

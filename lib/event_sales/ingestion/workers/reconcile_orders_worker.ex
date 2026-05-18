@@ -34,6 +34,8 @@ defmodule EventSales.Ingestion.Workers.ReconcileOrdersWorker do
     end
   end
 
+  def perform(%Oban.Job{args: _args}), do: :discard
+
   defp perform_loaded_run(run) do
     case check_future_paused(run) do
       {:snooze, seconds} ->
@@ -52,8 +54,6 @@ defmodule EventSales.Ingestion.Workers.ReconcileOrdersWorker do
       |> handle_result()
     end
   end
-
-  def perform(%Oban.Job{args: _args}), do: :discard
 
   defp load_run(sync_run_id) do
     case Ash.get(SyncRun, sync_run_id, domain: Ingestion) do

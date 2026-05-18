@@ -54,12 +54,12 @@ defmodule EventSales.Analytics.OrderProcessedNotifier do
 
     case hot_state_aggregator.apply_event(event) do
       :ok -> :ok
-      {:error, _reason} -> emit_failure(:notifier_apply_failed)
+      {:error, _reason} -> emit_reconciliation_failure(:notifier_apply_failed)
     end
   rescue
-    _exception -> emit_failure(:notifier_apply_failed)
+    _exception -> emit_reconciliation_failure(:notifier_apply_failed)
   catch
-    _kind, _reason -> emit_failure(:notifier_apply_failed)
+    _kind, _reason -> emit_reconciliation_failure(:notifier_apply_failed)
   end
 
   defp aggregate_reconciliation_event(%Order{} = order, %SyncRun{} = sync_run, event_id) do
@@ -79,12 +79,7 @@ defmodule EventSales.Analytics.OrderProcessedNotifier do
     }
   end
 
-  defp aggregate_reconciliation_event_id(
-         %Order{} = order,
-         %SyncRun{} = sync_run,
-         event_id,
-         source_updated_at
-       ) do
+  defp aggregate_reconciliation_event_id(%Order{} = order, %SyncRun{} = sync_run, event_id, source_updated_at) do
     source_timestamp =
       case source_updated_at do
         %DateTime{} = datetime -> DateTime.to_iso8601(datetime)
@@ -199,6 +194,15 @@ defmodule EventSales.Analytics.OrderProcessedNotifier do
       event_reason: :order_processed,
       result: :ignored,
       source: :webhook
+    })
+  end
+
+  defp emit_reconciliation_failure(reason) do
+    Telemetry.emit(Telemetry.hot_state_event_ignored(), %{count: 1}, %{
+      reason: reason,
+      event_reason: :reconciliation_applied,
+      result: :ignored,
+      source: :reconciliation
     })
   end
 

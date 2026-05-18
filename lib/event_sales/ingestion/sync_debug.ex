@@ -113,20 +113,36 @@ defmodule EventSales.Ingestion.SyncDebug do
   defp normalize_positive_integer(_value, default), do: default
 
   defp read_runs(opts, limit, offset) do
-    SyncRun
-    |> maybe_filter_event_id(Keyword.get(opts, :event_id))
+    base_query = SyncRun
+
+    case event_id_filter(Keyword.get(opts, :event_id)) do
+      :skip ->
+        query_runs(base_query, limit, offset)
+
+      {:ok, event_uuid} ->
+        base_query
+        |> Ash.Query.filter(event_id == ^event_uuid)
+        |> query_runs(limit, offset)
+
+      :invalid ->
+        {:ok, []}
+    end
+  end
+
+  defp query_runs(query, limit, offset) do
+    query
     |> Ash.Query.sort(inserted_at: :desc, id: :desc)
     |> Ash.Query.limit(limit)
     |> Ash.Query.offset(offset)
     |> Ash.read(domain: Ingestion)
   end
 
-  defp maybe_filter_event_id(query, event_id) when event_id in [nil, ""], do: query
+  defp event_id_filter(event_id) when event_id in [nil, ""], do: :skip
 
-  defp maybe_filter_event_id(query, event_id) do
+  defp event_id_filter(event_id) do
     case cast_uuid(to_string(event_id)) do
-      {:ok, uuid} -> Ash.Query.filter(query, event_id == ^uuid)
-      {:error, _} -> query
+      {:ok, uuid} -> {:ok, uuid}
+      {:error, _} -> :invalid
     end
   end
 

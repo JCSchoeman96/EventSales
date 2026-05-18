@@ -62,6 +62,8 @@ defmodule EventSales.Ingestion.Resources.SyncRun do
     update :resume do
       require_atomic? false
       change transition_state(:running)
+      change set_attribute(:paused_until, nil)
+      change set_attribute(:pause_reason, nil)
     end
 
     update :pause do

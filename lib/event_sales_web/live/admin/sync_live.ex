@@ -216,7 +216,11 @@ defmodule EventSalesWeb.Live.Admin.SyncLive do
       :ok ->
         with {:ok, run_attrs} <- build_run_attrs(socket),
              {:ok, %{sync_run: _run}} <-
-               ManualSync.queue_manual_scoped(run_attrs, audit_attrs(socket)) do
+               ManualSync.queue_manual_scoped(
+                 run_attrs,
+                 audit_attrs(socket),
+                 actor: socket.assigns.current_user
+               ) do
           {:noreply,
            socket
            |> put_flash(:info, "Sync queued")
@@ -225,6 +229,12 @@ defmodule EventSalesWeb.Live.Admin.SyncLive do
         else
           {:error, :forbidden} ->
             {:noreply, put_flash(socket, :error, "Sync is not allowed")}
+
+          {:error, :enqueue_failed} ->
+            {:noreply,
+             socket
+             |> put_flash(:error, "Sync could not be queued. Try again.")
+             |> assign(:confirm_sync, false)}
 
           {:error, _} ->
             {:noreply,
