@@ -8,6 +8,7 @@ defmodule EventSalesWeb.Live.Admin.DashboardLiveTest do
 
   alias EventSales.Accounts
   alias EventSales.Accounts.Resources.{Role, User, UserRole}
+  alias EventSales.Analytics.{DashboardCache, DashboardPubSub, HotStateAggregator}
   alias EventSales.Repo
   alias EventSales.Sales
   alias EventSales.Sales.Resources.{Order, OrderItem}
@@ -17,10 +18,12 @@ defmodule EventSalesWeb.Live.Admin.DashboardLiveTest do
   setup do
     EventSales.DataCase.setup_sandbox(%{async: false})
     ManualActionRateLimiter.reset_for_test!()
+    HotStateAggregator.reset_for_test!()
     delete_rebuild_jobs!()
 
     on_exit(fn ->
       ManualActionRateLimiter.reset_for_test!()
+      HotStateAggregator.reset_for_test!()
       delete_rebuild_jobs!()
     end)
 
@@ -117,6 +120,145 @@ defmodule EventSalesWeb.Live.Admin.DashboardLiveTest do
       |> live("/admin/dashboard")
 
     assert render_click(second_view, "manual_refresh") =~ "Refresh requested"
+  end
+
+  test "dashboard receives hot-state PubSub and updates one event row without full reload", %{
+    conn: conn
+  } do
+    admin = create_user!("dashboard-pubsub@example.com")
+    create_global_role!(admin, :admin)
+
+    source = SalesHelpers.create_source_system!()
+
+    event =
+      SalesHelpers.create_event!(source, %{name: "PubSub Event", slug: unique_slug("pubsub")})
+
+    other_event =
+      SalesHelpers.create_event!(source, %{name: "Other PubSub", slug: unique_slug("other")})
+
+    ticket = SalesHelpers.create_ticket_type!(event, %{name: "GA"})
+    other_ticket = SalesHelpers.create_ticket_type!(other_event, %{name: "VIP"})
+
+    older = create_order!(source, :completed, order_number: "VISIBLE-ORDER")
+    create_item!(older, event, ticket, woo_line_item_id: 21)
+    create_item!(older, other_event, other_ticket, woo_line_item_id: 22)
+
+    DashboardCache.put_event_summary(
+      event.id,
+      summary(%{total_sold: 1, status_breakdown: %{"completed" => 1}})
+    )
+
+    DashboardCache.put_event_summary(
+      other_event.id,
+      summary(%{
+        total_sold: 2,
+        total_revenue: Decimal.new("900.00"),
+        status_breakdown: %{"pending" => 2}
+      })
+    )
+
+    {:ok, view, html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/dashboard")
+
+    assert html =~ "VISIBLE-ORDER"
+
+    create_order!(source, :completed,
+      order_number: "SHOULD-NOT-APPEAR",
+      updated_at_source: ~U[2026-05-17 09:00:00Z]
+    )
+
+    DashboardCache.put_event_summary(
+      event.id,
+      summary(%{
+        total_sold: 4,
+        total_revenue: Decimal.new("1800.00"),
+        status_breakdown: %{"completed" => 4}
+      })
+    )
+
+    send(view.pid, {:hot_state_updated, event.id, DateTime.utc_now()})
+
+    html = render(view)
+
+    assert html =~ "1800.00"
+    assert html =~ "6"
+    assert html =~ "completed"
+    assert html =~ "pending"
+    assert html =~ "VISIBLE-ORDER"
+    refute html =~ "SHOULD-NOT-APPEAR"
+    assert Process.alive?(view.pid)
+  end
+
+  test "dashboard ignores unknown event updates safely", %{conn: conn} do
+    admin = create_user!("dashboard-unknown-event@example.com")
+    create_global_role!(admin, :admin)
+
+    source = SalesHelpers.create_source_system!()
+    event = SalesHelpers.create_event!(source, %{name: "Known Event", slug: unique_slug("known")})
+    ticket = SalesHelpers.create_ticket_type!(event, %{name: "GA"})
+
+    order = create_order!(source, :completed, order_number: "KNOWN-ORDER")
+    create_item!(order, event, ticket, woo_line_item_id: 31)
+
+    DashboardCache.put_event_summary(event.id, summary(%{total_sold: 1}))
+
+    {:ok, view, _html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/dashboard")
+
+    html_before = render(view)
+
+    send(view.pid, {:hot_state_updated, Ecto.UUID.generate(), DateTime.utc_now()})
+
+    assert render(view) == html_before
+  end
+
+  test "manual refresh subscribes to newly visible event topics", %{conn: conn} do
+    admin = create_user!("dashboard-refresh-subscribe@example.com")
+    create_global_role!(admin, :admin)
+
+    source = SalesHelpers.create_source_system!()
+
+    initial =
+      SalesHelpers.create_event!(source, %{name: "Initial Event", slug: unique_slug("initial")})
+
+    initial_ticket = SalesHelpers.create_ticket_type!(initial, %{name: "GA"})
+    order = create_order!(source, :completed, order_number: "INITIAL-ORDER")
+    create_item!(order, initial, initial_ticket, woo_line_item_id: 41)
+
+    DashboardCache.put_event_summary(initial.id, summary(%{total_sold: 1}))
+
+    {:ok, view, _html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/dashboard")
+
+    new_event =
+      SalesHelpers.create_event!(source, %{name: "Newly Visible Event", slug: unique_slug("new")})
+
+    new_ticket = SalesHelpers.create_ticket_type!(new_event, %{name: "Balcony"})
+    new_order = create_order!(source, :completed, order_number: "NEW-ORDER")
+    create_item!(new_order, new_event, new_ticket, woo_line_item_id: 42)
+
+    DashboardCache.put_event_summary(new_event.id, summary(%{total_sold: 0}))
+
+    assert render_click(view, "manual_refresh") =~ "Newly Visible Event"
+
+    DashboardCache.put_event_summary(
+      new_event.id,
+      summary(%{
+        total_sold: 5,
+        total_revenue: Decimal.new("2250.00"),
+        status_breakdown: %{"completed" => 5}
+      })
+    )
+
+    DashboardPubSub.broadcast_hot_state_updated(new_event.id, DateTime.utc_now())
+
+    assert render(view) =~ "2250.00"
   end
 
   test "DashboardLive source stays inside approved boundaries" do
@@ -248,4 +390,17 @@ defmodule EventSalesWeb.Live.Admin.DashboardLiveTest do
   end
 
   defp unique_slug(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
+
+  defp summary(overrides) do
+    %{
+      total_sold: 0,
+      total_revenue: Decimal.new("450.00"),
+      today_sold: 0,
+      today_revenue: Decimal.new("0"),
+      status_breakdown: %{},
+      currency: "ZAR",
+      updated_at: ~U[2026-05-17 10:00:00Z]
+    }
+    |> Map.merge(overrides)
+  end
 end

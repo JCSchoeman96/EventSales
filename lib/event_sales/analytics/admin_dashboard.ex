@@ -55,6 +55,45 @@ defmodule EventSales.Analytics.AdminDashboard do
     end
   end
 
+  @doc """
+  Returns one dashboard event row for the given event id.
+
+  This reads event metadata plus hot/warm event summaries only. It does not
+  backfill KPI totals from raw order item rows.
+  """
+  @spec event_row(Ecto.UUID.t() | String.t(), keyword()) ::
+          {:ok, map()} | :not_found | {:error, term()}
+  def event_row(event_id, opts \\ []) when is_binary(event_id) do
+    case get_event(event_id) do
+      {:ok, %Event{} = event} -> {:ok, build_event_row(event, opts)}
+      {:ok, nil} -> :not_found
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Replaces a displayed event row and recomputes dashboard totals from displayed rows.
+  """
+  @spec replace_event_row(snapshot(), map()) :: {:ok, snapshot()} | :not_found
+  def replace_event_row(%{events: events} = snapshot, %{event_id: event_id} = row)
+      when is_list(events) and is_binary(event_id) do
+    if Enum.any?(events, &(&1.event_id == event_id)) do
+      events =
+        Enum.map(events, fn
+          %{event_id: ^event_id} -> row
+          existing -> existing
+        end)
+
+      {:ok,
+       snapshot
+       |> Map.put(:events, events)
+       |> Map.put(:kpis, kpis(events))
+       |> Map.put(:statuses, statuses(events))}
+    else
+      :not_found
+    end
+  end
+
   defp list_events(limit) do
     Event
     |> Ash.Query.sort(name: :asc)
@@ -62,13 +101,20 @@ defmodule EventSales.Analytics.AdminDashboard do
     |> Ash.read(domain: Catalog)
   end
 
+  defp get_event(event_id) do
+    Event
+    |> Ash.Query.filter(id == ^event_id)
+    |> Ash.Query.limit(1)
+    |> Ash.read_one(domain: Catalog)
+  end
+
   defp event_rows(events, opts) do
     events
-    |> Enum.map(&event_row(&1, opts))
+    |> Enum.map(&build_event_row(&1, opts))
     |> then(&{:ok, &1})
   end
 
-  defp event_row(%Event{} = event, opts) do
+  defp build_event_row(%Event{} = event, opts) do
     summary =
       event.id
       |> summary_for_event(opts)

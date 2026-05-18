@@ -163,6 +163,12 @@ defmodule EventSalesWeb.Telemetry do
         tags: [:reason, :result, :source],
         description: "HotStateAggregator warm snapshot writes"
       ),
+      counter("event_sales.cache.invalidate.count",
+        event_name: EventSales.Telemetry.cache_invalidate(),
+        measurement: :count,
+        tags: [:scope, :reason, :source],
+        description: "Event-scoped dashboard cache invalidations"
+      ),
       counter("event_sales.snapshots.refresh.start.count",
         event_name: EventSales.Telemetry.snapshot_refresh_start(),
         measurement: :count,

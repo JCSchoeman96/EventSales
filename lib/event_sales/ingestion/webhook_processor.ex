@@ -11,6 +11,8 @@ defmodule EventSales.Ingestion.WebhookProcessor do
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.WebhookEvent
   alias EventSales.Sales.OrderUpserter
+  alias EventSales.Sales.Resources.Order
+  alias EventSales.Telemetry
 
   @terminal_statuses [:processed, :failed, :ignored]
   @supported_order_topics ~w(order.created order.updated)
@@ -75,7 +77,11 @@ defmodule EventSales.Ingestion.WebhookProcessor do
 
   defp default_handler(%WebhookEvent{} = event) do
     case order_upserter().upsert_from_webhook_event(event) do
-      {:ok, _order_or_noop} ->
+      {:ok, %Order{} = order} ->
+        notify_order_processed(order, event)
+        :ok
+
+      {:ok, :stale_noop} ->
         :ok
 
       {:error, reason} ->
@@ -114,6 +120,31 @@ defmodule EventSales.Ingestion.WebhookProcessor do
 
   defp order_upserter do
     Application.get_env(:event_sales, :order_upserter, OrderUpserter)
+  end
+
+  defp order_processed_notifier do
+    Application.get_env(
+      :event_sales,
+      :order_processed_notifier,
+      EventSales.Analytics.OrderProcessedNotifier
+    )
+  end
+
+  defp notify_order_processed(%Order{} = order, %WebhookEvent{} = event) do
+    order_processed_notifier().notify_order_processed(order, event)
+  rescue
+    _exception -> emit_notifier_failure()
+  catch
+    _kind, _reason -> emit_notifier_failure()
+  end
+
+  defp emit_notifier_failure do
+    Telemetry.emit(Telemetry.hot_state_event_ignored(), %{count: 1}, %{
+      reason: :notifier_failed,
+      event_reason: :order_processed,
+      result: :ignored,
+      source: :webhook
+    })
   end
 
   defp load_event(webhook_event_id) do
