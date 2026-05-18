@@ -45,9 +45,9 @@ defmodule EventSales.Ingestion.WebhookDebug do
 
   @spec list_events(keyword()) :: {:ok, %{rows: [row()], page: page()}} | {:error, term()}
   def list_events(opts \\ []) do
-    %{page: page, per_page: per_page, offset: offset} = pagination(opts)
-
-    with {:ok, events} <- read_events(opts, per_page + 1, offset) do
+    with :ok <- authorize(opts),
+         %{page: page, per_page: per_page, offset: offset} <- pagination(opts),
+         {:ok, events} <- read_events(opts, per_page + 1, offset) do
       {visible_events, has_next?} = split_page(events, per_page)
 
       {:ok,

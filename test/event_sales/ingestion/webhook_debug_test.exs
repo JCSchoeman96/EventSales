@@ -19,7 +19,7 @@ defmodule EventSales.Ingestion.WebhookDebugTest do
     {:ok, source: source, admin: admin, staff: staff}
   end
 
-  test "admin can list webhook log with newest first pagination", %{source: source} do
+  test "admin can list webhook log with newest first pagination", %{source: source, admin: admin} do
     for index <- 1..30 do
       {:ok, _event} =
         create_event(source, %{
@@ -29,13 +29,14 @@ defmodule EventSales.Ingestion.WebhookDebugTest do
         })
     end
 
-    assert {:ok, %{rows: rows, page: page}} = WebhookDebug.list_events(page: 1)
+    assert {:ok, %{rows: rows, page: page}} = WebhookDebug.list_events(actor: admin, page: 1)
     assert length(rows) == 25
     assert page == %{page: 1, per_page: 25, has_next?: true, has_previous?: false}
     assert hd(rows).delivery_id == "debug-delivery-30"
     assert List.last(rows).delivery_id == "debug-delivery-6"
 
-    assert {:ok, %{rows: next_rows, page: next_page}} = WebhookDebug.list_events(page: 2)
+    assert {:ok, %{rows: next_rows, page: next_page}} =
+             WebhookDebug.list_events(actor: admin, page: 2)
 
     assert Enum.map(next_rows, & &1.delivery_id) == [
              "debug-delivery-5",
@@ -48,7 +49,7 @@ defmodule EventSales.Ingestion.WebhookDebugTest do
     assert next_page == %{page: 2, per_page: 25, has_next?: false, has_previous?: true}
   end
 
-  test "filters narrow webhook rows", %{source: source} do
+  test "filters narrow webhook rows", %{source: source, admin: admin} do
     {:ok, failed} =
       create_event(source, %{
         delivery_id: "filter-delivery-failed",
@@ -73,6 +74,7 @@ defmodule EventSales.Ingestion.WebhookDebugTest do
 
     assert {:ok, %{rows: [row]}} =
              WebhookDebug.list_events(
+               actor: admin,
                status: "failed",
                topic: "order.updated",
                delivery_id: "filter-delivery-failed",
@@ -81,6 +83,14 @@ defmodule EventSales.Ingestion.WebhookDebugTest do
 
     assert row.id == failed.id
     assert row.status == :failed
+  end
+
+  test "list webhook log requires admin actor", %{source: source, staff: staff} do
+    {:ok, _event} = create_event(source, %{})
+
+    assert {:error, :forbidden} = WebhookDebug.list_events(actor: staff)
+    assert {:error, :forbidden} = WebhookDebug.list_events(actor: nil)
+    assert {:error, :forbidden} = WebhookDebug.list_events()
   end
 
   test "raw payload is explicit admin-only access", %{source: source, admin: admin, staff: staff} do

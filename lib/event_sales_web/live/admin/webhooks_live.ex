@@ -10,6 +10,7 @@ defmodule EventSalesWeb.Live.Admin.WebhooksLive do
   alias EventSales.Ingestion.{WebhookDebug, WebhookReplay}
   alias EventSalesWeb.Live.Admin.ManualActionRateLimiter
 
+  @payload_display_max_bytes 20_000
   @empty_filters %{"status" => "", "topic" => "", "delivery_id" => "", "resource_id" => ""}
 
   @impl true
@@ -272,6 +273,7 @@ defmodule EventSalesWeb.Live.Admin.WebhooksLive do
       socket.assigns.filters
       |> filters_to_opts()
       |> Keyword.put(:page, page)
+      |> Keyword.put(:actor, socket.assigns.current_user)
 
     case WebhookDebug.list_events(opts) do
       {:ok, %{rows: rows, page: page_info}} ->
@@ -319,8 +321,29 @@ defmodule EventSalesWeb.Live.Admin.WebhooksLive do
 
   defp format_payload(payload) do
     case Jason.encode(payload, pretty: true) do
-      {:ok, encoded} -> encoded
-      {:error, _reason} -> inspect(payload, pretty: true)
+      {:ok, encoded} -> cap_payload_display(encoded)
+      {:error, _reason} -> payload |> inspect(pretty: true) |> cap_payload_display()
+    end
+  end
+
+  defp cap_payload_display(encoded) when byte_size(encoded) <= @payload_display_max_bytes,
+    do: encoded
+
+  defp cap_payload_display(encoded) do
+    encoded
+    |> valid_binary_prefix(@payload_display_max_bytes)
+    |> Kernel.<>("\n\n[truncated]")
+  end
+
+  defp valid_binary_prefix(_encoded, 0), do: ""
+
+  defp valid_binary_prefix(encoded, bytes) do
+    prefix = binary_part(encoded, 0, min(bytes, byte_size(encoded)))
+
+    if String.valid?(prefix) do
+      prefix
+    else
+      valid_binary_prefix(encoded, bytes - 1)
     end
   end
 end

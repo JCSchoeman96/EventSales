@@ -116,6 +116,31 @@ defmodule EventSalesWeb.Live.Admin.WebhooksLiveTest do
     refute html =~ "payload-visible-only-after-click"
   end
 
+  test "large raw payload reveal is display-truncated", %{conn: conn, source: source} do
+    admin = create_user!("webhooks-live-large-payload@example.com")
+    create_global_role!(admin, :admin)
+    large_value = String.duplicate("x", 25_000)
+
+    {:ok, event} =
+      create_event(source, %{
+        delivery_id: "large-payload-delivery",
+        payload: %{"id" => 123, "large_value" => large_value, "tail_marker" => "must-not-render"}
+      })
+
+    {:ok, view, html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/webhooks")
+
+    refute html =~ "[truncated]"
+    refute html =~ "must-not-render"
+
+    html = render_click(view, "show_payload", %{"id" => event.id})
+    assert html =~ "[truncated]"
+    assert html =~ String.duplicate("x", 100)
+    refute html =~ "must-not-render"
+  end
+
   test "failed replay requires confirmation, enqueues, audits, and rate limits", %{
     conn: conn,
     source: source
