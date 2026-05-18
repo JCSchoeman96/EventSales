@@ -75,6 +75,7 @@ defmodule EventSalesWeb.Router do
     live "/dashboard", Live.Admin.DashboardLive
     live "/events", Live.Admin.EventsLive
     live "/events/:id", Live.Admin.EventDetailLive
+    live "/webhooks", Live.Admin.WebhooksLive
   end
 
   # Other scopes may use custom stacks.
