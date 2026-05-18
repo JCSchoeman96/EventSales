@@ -27,7 +27,7 @@ config :event_sales, Oban,
   repo: EventSales.Repo,
   notifier: Oban.Notifiers.Postgres,
   plugins: [],
-  queues: [default: 10, webhooks: 10, analytics_rebuilds: 1]
+  queues: [default: 10, webhooks: 10, analytics_rebuilds: 1, reconciliation: 1]
 
 config :event_sales, :redis_webhook_buffer,
   enabled: false,
@@ -65,6 +65,10 @@ config :event_sales, :woocommerce_rest,
 config :event_sales, :rest_circuit_breaker,
   failure_threshold: 3,
   cooldown_ms: 30_000
+
+config :event_sales, :reconciliation_peak_guard,
+  weekdays: [1, 2, 3, 4, 5],
+  max_days: 7
 
 # Configure the endpoint
 config :event_sales, EventSalesWeb.Endpoint,

@@ -40,6 +40,10 @@ defmodule EventSales.Telemetry do
   @product_metadata_cache_hit [:event_sales, :catalog, :product_metadata_cache, :hit]
   @product_metadata_cache_miss [:event_sales, :catalog, :product_metadata_cache, :miss]
   @product_metadata_cache_put [:event_sales, :catalog, :product_metadata_cache, :put]
+  @reconciliation_start [:event_sales, :reconciliation, :start]
+  @reconciliation_stop [:event_sales, :reconciliation, :stop]
+  @reconciliation_exception [:event_sales, :reconciliation, :exception]
+  @reconciliation_pause [:event_sales, :reconciliation, :pause]
 
   @doc """
   Returns every custom EventSales telemetry event name defined in Slice 0.8.
@@ -70,7 +74,11 @@ defmodule EventSales.Telemetry do
       missing_catalog_recovery_exception(),
       product_metadata_cache_hit(),
       product_metadata_cache_miss(),
-      product_metadata_cache_put()
+      product_metadata_cache_put(),
+      reconciliation_start(),
+      reconciliation_stop(),
+      reconciliation_exception(),
+      reconciliation_pause()
     ]
   end
 
@@ -169,6 +177,22 @@ defmodule EventSales.Telemetry do
   @doc "Product metadata cache write."
   @spec product_metadata_cache_put() :: event_name()
   def product_metadata_cache_put, do: @product_metadata_cache_put
+
+  @doc "Scoped order reconciliation started."
+  @spec reconciliation_start() :: event_name()
+  def reconciliation_start, do: @reconciliation_start
+
+  @doc "Scoped order reconciliation step completed."
+  @spec reconciliation_stop() :: event_name()
+  def reconciliation_stop, do: @reconciliation_stop
+
+  @doc "Scoped order reconciliation failed."
+  @spec reconciliation_exception() :: event_name()
+  def reconciliation_exception, do: @reconciliation_exception
+
+  @doc "Scoped order reconciliation paused for retryable REST errors."
+  @spec reconciliation_pause() :: event_name()
+  def reconciliation_pause, do: @reconciliation_pause
 
   @doc "Returns the low-cardinality product metadata cache event for the cache outcome."
   @spec product_metadata_cache_event(:hit | :miss | :put) :: event_name()

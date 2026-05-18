@@ -13,6 +13,7 @@ defmodule EventSales.ObanTopologyTest do
     assert Keyword.fetch!(oban_config, :plugins) == []
     assert Keyword.fetch!(oban_config, :queues)[:default] == 10
     assert Keyword.fetch!(oban_config, :queues)[:webhooks] == 10
+    assert Keyword.fetch!(oban_config, :queues)[:reconciliation] == 1
   end
 
   test "oban is supervised in test" do

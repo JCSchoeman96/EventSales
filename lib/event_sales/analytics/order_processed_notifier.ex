@@ -10,7 +10,8 @@ defmodule EventSales.Analytics.OrderProcessedNotifier do
   require Ash.Query
 
   alias EventSales.Analytics.{DashboardCache, HotStateAggregator}
-  alias EventSales.Ingestion.Resources.WebhookEvent
+  alias EventSales.Catalog.CacheInvalidation
+  alias EventSales.Ingestion.Resources.{SyncRun, WebhookEvent}
   alias EventSales.Sales
   alias EventSales.Sales.Resources.{Order, OrderItem}
   alias EventSales.Telemetry
@@ -29,6 +30,80 @@ defmodule EventSales.Analytics.OrderProcessedNotifier do
     end
 
     :ok
+  end
+
+  @doc """
+  Notifies dashboard hot state that a durable order upsert completed via reconciliation.
+  """
+  @spec notify_order_reconciled(Order.t(), SyncRun.t(), Ecto.UUID.t(), keyword()) :: :ok
+  def notify_order_reconciled(%Order{} = order, %SyncRun{} = sync_run, event_id, opts \\ [])
+      when is_binary(event_id) do
+    maybe_notify_test_pid(opts, order.id, sync_run.id, event_id)
+
+    DashboardCache.invalidate_event(event_id, :reconciliation_applied)
+    CacheInvalidation.emit_for_event(event_id, :reconciliation_applied)
+
+    Telemetry.emit(Telemetry.cache_invalidate(), %{count: 1}, %{
+      scope: :event,
+      reason: :reconciliation_applied,
+      source: :reconciliation
+    })
+
+    event = aggregate_reconciliation_event(order, sync_run, event_id)
+    hot_state_aggregator = Keyword.get(opts, :hot_state_aggregator, HotStateAggregator)
+
+    case hot_state_aggregator.apply_event(event) do
+      :ok -> :ok
+      {:error, _reason} -> emit_failure(:notifier_apply_failed)
+    end
+  rescue
+    _exception -> emit_failure(:notifier_apply_failed)
+  catch
+    _kind, _reason -> emit_failure(:notifier_apply_failed)
+  end
+
+  defp aggregate_reconciliation_event(%Order{} = order, %SyncRun{} = sync_run, event_id) do
+    source_updated_at = order.updated_at_source || DateTime.utc_now()
+    occurred_at = DateTime.utc_now()
+
+    %{
+      aggregate_event_id:
+        aggregate_reconciliation_event_id(order, sync_run, event_id, source_updated_at),
+      event_id: event_id,
+      reason: :order_processed,
+      occurred_at: occurred_at,
+      source_system_id: order.source_system_id,
+      order_id: order.id,
+      source_updated_at: source_updated_at,
+      payload_hash: "reconciliation:#{sync_run.id}"
+    }
+  end
+
+  defp aggregate_reconciliation_event_id(
+         %Order{} = order,
+         %SyncRun{} = sync_run,
+         event_id,
+         source_updated_at
+       ) do
+    source_timestamp =
+      case source_updated_at do
+        %DateTime{} = datetime -> DateTime.to_iso8601(datetime)
+        _other -> "unknown"
+      end
+
+    [
+      "order",
+      order.id,
+      "event",
+      event_id,
+      "sync_run",
+      sync_run.id,
+      "source",
+      source_timestamp
+    ]
+    |> Enum.join(":")
+    |> then(&:crypto.hash(:sha256, &1))
+    |> Base.encode16(case: :lower)
   end
 
   defp affected_event_ids(%Order{id: order_id}) do
@@ -125,5 +200,15 @@ defmodule EventSales.Analytics.OrderProcessedNotifier do
       result: :ignored,
       source: :webhook
     })
+  end
+
+  defp maybe_notify_test_pid(opts, order_id, sync_run_id, event_id) do
+    test_pid =
+      Keyword.get(opts, :test_pid) ||
+        Application.get_env(:event_sales, :order_reconciliation_notifier_test_pid)
+
+    if is_pid(test_pid) do
+      send(test_pid, {:notify_order_reconciled, order_id, sync_run_id, event_id})
+    end
   end
 end
