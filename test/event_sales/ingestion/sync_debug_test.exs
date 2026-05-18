@@ -1,6 +1,8 @@
 defmodule EventSales.Ingestion.SyncDebugTest do
   use EventSales.DataCase, async: false
 
+  require Ash.Query
+
   alias EventSales.Accounts
   alias EventSales.Accounts.Resources.{Role, User, UserRole}
   alias EventSales.Ingestion
