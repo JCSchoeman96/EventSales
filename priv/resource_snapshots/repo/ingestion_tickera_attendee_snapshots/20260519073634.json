@@ -1,0 +1,675 @@
+{
+  "attributes": [
+    {
+      "allow_nil?": false,
+      "default": "fragment(\"gen_random_uuid()\")",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": true,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "id",
+      "type": "uuid"
+    },
+    {
+      "allow_nil?": false,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "ticket_code",
+      "type": "text"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "checksum",
+      "type": "text"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "ticket_type_id",
+      "type": "bigint"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "ticket_type",
+      "type": "text"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "first_name",
+      "type": "text"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "last_name",
+      "type": "text"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "email",
+      "type": "text"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "buyer_first",
+      "type": "text"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "buyer_last",
+      "type": "text"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "buyer_email",
+      "type": "text"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "allowed_checkins",
+      "type": "bigint"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "used_checkins",
+      "type": "bigint"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "remaining_checkins",
+      "type": "bigint"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "checked_in",
+      "type": "boolean"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "payment_status",
+      "type": "text"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "payment_date_raw",
+      "type": "text"
+    },
+    {
+      "allow_nil?": false,
+      "default": "%{}",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "custom_fields",
+      "type": "map"
+    },
+    {
+      "allow_nil?": false,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "raw_source_hash",
+      "type": "text"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "source_updated_at",
+      "type": "utc_datetime_usec"
+    },
+    {
+      "allow_nil?": false,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "last_seen_at",
+      "type": "utc_datetime_usec"
+    },
+    {
+      "allow_nil?": false,
+      "default": "fragment(\"(now() AT TIME ZONE 'utc')\")",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "inserted_at",
+      "type": "utc_datetime_usec"
+    },
+    {
+      "allow_nil?": false,
+      "default": "fragment(\"(now() AT TIME ZONE 'utc')\")",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "updated_at",
+      "type": "utc_datetime_usec"
+    },
+    {
+      "allow_nil?": false,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": {
+        "deferrable": false,
+        "destination_attribute": "id",
+        "destination_attribute_default": null,
+        "destination_attribute_generated": null,
+        "index?": false,
+        "match_type": null,
+        "match_with": null,
+        "multitenancy": {
+          "attribute": null,
+          "global": null,
+          "strategy": null
+        },
+        "name": "ingestion_tickera_attendee_snapshots_tickera_event_source_id_fkey",
+        "on_delete": "restrict",
+        "on_update": "update",
+        "primary_key?": true,
+        "schema": "public",
+        "table": "ingestion_tickera_event_sources"
+      },
+      "scale": null,
+      "size": null,
+      "source": "tickera_event_source_id",
+      "type": "uuid"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": {
+        "deferrable": false,
+        "destination_attribute": "id",
+        "destination_attribute_default": null,
+        "destination_attribute_generated": null,
+        "index?": false,
+        "match_type": null,
+        "match_with": null,
+        "multitenancy": {
+          "attribute": null,
+          "global": null,
+          "strategy": null
+        },
+        "name": "ingestion_tickera_attendee_snapshots_tickera_attendee_sync_run_id_fkey",
+        "on_delete": "nilify",
+        "on_update": "update",
+        "primary_key?": true,
+        "schema": "public",
+        "table": "ingestion_tickera_attendee_sync_runs"
+      },
+      "scale": null,
+      "size": null,
+      "source": "tickera_attendee_sync_run_id",
+      "type": "uuid"
+    },
+    {
+      "allow_nil?": false,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": {
+        "deferrable": false,
+        "destination_attribute": "id",
+        "destination_attribute_default": null,
+        "destination_attribute_generated": null,
+        "index?": false,
+        "match_type": null,
+        "match_with": null,
+        "multitenancy": {
+          "attribute": null,
+          "global": null,
+          "strategy": null
+        },
+        "name": "ingestion_tickera_attendee_snapshots_source_system_id_fkey",
+        "on_delete": "restrict",
+        "on_update": "update",
+        "primary_key?": true,
+        "schema": "public",
+        "table": "catalog_source_systems"
+      },
+      "scale": null,
+      "size": null,
+      "source": "source_system_id",
+      "type": "uuid"
+    },
+    {
+      "allow_nil?": false,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": {
+        "deferrable": false,
+        "destination_attribute": "id",
+        "destination_attribute_default": null,
+        "destination_attribute_generated": null,
+        "index?": false,
+        "match_type": null,
+        "match_with": null,
+        "multitenancy": {
+          "attribute": null,
+          "global": null,
+          "strategy": null
+        },
+        "name": "ingestion_tickera_attendee_snapshots_event_id_fkey",
+        "on_delete": "restrict",
+        "on_update": "update",
+        "primary_key?": true,
+        "schema": "public",
+        "table": "catalog_events"
+      },
+      "scale": null,
+      "size": null,
+      "source": "event_id",
+      "type": "uuid"
+    }
+  ],
+  "base_filter": null,
+  "check_constraints": [],
+  "create_table_options": null,
+  "custom_indexes": [
+    {
+      "all_tenants?": false,
+      "concurrently": false,
+      "error_fields": [
+        "event_id"
+      ],
+      "fields": [
+        {
+          "type": "atom",
+          "value": "event_id"
+        }
+      ],
+      "include": null,
+      "message": null,
+      "name": "ingestion_tickera_attendee_snapshots_event_id_idx",
+      "nulls_distinct": true,
+      "prefix": null,
+      "table": null,
+      "unique": false,
+      "using": null,
+      "where": null
+    },
+    {
+      "all_tenants?": false,
+      "concurrently": false,
+      "error_fields": [
+        "source_system_id"
+      ],
+      "fields": [
+        {
+          "type": "atom",
+          "value": "source_system_id"
+        }
+      ],
+      "include": null,
+      "message": null,
+      "name": "ingestion_tickera_attendee_snapshots_source_system_id_idx",
+      "nulls_distinct": true,
+      "prefix": null,
+      "table": null,
+      "unique": false,
+      "using": null,
+      "where": null
+    },
+    {
+      "all_tenants?": false,
+      "concurrently": false,
+      "error_fields": [
+        "ticket_code"
+      ],
+      "fields": [
+        {
+          "type": "atom",
+          "value": "ticket_code"
+        }
+      ],
+      "include": null,
+      "message": null,
+      "name": "ingestion_tickera_attendee_snapshots_ticket_code_idx",
+      "nulls_distinct": true,
+      "prefix": null,
+      "table": null,
+      "unique": false,
+      "using": null,
+      "where": null
+    },
+    {
+      "all_tenants?": false,
+      "concurrently": false,
+      "error_fields": [
+        "checksum"
+      ],
+      "fields": [
+        {
+          "type": "atom",
+          "value": "checksum"
+        }
+      ],
+      "include": null,
+      "message": null,
+      "name": "ingestion_tickera_attendee_snapshots_checksum_idx",
+      "nulls_distinct": true,
+      "prefix": null,
+      "table": null,
+      "unique": false,
+      "using": null,
+      "where": null
+    },
+    {
+      "all_tenants?": false,
+      "concurrently": false,
+      "error_fields": [
+        "ticket_type_id"
+      ],
+      "fields": [
+        {
+          "type": "atom",
+          "value": "ticket_type_id"
+        }
+      ],
+      "include": null,
+      "message": null,
+      "name": "ingestion_tickera_attendee_snapshots_ticket_type_id_idx",
+      "nulls_distinct": true,
+      "prefix": null,
+      "table": null,
+      "unique": false,
+      "using": null,
+      "where": null
+    },
+    {
+      "all_tenants?": false,
+      "concurrently": false,
+      "error_fields": [
+        "payment_status"
+      ],
+      "fields": [
+        {
+          "type": "atom",
+          "value": "payment_status"
+        }
+      ],
+      "include": null,
+      "message": null,
+      "name": "ingestion_tickera_attendee_snapshots_payment_status_idx",
+      "nulls_distinct": true,
+      "prefix": null,
+      "table": null,
+      "unique": false,
+      "using": null,
+      "where": null
+    },
+    {
+      "all_tenants?": false,
+      "concurrently": false,
+      "error_fields": [
+        "last_seen_at"
+      ],
+      "fields": [
+        {
+          "type": "atom",
+          "value": "last_seen_at"
+        }
+      ],
+      "include": null,
+      "message": null,
+      "name": "ingestion_tickera_attendee_snapshots_last_seen_at_idx",
+      "nulls_distinct": true,
+      "prefix": null,
+      "table": null,
+      "unique": false,
+      "using": null,
+      "where": null
+    },
+    {
+      "all_tenants?": false,
+      "concurrently": false,
+      "error_fields": [
+        "event_id",
+        "ticket_type_id"
+      ],
+      "fields": [
+        {
+          "type": "atom",
+          "value": "event_id"
+        },
+        {
+          "type": "atom",
+          "value": "ticket_type_id"
+        }
+      ],
+      "include": null,
+      "message": null,
+      "name": "ingestion_tickera_attendee_snapshots_event_ticket_type_idx",
+      "nulls_distinct": true,
+      "prefix": null,
+      "table": null,
+      "unique": false,
+      "using": null,
+      "where": null
+    },
+    {
+      "all_tenants?": false,
+      "concurrently": false,
+      "error_fields": [
+        "tickera_event_source_id",
+        "ticket_type_id"
+      ],
+      "fields": [
+        {
+          "type": "atom",
+          "value": "tickera_event_source_id"
+        },
+        {
+          "type": "atom",
+          "value": "ticket_type_id"
+        }
+      ],
+      "include": null,
+      "message": null,
+      "name": "ingestion_tickera_attendee_snapshots_source_ticket_type_idx",
+      "nulls_distinct": true,
+      "prefix": null,
+      "table": null,
+      "unique": false,
+      "using": null,
+      "where": null
+    },
+    {
+      "all_tenants?": false,
+      "concurrently": false,
+      "error_fields": [
+        "tickera_event_source_id",
+        "payment_status"
+      ],
+      "fields": [
+        {
+          "type": "atom",
+          "value": "tickera_event_source_id"
+        },
+        {
+          "type": "atom",
+          "value": "payment_status"
+        }
+      ],
+      "include": null,
+      "message": null,
+      "name": "ingestion_tickera_attendee_snapshots_source_payment_idx",
+      "nulls_distinct": true,
+      "prefix": null,
+      "table": null,
+      "unique": false,
+      "using": null,
+      "where": null
+    }
+  ],
+  "custom_statements": [],
+  "has_create_action": true,
+  "hash": "0045588CECE75B7A607DA62C8B665600F606C307E9A241EB1CC2A52A8AA86675",
+  "identities": [
+    {
+      "all_tenants?": false,
+      "base_filter": null,
+      "index_name": "tickera_attendee_snapshots_source_ticket_code_idx",
+      "keys": [
+        {
+          "type": "atom",
+          "value": "tickera_event_source_id"
+        },
+        {
+          "type": "atom",
+          "value": "ticket_code"
+        }
+      ],
+      "name": "unique_source_ticket_code",
+      "nils_distinct?": true,
+      "where": null
+    }
+  ],
+  "multitenancy": {
+    "attribute": null,
+    "global": null,
+    "strategy": null
+  },
+  "repo": "Elixir.EventSales.Repo",
+  "schema": null,
+  "table": "ingestion_tickera_attendee_snapshots"
+}

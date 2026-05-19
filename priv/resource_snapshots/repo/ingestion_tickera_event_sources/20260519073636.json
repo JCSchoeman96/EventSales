@@ -1,0 +1,286 @@
+{
+  "attributes": [
+    {
+      "allow_nil?": false,
+      "default": "fragment(\"gen_random_uuid()\")",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": true,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "id",
+      "type": "uuid"
+    },
+    {
+      "allow_nil?": false,
+      "default": "\"https://voelgoed.co.za\"",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "tickera_site_url",
+      "type": "text"
+    },
+    {
+      "allow_nil?": false,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "api_key_env_var",
+      "type": "text"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "api_key_last4",
+      "type": "text"
+    },
+    {
+      "allow_nil?": false,
+      "default": "true",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "active",
+      "type": "boolean"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "notes",
+      "type": "text"
+    },
+    {
+      "allow_nil?": false,
+      "default": "fragment(\"(now() AT TIME ZONE 'utc')\")",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "inserted_at",
+      "type": "utc_datetime_usec"
+    },
+    {
+      "allow_nil?": false,
+      "default": "fragment(\"(now() AT TIME ZONE 'utc')\")",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "updated_at",
+      "type": "utc_datetime_usec"
+    },
+    {
+      "allow_nil?": false,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": {
+        "deferrable": false,
+        "destination_attribute": "id",
+        "destination_attribute_default": null,
+        "destination_attribute_generated": null,
+        "index?": false,
+        "match_type": null,
+        "match_with": null,
+        "multitenancy": {
+          "attribute": null,
+          "global": null,
+          "strategy": null
+        },
+        "name": "ingestion_tickera_event_sources_source_system_id_fkey",
+        "on_delete": "restrict",
+        "on_update": "update",
+        "primary_key?": true,
+        "schema": "public",
+        "table": "catalog_source_systems"
+      },
+      "scale": null,
+      "size": null,
+      "source": "source_system_id",
+      "type": "uuid"
+    },
+    {
+      "allow_nil?": false,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": {
+        "deferrable": false,
+        "destination_attribute": "id",
+        "destination_attribute_default": null,
+        "destination_attribute_generated": null,
+        "index?": false,
+        "match_type": null,
+        "match_with": null,
+        "multitenancy": {
+          "attribute": null,
+          "global": null,
+          "strategy": null
+        },
+        "name": "ingestion_tickera_event_sources_event_id_fkey",
+        "on_delete": "restrict",
+        "on_update": "update",
+        "primary_key?": true,
+        "schema": "public",
+        "table": "catalog_events"
+      },
+      "scale": null,
+      "size": null,
+      "source": "event_id",
+      "type": "uuid"
+    }
+  ],
+  "base_filter": null,
+  "check_constraints": [],
+  "create_table_options": null,
+  "custom_indexes": [
+    {
+      "all_tenants?": false,
+      "concurrently": false,
+      "error_fields": [
+        "event_id"
+      ],
+      "fields": [
+        {
+          "type": "atom",
+          "value": "event_id"
+        }
+      ],
+      "include": null,
+      "message": null,
+      "name": "ingestion_tickera_event_sources_event_id_idx",
+      "nulls_distinct": true,
+      "prefix": null,
+      "table": null,
+      "unique": false,
+      "using": null,
+      "where": null
+    },
+    {
+      "all_tenants?": false,
+      "concurrently": false,
+      "error_fields": [
+        "source_system_id"
+      ],
+      "fields": [
+        {
+          "type": "atom",
+          "value": "source_system_id"
+        }
+      ],
+      "include": null,
+      "message": null,
+      "name": "ingestion_tickera_event_sources_source_system_id_idx",
+      "nulls_distinct": true,
+      "prefix": null,
+      "table": null,
+      "unique": false,
+      "using": null,
+      "where": null
+    },
+    {
+      "all_tenants?": false,
+      "concurrently": false,
+      "error_fields": [
+        "active"
+      ],
+      "fields": [
+        {
+          "type": "atom",
+          "value": "active"
+        }
+      ],
+      "include": null,
+      "message": null,
+      "name": "ingestion_tickera_event_sources_active_idx",
+      "nulls_distinct": true,
+      "prefix": null,
+      "table": null,
+      "unique": false,
+      "using": null,
+      "where": null
+    },
+    {
+      "all_tenants?": false,
+      "concurrently": false,
+      "error_fields": [
+        "api_key_env_var"
+      ],
+      "fields": [
+        {
+          "type": "atom",
+          "value": "api_key_env_var"
+        }
+      ],
+      "include": null,
+      "message": null,
+      "name": "ingestion_tickera_event_sources_api_key_env_var_idx",
+      "nulls_distinct": true,
+      "prefix": null,
+      "table": null,
+      "unique": false,
+      "using": null,
+      "where": null
+    }
+  ],
+  "custom_statements": [],
+  "has_create_action": true,
+  "hash": "FCD852924F74FB6BE42B7DD8D1FF9108C03BA3C2833A8407EED211E80FDE0D7C",
+  "identities": [
+    {
+      "all_tenants?": false,
+      "base_filter": null,
+      "index_name": "ingestion_tickera_event_sources_unique_source_event_index",
+      "keys": [
+        {
+          "type": "atom",
+          "value": "source_system_id"
+        },
+        {
+          "type": "atom",
+          "value": "event_id"
+        }
+      ],
+      "name": "unique_source_event",
+      "nils_distinct?": true,
+      "where": null
+    }
+  ],
+  "multitenancy": {
+    "attribute": null,
+    "global": null,
+    "strategy": null
+  },
+  "repo": "Elixir.EventSales.Repo",
+  "schema": null,
+  "table": "ingestion_tickera_event_sources"
+}

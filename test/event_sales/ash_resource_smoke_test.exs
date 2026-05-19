@@ -35,7 +35,10 @@ defmodule EventSales.AshResourceSmokeTest do
       EventSales.Ingestion.Resources.WebhookEvent,
       EventSales.Ingestion.Resources.WebhookDeliveryFailure,
       EventSales.Ingestion.Resources.SyncRun,
-      EventSales.Ingestion.Resources.SyncCursor
+      EventSales.Ingestion.Resources.SyncCursor,
+      EventSales.Ingestion.Resources.TickeraEventSource,
+      EventSales.Ingestion.Resources.TickeraAttendeeSyncRun,
+      EventSales.Ingestion.Resources.TickeraAttendeeSnapshot
     ],
     EventSales.Analytics => [
       EventSales.Analytics.Resources.EventAggregateSnapshot,

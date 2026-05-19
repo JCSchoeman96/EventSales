@@ -12,5 +12,8 @@ defmodule EventSales.Ingestion do
     resource EventSales.Ingestion.Resources.WebhookDeliveryFailure
     resource EventSales.Ingestion.Resources.SyncRun
     resource EventSales.Ingestion.Resources.SyncCursor
+    resource EventSales.Ingestion.Resources.TickeraEventSource
+    resource EventSales.Ingestion.Resources.TickeraAttendeeSyncRun
+    resource EventSales.Ingestion.Resources.TickeraAttendeeSnapshot
   end
 end
