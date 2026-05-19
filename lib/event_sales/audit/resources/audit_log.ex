@@ -17,7 +17,9 @@ defmodule EventSales.Audit.Resources.AuditLog do
     :webhook_replay_requested,
     :webhook_replay_ignored,
     :webhook_duplicate_payload_mismatch,
-    :webhook_stale_replay
+    :webhook_stale_replay,
+    :tickera_attendee_sync_requested,
+    :tickera_reconciliation_run_requested
   ]
 
   @actor_types [:system, :user, :worker, :webhook]

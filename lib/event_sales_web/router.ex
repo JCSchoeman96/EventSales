@@ -77,6 +77,8 @@ defmodule EventSalesWeb.Router do
     live "/events/:id", Live.Admin.EventDetailLive
     live "/webhooks", Live.Admin.WebhooksLive
     live "/sync", Live.Admin.SyncLive
+    live "/reconciliation", Live.Admin.ReconciliationLive
+    get "/reconciliation/export.csv", Admin.ReconciliationExportController, :show
   end
 
   # Other scopes may use custom stacks.
