@@ -34,6 +34,53 @@ defmodule EventSales.Ingestion.Workers.SyncTickeraAttendeesWorkerTest do
     assert [] = FakeTickeraAttendeeClient.calls()
   end
 
+  test "completed run discard emits no sync telemetry", %{source: source, env_var: env_var} do
+    put_env!(env_var, "key")
+    {:ok, run} = TickeraAttendeeSyncRuns.queue_manual(source, %{}, internal?: true)
+    {:ok, started} = TickeraAttendeeSyncRuns.mark_started(run, internal?: true)
+    {:ok, completed} = TickeraAttendeeSyncRuns.mark_completed(started, internal?: true)
+
+    handler_id = "tickera-worker-discard-#{System.unique_integer([:positive])}"
+    parent = self()
+
+    for event <- [:start, :stop, :exception] do
+      :ok =
+        :telemetry.attach(
+          "#{handler_id}-#{event}",
+          [:event_sales, :tickera, :sync, event],
+          fn _event, _measurements, _metadata, _config ->
+            send(parent, {:tickera_sync, event})
+          end,
+          nil
+        )
+    end
+
+    on_exit(fn ->
+      for event <- [:start, :stop, :exception] do
+        :telemetry.detach("#{handler_id}-#{event}")
+      end
+    end)
+
+    FakeTickeraAttendeeClient.reset!({:ok, page_result()})
+    assert :discard = perform(%{"sync_run_id" => completed.id})
+
+    refute_receive {:tickera_sync, _}, 100
+  end
+
+  test "inactive source fails without client call", %{source: source, env_var: env_var, admin: admin} do
+    put_env!(env_var, "key")
+    {:ok, run} = TickeraAttendeeSyncRuns.queue_manual(source, %{}, internal?: true)
+    {:ok, _deactivated} = TickeraEventSources.deactivate_source(source, actor: admin)
+
+    FakeTickeraAttendeeClient.reset!({:ok, page_result()})
+    assert :ok = perform(%{"sync_run_id" => run.id})
+    assert [] = FakeTickeraAttendeeClient.calls()
+
+    reloaded = Ash.get!(TickeraAttendeeSyncRun, run.id, domain: Ingestion)
+    assert reloaded.status == :failed
+    assert reloaded.last_error == "tickera_source_inactive"
+  end
+
   test "queued run starts and fetches first page", %{source: source, env_var: env_var} do
     put_env!(env_var, "key")
     {:ok, run} = TickeraAttendeeSyncRuns.queue_manual(source, %{}, internal?: true)
