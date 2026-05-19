@@ -2,6 +2,8 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncQueueTest do
   use EventSales.DataCase, async: false
   use Oban.Testing, repo: EventSales.Repo
 
+  require Ash.Query
+
   import EventSales.TestSupport.TickeraSyncTestHelpers
 
   alias EventSales.Ingestion
