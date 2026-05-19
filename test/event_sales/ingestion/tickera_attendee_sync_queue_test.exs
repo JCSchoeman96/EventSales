@@ -9,7 +9,6 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncQueueTest do
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.TickeraAttendeeSyncRun
   alias EventSales.Ingestion.TickeraAttendeeSyncQueue
-  alias EventSales.Ingestion.TickeraAttendeeSyncRuns
   alias EventSales.Ingestion.TickeraEventSources
   alias EventSales.Ingestion.Workers.SyncTickeraAttendeesWorker
   alias EventSales.TestSupport.Fakes.FakeTickeraAttendeeClient

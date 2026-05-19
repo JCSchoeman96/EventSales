@@ -8,6 +8,7 @@ defmodule EventSales.TestSupport.TickeraSyncTestHelpers do
 
   alias EventSales.Accounts
   alias EventSales.Accounts.Resources.{Role, User, UserRole}
+  alias EventSales.Ingestion.TickeraAttendeeSyncRuns
   alias EventSales.Ingestion.TickeraEventSources
   alias EventSales.TestSupport.Fakes.FakeTickeraAttendeeClient
   alias EventSales.TestSupport.SalesHelpers
@@ -29,8 +30,6 @@ defmodule EventSales.TestSupport.TickeraSyncTestHelpers do
       else
         Application.delete_env(:event_sales, :tickera_attendee_client)
       end
-
-      FakeTickeraAttendeeClient.reset!({:ok, default_page_result()})
     end)
 
     :ok
@@ -114,6 +113,11 @@ defmodule EventSales.TestSupport.TickeraSyncTestHelpers do
   end
 
   def default_page_result, do: page_result(%{attendees: [], count: 0})
+
+  def queue_sync_run!(source, admin, attrs \\ %{}) do
+    {:ok, run} = TickeraAttendeeSyncRuns.queue_manual(source, attrs, actor: admin)
+    run
+  end
 
   def put_env!(key, value) do
     System.put_env(key, value)

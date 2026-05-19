@@ -15,11 +15,11 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncTest do
 
   setup [:setup_fake_client, :setup_admin]
 
-  test "resolves api key from env and never leaks secret", %{source: source, env_var: env_var} do
+  test "resolves api key from env and never leaks secret", %{admin: admin, source: source, env_var: env_var} do
     secret = "tickera-secret-#{System.unique_integer([:positive])}"
     put_env!(env_var, secret)
 
-    {:ok, run} = TickeraAttendeeSyncRuns.queue_manual(source, %{}, internal?: true)
+    run = queue_sync_run!(source, admin)
 
     FakeTickeraAttendeeClient.reset!(
       {:ok, page_result(%{attendees: [attendee()], count: 1, per_page: 1})}
@@ -35,10 +35,10 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncTest do
     refute_secret_leaks!(FakeTickeraAttendeeClient.calls(), secret)
   end
 
-  test "uses source tickera_site_url and run current_page", %{source: source} do
+  test "uses source tickera_site_url and run current_page", %{admin: admin, source: source} do
     put_env!(source.api_key_env_var, "key")
 
-    {:ok, run} = TickeraAttendeeSyncRuns.queue_manual(source, %{}, internal?: true)
+    run = queue_sync_run!(source, admin)
     {:ok, run} = TickeraAttendeeSyncRuns.record_page(run, %{current_page: 2}, internal?: true)
 
     FakeTickeraAttendeeClient.reset!(
@@ -51,9 +51,9 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncTest do
     assert site_url == source.tickera_site_url
   end
 
-  test "full page continues and advances current_page", %{source: source, env_var: env_var} do
+  test "full page continues and advances current_page", %{admin: admin, source: source, env_var: env_var} do
     put_env!(env_var, "key")
-    {:ok, run} = TickeraAttendeeSyncRuns.queue_manual(source, %{}, internal?: true)
+    run = queue_sync_run!(source, admin)
 
     attendees = [attendee(), attendee()]
     per_page = 2
@@ -68,9 +68,9 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncTest do
     assert continued.attendees_upserted_count == 2
   end
 
-  test "short page completes", %{source: source, env_var: env_var} do
+  test "short page completes", %{admin: admin, source: source, env_var: env_var} do
     put_env!(env_var, "key")
-    {:ok, run} = TickeraAttendeeSyncRuns.queue_manual(source, %{}, internal?: true)
+    run = queue_sync_run!(source, admin)
 
     FakeTickeraAttendeeClient.reset!(
       {:ok, page_result(%{attendees: [attendee()], count: 1, per_page: 50, page: 1})}
@@ -81,11 +81,12 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncTest do
   end
 
   test "snapshot attrs omit forbidden fields and hash ignores transaction_id", %{
+    admin: admin,
     source: source,
     env_var: env_var
   } do
     put_env!(env_var, "key")
-    {:ok, run} = TickeraAttendeeSyncRuns.queue_manual(source, %{}, internal?: true)
+    run = queue_sync_run!(source, admin)
 
     base = attendee(%{transaction_id: "txn-a"})
     changed_txn = Map.put(base, :transaction_id, "txn-b")
@@ -108,9 +109,9 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncTest do
     refute Map.has_key?(snapshot, :transaction_id)
   end
 
-  test "duplicate page pauses without advancing current_page", %{source: source, env_var: env_var} do
+  test "duplicate page pauses without advancing current_page", %{admin: admin, source: source, env_var: env_var} do
     put_env!(env_var, "key")
-    {:ok, run} = TickeraAttendeeSyncRuns.queue_manual(source, %{}, internal?: true)
+    run = queue_sync_run!(source, admin)
     {:ok, run} = TickeraAttendeeSyncRuns.mark_started(run, internal?: true)
 
     attendees = [attendee(%{ticket_code: "DUP-1"}), attendee(%{ticket_code: "DUP-2"})]
@@ -148,7 +149,7 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncTest do
   } do
     put_env!(env_var, "key")
     {:ok, deactivated} = TickeraEventSources.deactivate_source(source, actor: admin)
-    {:ok, run} = TickeraAttendeeSyncRuns.queue_manual(deactivated, %{}, internal?: true)
+    run = queue_sync_run!(deactivated, admin)
 
     FakeTickeraAttendeeClient.reset!({:ok, page_result()})
 
@@ -159,9 +160,9 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncTest do
     assert [] = FakeTickeraAttendeeClient.calls()
   end
 
-  test "run source mismatch fails without client call", %{source: source, env_var: env_var} do
+  test "run source mismatch fails without client call", %{admin: admin, source: source, env_var: env_var} do
     put_env!(env_var, "key")
-    {:ok, run} = TickeraAttendeeSyncRuns.queue_manual(source, %{}, internal?: true)
+    run = queue_sync_run!(source, admin)
 
     mismatched = %{run | event_id: Ecto.UUID.generate()}
 
@@ -174,9 +175,9 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncTest do
     assert [] = FakeTickeraAttendeeClient.calls()
   end
 
-  test "missing api key env fails without client call", %{source: source} do
+  test "missing api key env fails without client call", %{admin: admin, source: source} do
     System.delete_env(source.api_key_env_var)
-    {:ok, run} = TickeraAttendeeSyncRuns.queue_manual(source, %{}, internal?: true)
+    run = queue_sync_run!(source, admin)
 
     FakeTickeraAttendeeClient.reset!({:ok, page_result()})
 
@@ -185,9 +186,9 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncTest do
     assert [] = FakeTickeraAttendeeClient.calls()
   end
 
-  test "missing source fails without client call", %{source: source, env_var: env_var} do
+  test "missing source fails without client call", %{admin: admin, source: source, env_var: env_var} do
     put_env!(env_var, "key")
-    {:ok, run} = TickeraAttendeeSyncRuns.queue_manual(source, %{}, internal?: true)
+    run = queue_sync_run!(source, admin)
     missing_source_run = %{run | tickera_event_source_id: Ecto.UUID.generate()}
 
     FakeTickeraAttendeeClient.reset!({:ok, page_result()})
@@ -199,9 +200,9 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncTest do
     assert [] = FakeTickeraAttendeeClient.calls()
   end
 
-  test "one bad attendee does not fail the whole page", %{source: source, env_var: env_var} do
+  test "one bad attendee does not fail the whole page", %{admin: admin, source: source, env_var: env_var} do
     put_env!(env_var, "key")
-    {:ok, run} = TickeraAttendeeSyncRuns.queue_manual(source, %{}, internal?: true)
+    run = queue_sync_run!(source, admin)
 
     attendees = [attendee(%{ticket_code: "", checksum: ""}), attendee()]
 
@@ -216,9 +217,9 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncTest do
     assert continued.errors_count == 1
   end
 
-  test "emits exactly one start and one stop per run_step", %{source: source, env_var: env_var} do
+  test "emits exactly one start and one stop per run_step", %{admin: admin, source: source, env_var: env_var} do
     put_env!(env_var, "key")
-    {:ok, run} = TickeraAttendeeSyncRuns.queue_manual(source, %{}, internal?: true)
+    run = queue_sync_run!(source, admin)
 
     FakeTickeraAttendeeClient.reset!(
       {:ok, page_result(%{attendees: [attendee()], count: 1, per_page: 1})}
