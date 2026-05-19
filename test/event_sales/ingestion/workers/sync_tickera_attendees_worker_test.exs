@@ -2,7 +2,6 @@ defmodule EventSales.Ingestion.Workers.SyncTickeraAttendeesWorkerTest do
   use EventSales.DataCase, async: false
   use Oban.Testing, repo: EventSales.Repo
 
-  import ExUnit.Callbacks, only: [on_exit: 1]
   import EventSales.TestSupport.TickeraSyncTestHelpers
 
   alias EventSales.Ingestion

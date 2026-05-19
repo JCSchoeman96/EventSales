@@ -3,7 +3,6 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncTest do
 
   require Ash.Query
 
-  import ExUnit.Callbacks, only: [on_exit: 1]
   import EventSales.TestSupport.TickeraSyncTestHelpers
 
   alias EventSales.Ingestion
