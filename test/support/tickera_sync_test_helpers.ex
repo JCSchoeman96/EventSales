@@ -2,6 +2,7 @@ defmodule EventSales.TestSupport.TickeraSyncTestHelpers do
   @moduledoc false
 
   import ExUnit.Assertions
+  import ExUnit.Callbacks, only: [on_exit: 1, start_supervised!: 1]
 
   require Ash.Query
 
