@@ -15,5 +15,7 @@ defmodule EventSales.Ingestion do
     resource EventSales.Ingestion.Resources.TickeraEventSource
     resource EventSales.Ingestion.Resources.TickeraAttendeeSyncRun
     resource EventSales.Ingestion.Resources.TickeraAttendeeSnapshot
+    resource EventSales.Ingestion.Resources.TickeraReconciliationRun
+    resource EventSales.Ingestion.Resources.TickeraReconciliationFinding
   end
 end
