@@ -19,6 +19,15 @@ defmodule EventSales.Audit.Logger do
   @spec manual_sync_requested(attrs()) :: result()
   def manual_sync_requested(attrs), do: log(:manual_sync_requested, attrs)
 
+  @doc "Writes a manual Tickera attendee snapshot sync request audit event."
+  @spec tickera_attendee_sync_requested(attrs()) :: result()
+  def tickera_attendee_sync_requested(attrs), do: log(:tickera_attendee_sync_requested, attrs)
+
+  @doc "Writes a manual Tickera/Woo reconciliation run request audit event."
+  @spec tickera_reconciliation_run_requested(attrs()) :: result()
+  def tickera_reconciliation_run_requested(attrs),
+    do: log(:tickera_reconciliation_run_requested, attrs)
+
   @doc "Writes a CSV apply request audit event."
   @spec csv_apply_requested(attrs()) :: result()
   def csv_apply_requested(attrs), do: log(:csv_apply_requested, attrs)
