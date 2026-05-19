@@ -44,6 +44,8 @@ defmodule EventSales.Telemetry do
   @reconciliation_stop [:event_sales, :reconciliation, :stop]
   @reconciliation_exception [:event_sales, :reconciliation, :exception]
   @reconciliation_pause [:event_sales, :reconciliation, :pause]
+  @tickera_request_stop [:event_sales, :tickera, :request, :stop]
+  @tickera_request_exception [:event_sales, :tickera, :request, :exception]
 
   @doc """
   Returns every custom EventSales telemetry event name defined in Slice 0.8.
@@ -78,7 +80,9 @@ defmodule EventSales.Telemetry do
       reconciliation_start(),
       reconciliation_stop(),
       reconciliation_exception(),
-      reconciliation_pause()
+      reconciliation_pause(),
+      tickera_request_stop(),
+      tickera_request_exception()
     ]
   end
 
@@ -193,6 +197,14 @@ defmodule EventSales.Telemetry do
   @doc "Scoped order reconciliation paused for retryable REST errors."
   @spec reconciliation_pause() :: event_name()
   def reconciliation_pause, do: @reconciliation_pause
+
+  @doc "Tickera attendee API request completed."
+  @spec tickera_request_stop() :: event_name()
+  def tickera_request_stop, do: @tickera_request_stop
+
+  @doc "Tickera attendee API request failed."
+  @spec tickera_request_exception() :: event_name()
+  def tickera_request_exception, do: @tickera_request_exception
 
   @doc "Returns the low-cardinality product metadata cache event for the cache outcome."
   @spec product_metadata_cache_event(:hit | :miss | :put) :: event_name()
