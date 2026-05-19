@@ -40,6 +40,37 @@ Slice `0.2` established the Postgres-backed test baseline required for `EventSal
   - Runs `mix test`
   - Runs `mix dialyzer`
 
+### Local full PR gate (`scripts/local_ci.sh`)
+
+Run before pushing a meaningful PR update so GitHub CI confirms success instead of discovering failures after a cold start.
+
+```bash
+bash scripts/local_ci.sh
+```
+
+The script runs these steps in order:
+
+1. `git diff --check`
+2. `mix format --check-formatted`
+3. `mix compile --warnings-as-errors`
+4. `bash scripts/check_no_web_woocommerce_refs.sh`
+5. `MIX_ENV=test mix ash.codegen --dry-run`
+6. `git diff --exit-code priv/repo/migrations priv/resource_snapshots`
+7. `mix quality.pr`
+8. `mix dialyzer`
+
+**When to use it:** before opening or updating a meaningful PR on GitHub.
+
+**When not to use it:** during active coding. Prefer `mix quality.fast` and focused `mix test path/to/relevant_test.exs` for quick feedback.
+
+**What it covers:** the core GitHub jobs `format_compile`, `test`, `ash_codegen`, and `dialyzer`. It does not run Sobelow, `mix deps.audit`, or `mix hex.audit` (those are in `mix quality.ci` and the CI `lint_security` job).
+
+**Still required before merge-ready:** `mix quality.ci` (full local CI parity). The pre-push hook runs `mix quality.ci` when repo hooks are installed.
+
+Steps 2–6 partially overlap with step 7 (`mix quality.pr`) so failures surface with clear section labels before the full PR alias runs.
+
+Postgres must be reachable for Ash codegen, tests, and Dialyzer. Start local Postgres with `bash scripts/dev_postgres.sh start` when needed.
+
 ## Slice 0.4 Ash Baseline Checks
 
 Slice `0.4` adds proof-only Ash verification on top of the existing local commands:
@@ -115,7 +146,8 @@ Hook behavior:
 
 PR behavior:
 
-- Do not open or update a meaningful PR until `mix quality.pr` passes.
+- Do not push a meaningful PR update until `bash scripts/local_ci.sh` passes.
+- Do not open or update a meaningful PR until `mix quality.pr` passes (included in `local_ci.sh`).
 - Do not mark a PR ready for review until `mix quality.ci` passes.
 - Do not claim “all checks pass” unless Credo ran explicitly or through `mix quality`, `mix quality.pr`, or `mix quality.ci`.
 
