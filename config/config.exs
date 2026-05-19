@@ -68,7 +68,6 @@ config :event_sales, :tickera_api,
   connect_timeout_ms: 5_000,
   receive_timeout_ms: 30_000,
   per_page: 50,
-  max_pages: 200,
   page_delay_ms: 100,
   transport: EventSales.Ingestion.Clients.HttpcTransport
 

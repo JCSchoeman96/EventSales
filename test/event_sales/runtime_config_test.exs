@@ -17,7 +17,6 @@ defmodule EventSales.RuntimeConfigTest do
     "TICKERA_CONNECT_TIMEOUT_MS",
     "TICKERA_RECEIVE_TIMEOUT_MS",
     "TICKERA_PER_PAGE",
-    "TICKERA_MAX_PAGES",
     "TICKERA_PAGE_DELAY_MS"
   ]
 
@@ -90,7 +89,6 @@ defmodule EventSales.RuntimeConfigTest do
     System.put_env("TICKERA_CONNECT_TIMEOUT_MS", "6000")
     System.put_env("TICKERA_RECEIVE_TIMEOUT_MS", "32000")
     System.put_env("TICKERA_PER_PAGE", "75")
-    System.put_env("TICKERA_MAX_PAGES", "150")
     System.put_env("TICKERA_PAGE_DELAY_MS", "125")
 
     app_config =
@@ -105,9 +103,9 @@ defmodule EventSales.RuntimeConfigTest do
     assert Keyword.fetch!(tickera_config, :connect_timeout_ms) == 6_000
     assert Keyword.fetch!(tickera_config, :receive_timeout_ms) == 32_000
     assert Keyword.fetch!(tickera_config, :per_page) == 75
-    assert Keyword.fetch!(tickera_config, :max_pages) == 150
     assert Keyword.fetch!(tickera_config, :page_delay_ms) == 125
     refute Keyword.has_key?(tickera_config, :api_key)
+    refute Keyword.has_key?(tickera_config, :max_pages)
   end
 
   defp restore_env(key, nil), do: System.delete_env(key)

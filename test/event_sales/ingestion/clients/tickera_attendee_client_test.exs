@@ -51,7 +51,6 @@ defmodule EventSales.Ingestion.Clients.TickeraAttendeeClientTest do
       connect_timeout_ms: 500,
       receive_timeout_ms: 1_000,
       per_page: 50,
-      max_pages: 200,
       page_delay_ms: 100,
       transport: FakeTransport
     )
@@ -144,10 +143,10 @@ defmodule EventSales.Ingestion.Clients.TickeraAttendeeClientTest do
              )
   end
 
-  test "rejects invalid page and per-page arguments before transport" do
+  test "rejects non-positive page and per-page arguments before transport" do
     FakeTransport.reset!([{:ok, 200, [], "[]"}])
 
-    for {page, per_page} <- [{0, 50}, {-1, 50}, {1, 0}, {1, -1}, {1, 201}] do
+    for {page, per_page} <- [{0, 50}, {-1, 50}, {1, 0}, {1, -1}] do
       assert {:error, %TickeraError{reason: :invalid_request}} =
                TickeraAttendeeClient.fetch_attendees_page(
                  "https://voelgoed.co.za",
@@ -158,6 +157,22 @@ defmodule EventSales.Ingestion.Clients.TickeraAttendeeClientTest do
     end
 
     assert [] = FakeTransport.requests()
+  end
+
+  test "does not apply an artificial upper cap to page or per_page" do
+    FakeTransport.reset!([{:ok, 200, [], Jason.encode!(%{"data" => [], "additional" => %{}})}])
+
+    assert {:ok, %{page: 10_000, per_page: 500, attendees: []}} =
+             TickeraAttendeeClient.fetch_attendees_page(
+               "https://voelgoed.co.za",
+               "abc123",
+               10_000,
+               500
+             )
+
+    assert [
+             %{url: "https://voelgoed.co.za/tc-api/abc123/tickets_info/500/10000/"}
+           ] = FakeTransport.requests()
   end
 
   test "parses data-list response shape and normalizes attendee fields" do
@@ -407,6 +422,53 @@ defmodule EventSales.Ingestion.Clients.TickeraAttendeeClientTest do
                1,
                50
              )
+  end
+
+  test "invalid JSON and empty success bodies emit exception telemetry without stop telemetry" do
+    FakeTransport.reset!([
+      {:ok, 200, [], "not-json"},
+      {:ok, 200, [], ""}
+    ])
+
+    test_pid = self()
+    stop_id = "tickera-invalid-stop-#{System.unique_integer([:positive])}"
+    exception_id = "tickera-invalid-exception-#{System.unique_integer([:positive])}"
+
+    :telemetry.attach(
+      stop_id,
+      EventSales.Telemetry.tickera_request_stop(),
+      fn _event, _measurements, metadata, _config ->
+        send(test_pid, {:unexpected_stop, metadata})
+      end,
+      nil
+    )
+
+    :telemetry.attach(
+      exception_id,
+      EventSales.Telemetry.tickera_request_exception(),
+      fn _event, measurements, metadata, _config ->
+        send(test_pid, {:tickera_exception, measurements, metadata})
+      end,
+      nil
+    )
+
+    on_exit(fn ->
+      :telemetry.detach(stop_id)
+      :telemetry.detach(exception_id)
+    end)
+
+    for _ <- 1..2 do
+      assert {:error, %TickeraError{reason: :invalid_json}} =
+               TickeraAttendeeClient.fetch_attendees_page(
+                 "https://voelgoed.co.za",
+                 "abc123",
+                 1,
+                 50
+               )
+
+      assert_receive {:tickera_exception, %{count: 1}, %{reason: :invalid_json}}
+      refute_receive {:unexpected_stop, _metadata}, 20
+    end
   end
 
   test "maps HTTP statuses and transport failures to typed retryability" do

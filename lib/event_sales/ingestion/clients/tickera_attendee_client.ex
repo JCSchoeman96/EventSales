@@ -14,9 +14,37 @@ defmodule EventSales.Ingestion.Clients.TickeraAttendeeClient do
   @default_connect_timeout_ms 5_000
   @default_receive_timeout_ms 30_000
   @default_per_page 50
-  @default_max_pages 200
   @default_page_delay_ms 100
   @user_agent "EventSales/1.0 (+https://voelgoed.co.za)"
+  @known_atom_keys %{
+    "allowed_checkins" => :allowed_checkins,
+    "buyer_email" => :buyer_email,
+    "buyer_first" => :buyer_first,
+    "buyer_last" => :buyer_last,
+    "checked_in" => :checked_in,
+    "checked_in_count" => :checked_in_count,
+    "checkin_limit" => :checkin_limit,
+    "checkins" => :checkins,
+    "checksum" => :checksum,
+    "custom_fields" => :custom_fields,
+    "email" => :email,
+    "first_name" => :first_name,
+    "last_name" => :last_name,
+    "order_status" => :order_status,
+    "payment_date" => :payment_date,
+    "payment_status" => :payment_status,
+    "purchaser_email" => :purchaser_email,
+    "purchaser_first" => :purchaser_first,
+    "purchaser_last" => :purchaser_last,
+    "remaining_checkins" => :remaining_checkins,
+    "ticket_code" => :ticket_code,
+    "ticket_type" => :ticket_type,
+    "ticket_type_id" => :ticket_type_id,
+    "transaction_id" => :transaction_id,
+    "used_checkins" => :used_checkins,
+    "wc_order_status" => :wc_order_status,
+    "woocommerce_order_status" => :woocommerce_order_status
+  }
 
   @type page_result :: %{
           attendees: [map()],
@@ -36,7 +64,7 @@ defmodule EventSales.Ingestion.Clients.TickeraAttendeeClient do
 
     with {:ok, config} <- config(opts),
          {:ok, page} <- normalize_positive_integer(page, :page, operation),
-         {:ok, per_page} <- normalize_per_page(per_page, config.max_pages, operation),
+         {:ok, per_page} <- normalize_positive_integer(per_page, :per_page, operation),
          {:ok, request_url} <- build_url(site_url, api_key, "tickets_info/#{per_page}/#{page}/"),
          :ok <- validate_site_url(request_url, operation) do
       execute_request(operation, request_url, page, per_page, config)
@@ -61,8 +89,7 @@ defmodule EventSales.Ingestion.Clients.TickeraAttendeeClient do
         duration = System.monotonic_time() - started_at
 
         if status in 200..299 do
-          emit_stop(operation, page, per_page, status, duration)
-          decode_success(body, page, per_page, operation)
+          decode_success(body, page, per_page, operation, status, duration)
         else
           reason = status_reason(status)
           emit_exception(operation, page, per_page, reason, status)
@@ -88,14 +115,16 @@ defmodule EventSales.Ingestion.Clients.TickeraAttendeeClient do
     :throw, _value -> {:error, :transport_failure}
   end
 
-  defp decode_success(body, page, per_page, operation) when is_binary(body) do
+  defp decode_success(body, page, per_page, operation, status, duration) when is_binary(body) do
     if String.trim(body) == "" do
       emit_exception(operation, page, per_page, :invalid_json, nil)
       {:error, tickera_error(:invalid_json, operation)}
     else
       case Jason.decode(body) do
         {:ok, decoded} ->
-          {:ok, normalize_response(decoded, page, per_page)}
+          result = normalize_response(decoded, page, per_page)
+          emit_stop(operation, page, per_page, status, duration)
+          {:ok, result}
 
         {:error, _error} ->
           emit_exception(operation, page, per_page, :invalid_json, nil)
@@ -335,10 +364,12 @@ defmodule EventSales.Ingestion.Clients.TickeraAttendeeClient do
   end
 
   defp custom_field(custom_fields, keys) do
-    Enum.find_value(keys, fn wanted ->
-      Enum.find_value(custom_fields, fn {key, value} ->
-        if normalize_custom_field_key(key) == wanted, do: value
-      end)
+    Enum.find_value(keys, &custom_field_value(custom_fields, &1))
+  end
+
+  defp custom_field_value(custom_fields, wanted) do
+    Enum.find_value(custom_fields, fn {key, value} ->
+      if normalize_custom_field_key(key) == wanted, do: value
     end)
   end
 
@@ -356,7 +387,14 @@ defmodule EventSales.Ingestion.Clients.TickeraAttendeeClient do
   end
 
   defp value(map, key) when is_map(map) and is_binary(key) do
-    Map.get(map, key) || Map.get(map, String.to_atom(key))
+    Map.get(map, key) || atom_key_value(map, key)
+  end
+
+  defp atom_key_value(map, key) do
+    case Map.fetch(@known_atom_keys, key) do
+      {:ok, atom_key} -> Map.get(map, atom_key)
+      :error -> nil
+    end
   end
 
   defp positive_integer(value) do
@@ -476,16 +514,6 @@ defmodule EventSales.Ingestion.Clients.TickeraAttendeeClient do
   defp normalize_positive_integer(_value, _field, operation),
     do: {:error, tickera_error(:invalid_request, operation)}
 
-  defp normalize_per_page(value, max_pages, operation) do
-    with {:ok, per_page} <- normalize_positive_integer(value, :per_page, operation) do
-      if per_page <= max_pages do
-        {:ok, per_page}
-      else
-        {:error, tickera_error(:invalid_request, operation)}
-      end
-    end
-  end
-
   defp status_reason(401), do: :unauthorized
   defp status_reason(403), do: :forbidden
   defp status_reason(404), do: :not_found
@@ -508,7 +536,6 @@ defmodule EventSales.Ingestion.Clients.TickeraAttendeeClient do
        connect_timeout_ms: Keyword.fetch!(app_config, :connect_timeout_ms),
        receive_timeout_ms: Keyword.fetch!(app_config, :receive_timeout_ms),
        per_page: Keyword.fetch!(app_config, :per_page),
-       max_pages: Keyword.fetch!(app_config, :max_pages),
        page_delay_ms: Keyword.fetch!(app_config, :page_delay_ms),
        transport: Keyword.fetch!(app_config, :transport)
      }}
@@ -521,7 +548,6 @@ defmodule EventSales.Ingestion.Clients.TickeraAttendeeClient do
       connect_timeout_ms: @default_connect_timeout_ms,
       receive_timeout_ms: @default_receive_timeout_ms,
       per_page: @default_per_page,
-      max_pages: @default_max_pages,
       page_delay_ms: @default_page_delay_ms,
       transport: HttpcTransport
     ]

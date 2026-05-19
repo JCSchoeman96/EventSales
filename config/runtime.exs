@@ -49,7 +49,6 @@ if config_env() == :prod do
     connect_timeout_ms: String.to_integer(System.get_env("TICKERA_CONNECT_TIMEOUT_MS", "5000")),
     receive_timeout_ms: String.to_integer(System.get_env("TICKERA_RECEIVE_TIMEOUT_MS", "30000")),
     per_page: String.to_integer(System.get_env("TICKERA_PER_PAGE", "50")),
-    max_pages: String.to_integer(System.get_env("TICKERA_MAX_PAGES", "200")),
     page_delay_ms: String.to_integer(System.get_env("TICKERA_PAGE_DELAY_MS", "100")),
     transport: EventSales.Ingestion.Clients.HttpcTransport
 
