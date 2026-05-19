@@ -68,6 +68,9 @@ Git hooks
 |> bash scripts/install_git_hooks.sh
 |> installs .githooks as the repo-local hooks path
 
+Before meaningful PR push
+|> bash scripts/local_ci.sh
+
 Architecture guardrail
 |> bash scripts/check_no_web_woocommerce_refs.sh
 |> verifies LiveView/controllers/components/MappingResolver do not call WooCommerce REST or direct HTTP clients
