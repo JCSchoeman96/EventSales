@@ -18,6 +18,7 @@ defmodule EventSales.Ingestion.Workers.ReconcileTickeraAttendeesWorkerTest do
 
   setup do
     original_engine = Application.get_env(:event_sales, :tickera_reconciliation_engine)
+    original_raise = Application.get_env(:event_sales, :tickera_reconciliation_test_raise)
 
     on_exit(fn ->
       if original_engine do
@@ -25,6 +26,8 @@ defmodule EventSales.Ingestion.Workers.ReconcileTickeraAttendeesWorkerTest do
       else
         Application.delete_env(:event_sales, :tickera_reconciliation_engine)
       end
+
+      restore_test_raise!(original_raise)
     end)
 
     admin = create_user!("tickera-reconciliation-worker-admin@example.com")
@@ -105,6 +108,38 @@ defmodule EventSales.Ingestion.Workers.ReconcileTickeraAttendeesWorkerTest do
     assert reloaded.last_error =~ "forced reconciliation failure"
   end
 
+  test "real engine exception marks run failed and returns error", %{admin: admin, source: source} do
+    Application.put_env(
+      :event_sales,
+      :tickera_reconciliation_test_raise,
+      "forced reconciliation failure"
+    )
+
+    {:ok, run} = TickeraReconciliationRuns.queue_manual(source, %{}, actor: admin)
+
+    assert {:error, {:failed, _failed, :exception}} =
+             perform_job(ReconcileTickeraAttendeesWorker, %{"reconciliation_run_id" => run.id})
+
+    reloaded = Ash.get!(TickeraReconciliationRun, run.id, domain: Ingestion)
+    assert reloaded.status == :failed
+    assert reloaded.last_error =~ "forced reconciliation failure"
+  end
+
+  test "inactive source marks run failed and completes worker", %{
+    admin: admin,
+    source: source
+  } do
+    {:ok, run} = TickeraReconciliationRuns.queue_manual(source, %{}, actor: admin)
+    {:ok, _deactivated} = TickeraEventSources.deactivate_source(source, actor: admin)
+
+    assert :ok =
+             perform_job(ReconcileTickeraAttendeesWorker, %{"reconciliation_run_id" => run.id})
+
+    reloaded = Ash.get!(TickeraReconciliationRun, run.id, domain: Ingestion)
+    assert reloaded.status == :failed
+    assert reloaded.last_error == "tickera_source_inactive"
+  end
+
   defp completed_run(source, admin) do
     {:ok, run} = TickeraReconciliationRuns.queue_manual(source, %{}, actor: admin)
     {:ok, started} = TickeraReconciliationRuns.mark_started(run, internal?: true)
@@ -148,4 +183,10 @@ defmodule EventSales.Ingestion.Workers.ReconcileTickeraAttendeesWorkerTest do
   end
 
   defp unique_slug(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
+
+  defp restore_test_raise!(nil),
+    do: Application.delete_env(:event_sales, :tickera_reconciliation_test_raise)
+
+  defp restore_test_raise!(value),
+    do: Application.put_env(:event_sales, :tickera_reconciliation_test_raise, value)
 end

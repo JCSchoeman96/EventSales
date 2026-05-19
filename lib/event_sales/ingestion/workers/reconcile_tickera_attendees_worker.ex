@@ -18,6 +18,8 @@ defmodule EventSales.Ingestion.Workers.ReconcileTickeraAttendeesWorker do
   alias EventSales.Ingestion.TickeraReconciliation
   alias EventSales.Ingestion.TickeraReconciliationRuns
 
+  @terminal_failure_reasons [:source_invalid]
+
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"reconciliation_run_id" => run_id}}) when is_binary(run_id) do
     case load_run(run_id) do
@@ -76,6 +78,12 @@ defmodule EventSales.Ingestion.Workers.ReconcileTickeraAttendeesWorker do
   defp ensure_running(%TickeraReconciliationRun{} = run), do: {:ok, run}
 
   defp handle_result({:ok, _run}), do: :ok
-  defp handle_result({:error, {:failed, _run, _reason}}), do: :ok
+
+  defp handle_result({:error, {:failed, _run, reason}})
+       when reason in @terminal_failure_reasons,
+       do: :ok
+
+  defp handle_result({:error, {:failed, _, :exception}} = error), do: error
+
   defp handle_result({:error, reason}), do: {:error, reason}
 end

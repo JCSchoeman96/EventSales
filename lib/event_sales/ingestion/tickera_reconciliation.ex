@@ -19,20 +19,34 @@ defmodule EventSales.Ingestion.TickeraReconciliation do
   @spec run(TickeraReconciliationRun.t(), keyword()) ::
           {:ok, TickeraReconciliationRun.t()} | {:error, term()}
   def run(%TickeraReconciliationRun{} = run, opts \\ []) do
-    with {:ok, run} <- maybe_start(run),
-         {:ok, source} <- load_source(run) do
-      try do
-        reconcile_loaded(run, source, opts)
-      rescue
-        exception ->
-          mark_failed(run, Exception.message(exception), :exception)
-      end
-    else
-      {:fail, reason} ->
-        mark_failed(run, reason, :source_invalid)
+    case maybe_start(run) do
+      {:ok, run} ->
+        case load_source(run) do
+          {:ok, source} ->
+            try do
+              maybe_test_raise!()
+              reconcile_loaded(run, source, opts)
+            rescue
+              exception ->
+                mark_failed(run, Exception.message(exception), :exception)
+            end
+
+          {:fail, reason} ->
+            mark_failed(run, reason, :source_invalid)
+
+          {:error, reason} ->
+            {:error, reason}
+        end
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  defp maybe_test_raise! do
+    case Application.get_env(:event_sales, :tickera_reconciliation_test_raise) do
+      nil -> :ok
+      message -> raise(to_string(message))
     end
   end
 
@@ -121,8 +135,6 @@ defmodule EventSales.Ingestion.TickeraReconciliation do
       {:error, error} -> {:error, error}
     end
   end
-
-  defp mark_failed(nil, message, reason), do: {:error, {:failed, message, reason}}
 
   defp woo_summary(event_id) do
     mapped_rows =

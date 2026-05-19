@@ -241,6 +241,27 @@ defmodule EventSales.Ingestion.TickeraReconciliationTest do
     assert reloaded.status == :open
   end
 
+  test "forced exception marks run failed and returns error", context do
+    original_raise = Application.get_env(:event_sales, :tickera_reconciliation_test_raise)
+
+    on_exit(fn ->
+      restore_test_raise!(original_raise)
+    end)
+
+    Application.put_env(
+      :event_sales,
+      :tickera_reconciliation_test_raise,
+      "forced reconciliation failure"
+    )
+
+    run = queue_run!(context)
+
+    assert {:error, {:failed, failed, :exception}} = TickeraReconciliation.run(run)
+    assert failed.status == :failed
+    assert failed.last_error =~ "forced reconciliation failure"
+    assert String.length(failed.last_error) <= 500
+  end
+
   defp queue_run!(context) do
     {:ok, run} = TickeraReconciliationRuns.queue_manual(context.source, %{}, actor: context.admin)
     run
@@ -391,4 +412,10 @@ defmodule EventSales.Ingestion.TickeraReconciliationTest do
   end
 
   defp unique_slug(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
+
+  defp restore_test_raise!(nil),
+    do: Application.delete_env(:event_sales, :tickera_reconciliation_test_raise)
+
+  defp restore_test_raise!(value),
+    do: Application.put_env(:event_sales, :tickera_reconciliation_test_raise, value)
 end
