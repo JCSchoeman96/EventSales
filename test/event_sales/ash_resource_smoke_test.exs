@@ -38,7 +38,9 @@ defmodule EventSales.AshResourceSmokeTest do
       EventSales.Ingestion.Resources.SyncCursor,
       EventSales.Ingestion.Resources.TickeraEventSource,
       EventSales.Ingestion.Resources.TickeraAttendeeSyncRun,
-      EventSales.Ingestion.Resources.TickeraAttendeeSnapshot
+      EventSales.Ingestion.Resources.TickeraAttendeeSnapshot,
+      EventSales.Ingestion.Resources.TickeraReconciliationRun,
+      EventSales.Ingestion.Resources.TickeraReconciliationFinding
     ],
     EventSales.Analytics => [
       EventSales.Analytics.Resources.EventAggregateSnapshot,

@@ -32,8 +32,11 @@ config :event_sales, Oban,
     webhooks: 10,
     analytics_rebuilds: 1,
     reconciliation: 1,
-    tickera_sync: 1
+    tickera_sync: 1,
+    tickera_reconciliation: 1
   ]
+
+config :event_sales, :tickera_reconciliation, stale_snapshot_after_hours: 24
 
 config :event_sales, :redis_webhook_buffer,
   enabled: false,

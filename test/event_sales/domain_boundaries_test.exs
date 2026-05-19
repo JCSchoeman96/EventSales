@@ -36,7 +36,9 @@ defmodule EventSales.DomainBoundariesTest do
     EventSales.Ingestion.Resources.SyncCursor,
     EventSales.Ingestion.Resources.TickeraEventSource,
     EventSales.Ingestion.Resources.TickeraAttendeeSyncRun,
-    EventSales.Ingestion.Resources.TickeraAttendeeSnapshot
+    EventSales.Ingestion.Resources.TickeraAttendeeSnapshot,
+    EventSales.Ingestion.Resources.TickeraReconciliationRun,
+    EventSales.Ingestion.Resources.TickeraReconciliationFinding
   ]
   @analytics_resources [
     EventSales.Analytics.Resources.EventAggregateSnapshot,
@@ -233,10 +235,25 @@ defmodule EventSales.DomainBoundariesTest do
 
     for pattern <- [
           "SyncTickeraAttendeesWorker",
+          "ReconcileTickeraAttendeesWorker",
           "TickeraAttendeeSync",
+          "TickeraReconciliation",
           "/tc-api/",
           "tickets_info"
         ] do
+      assert [] = files_containing(scan_paths, pattern)
+    end
+  end
+
+  test "Tickera reconciliation modules do not reference external API clients" do
+    scan_paths = [
+      "lib/event_sales/ingestion/tickera_reconciliation.ex",
+      "lib/event_sales/ingestion/tickera_reconciliation_runs.ex",
+      "lib/event_sales/ingestion/tickera_reconciliation_findings.ex",
+      "lib/event_sales/ingestion/workers/reconcile_tickera_attendees_worker.ex"
+    ]
+
+    for pattern <- @forbidden_woocommerce_rest_patterns ++ @forbidden_tickera_rest_patterns do
       assert [] = files_containing(scan_paths, pattern)
     end
   end
