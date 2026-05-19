@@ -214,7 +214,7 @@ defmodule EventSales.Ingestion.AdminReconciliationDashboard do
 
     with :ok <- authorize(opts),
          {:ok, event_uuid} <- cast_uuid(event_id),
-         {:ok, source} <- TickeraEventSources.get_source_for_event(event_uuid, actor: actor(opts)),
+         {:ok, source} <- active_source_for_event(event_uuid, opts),
          {:ok, result} <-
            TickeraAttendeeSyncQueue.queue_manual(source, %{}, actor: actor(opts)),
          {:ok, _audit} <- audit_attendee_sync(result.sync_run, audit_attrs) do
@@ -257,7 +257,7 @@ defmodule EventSales.Ingestion.AdminReconciliationDashboard do
   def stream_findings_for_export(opts \\ []) do
     with :ok <- authorize(opts) do
       filter_opts = filter_opts_from(opts)
-      limit = Keyword.get(opts, :limit, @export_max_rows)
+      limit = export_row_limit(opts)
 
       stream =
         Stream.resource(
@@ -300,6 +300,35 @@ defmodule EventSales.Ingestion.AdminReconciliationDashboard do
     |> maybe_put_filter_datetime(:last_seen_from, opts[:last_seen_from], :start_of_day)
     |> maybe_put_filter_datetime(:last_seen_to, opts[:last_seen_to], :end_of_day)
     |> Keyword.put(:actor, actor(opts))
+  end
+
+  @doc false
+  @spec export_row_limit(keyword()) :: pos_integer()
+  def export_row_limit(opts \\ []) do
+    opts
+    |> Keyword.get(:limit, @export_max_rows)
+    |> normalize_export_limit()
+  end
+
+  defp normalize_export_limit(limit) when is_integer(limit) and limit > 0 do
+    min(limit, @export_max_rows)
+  end
+
+  defp normalize_export_limit(limit) when is_binary(limit) do
+    case Integer.parse(limit) do
+      {parsed, ""} when parsed > 0 -> normalize_export_limit(parsed)
+      _other -> @export_max_rows
+    end
+  end
+
+  defp normalize_export_limit(_limit), do: @export_max_rows
+
+  defp active_source_for_event(event_uuid, opts) do
+    case TickeraEventSources.get_source_for_event(event_uuid, actor: actor(opts)) do
+      {:ok, nil} -> {:error, :not_found}
+      {:ok, source} -> {:ok, source}
+      other -> other
+    end
   end
 
   defp export_page(filter_opts, limit, offset) do

@@ -58,7 +58,13 @@ defmodule EventSalesWeb.Live.Admin.ReconciliationLiveTest do
       |> finding_attrs(source, event)
       |> TickeraReconciliationFindings.upsert_open(internal?: true)
 
-    {:ok, admin: admin, event: event, source: source, run: run, finding: finding}
+    {:ok,
+     admin: admin,
+     source_system: source_system,
+     event: event,
+     source: source,
+     run: run,
+     finding: finding}
   end
 
   test "rejects unauthenticated access", %{conn: conn} do
@@ -146,6 +152,33 @@ defmodule EventSalesWeb.Live.Admin.ReconciliationLiveTest do
 
     assert html =~ "Reconciliation queued"
     assert_enqueued(worker: ReconcileTickeraAttendeesWorker)
+  end
+
+  test "sync shows error when event has no active Tickera source", %{
+    conn: conn,
+    admin: admin,
+    source_system: source_system
+  } do
+    event_without_source =
+      SalesHelpers.create_event!(source_system, %{
+        name: "No Tickera Source Live Event",
+        slug: unique_slug("no-tickera-source-live")
+      })
+
+    {:ok, view, _html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/reconciliation")
+
+    render_change(view, "update_action_event", %{
+      "action" => %{"event_id" => event_without_source.id}
+    })
+
+    render_click(view, "confirm_attendee_sync")
+    html = render_click(view, "queue_attendee_sync")
+
+    assert html =~ "No active Tickera source for this event"
+    refute_enqueued(worker: SyncTickeraAttendeesWorker)
   end
 
   test "queue attendee sync enqueues worker", %{conn: conn, admin: admin, event: event} do

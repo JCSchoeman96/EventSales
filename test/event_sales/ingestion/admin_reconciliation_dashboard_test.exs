@@ -55,6 +55,7 @@ defmodule EventSales.Ingestion.AdminReconciliationDashboardTest do
     %{
       admin: admin,
       staff: staff,
+      source_system: source_system,
       event: event,
       source: source,
       run: run,
@@ -152,6 +153,24 @@ defmodule EventSales.Ingestion.AdminReconciliationDashboardTest do
     assert audit.metadata["result"] == "queued"
   end
 
+  test "queue_attendee_sync returns not_found when event has no active Tickera source", %{
+    admin: admin,
+    source_system: source_system
+  } do
+    event_without_source =
+      SalesHelpers.create_event!(source_system, %{
+        name: "No Tickera Source Event",
+        slug: unique_slug("no-tickera-source")
+      })
+
+    assert {:error, :not_found} =
+             AdminReconciliationDashboard.queue_attendee_sync(event_without_source.id,
+               actor: admin
+             )
+
+    refute_enqueued(worker: SyncTickeraAttendeesWorker)
+  end
+
   test "queue_attendee_sync enqueues worker and audits", %{admin: admin, event: event} do
     assert {:ok, %{sync_run: run}} =
              AdminReconciliationDashboard.queue_attendee_sync(event.id,
@@ -192,6 +211,12 @@ defmodule EventSales.Ingestion.AdminReconciliationDashboardTest do
     rows = Enum.to_list(stream)
     assert length(rows) == 2
     assert truncated? == true
+  end
+
+  test "export_row_limit clamps requested limit to max export rows" do
+    assert AdminReconciliationDashboard.export_row_limit(limit: 100_000) == 10_000
+    assert AdminReconciliationDashboard.export_row_limit(limit: 5) == 5
+    assert AdminReconciliationDashboard.export_row_limit() == 10_000
   end
 
   defp finding_attrs(run, source, event, type, severity, fingerprint_suffix \\ "default") do
