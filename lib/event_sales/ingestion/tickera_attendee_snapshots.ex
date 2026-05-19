@@ -7,7 +7,7 @@ defmodule EventSales.Ingestion.TickeraAttendeeSnapshots do
 
   alias EventSales.Accounts.Policies
   alias EventSales.Ingestion
-  alias EventSales.Ingestion.Resources.TickeraAttendeeSnapshot
+  alias EventSales.Ingestion.Resources.{TickeraAttendeeSnapshot, TickeraEventSource}
 
   @default_limit 100
   @max_limit 500
@@ -49,11 +49,17 @@ defmodule EventSales.Ingestion.TickeraAttendeeSnapshots do
     end
   end
 
+  # internal?: true is reserved for trusted application workers only.
+  # Never pass this from web params or user input.
   def upsert_from_tickera(attrs, opts \\ []) do
-    with :ok <- authorize_internal(opts) do
+    with :ok <- authorize_internal(opts),
+         {:ok, source_id} <- fetch_tickera_event_source_id(attrs),
+         {:ok, source} <- Ash.get(TickeraEventSource, source_id, domain: Ingestion) do
       attrs =
         attrs
         |> Map.drop(@drop_fields)
+        |> Map.put(:source_system_id, source.source_system_id)
+        |> Map.put(:event_id, source.event_id)
         |> put_checked_in_argument()
 
       TickeraAttendeeSnapshot
@@ -62,6 +68,24 @@ defmodule EventSales.Ingestion.TickeraAttendeeSnapshots do
       |> Ash.Changeset.for_create(:upsert_from_tickera, attrs)
       |> Ash.create(domain: Ingestion)
     end
+  end
+
+  defp fetch_tickera_event_source_id(attrs) do
+    case Map.get(attrs, :tickera_event_source_id) || Map.get(attrs, "tickera_event_source_id") do
+      id when is_binary(id) and id != "" -> {:ok, id}
+      _other -> {:error, missing_tickera_event_source_id_error()}
+    end
+  end
+
+  defp missing_tickera_event_source_id_error do
+    %Ash.Error.Invalid{
+      errors: [
+        %Ash.Error.Changes.InvalidAttribute{
+          field: :tickera_event_source_id,
+          message: "is required"
+        }
+      ]
+    }
   end
 
   defp put_checked_in_argument(attrs) do

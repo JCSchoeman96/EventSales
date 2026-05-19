@@ -72,6 +72,8 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncRuns do
     update_internal(run, attrs, :record_counts, opts)
   end
 
+  # internal?: true is reserved for trusted application workers only.
+  # Never pass this from web params or user input.
   defp update_internal(run, attrs, action, opts) do
     with :ok <- authorize_internal_or_admin(opts) do
       run

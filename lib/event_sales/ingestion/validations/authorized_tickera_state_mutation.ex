@@ -1,5 +1,10 @@
 defmodule EventSales.Ingestion.Validations.AuthorizedTickeraStateMutation do
-  @moduledoc false
+  @moduledoc """
+  Prevents accidental direct Ash writes to Tickera state resources.
+
+  This is an application-internal guard, not a security boundary. Facade
+  authorization (`actor`, `internal?`) remains the real access control.
+  """
 
   use Ash.Resource.Validation
 

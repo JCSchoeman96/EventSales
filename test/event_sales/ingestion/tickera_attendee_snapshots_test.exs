@@ -110,6 +110,34 @@ defmodule EventSales.Ingestion.TickeraAttendeeSnapshotsTest do
              )
   end
 
+  test "upsert_from_tickera derives event and source from tickera_event_source", %{
+    source_system: source_system,
+    event: event,
+    source: source,
+    run: run
+  } do
+    other_event =
+      SalesHelpers.create_event!(source_system, %{
+        name: "Other Snapshot Event",
+        slug: unique_slug("other-snapshot-event")
+      })
+
+    other_source_system = SalesHelpers.create_source_system!()
+
+    attrs =
+      attendee_attrs(other_source_system, other_event, source, run, %{
+        ticket_code: "MISMATCHED"
+      })
+
+    assert {:ok, snapshot} =
+             TickeraAttendeeSnapshots.upsert_from_tickera(attrs, internal?: true)
+
+    assert snapshot.event_id == source.event_id
+    assert snapshot.source_system_id == source.source_system_id
+    refute snapshot.event_id == other_event.id
+    refute snapshot.source_system_id == other_source_system.id
+  end
+
   test "list and get facades are bounded and ordered", %{
     admin: admin,
     source_system: source_system,

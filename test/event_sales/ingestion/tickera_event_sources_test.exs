@@ -186,6 +186,60 @@ defmodule EventSales.Ingestion.TickeraEventSourcesTest do
              |> Ash.create(domain: Ingestion)
   end
 
+  test "update_source updates mutable fields but not event or source identity", %{
+    admin: admin,
+    source_system: source_system,
+    event: event
+  } do
+    assert {:ok, source} =
+             TickeraEventSources.create_source(
+               %{
+                 source_system_id: source_system.id,
+                 event_id: event.id,
+                 api_key_env_var: "TICKERA_API_KEY_UPDATE",
+                 notes: "Original"
+               },
+               actor: admin
+             )
+
+    assert {:ok, updated} =
+             TickeraEventSources.update_source(source, %{notes: "Updated"}, actor: admin)
+
+    assert updated.notes == "Updated"
+    assert updated.event_id == event.id
+    assert updated.source_system_id == source_system.id
+
+    other_event =
+      SalesHelpers.create_event!(source_system, %{
+        name: "Other Event",
+        slug: unique_slug("other-event")
+      })
+
+    assert {:error, %Ash.Error.Invalid{}} =
+             TickeraEventSources.update_source(
+               updated,
+               %{event_id: other_event.id},
+               actor: admin
+             )
+
+    assert {:ok, unchanged} = TickeraEventSources.get_source(source.id, actor: admin)
+    assert unchanged.event_id == event.id
+    assert unchanged.source_system_id == source_system.id
+
+    other_source_system = SalesHelpers.create_source_system!()
+
+    assert {:error, %Ash.Error.Invalid{}} =
+             TickeraEventSources.update_source(
+               unchanged,
+               %{source_system_id: other_source_system.id},
+               actor: admin
+             )
+
+    assert {:ok, still_unchanged} = TickeraEventSources.get_source(source.id, actor: admin)
+    assert still_unchanged.event_id == event.id
+    assert still_unchanged.source_system_id == source_system.id
+  end
+
   test "activate, deactivate, and deterministic list ordering", %{
     admin: admin,
     source_system: source_system

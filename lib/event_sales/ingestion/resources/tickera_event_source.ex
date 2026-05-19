@@ -10,9 +10,17 @@ defmodule EventSales.Ingestion.Resources.TickeraEventSource do
   alias EventSales.Ingestion.Validations.AuthorizedTickeraStateMutation
 
   @default_site_url "https://voelgoed.co.za"
-  @create_update_accept [
+  @create_accept [
     :source_system_id,
     :event_id,
+    :tickera_site_url,
+    :api_key_env_var,
+    :api_key_last4,
+    :active,
+    :notes
+  ]
+
+  @update_accept [
     :tickera_site_url,
     :api_key_env_var,
     :api_key_last4,
@@ -41,17 +49,16 @@ defmodule EventSales.Ingestion.Resources.TickeraEventSource do
     defaults [:read]
 
     create :create do
-      accept @create_update_accept
+      accept @create_accept
       validate {AuthorizedTickeraStateMutation, []}
       validate present([:source_system_id, :event_id, :tickera_site_url, :api_key_env_var])
       change &__MODULE__.normalize_config/2
     end
 
     update :update do
-      accept @create_update_accept
+      accept @update_accept
       require_atomic? false
       validate {AuthorizedTickeraStateMutation, []}
-      validate present([:source_system_id, :event_id, :tickera_site_url, :api_key_env_var])
       change &__MODULE__.normalize_config/2
     end
 
