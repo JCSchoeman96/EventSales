@@ -382,10 +382,6 @@ defmodule EventSales.Ingestion.TickeraAttendeeSync do
     %{result: :failed, pause_reason: nil, error_reason: reason}
   end
 
-  defp stop_metadata({:error, _reason}, _opts) do
-    %{result: :failed, pause_reason: nil, error_reason: :internal}
-  end
-
   defp page_stop_metadata(run, result, opts) do
     per_page = per_page(opts)
 
