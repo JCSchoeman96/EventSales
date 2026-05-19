@@ -119,6 +119,17 @@ defmodule EventSales.TestSupport.TickeraSyncTestHelpers do
     run
   end
 
+  def start_sync_run!(run) do
+    {:ok, started} = TickeraAttendeeSyncRuns.mark_started(run, internal?: true)
+    started
+  end
+
+  def queue_running_sync_run!(source, admin, attrs \\ %{}) do
+    source
+    |> queue_sync_run!(admin, attrs)
+    |> start_sync_run!()
+  end
+
   def put_env!(key, value) do
     System.put_env(key, value)
 

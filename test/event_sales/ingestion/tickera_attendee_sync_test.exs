@@ -3,6 +3,7 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncTest do
 
   require Ash.Query
 
+  import ExUnit.Callbacks, only: [on_exit: 1]
   import EventSales.TestSupport.TickeraSyncTestHelpers
 
   alias EventSales.Ingestion
@@ -15,19 +16,23 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncTest do
 
   setup [:setup_fake_client, :setup_admin]
 
-  test "resolves api key from env and never leaks secret", %{admin: admin, source: source, env_var: env_var} do
+  test "resolves api key from env and never leaks secret", %{
+    admin: admin,
+    source: source,
+    env_var: env_var
+  } do
     secret = "tickera-secret-#{System.unique_integer([:positive])}"
     put_env!(env_var, secret)
 
-    run = queue_sync_run!(source, admin)
+    run = queue_running_sync_run!(source, admin)
 
     FakeTickeraAttendeeClient.reset!(
-      {:ok, page_result(%{attendees: [attendee()], count: 1, per_page: 1})}
+      {:ok, page_result(%{attendees: [attendee()], count: 1, per_page: 50})}
     )
 
     assert {:complete, completed} =
              TickeraAttendeeSync.run_step(run,
-               per_page: 1,
+               per_page: 50,
                tickera_client: FakeTickeraAttendeeClient
              )
 
@@ -38,22 +43,26 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncTest do
   test "uses source tickera_site_url and run current_page", %{admin: admin, source: source} do
     put_env!(source.api_key_env_var, "key")
 
-    run = queue_sync_run!(source, admin)
+    run = queue_running_sync_run!(source, admin)
     {:ok, run} = TickeraAttendeeSyncRuns.record_page(run, %{current_page: 2}, internal?: true)
 
     FakeTickeraAttendeeClient.reset!(
-      {:ok, page_result(%{page: 2, per_page: 1, count: 1, attendees: [attendee()]})}
+      {:ok, page_result(%{page: 2, per_page: 50, count: 1, attendees: [attendee()]})}
     )
 
-    assert {:complete, _} = TickeraAttendeeSync.run_step(run, per_page: 1)
+    assert {:complete, _} = TickeraAttendeeSync.run_step(run, per_page: 50)
 
     assert [%{site_url: site_url, page: 2}] = FakeTickeraAttendeeClient.calls()
     assert site_url == source.tickera_site_url
   end
 
-  test "full page continues and advances current_page", %{admin: admin, source: source, env_var: env_var} do
+  test "full page continues and advances current_page", %{
+    admin: admin,
+    source: source,
+    env_var: env_var
+  } do
     put_env!(env_var, "key")
-    run = queue_sync_run!(source, admin)
+    run = queue_running_sync_run!(source, admin)
 
     attendees = [attendee(), attendee()]
     per_page = 2
@@ -70,7 +79,7 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncTest do
 
   test "short page completes", %{admin: admin, source: source, env_var: env_var} do
     put_env!(env_var, "key")
-    run = queue_sync_run!(source, admin)
+    run = queue_running_sync_run!(source, admin)
 
     FakeTickeraAttendeeClient.reset!(
       {:ok, page_result(%{attendees: [attendee()], count: 1, per_page: 50, page: 1})}
@@ -86,7 +95,7 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncTest do
     env_var: env_var
   } do
     put_env!(env_var, "key")
-    run = queue_sync_run!(source, admin)
+    run = queue_running_sync_run!(source, admin)
 
     base = attendee(%{transaction_id: "txn-a"})
     changed_txn = Map.put(base, :transaction_id, "txn-b")
@@ -94,10 +103,10 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncTest do
     assert raw_hash(base) == raw_hash(changed_txn)
 
     FakeTickeraAttendeeClient.reset!(
-      {:ok, page_result(%{attendees: [base], count: 1, per_page: 1})}
+      {:ok, page_result(%{attendees: [base], count: 1, per_page: 50})}
     )
 
-    assert {:complete, _} = TickeraAttendeeSync.run_step(run, per_page: 1)
+    assert {:complete, _} = TickeraAttendeeSync.run_step(run, per_page: 50)
 
     snapshot =
       TickeraAttendeeSnapshot
@@ -109,10 +118,13 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncTest do
     refute Map.has_key?(snapshot, :transaction_id)
   end
 
-  test "duplicate page pauses without advancing current_page", %{admin: admin, source: source, env_var: env_var} do
+  test "duplicate page pauses without advancing current_page", %{
+    admin: admin,
+    source: source,
+    env_var: env_var
+  } do
     put_env!(env_var, "key")
-    run = queue_sync_run!(source, admin)
-    {:ok, run} = TickeraAttendeeSyncRuns.mark_started(run, internal?: true)
+    run = queue_running_sync_run!(source, admin)
 
     attendees = [attendee(%{ticket_code: "DUP-1"}), attendee(%{ticket_code: "DUP-2"})]
     per_page = 2
@@ -160,7 +172,11 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncTest do
     assert [] = FakeTickeraAttendeeClient.calls()
   end
 
-  test "run source mismatch fails without client call", %{admin: admin, source: source, env_var: env_var} do
+  test "run source mismatch fails without client call", %{
+    admin: admin,
+    source: source,
+    env_var: env_var
+  } do
     put_env!(env_var, "key")
     run = queue_sync_run!(source, admin)
 
@@ -186,7 +202,11 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncTest do
     assert [] = FakeTickeraAttendeeClient.calls()
   end
 
-  test "missing source fails without client call", %{admin: admin, source: source, env_var: env_var} do
+  test "missing source fails without client call", %{
+    admin: admin,
+    source: source,
+    env_var: env_var
+  } do
     put_env!(env_var, "key")
     run = queue_sync_run!(source, admin)
     missing_source_run = %{run | tickera_event_source_id: Ecto.UUID.generate()}
@@ -200,9 +220,13 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncTest do
     assert [] = FakeTickeraAttendeeClient.calls()
   end
 
-  test "one bad attendee does not fail the whole page", %{admin: admin, source: source, env_var: env_var} do
+  test "one bad attendee does not fail the whole page", %{
+    admin: admin,
+    source: source,
+    env_var: env_var
+  } do
     put_env!(env_var, "key")
-    run = queue_sync_run!(source, admin)
+    run = queue_running_sync_run!(source, admin)
 
     attendees = [attendee(%{ticket_code: "", checksum: ""}), attendee()]
 
@@ -217,30 +241,27 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncTest do
     assert continued.errors_count == 1
   end
 
-  test "emits exactly one start and one stop per run_step", %{admin: admin, source: source, env_var: env_var} do
+  test "emits exactly one start and one stop per run_step", %{
+    admin: admin,
+    source: source,
+    env_var: env_var
+  } do
     put_env!(env_var, "key")
-    run = queue_sync_run!(source, admin)
+    run = queue_running_sync_run!(source, admin)
 
     FakeTickeraAttendeeClient.reset!(
-      {:ok, page_result(%{attendees: [attendee()], count: 1, per_page: 1})}
+      {:ok, page_result(%{attendees: [attendee()], count: 1, per_page: 50})}
     )
 
     handler_id = "tickera-sync-test-#{System.unique_integer([:positive])}"
+    test_pid = self()
 
-    :ok =
-      :telemetry.attach(
-        handler_id,
-        [:event_sales, :tickera, :sync, :stop],
-        fn _event, _measurements, _metadata, pid ->
-          send(pid, :stop)
-        end,
-        nil
-      )
+    start_handler = fn _event, _measurements, _metadata, _config ->
+      send(test_pid, :start)
+    end
 
-    parent = self()
-
-    start_handler = fn _event, _measurements, _metadata ->
-      send(parent, :start)
+    stop_handler = fn _event, _measurements, _metadata, _config ->
+      send(test_pid, :stop)
     end
 
     :ok =
@@ -251,13 +272,23 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncTest do
         nil
       )
 
-    assert {:complete, _} = TickeraAttendeeSync.run_step(run, per_page: 1)
+    :ok =
+      :telemetry.attach(
+        "#{handler_id}-stop",
+        [:event_sales, :tickera, :sync, :stop],
+        stop_handler,
+        nil
+      )
+
+    on_exit(fn ->
+      :telemetry.detach("#{handler_id}-start")
+      :telemetry.detach("#{handler_id}-stop")
+    end)
+
+    assert {:complete, _} = TickeraAttendeeSync.run_step(run, per_page: 50)
 
     assert_receive :start, 500
     assert_receive :stop, 500
-
-    :telemetry.detach(handler_id)
-    :telemetry.detach("#{handler_id}-start")
   end
 
   defp raw_hash(attendee) do

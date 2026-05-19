@@ -2,6 +2,7 @@ defmodule EventSales.Ingestion.Workers.SyncTickeraAttendeesWorkerTest do
   use EventSales.DataCase, async: false
   use Oban.Testing, repo: EventSales.Repo
 
+  import ExUnit.Callbacks, only: [on_exit: 1]
   import EventSales.TestSupport.TickeraSyncTestHelpers
 
   alias EventSales.Ingestion
@@ -34,14 +35,18 @@ defmodule EventSales.Ingestion.Workers.SyncTickeraAttendeesWorkerTest do
     assert [] = FakeTickeraAttendeeClient.calls()
   end
 
-  test "completed run discard emits no sync telemetry", %{admin: admin, source: source, env_var: env_var} do
+  test "completed run discard emits no sync telemetry", %{
+    admin: admin,
+    source: source,
+    env_var: env_var
+  } do
     put_env!(env_var, "key")
     run = queue_sync_run!(source, admin)
     {:ok, started} = TickeraAttendeeSyncRuns.mark_started(run, internal?: true)
     {:ok, completed} = TickeraAttendeeSyncRuns.mark_completed(started, internal?: true)
 
     handler_id = "tickera-worker-discard-#{System.unique_integer([:positive])}"
-    parent = self()
+    test_pid = self()
 
     for event <- [:start, :stop, :exception] do
       :ok =
@@ -49,7 +54,7 @@ defmodule EventSales.Ingestion.Workers.SyncTickeraAttendeesWorkerTest do
           "#{handler_id}-#{event}",
           [:event_sales, :tickera, :sync, event],
           fn _event, _measurements, _metadata, _config ->
-            send(parent, {:tickera_sync, event})
+            send(test_pid, {:tickera_sync, event})
           end,
           nil
         )
@@ -85,7 +90,11 @@ defmodule EventSales.Ingestion.Workers.SyncTickeraAttendeesWorkerTest do
     assert reloaded.last_error == "tickera_source_inactive"
   end
 
-  test "queued run starts and fetches first page", %{admin: admin, source: source, env_var: env_var} do
+  test "queued run starts and fetches first page", %{
+    admin: admin,
+    source: source,
+    env_var: env_var
+  } do
     put_env!(env_var, "key")
     run = queue_sync_run!(source, admin)
 
@@ -93,12 +102,19 @@ defmodule EventSales.Ingestion.Workers.SyncTickeraAttendeesWorkerTest do
       {:ok, page_result(%{attendees: [attendee()], count: 1, per_page: 1})}
     )
 
-    assert :ok = perform(%{"sync_run_id" => run.id})
+    assert {:snooze, 1} = perform(%{"sync_run_id" => run.id})
     assert [_call] = FakeTickeraAttendeeClient.calls()
-    assert Ash.get!(TickeraAttendeeSyncRun, run.id, domain: Ingestion).status == :completed
+
+    reloaded = Ash.get!(TickeraAttendeeSyncRun, run.id, domain: Ingestion)
+    assert reloaded.status == :running
+    assert reloaded.current_page == 2
   end
 
-  test "full page returns snooze and advances current_page", %{admin: admin, source: source, env_var: env_var} do
+  test "full page returns snooze and advances current_page", %{
+    admin: admin,
+    source: source,
+    env_var: env_var
+  } do
     put_env!(env_var, "key")
     run = queue_sync_run!(source, admin)
 
@@ -114,7 +130,11 @@ defmodule EventSales.Ingestion.Workers.SyncTickeraAttendeesWorkerTest do
     assert reloaded.current_page == 2
   end
 
-  test "future paused run snoozes without Tickera call", %{admin: admin, source: source, env_var: env_var} do
+  test "future paused run snoozes without Tickera call", %{
+    admin: admin,
+    source: source,
+    env_var: env_var
+  } do
     put_env!(env_var, "key")
     run = queue_sync_run!(source, admin)
     {:ok, started} = TickeraAttendeeSyncRuns.mark_started(run, internal?: true)
@@ -134,7 +154,11 @@ defmodule EventSales.Ingestion.Workers.SyncTickeraAttendeesWorkerTest do
     assert [] = FakeTickeraAttendeeClient.calls()
   end
 
-  test "elapsed paused run resumes and fetches", %{admin: admin, source: source, env_var: env_var} do
+  test "elapsed paused run resumes and fetches", %{
+    admin: admin,
+    source: source,
+    env_var: env_var
+  } do
     put_env!(env_var, "key")
     run = queue_sync_run!(source, admin)
     {:ok, started} = TickeraAttendeeSyncRuns.mark_started(run, internal?: true)
@@ -148,14 +172,21 @@ defmodule EventSales.Ingestion.Workers.SyncTickeraAttendeesWorkerTest do
       )
 
     FakeTickeraAttendeeClient.reset!(
-      {:ok, page_result(%{attendees: [attendee()], count: 1, per_page: 1})}
+      {:ok, page_result(%{attendees: [attendee()], count: 1, per_page: 50})}
     )
 
     assert :ok = perform(%{"sync_run_id" => paused.id})
     assert [_call] = FakeTickeraAttendeeClient.calls()
+
+    reloaded = Ash.get!(TickeraAttendeeSyncRun, paused.id, domain: Ingestion)
+    assert reloaded.status == :completed
   end
 
-  test "retryable Tickera error pauses and snoozes", %{admin: admin, source: source, env_var: env_var} do
+  test "retryable Tickera error pauses and snoozes", %{
+    admin: admin,
+    source: source,
+    env_var: env_var
+  } do
     put_env!(env_var, "key")
     run = queue_sync_run!(source, admin)
 
@@ -194,7 +225,11 @@ defmodule EventSales.Ingestion.Workers.SyncTickeraAttendeesWorkerTest do
     assert Ash.get!(TickeraAttendeeSyncRun, run.id, domain: Ingestion).status == :failed
   end
 
-  test "duplicate full page pauses without advancing page", %{admin: admin, source: source, env_var: env_var} do
+  test "duplicate full page pauses without advancing page", %{
+    admin: admin,
+    source: source,
+    env_var: env_var
+  } do
     put_env!(env_var, "key")
     run = queue_sync_run!(source, admin)
 
