@@ -68,7 +68,10 @@ defmodule EventSales.Ingestion.Workers.SyncTickeraAttendeesWorker do
     end
   end
 
-  defp check_future_paused(%TickeraAttendeeSyncRun{status: :paused, paused_until: %DateTime{} = paused_until}) do
+  defp check_future_paused(%TickeraAttendeeSyncRun{
+         status: :paused,
+         paused_until: %DateTime{} = paused_until
+       }) do
     snooze_if_future(paused_until)
   end
 

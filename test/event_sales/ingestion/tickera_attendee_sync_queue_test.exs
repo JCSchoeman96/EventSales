@@ -6,8 +6,8 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncQueueTest do
 
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.TickeraAttendeeSyncRun
-  alias EventSales.Ingestion.TickeraAttendeeSyncRuns
   alias EventSales.Ingestion.TickeraAttendeeSyncQueue
+  alias EventSales.Ingestion.TickeraAttendeeSyncRuns
   alias EventSales.Ingestion.TickeraEventSources
   alias EventSales.Ingestion.Workers.SyncTickeraAttendeesWorker
   alias EventSales.TestSupport.Fakes.FakeTickeraAttendeeClient
@@ -28,7 +28,10 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncQueueTest do
     staff_user = create_staff!()
 
     assert {:error, :forbidden} = TickeraAttendeeSyncQueue.queue_manual(source, %{}, actor: nil)
-    assert {:error, :forbidden} = TickeraAttendeeSyncQueue.queue_manual(source, %{}, actor: staff_user)
+
+    assert {:error, :forbidden} =
+             TickeraAttendeeSyncQueue.queue_manual(source, %{}, actor: staff_user)
+
     refute_enqueued(worker: SyncTickeraAttendeesWorker)
   end
 
@@ -76,7 +79,12 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncQueueTest do
 
     Ash.create!(
       User,
-      %{email: email, name: "Test", password: "valid-pass-123", password_confirmation: "valid-pass-123"},
+      %{
+        email: email,
+        name: "Test",
+        password: "valid-pass-123",
+        password_confirmation: "valid-pass-123"
+      },
       action: :register_with_password,
       domain: Accounts
     )
@@ -95,6 +103,9 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncQueueTest do
         role -> role
       end
 
-    Ash.create!(UserRole, %{user_id: user.id, role_id: role.id}, action: :create, domain: Accounts)
+    Ash.create!(UserRole, %{user_id: user.id, role_id: role.id},
+      action: :create,
+      domain: Accounts
+    )
   end
 end

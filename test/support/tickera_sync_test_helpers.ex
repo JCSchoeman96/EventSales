@@ -3,6 +3,8 @@ defmodule EventSales.TestSupport.TickeraSyncTestHelpers do
 
   import ExUnit.Assertions
 
+  require Ash.Query
+
   alias EventSales.Accounts
   alias EventSales.Accounts.Resources.{Role, User, UserRole}
   alias EventSales.Ingestion.TickeraEventSources

@@ -67,7 +67,11 @@ defmodule EventSales.Ingestion.Workers.SyncTickeraAttendeesWorkerTest do
     refute_receive {:tickera_sync, _}, 100
   end
 
-  test "inactive source fails without client call", %{source: source, env_var: env_var, admin: admin} do
+  test "inactive source fails without client call", %{
+    source: source,
+    env_var: env_var,
+    admin: admin
+  } do
     put_env!(env_var, "key")
     {:ok, run} = TickeraAttendeeSyncRuns.queue_manual(source, %{}, internal?: true)
     {:ok, _deactivated} = TickeraEventSources.deactivate_source(source, actor: admin)
@@ -199,8 +203,7 @@ defmodule EventSales.Ingestion.Workers.SyncTickeraAttendeesWorkerTest do
 
     signature =
       attendees
-      |> Enum.map(& &1.ticket_code)
-      |> Enum.join("|")
+      |> Enum.map_join("|", & &1.ticket_code)
       |> then(&:crypto.hash(:sha256, &1))
       |> Base.encode16(case: :lower)
 

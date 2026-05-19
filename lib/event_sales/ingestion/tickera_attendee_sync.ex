@@ -259,9 +259,8 @@ defmodule EventSales.Ingestion.TickeraAttendeeSync do
       errors_count: run.errors_count + failed
     }
 
-    with {:ok, run} <- TickeraAttendeeSyncRuns.record_page(run, page_attrs, internal?: true),
-         {:ok, run} <- TickeraAttendeeSyncRuns.record_counts(run, count_attrs, internal?: true) do
-      {:ok, run}
+    with {:ok, run} <- TickeraAttendeeSyncRuns.record_page(run, page_attrs, internal?: true) do
+      TickeraAttendeeSyncRuns.record_counts(run, count_attrs, internal?: true)
     end
   end
 
@@ -328,10 +327,9 @@ defmodule EventSales.Ingestion.TickeraAttendeeSync do
 
   defp page_signature(attendees) do
     attendees
-    |> Enum.map(fn attendee ->
+    |> Enum.map_join("|", fn attendee ->
       map_value(attendee, :ticket_code) || map_value(attendee, :checksum) || ""
     end)
-    |> Enum.join("|")
     |> then(&:crypto.hash(:sha256, &1))
     |> Base.encode16(case: :lower)
   end

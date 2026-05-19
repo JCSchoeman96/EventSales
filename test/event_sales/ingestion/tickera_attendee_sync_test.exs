@@ -26,7 +26,10 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncTest do
     )
 
     assert {:complete, completed} =
-             TickeraAttendeeSync.run_step(run, per_page: 1, tickera_client: FakeTickeraAttendeeClient)
+             TickeraAttendeeSync.run_step(run,
+               per_page: 1,
+               tickera_client: FakeTickeraAttendeeClient
+             )
 
     refute_secret_leaks!(completed, secret)
     refute_secret_leaks!(FakeTickeraAttendeeClient.calls(), secret)
@@ -138,7 +141,11 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncTest do
     assert paused.duplicate_page_count == 1
   end
 
-  test "inactive source fails without client call", %{source: source, env_var: env_var, admin: admin} do
+  test "inactive source fails without client call", %{
+    source: source,
+    env_var: env_var,
+    admin: admin
+  } do
     put_env!(env_var, "key")
     {:ok, deactivated} = TickeraEventSources.deactivate_source(source, actor: admin)
     {:ok, run} = TickeraAttendeeSyncRuns.queue_manual(deactivated, %{}, internal?: true)
@@ -235,7 +242,13 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncTest do
       send(parent, :start)
     end
 
-    :ok = :telemetry.attach("#{handler_id}-start", [:event_sales, :tickera, :sync, :start], start_handler, nil)
+    :ok =
+      :telemetry.attach(
+        "#{handler_id}-start",
+        [:event_sales, :tickera, :sync, :start],
+        start_handler,
+        nil
+      )
 
     assert {:complete, _} = TickeraAttendeeSync.run_step(run, per_page: 1)
 
@@ -248,16 +261,21 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncTest do
 
   defp raw_hash(attendee) do
     attendee
-    |> Map.drop([:transaction_id, "transaction_id", :api_key, "api_key", :tickera_api_key, "tickera_api_key"])
+    |> Map.drop([
+      :transaction_id,
+      "transaction_id",
+      :api_key,
+      "api_key",
+      :tickera_api_key,
+      "tickera_api_key"
+    ])
     |> TickeraAttendeeSnapshotHash.hash()
   end
 
   defp duplicate_signature(attendees) do
     attendees
-    |> Enum.map(fn a -> a.ticket_code || a.checksum || "" end)
-    |> Enum.join("|")
+    |> Enum.map_join("|", fn a -> a.ticket_code || a.checksum || "" end)
     |> then(&:crypto.hash(:sha256, &1))
     |> Base.encode16(case: :lower)
   end
-
 end
