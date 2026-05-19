@@ -212,6 +212,19 @@ defmodule EventSalesWeb.Telemetry do
         tags: [:sync_mode, :requested_via, :pause_reason, :source],
         description: "Scoped order reconciliation pauses"
       ),
+      summary("event_sales.tickera.request.stop.duration",
+        event_name: EventSales.Telemetry.tickera_request_stop(),
+        measurement: :duration,
+        tags: [:operation, :endpoint, :page, :per_page, :status, :source],
+        unit: {:native, :millisecond},
+        description: "Tickera attendee API request duration"
+      ),
+      counter("event_sales.tickera.request.exception.count",
+        event_name: EventSales.Telemetry.tickera_request_exception(),
+        measurement: :count,
+        tags: [:operation, :endpoint, :page, :per_page, :reason, :retryable?, :status, :source],
+        description: "Tickera attendee API request failures"
+      ),
 
       # Oban Metrics
       last_value("oban.supervisor.init.system_time",

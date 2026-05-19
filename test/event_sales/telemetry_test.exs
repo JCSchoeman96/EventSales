@@ -152,6 +152,20 @@ defmodule EventSales.TelemetryTest do
     })
   end
 
+  test "Tickera request telemetry metrics are defined" do
+    assert_metric(%Summary{
+      name: [:event_sales, :tickera, :request, :stop, :duration],
+      event_name: [:event_sales, :tickera, :request, :stop],
+      measurement: :duration
+    })
+
+    assert_metric(%Counter{
+      name: [:event_sales, :tickera, :request, :exception, :count],
+      event_name: [:event_sales, :tickera, :request, :exception],
+      measurement: :count
+    })
+  end
+
   test "cache invalidation telemetry metric is defined with low-cardinality tags" do
     assert_metric_with_tags(%Counter{
       name: [:event_sales, :cache, :invalidate, :count],

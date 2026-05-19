@@ -11,7 +11,13 @@ defmodule EventSales.RuntimeConfigTest do
     "PHX_HOST",
     "SECRET_KEY_BASE",
     "WEBHOOK_PATH_TOKEN",
-    "WOOCOMMERCE_WEBHOOK_SECRET"
+    "WOOCOMMERCE_WEBHOOK_SECRET",
+    "TICKERA_DEFAULT_SITE_URL",
+    "TICKERA_TIMEOUT_MS",
+    "TICKERA_CONNECT_TIMEOUT_MS",
+    "TICKERA_RECEIVE_TIMEOUT_MS",
+    "TICKERA_PER_PAGE",
+    "TICKERA_PAGE_DELAY_MS"
   ]
 
   setup do
@@ -70,6 +76,36 @@ defmodule EventSales.RuntimeConfigTest do
 
     assert Keyword.get(webhook_intake, :path_token) == "prod-webhook-token"
     assert Keyword.get(webhook_intake, :secret) == "prod-webhook-secret"
+  end
+
+  test "prod runtime config reads Tickera API settings from env without a global API key" do
+    System.put_env("DATABASE_URL", "ecto://pooled-user:pooled-pass@db.internal/event_sales")
+    System.put_env("SECRET_KEY_BASE", String.duplicate("a", 64))
+    System.put_env("PHX_HOST", "eventsales.example.com")
+    System.put_env("WEBHOOK_PATH_TOKEN", "prod-webhook-token")
+    System.put_env("WOOCOMMERCE_WEBHOOK_SECRET", "prod-webhook-secret")
+    System.put_env("TICKERA_DEFAULT_SITE_URL", "https://tickera.example.test")
+    System.put_env("TICKERA_TIMEOUT_MS", "31000")
+    System.put_env("TICKERA_CONNECT_TIMEOUT_MS", "6000")
+    System.put_env("TICKERA_RECEIVE_TIMEOUT_MS", "32000")
+    System.put_env("TICKERA_PER_PAGE", "75")
+    System.put_env("TICKERA_PAGE_DELAY_MS", "125")
+
+    app_config =
+      @runtime_config_path
+      |> Config.Reader.read!(env: :prod)
+      |> Keyword.get(:event_sales, [])
+
+    tickera_config = Keyword.fetch!(app_config, :tickera_api)
+
+    assert Keyword.fetch!(tickera_config, :default_site_url) == "https://tickera.example.test"
+    assert Keyword.fetch!(tickera_config, :timeout_ms) == 31_000
+    assert Keyword.fetch!(tickera_config, :connect_timeout_ms) == 6_000
+    assert Keyword.fetch!(tickera_config, :receive_timeout_ms) == 32_000
+    assert Keyword.fetch!(tickera_config, :per_page) == 75
+    assert Keyword.fetch!(tickera_config, :page_delay_ms) == 125
+    refute Keyword.has_key?(tickera_config, :api_key)
+    refute Keyword.has_key?(tickera_config, :max_pages)
   end
 
   defp restore_env(key, nil), do: System.delete_env(key)

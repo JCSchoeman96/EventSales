@@ -62,6 +62,15 @@ config :event_sales, :woocommerce_rest,
   max_concurrency: 2,
   transport: EventSales.Ingestion.Clients.HttpcTransport
 
+config :event_sales, :tickera_api,
+  default_site_url: "https://voelgoed.co.za",
+  timeout_ms: 30_000,
+  connect_timeout_ms: 5_000,
+  receive_timeout_ms: 30_000,
+  per_page: 50,
+  page_delay_ms: 100,
+  transport: EventSales.Ingestion.Clients.HttpcTransport
+
 config :event_sales, :rest_circuit_breaker,
   failure_threshold: 3,
   cooldown_ms: 30_000

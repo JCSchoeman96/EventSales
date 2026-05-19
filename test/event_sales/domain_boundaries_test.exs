@@ -65,6 +65,10 @@ defmodule EventSales.DomainBoundariesTest do
     "HTTPoison.",
     "/wp-json/wc/"
   ]
+  @forbidden_tickera_rest_patterns [
+    "TickeraAttendeeClient",
+    "/tc-api/"
+  ]
 
   test "business Ash domain modules compile and load" do
     for domain <- @business_domains do
@@ -189,6 +193,28 @@ defmodule EventSales.DomainBoundariesTest do
       |> files_containing("WooCommerceClient")
 
     assert [] = matches
+  end
+
+  test "Tickera attendee client is wired only into approved production ingestion boundaries" do
+    allowed_prefixes = [
+      "lib/event_sales/ingestion/clients/"
+    ]
+
+    for pattern <- @forbidden_tickera_rest_patterns do
+      matches =
+        implementation_files("lib/event_sales")
+        |> Enum.reject(fn path ->
+          normalized =
+            path
+            |> Path.relative_to_cwd()
+            |> String.replace("\\", "/")
+
+          Enum.any?(allowed_prefixes, &String.starts_with?(normalized, &1))
+        end)
+        |> files_containing(pattern)
+
+      assert [] = matches
+    end
   end
 
   defp implementation_files(path) do
