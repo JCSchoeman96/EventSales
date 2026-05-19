@@ -225,6 +225,24 @@ defmodule EventSalesWeb.Telemetry do
         tags: [:operation, :endpoint, :page, :per_page, :reason, :retryable?, :status, :source],
         description: "Tickera attendee API request failures"
       ),
+      counter("event_sales.tickera.sync.start.count",
+        event_name: EventSales.Telemetry.tickera_sync_start(),
+        measurement: :count,
+        tags: [:source],
+        description: "Tickera attendee sync step starts"
+      ),
+      counter("event_sales.tickera.sync.stop.count",
+        event_name: EventSales.Telemetry.tickera_sync_stop(),
+        measurement: :count,
+        tags: [:result, :pause_reason, :error_reason, :source],
+        description: "Tickera attendee sync step completions"
+      ),
+      counter("event_sales.tickera.sync.exception.count",
+        event_name: EventSales.Telemetry.tickera_sync_exception(),
+        measurement: :count,
+        tags: [:error_reason, :source],
+        description: "Tickera attendee sync unexpected failures"
+      ),
 
       # Oban Metrics
       last_value("oban.supervisor.init.system_time",

@@ -27,7 +27,13 @@ config :event_sales, Oban,
   repo: EventSales.Repo,
   notifier: Oban.Notifiers.Postgres,
   plugins: [],
-  queues: [default: 10, webhooks: 10, analytics_rebuilds: 1, reconciliation: 1]
+  queues: [
+    default: 10,
+    webhooks: 10,
+    analytics_rebuilds: 1,
+    reconciliation: 1,
+    tickera_sync: 1
+  ]
 
 config :event_sales, :redis_webhook_buffer,
   enabled: false,

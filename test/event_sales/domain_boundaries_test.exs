@@ -204,6 +204,12 @@ defmodule EventSales.DomainBoundariesTest do
       "lib/event_sales/ingestion/clients/"
     ]
 
+    allowed_files = [
+      "lib/event_sales/ingestion/tickera_attendee_sync.ex",
+      "lib/event_sales/ingestion/tickera_attendee_sync_queue.ex",
+      "lib/event_sales/ingestion/workers/sync_tickera_attendees_worker.ex"
+    ]
+
     for pattern <- @forbidden_tickera_rest_patterns do
       matches =
         implementation_files("lib/event_sales")
@@ -213,11 +219,25 @@ defmodule EventSales.DomainBoundariesTest do
             |> Path.relative_to_cwd()
             |> String.replace("\\", "/")
 
-          Enum.any?(allowed_prefixes, &String.starts_with?(normalized, &1))
+          Enum.any?(allowed_prefixes, &String.starts_with?(normalized, &1)) or
+            normalized in allowed_files
         end)
         |> files_containing(pattern)
 
       assert [] = matches
+    end
+  end
+
+  test "web layer does not reference Tickera sync worker or REST paths" do
+    scan_paths = implementation_files("lib/event_sales_web")
+
+    for pattern <- [
+          "SyncTickeraAttendeesWorker",
+          "TickeraAttendeeSync",
+          "/tc-api/",
+          "tickets_info"
+        ] do
+      assert [] = files_containing(scan_paths, pattern)
     end
   end
 

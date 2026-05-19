@@ -46,6 +46,9 @@ defmodule EventSales.Telemetry do
   @reconciliation_pause [:event_sales, :reconciliation, :pause]
   @tickera_request_stop [:event_sales, :tickera, :request, :stop]
   @tickera_request_exception [:event_sales, :tickera, :request, :exception]
+  @tickera_sync_start [:event_sales, :tickera, :sync, :start]
+  @tickera_sync_stop [:event_sales, :tickera, :sync, :stop]
+  @tickera_sync_exception [:event_sales, :tickera, :sync, :exception]
 
   @doc """
   Returns every custom EventSales telemetry event name defined in Slice 0.8.
@@ -82,7 +85,10 @@ defmodule EventSales.Telemetry do
       reconciliation_exception(),
       reconciliation_pause(),
       tickera_request_stop(),
-      tickera_request_exception()
+      tickera_request_exception(),
+      tickera_sync_start(),
+      tickera_sync_stop(),
+      tickera_sync_exception()
     ]
   end
 
@@ -205,6 +211,18 @@ defmodule EventSales.Telemetry do
   @doc "Tickera attendee API request failed."
   @spec tickera_request_exception() :: event_name()
   def tickera_request_exception, do: @tickera_request_exception
+
+  @doc "Tickera attendee sync step started."
+  @spec tickera_sync_start() :: event_name()
+  def tickera_sync_start, do: @tickera_sync_start
+
+  @doc "Tickera attendee sync step completed."
+  @spec tickera_sync_stop() :: event_name()
+  def tickera_sync_stop, do: @tickera_sync_stop
+
+  @doc "Tickera attendee sync step failed unexpectedly."
+  @spec tickera_sync_exception() :: event_name()
+  def tickera_sync_exception, do: @tickera_sync_exception
 
   @doc "Returns the low-cardinality product metadata cache event for the cache outcome."
   @spec product_metadata_cache_event(:hit | :miss | :put) :: event_name()

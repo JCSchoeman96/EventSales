@@ -9,7 +9,7 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncRunsTest do
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.TickeraAttendeeSyncRun
   alias EventSales.Ingestion.{TickeraAttendeeSyncRuns, TickeraEventSources}
-  alias EventSales.Ingestion.Workers.ReconcileOrdersWorker
+  alias EventSales.Ingestion.Workers.{ReconcileOrdersWorker, SyncTickeraAttendeesWorker}
   alias EventSales.TestSupport.SalesHelpers
 
   setup do
@@ -44,6 +44,7 @@ defmodule EventSales.Ingestion.TickeraAttendeeSyncRunsTest do
     assert run.source_system_id == source.source_system_id
     assert run.event_id == source.event_id
     refute_enqueued(worker: ReconcileOrdersWorker)
+    refute_enqueued(worker: SyncTickeraAttendeesWorker)
   end
 
   test "queue_manual requires admin actor", %{staff: staff, source: source} do
