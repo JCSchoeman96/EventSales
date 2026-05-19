@@ -33,7 +33,10 @@ defmodule EventSales.DomainBoundariesTest do
     EventSales.Ingestion.Resources.WebhookEvent,
     EventSales.Ingestion.Resources.WebhookDeliveryFailure,
     EventSales.Ingestion.Resources.SyncRun,
-    EventSales.Ingestion.Resources.SyncCursor
+    EventSales.Ingestion.Resources.SyncCursor,
+    EventSales.Ingestion.Resources.TickeraEventSource,
+    EventSales.Ingestion.Resources.TickeraAttendeeSyncRun,
+    EventSales.Ingestion.Resources.TickeraAttendeeSnapshot
   ]
   @analytics_resources [
     EventSales.Analytics.Resources.EventAggregateSnapshot,
@@ -67,7 +70,8 @@ defmodule EventSales.DomainBoundariesTest do
   ]
   @forbidden_tickera_rest_patterns [
     "TickeraAttendeeClient",
-    "/tc-api/"
+    "/tc-api/",
+    "tickets_info"
   ]
 
   test "business Ash domain modules compile and load" do
@@ -214,6 +218,23 @@ defmodule EventSales.DomainBoundariesTest do
         |> files_containing(pattern)
 
       assert [] = matches
+    end
+  end
+
+  test "Tickera durable state resources do not store API key fields" do
+    resources = [
+      EventSales.Ingestion.Resources.TickeraAttendeeSyncRun,
+      EventSales.Ingestion.Resources.TickeraAttendeeSnapshot
+    ]
+
+    for resource <- resources do
+      attribute_names =
+        resource
+        |> Ash.Resource.Info.attributes()
+        |> Enum.map(& &1.name)
+
+      refute :api_key in attribute_names
+      refute :tickera_api_key in attribute_names
     end
   end
 
