@@ -9,6 +9,7 @@ defmodule EventSalesWeb.Live.Admin.DashboardLive do
   alias EventSales.Analytics.DashboardPubSub
   alias EventSales.Analytics.HotStateAggregator
   alias EventSalesWeb.Live.Admin.ManualActionRateLimiter
+  alias EventSalesWeb.Live.Admin.Session, as: AdminSession
 
   alias EventSalesWeb.Live.Components.{
     OrderTable,
@@ -23,7 +24,7 @@ defmodule EventSalesWeb.Live.Admin.DashboardLive do
     {:ok,
      socket
      |> assign(:page_title, "Admin Dashboard")
-     |> assign(:current_user_id, current_user_id(session))
+     |> assign(:current_user_id, AdminSession.current_user_id(session))
      |> assign(:subscribed_event_ids, MapSet.new())
      |> load_dashboard()
      |> maybe_subscribe_to_event_topics()}
@@ -223,10 +224,6 @@ defmodule EventSalesWeb.Live.Admin.DashboardLive do
 
   defp put_refresh_flash(socket, {:error, _reason}),
     do: put_flash(socket, :error, "Refresh failed")
-
-  defp current_user_id(%{"current_user_id" => user_id}) when is_binary(user_id), do: user_id
-  defp current_user_id(%{current_user_id: user_id}) when is_binary(user_id), do: user_id
-  defp current_user_id(_session), do: "unknown"
 
   defp empty_dashboard do
     %{

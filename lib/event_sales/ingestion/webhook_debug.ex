@@ -10,6 +10,7 @@ defmodule EventSales.Ingestion.WebhookDebug do
   require Ash.Query
 
   alias EventSales.Accounts.Policies
+  alias EventSales.AdminRead.Pagination, as: AdminReadPagination
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.WebhookEvent
 
@@ -46,14 +47,15 @@ defmodule EventSales.Ingestion.WebhookDebug do
   @spec list_events(keyword()) :: {:ok, %{rows: [row()], page: page()}} | {:error, term()}
   def list_events(opts \\ []) do
     with :ok <- authorize(opts),
-         %{page: page, per_page: per_page, offset: offset} <- pagination(opts),
+         %{page: page, per_page: per_page, offset: offset} <-
+           AdminReadPagination.pagination(opts, @default_per_page, @max_per_page),
          {:ok, events} <- read_events(opts, per_page + 1, offset) do
-      {visible_events, has_next?} = split_page(events, per_page)
+      {visible_events, has_next?} = AdminReadPagination.split_page(events, per_page)
 
       {:ok,
        %{
          rows: Enum.map(visible_events, &to_row/1),
-         page: page_info(page, per_page, has_next?)
+         page: AdminReadPagination.page_info(page, per_page, has_next?)
        }}
     end
   end
@@ -80,32 +82,6 @@ defmodule EventSales.Ingestion.WebhookDebug do
       {:error, :forbidden}
     end
   end
-
-  defp pagination(opts) do
-    page =
-      opts
-      |> Keyword.get(:page, 1)
-      |> normalize_positive_integer(1)
-
-    per_page =
-      opts
-      |> Keyword.get(:per_page, @default_per_page)
-      |> normalize_positive_integer(@default_per_page)
-      |> min(@max_per_page)
-
-    %{page: page, per_page: per_page, offset: (page - 1) * per_page}
-  end
-
-  defp normalize_positive_integer(value, _default) when is_integer(value) and value > 0, do: value
-
-  defp normalize_positive_integer(value, default) when is_binary(value) do
-    case Integer.parse(value) do
-      {parsed, ""} when parsed > 0 -> parsed
-      _other -> default
-    end
-  end
-
-  defp normalize_positive_integer(_value, default), do: default
 
   defp read_events(opts, limit, offset) do
     WebhookEvent
@@ -188,20 +164,6 @@ defmodule EventSales.Ingestion.WebhookDebug do
       raw_body_size: event.raw_body_size,
       source_updated_at: event.source_updated_at,
       processing_attempt_count: event.processing_attempt_count
-    }
-  end
-
-  defp split_page(rows, per_page) do
-    visible_rows = Enum.take(rows, per_page)
-    {visible_rows, length(rows) > per_page}
-  end
-
-  defp page_info(page, per_page, has_next?) do
-    %{
-      page: page,
-      per_page: per_page,
-      has_next?: has_next?,
-      has_previous?: page > 1
     }
   end
 end

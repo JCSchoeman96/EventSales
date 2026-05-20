@@ -5,11 +5,11 @@ defmodule EventSalesWeb.Live.Admin.SyncLive do
 
   use EventSalesWeb, :live_view
 
-  alias EventSales.Accounts
-  alias EventSales.Accounts.Resources.User
   alias EventSales.Analytics.EventDetail
   alias EventSales.Ingestion.{ManualSync, SyncDebug}
   alias EventSalesWeb.Live.Admin.ManualActionRateLimiter
+  alias EventSalesWeb.Live.Admin.Pagination, as: AdminPagination
+  alias EventSalesWeb.Live.Admin.Session, as: AdminSession
 
   @empty_form %{
     "event_id" => "",
@@ -23,12 +23,12 @@ defmodule EventSalesWeb.Live.Admin.SyncLive do
     socket =
       socket
       |> assign(:page_title, "Manual Sync")
-      |> assign(:current_user, current_user(session))
-      |> assign(:current_user_id, current_user_id(session))
+      |> assign(:current_user, AdminSession.current_user(session))
+      |> assign(:current_user_id, AdminSession.current_user_id(session))
       |> assign(:form, @empty_form)
       |> assign(:confirm_sync, false)
       |> assign(:events, [])
-      |> assign(:page, empty_page())
+      |> assign(:page, AdminPagination.empty_page())
       |> stream(:sync_runs, [])
       |> load_events()
       |> load_runs(1)
@@ -337,7 +337,7 @@ defmodule EventSalesWeb.Live.Admin.SyncLive do
 
       {:error, _reason} ->
         socket
-        |> assign(:page, empty_page())
+        |> assign(:page, AdminPagination.empty_page())
         |> stream(:sync_runs, [], reset: true)
         |> put_flash(:error, "Sync runs could not be loaded")
     end
@@ -349,21 +349,6 @@ defmodule EventSalesWeb.Live.Admin.SyncLive do
   defp normalize_form(sync) do
     Map.merge(@empty_form, Map.take(sync, Map.keys(@empty_form)))
   end
-
-  defp current_user(%{"current_user_id" => user_id}) when is_binary(user_id) do
-    case Ash.get(User, user_id, domain: Accounts) do
-      {:ok, %User{active: true} = user} -> user
-      _other -> nil
-    end
-  end
-
-  defp current_user(_session), do: nil
-
-  defp current_user_id(%{"current_user_id" => user_id}) when is_binary(user_id), do: user_id
-  defp current_user_id(%{current_user_id: user_id}) when is_binary(user_id), do: user_id
-  defp current_user_id(_session), do: "unknown"
-
-  defp empty_page, do: %{page: 1, per_page: 25, has_next?: false, has_previous?: false}
 
   defp format_datetime(nil), do: "-"
 

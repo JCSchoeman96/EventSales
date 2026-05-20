@@ -5,9 +5,9 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLive do
 
   use EventSalesWeb, :live_view
 
-  alias EventSales.Accounts
-  alias EventSales.Accounts.Resources.User
   alias EventSales.Analytics.{DashboardPubSub, EventDetail}
+  alias EventSalesWeb.Live.Admin.Pagination, as: AdminPagination
+  alias EventSalesWeb.Live.Admin.Session, as: AdminSession
 
   @impl true
   def mount(%{"id" => event_id}, session, socket) do
@@ -15,7 +15,7 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLive do
       socket
       |> assign(:page_title, "Event Detail")
       |> assign(:event_id, event_id)
-      |> assign(:current_user, current_user(session))
+      |> assign(:current_user, AdminSession.current_user(session))
       |> assign(:not_found?, false)
       |> stream_configure(:recent_orders, dom_id: &"recent-order-#{&1.order_id}")
       |> stream_configure(:unmapped_items, dom_id: &"unmapped-item-#{&1.order_item_id}")
@@ -301,7 +301,7 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLive do
 
   defp load_recent_orders(%{assigns: %{not_found?: true}} = socket, _page) do
     socket
-    |> assign(:recent_orders_page, empty_page())
+    |> assign(:recent_orders_page, AdminPagination.empty_page())
     |> stream(:recent_orders, [], reset: true)
   end
 
@@ -317,14 +317,14 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLive do
 
       {:error, _reason} ->
         socket
-        |> assign(:recent_orders_page, empty_page())
+        |> assign(:recent_orders_page, AdminPagination.empty_page())
         |> stream(:recent_orders, [], reset: true)
     end
   end
 
   defp load_unmapped_items(%{assigns: %{not_found?: true}} = socket, _page) do
     socket
-    |> assign(:unmapped_items_page, empty_page())
+    |> assign(:unmapped_items_page, AdminPagination.empty_page())
     |> stream(:unmapped_items, [], reset: true)
   end
 
@@ -340,7 +340,7 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLive do
 
       {:error, _reason} ->
         socket
-        |> assign(:unmapped_items_page, empty_page())
+        |> assign(:unmapped_items_page, AdminPagination.empty_page())
         |> stream(:unmapped_items, [], reset: true)
     end
   end
@@ -354,15 +354,6 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLive do
 
     socket
   end
-
-  defp current_user(%{"current_user_id" => user_id}) when is_binary(user_id) do
-    case Ash.get(User, user_id, domain: Accounts) do
-      {:ok, %User{active: true} = user} -> user
-      _other -> nil
-    end
-  end
-
-  defp current_user(_session), do: nil
 
   defp empty_detail(event_id) do
     %{
@@ -379,10 +370,6 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLive do
       status_breakdown: %{},
       ticket_types: []
     }
-  end
-
-  defp empty_page do
-    %{page: 1, per_page: 25, has_next?: false, has_previous?: false}
   end
 
   defp format_count(nil), do: "Uncapped"
