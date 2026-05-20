@@ -11,6 +11,7 @@ defmodule EventSales.Analytics.EventDetail do
   require Ash.Query
 
   alias EventSales.Accounts.Policies
+  alias EventSales.AdminRead.Pagination, as: AdminReadPagination
   alias EventSales.Analytics.{HotStateAggregator, SnapshotReader}
   alias EventSales.Catalog
   alias EventSales.Catalog.Resources.{Event, TicketType}
@@ -89,14 +90,15 @@ defmodule EventSales.Analytics.EventDetail do
           {:ok, %{rows: [event_list_row()], page: page()}} | {:error, term()}
   def list_events(opts \\ []) do
     with :ok <- authorize(opts),
-         %{page: page, per_page: per_page, offset: offset} <- pagination(opts),
+         %{page: page, per_page: per_page, offset: offset} <-
+           AdminReadPagination.pagination(opts, @default_per_page, @max_per_page),
          {:ok, events} <- read_events(per_page + 1, offset) do
-      {visible_events, has_next?} = split_page(events, per_page)
+      {visible_events, has_next?} = AdminReadPagination.split_page(events, per_page)
 
       {:ok,
        %{
          rows: Enum.map(visible_events, &event_list_row/1),
-         page: page_info(page, per_page, has_next?)
+         page: AdminReadPagination.page_info(page, per_page, has_next?)
        }}
     end
   end
@@ -137,14 +139,15 @@ defmodule EventSales.Analytics.EventDetail do
   def recent_orders(event_id, opts \\ []) when is_binary(event_id) do
     with :ok <- authorize(opts),
          {:ok, event_id} <- cast_uuid(event_id),
-         %{page: page, per_page: per_page, offset: offset} <- pagination(opts),
+         %{page: page, per_page: per_page, offset: offset} <-
+           AdminReadPagination.pagination(opts, @default_per_page, @max_per_page),
          rows <- recent_order_rows(event_id, per_page + 1, offset) do
-      {visible_rows, has_next?} = split_page(rows, per_page)
+      {visible_rows, has_next?} = AdminReadPagination.split_page(rows, per_page)
 
       {:ok,
        %{
          rows: Enum.map(visible_rows, &normalize_recent_order/1),
-         page: page_info(page, per_page, has_next?)
+         page: AdminReadPagination.page_info(page, per_page, has_next?)
        }}
     end
   end
@@ -154,14 +157,15 @@ defmodule EventSales.Analytics.EventDetail do
   def unmapped_items(event_id, opts \\ []) when is_binary(event_id) do
     with :ok <- authorize(opts),
          {:ok, event_id} <- cast_uuid(event_id),
-         %{page: page, per_page: per_page, offset: offset} <- pagination(opts),
+         %{page: page, per_page: per_page, offset: offset} <-
+           AdminReadPagination.pagination(opts, @default_per_page, @max_per_page),
          rows <- unmapped_item_rows(event_id, per_page + 1, offset) do
-      {visible_rows, has_next?} = split_page(rows, per_page)
+      {visible_rows, has_next?} = AdminReadPagination.split_page(rows, per_page)
 
       {:ok,
        %{
          rows: Enum.map(visible_rows, &normalize_unmapped_item/1),
-         page: page_info(page, per_page, has_next?)
+         page: AdminReadPagination.page_info(page, per_page, has_next?)
        }}
     end
   end
@@ -173,32 +177,6 @@ defmodule EventSales.Analytics.EventDetail do
       {:error, :forbidden}
     end
   end
-
-  defp pagination(opts) do
-    page =
-      opts
-      |> Keyword.get(:page, 1)
-      |> normalize_positive_integer(1)
-
-    per_page =
-      opts
-      |> Keyword.get(:per_page, @default_per_page)
-      |> normalize_positive_integer(@default_per_page)
-      |> min(@max_per_page)
-
-    %{page: page, per_page: per_page, offset: (page - 1) * per_page}
-  end
-
-  defp normalize_positive_integer(value, _default) when is_integer(value) and value > 0, do: value
-
-  defp normalize_positive_integer(value, default) when is_binary(value) do
-    case Integer.parse(value) do
-      {parsed, ""} when parsed > 0 -> parsed
-      _other -> default
-    end
-  end
-
-  defp normalize_positive_integer(_value, default), do: default
 
   defp read_events(limit, offset) do
     Event
@@ -446,20 +424,6 @@ defmodule EventSales.Analytics.EventDetail do
 
   defp remaining(nil, _sold), do: nil
   defp remaining(capacity, sold), do: max(capacity - sold, 0)
-
-  defp split_page(rows, per_page) do
-    visible_rows = Enum.take(rows, per_page)
-    {visible_rows, length(rows) > per_page}
-  end
-
-  defp page_info(page, per_page, has_next?) do
-    %{
-      page: page,
-      per_page: per_page,
-      has_next?: has_next?,
-      has_previous?: page > 1
-    }
-  end
 
   defp cast_uuid(value) do
     case Ecto.UUID.cast(value) do

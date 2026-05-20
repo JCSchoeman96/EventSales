@@ -5,16 +5,16 @@ defmodule EventSalesWeb.Live.Admin.EventsLive do
 
   use EventSalesWeb, :live_view
 
-  alias EventSales.Accounts
-  alias EventSales.Accounts.Resources.User
   alias EventSales.Analytics.EventDetail
+  alias EventSalesWeb.Live.Admin.Pagination, as: AdminPagination
+  alias EventSalesWeb.Live.Admin.Session, as: AdminSession
 
   @impl true
   def mount(_params, session, socket) do
     {:ok,
      socket
      |> assign(:page_title, "Events")
-     |> assign(:current_user, current_user(session))
+     |> assign(:current_user, AdminSession.current_user(session))
      |> load_events(1)}
   end
 
@@ -127,28 +127,15 @@ defmodule EventSalesWeb.Live.Admin.EventsLive do
       {:error, :forbidden} ->
         socket
         |> assign(:events, [])
-        |> assign(:page, empty_page())
+        |> assign(:page, AdminPagination.empty_page())
         |> put_flash(:error, "Events could not be loaded")
 
       {:error, _reason} ->
         socket
         |> assign(:events, [])
-        |> assign(:page, empty_page())
+        |> assign(:page, AdminPagination.empty_page())
         |> put_flash(:error, "Events could not be loaded")
     end
-  end
-
-  defp current_user(%{"current_user_id" => user_id}) when is_binary(user_id) do
-    case Ash.get(User, user_id, domain: Accounts) do
-      {:ok, %User{active: true} = user} -> user
-      _other -> nil
-    end
-  end
-
-  defp current_user(_session), do: nil
-
-  defp empty_page do
-    %{page: 1, per_page: 25, has_next?: false, has_previous?: false}
   end
 
   defp format_count(nil), do: "Uncapped"
