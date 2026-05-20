@@ -112,7 +112,7 @@ defmodule EventSales.Ingestion.TickeraAttendeeSnapshotsTest do
 
   test "upsert_from_tickera derives event and source from tickera_event_source", %{
     source_system: source_system,
-    event: event,
+    event: _event,
     source: source,
     run: run
   } do
