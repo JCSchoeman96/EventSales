@@ -237,6 +237,35 @@ defmodule EventSales.Catalog.CatalogResourcesProductMappingTest do
     assert length(loaded.paper_trail_versions) == 1
   end
 
+  test "update_current_label audits label-only metadata without mapping side effects" do
+    ctx = mapping_context!()
+    mapping = create_mapping!(ctx, %{woo_product_id: 401, woo_variation_id: nil})
+
+    drain_side_effect_messages()
+
+    updated =
+      Ash.update!(
+        mapping,
+        %{current_label: "Renamed from product.updated"},
+        action: :update_current_label,
+        domain: Catalog
+      )
+
+    assert updated.current_label == "Renamed from product.updated"
+    assert updated.original_label == mapping.original_label
+    assert updated.source_system_id == mapping.source_system_id
+    assert updated.event_id == mapping.event_id
+    assert updated.ticket_type_id == mapping.ticket_type_id
+    assert updated.woo_product_id == mapping.woo_product_id
+    assert updated.woo_variation_id == mapping.woo_variation_id
+    assert updated.active == mapping.active
+
+    loaded = Ash.load!(updated, :paper_trail_versions, domain: Catalog)
+    assert length(loaded.paper_trail_versions) == 1
+    assert mapping_worker_count() == 0
+    refute_received {:telemetry, [:event_sales, :cache, :invalidate], _, _}
+  end
+
   test "revenue visibility uses dashboard settings and grants" do
     source = create_source_system!()
     event = create_event!(source, %{name: "Policy Event", slug: "policy-event"})
