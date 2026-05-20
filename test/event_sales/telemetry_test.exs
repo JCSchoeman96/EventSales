@@ -175,6 +175,15 @@ defmodule EventSales.TelemetryTest do
     })
   end
 
+  test "product metadata update telemetry metric is defined with low-cardinality tags" do
+    assert_metric_with_tags(%Counter{
+      name: [:event_sales, :catalog, :product_metadata, :update, :count],
+      event_name: [:event_sales, :catalog, :product_metadata, :update],
+      measurement: :count,
+      tags: [:result, :source]
+    })
+  end
+
   defp assert_metric(expected_metric) do
     assert Enum.any?(EventSalesWeb.Telemetry.metrics(), &metric_matches?(&1, expected_metric))
   end

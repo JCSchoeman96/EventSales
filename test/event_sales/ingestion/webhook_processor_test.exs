@@ -1,6 +1,8 @@
 defmodule EventSales.Ingestion.WebhookProcessorTest do
   use EventSales.DataCase, async: false
 
+  alias EventSales.Catalog
+  alias EventSales.Catalog.Resources.ProductMapping
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.WebhookEvent
   alias EventSales.Ingestion.WebhookEventStore
@@ -82,7 +84,7 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
   end
 
   test "unsupported topics are ignored with an ignore reason", %{source: source} do
-    {:ok, event} = create_event(source, %{topic: "product.updated"})
+    {:ok, event} = create_event(source, %{topic: "customer.updated"})
 
     assert :ok = WebhookProcessor.process(event.id)
 
@@ -90,6 +92,52 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
     assert ignored.status == :ignored
     assert ignored.ignore_reason == :unsupported_topic
     assert ignored.processed_at
+  end
+
+  test "product.updated dispatches to metadata handler and marks processed", %{source: source} do
+    event_resource = SalesHelpers.create_event!(source, %{name: "Processor Product Event"})
+    ticket = SalesHelpers.create_ticket_type!(event_resource, %{name: "Processor Product Ticket"})
+
+    mapping =
+      create_mapping!(source, event_resource, ticket, %{
+        woo_product_id: 501,
+        current_label: "Old Product Label"
+      })
+
+    {:ok, event} =
+      create_event(source, %{
+        topic: "product.updated",
+        resource_type: "product",
+        resource_id: "501",
+        payload: %{"id" => 501, "name" => "New Product Label"},
+        source_updated_at: ~U[2026-05-01 08:05:00Z]
+      })
+
+    assert :ok = WebhookProcessor.process(event.id)
+
+    processed = reload!(event.id)
+    assert processed.status == :processed
+    refute processed.ignore_reason
+
+    assert Ash.get!(ProductMapping, mapping.id, domain: Catalog).current_label ==
+             "New Product Label"
+  end
+
+  test "unknown product.updated is marked ignored but returns ok to Oban", %{source: source} do
+    {:ok, event} =
+      create_event(source, %{
+        topic: "product.updated",
+        resource_type: "product",
+        resource_id: "999999",
+        payload: %{"id" => 999_999, "name" => "Unknown Product"},
+        source_updated_at: ~U[2026-05-01 08:05:00Z]
+      })
+
+    assert :ok = WebhookProcessor.process(event.id)
+
+    ignored = reload!(event.id)
+    assert ignored.status == :ignored
+    assert ignored.ignore_reason == :unknown_product
   end
 
   test "processed source resource hash duplicates are ignored", %{source: source} do
@@ -427,6 +475,21 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
 
   defp unique_delivery_id do
     "delivery-#{System.unique_integer([:positive])}"
+  end
+
+  defp create_mapping!(source, event, ticket, attrs) do
+    defaults = %{
+      source_system_id: source.id,
+      event_id: event.id,
+      ticket_type_id: ticket.id,
+      woo_product_id: 1,
+      woo_variation_id: nil,
+      original_label: "Ticket",
+      current_label: "Ticket",
+      active: true
+    }
+
+    Ash.create!(ProductMapping, Map.merge(defaults, attrs), action: :create, domain: Catalog)
   end
 
   defp create_order!(source) do

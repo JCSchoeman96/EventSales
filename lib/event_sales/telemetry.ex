@@ -40,6 +40,7 @@ defmodule EventSales.Telemetry do
   @product_metadata_cache_hit [:event_sales, :catalog, :product_metadata_cache, :hit]
   @product_metadata_cache_miss [:event_sales, :catalog, :product_metadata_cache, :miss]
   @product_metadata_cache_put [:event_sales, :catalog, :product_metadata_cache, :put]
+  @product_metadata_update [:event_sales, :catalog, :product_metadata, :update]
   @reconciliation_start [:event_sales, :reconciliation, :start]
   @reconciliation_stop [:event_sales, :reconciliation, :stop]
   @reconciliation_exception [:event_sales, :reconciliation, :exception]
@@ -80,6 +81,7 @@ defmodule EventSales.Telemetry do
       product_metadata_cache_hit(),
       product_metadata_cache_miss(),
       product_metadata_cache_put(),
+      product_metadata_update(),
       reconciliation_start(),
       reconciliation_stop(),
       reconciliation_exception(),
@@ -187,6 +189,10 @@ defmodule EventSales.Telemetry do
   @doc "Product metadata cache write."
   @spec product_metadata_cache_put() :: event_name()
   def product_metadata_cache_put, do: @product_metadata_cache_put
+
+  @doc "WooCommerce product.updated metadata handling result."
+  @spec product_metadata_update() :: event_name()
+  def product_metadata_update, do: @product_metadata_update
 
   @doc "Scoped order reconciliation started."
   @spec reconciliation_start() :: event_name()

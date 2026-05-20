@@ -60,6 +60,38 @@ defmodule EventSalesWeb.WebhookControllerTest do
     assert_enqueued(worker: ProcessWebhookWorker, queue: :webhooks)
   end
 
+  test "valid signed product.updated webhook persists and enqueues without inline REST", %{
+    conn: conn
+  } do
+    raw_body = FixtureHelpers.read_fixture!(:woocommerce, :product_updated)
+
+    headers =
+      signed_headers(raw_body,
+        delivery_id: unique_delivery_id(),
+        topic: "product.updated",
+        resource: "product"
+      )
+
+    conn = post_webhook(conn, headers, raw_body)
+
+    assert response(conn, 200) == "ok"
+
+    assert [
+             %WebhookEvent{
+               status: :queued,
+               topic: "product.updated",
+               resource_type: "product",
+               resource_id: "501"
+             }
+           ] = Ash.read!(WebhookEvent, domain: Ingestion)
+
+    assert_enqueued(worker: ProcessWebhookWorker, queue: :webhooks)
+
+    controller_source = File.read!("lib/event_sales_web/controllers/webhook_controller.ex")
+    refute controller_source =~ "WooCommerceClient"
+    refute controller_source =~ "/wp-json/wc/"
+  end
+
   test "missing signature header is rejected", %{conn: conn} do
     raw_body = ~s({"id":1})
     headers = signed_headers(raw_body, delivery_id: unique_delivery_id())
@@ -247,7 +279,9 @@ defmodule EventSalesWeb.WebhookControllerTest do
     headers =
       WooCommerceWebhookHelpers.signed_headers(raw_body,
         secret: @secret,
-        delivery_id: delivery_id
+        delivery_id: delivery_id,
+        topic: Keyword.get(opts, :topic, "order.updated"),
+        resource: Keyword.get(opts, :resource, "order")
       )
 
     case Keyword.get(opts, :signature) do

@@ -61,6 +61,11 @@ defmodule EventSales.Catalog.Resources.ProductMapping do
       change MappingSideEffectsAfterAction
     end
 
+    update :update_current_label do
+      accept [:current_label]
+      require_atomic? false
+    end
+
     update :deactivate do
       accept []
       require_atomic? false
@@ -142,7 +147,7 @@ defmodule EventSales.Catalog.Resources.ProductMapping do
     change_tracking_mode :changes_only
     ignore_attributes [:inserted_at, :updated_at]
     ignore_actions [:create]
-    on_actions [:update, :deactivate, :remap]
+    on_actions [:update, :update_current_label, :deactivate, :remap]
     store_action_name? true
     table_name "catalog_product_mapping_versions"
   end
