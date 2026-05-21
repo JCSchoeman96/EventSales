@@ -8,7 +8,15 @@ defmodule EventSales.Ingestion.Resources.CsvImportBatch do
     domain: EventSales.Ingestion,
     extensions: [AshStateMachine]
 
-  @statuses [:uploaded, :validating, :dry_run_passed, :dry_run_failed, :failed]
+  @statuses [
+    :uploaded,
+    :validating,
+    :dry_run_passed,
+    :dry_run_failed,
+    :applying,
+    :applied,
+    :failed
+  ]
 
   postgres do
     table "ingestion_csv_import_batches"
@@ -57,6 +65,17 @@ defmodule EventSales.Ingestion.Resources.CsvImportBatch do
       accept [:last_error]
       require_atomic? false
       change transition_state(:failed)
+    end
+
+    update :mark_applying do
+      require_atomic? false
+      change transition_state(:applying)
+    end
+
+    update :mark_applied do
+      accept [:applied_at]
+      require_atomic? false
+      change transition_state(:applied)
     end
   end
 
@@ -107,6 +126,10 @@ defmodule EventSales.Ingestion.Resources.CsvImportBatch do
       public? true
     end
 
+    attribute :applied_at, :utc_datetime_usec do
+      public? true
+    end
+
     create_timestamp :inserted_at
     update_timestamp :updated_at
   end
@@ -136,7 +159,12 @@ defmodule EventSales.Ingestion.Resources.CsvImportBatch do
       transition :mark_validating, from: :uploaded, to: :validating
       transition :mark_dry_run_passed, from: :validating, to: :dry_run_passed
       transition :mark_dry_run_failed, from: :validating, to: :dry_run_failed
-      transition :mark_failed, from: [:uploaded, :validating], to: :failed
+      transition :mark_applying, from: :dry_run_passed, to: :applying
+      transition :mark_applied, from: :applying, to: :applied
+
+      transition :mark_failed,
+        from: [:uploaded, :validating, :dry_run_passed, :applying],
+        to: :failed
     end
   end
 end

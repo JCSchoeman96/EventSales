@@ -11,7 +11,7 @@ defmodule EventSales.Analytics.OrderProcessedNotifier do
 
   alias EventSales.Analytics.{DashboardCache, HotStateAggregator}
   alias EventSales.Catalog.CacheInvalidation
-  alias EventSales.Ingestion.Resources.{SyncRun, WebhookEvent}
+  alias EventSales.Ingestion.Resources.{CsvImportBatch, SyncRun, WebhookEvent}
   alias EventSales.Sales
   alias EventSales.Sales.Resources.{Order, OrderItem}
   alias EventSales.Telemetry
@@ -62,6 +62,34 @@ defmodule EventSales.Analytics.OrderProcessedNotifier do
     _kind, _reason -> emit_reconciliation_failure(:notifier_apply_failed)
   end
 
+  @doc """
+  Notifies dashboard hot state that a durable CSV import order upsert completed.
+  """
+  @spec notify_order_imported(Order.t(), CsvImportBatch.t(), Ecto.UUID.t(), keyword()) :: :ok
+  def notify_order_imported(%Order{} = order, %CsvImportBatch{} = batch, event_id, opts \\ [])
+      when is_binary(event_id) do
+    DashboardCache.invalidate_event(event_id, :csv_import_applied)
+    CacheInvalidation.emit_for_event(event_id, :csv_import_applied)
+
+    Telemetry.emit(Telemetry.cache_invalidate(), %{count: 1}, %{
+      scope: :event,
+      reason: :csv_import_applied,
+      source: :csv
+    })
+
+    event = aggregate_csv_import_event(order, batch, event_id)
+    hot_state_aggregator = Keyword.get(opts, :hot_state_aggregator, HotStateAggregator)
+
+    case hot_state_aggregator.apply_event(event) do
+      :ok -> :ok
+      {:error, _reason} -> emit_csv_import_failure(:notifier_apply_failed)
+    end
+  rescue
+    _exception -> emit_csv_import_failure(:notifier_apply_failed)
+  catch
+    _kind, _reason -> emit_csv_import_failure(:notifier_apply_failed)
+  end
+
   defp aggregate_reconciliation_event(%Order{} = order, %SyncRun{} = sync_run, event_id) do
     source_updated_at = order.updated_at_source || DateTime.utc_now()
     occurred_at = DateTime.utc_now()
@@ -77,6 +105,50 @@ defmodule EventSales.Analytics.OrderProcessedNotifier do
       source_updated_at: source_updated_at,
       payload_hash: "reconciliation:#{sync_run.id}"
     }
+  end
+
+  defp aggregate_csv_import_event(%Order{} = order, %CsvImportBatch{} = batch, event_id) do
+    source_updated_at = order.updated_at_source || DateTime.utc_now()
+    occurred_at = DateTime.utc_now()
+
+    %{
+      aggregate_event_id:
+        aggregate_csv_import_event_id(order, batch, event_id, source_updated_at),
+      event_id: event_id,
+      reason: :order_processed,
+      occurred_at: occurred_at,
+      source_system_id: order.source_system_id,
+      order_id: order.id,
+      source_updated_at: source_updated_at,
+      payload_hash: "csv_import:#{batch.id}"
+    }
+  end
+
+  defp aggregate_csv_import_event_id(
+         %Order{} = order,
+         %CsvImportBatch{} = batch,
+         event_id,
+         source_updated_at
+       ) do
+    source_timestamp =
+      case source_updated_at do
+        %DateTime{} = datetime -> DateTime.to_iso8601(datetime)
+        _other -> "unknown"
+      end
+
+    [
+      "order",
+      order.id,
+      "event",
+      event_id,
+      "csv_import_batch",
+      batch.id,
+      "source",
+      source_timestamp
+    ]
+    |> Enum.join(":")
+    |> then(&:crypto.hash(:sha256, &1))
+    |> Base.encode16(case: :lower)
   end
 
   defp aggregate_reconciliation_event_id(
@@ -208,6 +280,15 @@ defmodule EventSales.Analytics.OrderProcessedNotifier do
       event_reason: :reconciliation_applied,
       result: :ignored,
       source: :reconciliation
+    })
+  end
+
+  defp emit_csv_import_failure(reason) do
+    Telemetry.emit(Telemetry.hot_state_event_ignored(), %{count: 1}, %{
+      reason: reason,
+      event_reason: :csv_import_applied,
+      result: :ignored,
+      source: :csv
     })
   end
 

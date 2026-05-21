@@ -7,7 +7,7 @@ defmodule EventSales.Ingestion.Resources.CsvImportRow do
     data_layer: AshPostgres.DataLayer,
     domain: EventSales.Ingestion
 
-  @statuses [:valid, :invalid, :duplicate, :skipped]
+  @statuses [:valid, :invalid, :duplicate, :skipped, :applied, :failed]
 
   postgres do
     table "ingestion_csv_import_rows"
@@ -45,6 +45,16 @@ defmodule EventSales.Ingestion.Resources.CsvImportRow do
       ]
 
       validate present([:csv_import_batch_id, :row_number, :status])
+    end
+
+    update :mark_applied do
+      accept [:applied_at]
+      change set_attribute(:status, :applied)
+    end
+
+    update :mark_failed do
+      accept [:error_messages]
+      change set_attribute(:status, :failed)
     end
   end
 
@@ -86,6 +96,10 @@ defmodule EventSales.Ingestion.Resources.CsvImportRow do
     end
 
     attribute :external_line_key, :string do
+      public? true
+    end
+
+    attribute :applied_at, :utc_datetime_usec do
       public? true
     end
 

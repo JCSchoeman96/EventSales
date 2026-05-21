@@ -160,6 +160,72 @@ defmodule EventSales.Sales.OrderUpserterTest do
     assert order.woo_order_id == normalized.woo_order_id
   end
 
+  test "pre-mapped normalized imports persist event and ticket mapping fields", %{source: source} do
+    event = SalesHelpers.create_event!(source, %{name: "CSV Upsert Event"})
+    ticket = SalesHelpers.create_ticket_type!(event, %{name: "CSV GA"})
+
+    normalized = %{
+      woo_order_id: 90_001,
+      order_number: "CSV-90001",
+      status: :completed,
+      currency: "ZAR",
+      completed_at: ~U[2026-05-21 10:00:00.000000Z],
+      created_at_source: ~U[2026-05-21 09:55:00.000000Z],
+      updated_at_source: ~U[2026-05-21 10:00:00.000000Z],
+      customer_name: "Synthetic Import",
+      customer_email: "synthetic.import@example.test",
+      raw_total: Decimal.new("500.00"),
+      raw_discount_total: Decimal.new("0"),
+      raw_tax_total: Decimal.new("0"),
+      payment_method: "payfast",
+      payment_method_title: "Synthetic PayFast",
+      payment_gateway_transaction_id: "csv-upsert-1",
+      coupons: [],
+      line_items: [
+        %{
+          woo_line_item_id: 80_001,
+          woo_product_id: 501,
+          woo_variation_id: 601,
+          name: "CSV GA",
+          quantity: 1,
+          line_subtotal: Decimal.new("500.00"),
+          line_total: Decimal.new("500.00"),
+          discount_total: Decimal.new("0"),
+          event_id: event.id,
+          ticket_type_id: ticket.id,
+          item_kind: :ticket,
+          mapping_status: :mapped
+        }
+      ]
+    }
+
+    assert {:ok, order} = OrderUpserter.upsert_normalized_order(source.id, normalized)
+    assert [line] = order_items(order.id)
+    assert line.event_id == event.id
+    assert line.ticket_type_id == ticket.id
+    assert line.item_kind == :ticket
+    assert line.mapping_status == :mapped
+
+    newer =
+      put_in(
+        normalized,
+        [:line_items, Access.at(0), :line_total],
+        Decimal.new("450.00")
+      )
+      |> Map.put(:updated_at_source, ~U[2026-05-21 10:01:00.000000Z])
+      |> Map.put(:raw_total, Decimal.new("450.00"))
+
+    assert {:ok, updated} = OrderUpserter.upsert_normalized_order(source.id, newer)
+    assert updated.id == order.id
+    assert [updated_line] = order_items(order.id)
+    assert updated_line.line_total == Decimal.new("450.00")
+    assert updated_line.event_id == event.id
+    assert updated_line.ticket_type_id == ticket.id
+    assert updated_line.item_kind == :ticket
+    assert updated_line.mapping_status == :mapped
+    assert Ash.count!(OrderItem, domain: Sales) == 1
+  end
+
   defp fixture(name), do: FixtureHelpers.decode_json_fixture!(:woocommerce, name)
 
   defp order_items(order_id) do

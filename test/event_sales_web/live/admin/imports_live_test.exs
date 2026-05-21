@@ -1,5 +1,6 @@
 defmodule EventSalesWeb.Live.Admin.ImportsLiveTest do
   use EventSalesWeb.ConnCase, async: false
+  use Oban.Testing, repo: EventSales.Repo
 
   import Phoenix.LiveViewTest
 
@@ -9,6 +10,9 @@ defmodule EventSalesWeb.Live.Admin.ImportsLiveTest do
   alias EventSales.Accounts.Resources.{Role, User, UserRole}
   alias EventSales.Catalog
   alias EventSales.Catalog.Resources.ProductMapping
+  alias EventSales.Ingestion
+  alias EventSales.Ingestion.Resources.CsvImportBatch
+  alias EventSales.Ingestion.Workers.ProcessCsvImportWorker
   alias EventSales.TestSupport.SalesHelpers
 
   setup do
@@ -70,7 +74,39 @@ defmodule EventSalesWeb.Live.Admin.ImportsLiveTest do
     assert html =~ "Dry-run passed"
     assert html =~ "ES-10001"
     assert html =~ "70001"
-    refute html =~ "Apply import"
+    assert html =~ "Apply import"
+  end
+
+  test "admin can queue apply for a passed dry-run through the facade", %{
+    conn: conn,
+    admin: admin,
+    event: event
+  } do
+    {:ok, view, _html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/imports?event_id=#{event.id}")
+
+    upload =
+      file_input(view, "#csv-import-form", :csv, [
+        %{
+          name: "import_valid.csv",
+          content: File.read!(fixture_path("import_valid.csv")),
+          type: "text/csv"
+        }
+      ])
+
+    render_upload(upload, "import_valid.csv")
+    html = render_submit(view, "dry_run", %{"import" => %{"event_id" => event.id}})
+    assert html =~ "Apply import"
+
+    html = render_click(view, "apply", %{"batch_id" => latest_batch_id()})
+    assert html =~ "CSV apply queued"
+
+    assert_enqueued(
+      worker: ProcessCsvImportWorker,
+      args: %{"csv_import_batch_id" => latest_batch_id()}
+    )
   end
 
   test "invalid CSV displays row errors", %{conn: conn, admin: admin, event: event} do
@@ -131,6 +167,7 @@ defmodule EventSalesWeb.Live.Admin.ImportsLiveTest do
           "MappingResolver",
           "WooCommerceClient",
           "ProcessCsvImportWorker",
+          "ApplyImport",
           "Sales.OrderUpserter",
           "Req",
           "Finch",
@@ -141,6 +178,14 @@ defmodule EventSalesWeb.Live.Admin.ImportsLiveTest do
   end
 
   defp fixture_path(name), do: Path.join(["test", "fixtures", "csv", name])
+
+  defp latest_batch_id do
+    CsvImportBatch
+    |> Ash.Query.sort(inserted_at: :desc)
+    |> Ash.Query.limit(1)
+    |> Ash.read_one!(domain: Ingestion)
+    |> Map.fetch!(:id)
+  end
 
   defp malformed_csv do
     headers = EventSales.Ingestion.Csv.Parser.required_headers()

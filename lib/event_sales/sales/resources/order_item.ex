@@ -81,6 +81,27 @@ defmodule EventSales.Sales.Resources.OrderItem do
       validate compare(:quantity, greater_than: 0)
     end
 
+    update :sync_from_mapped_import do
+      accept [
+        :event_id,
+        :ticket_type_id,
+        :woo_product_id,
+        :woo_variation_id,
+        :name,
+        :quantity,
+        :line_subtotal,
+        :line_total,
+        :discount_total
+      ]
+
+      require_atomic? false
+      validate compare(:quantity, greater_than: 0)
+      validate present([:event_id, :ticket_type_id])
+      change ValidateTicketTypeEvent
+      change set_attribute(:item_kind, :ticket)
+      change transition_state(:mapped)
+    end
+
     update :apply_mapping do
       accept [:event_id, :ticket_type_id, :woo_product_id, :woo_variation_id, :name]
       require_atomic? false
@@ -201,6 +222,10 @@ defmodule EventSales.Sales.Resources.OrderItem do
       transition :mark_non_ticket, from: :pending_mapping_resolution, to: :non_ticket
       transition :mark_ignored, from: :pending_mapping_resolution, to: :ignored
       transition :remap, from: :mapped, to: :pending_mapping_resolution
+
+      transition :sync_from_mapped_import,
+        from: [:pending_mapping_resolution, :unmapped, :mapped],
+        to: :mapped
     end
   end
 end

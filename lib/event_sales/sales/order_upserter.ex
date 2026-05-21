@@ -111,6 +111,8 @@ defmodule EventSales.Sales.OrderUpserter do
         attrs =
           line_item
           |> Map.take([
+            :event_id,
+            :ticket_type_id,
             :woo_line_item_id,
             :woo_product_id,
             :woo_variation_id,
@@ -129,6 +131,8 @@ defmodule EventSales.Sales.OrderUpserter do
       {:ok, %OrderItem{} = existing} ->
         attrs =
           Map.take(line_item, [
+            :event_id,
+            :ticket_type_id,
             :woo_product_id,
             :woo_variation_id,
             :name,
@@ -138,11 +142,25 @@ defmodule EventSales.Sales.OrderUpserter do
             :discount_total
           ])
 
-        Ash.update(existing, attrs, action: :sync_from_order, domain: Sales)
+        action =
+          if mapped_import_line?(line_item) do
+            :sync_from_mapped_import
+          else
+            :sync_from_order
+          end
+
+        Ash.update(existing, attrs, action: action, domain: Sales)
 
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  defp mapped_import_line?(line_item) do
+    Map.has_key?(line_item, :event_id) and
+      Map.has_key?(line_item, :ticket_type_id) and
+      not is_nil(Map.get(line_item, :event_id)) and
+      not is_nil(Map.get(line_item, :ticket_type_id))
   end
 
   defp upsert_coupons(%Order{} = order, coupons) do

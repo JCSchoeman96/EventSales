@@ -1,15 +1,19 @@
 defmodule EventSales.Ingestion.CsvImportsTest do
   use EventSales.DataCase, async: false
+  use Oban.Testing, repo: EventSales.Repo
 
   require Ash.Query
 
   alias EventSales.Accounts
   alias EventSales.Accounts.Resources.{Role, User, UserRole}
+  alias EventSales.Audit
+  alias EventSales.Audit.Resources.AuditLog
   alias EventSales.Catalog
   alias EventSales.Catalog.Resources.ProductMapping
   alias EventSales.Ingestion
   alias EventSales.Ingestion.CsvImports
   alias EventSales.Ingestion.Resources.{CsvImportBatch, CsvImportRow}
+  alias EventSales.Ingestion.Workers.ProcessCsvImportWorker
   alias EventSales.Sales
   alias EventSales.Sales.Resources.{Order, OrderItem}
   alias EventSales.TestSupport.SalesHelpers
@@ -167,17 +171,99 @@ defmodule EventSales.Ingestion.CsvImportsTest do
     assert Ash.count!(OrderItem, domain: Sales) == before_items
   end
 
-  test "Slice 16 does not expose apply actions or statuses" do
-    batch_source = File.read!("lib/event_sales/ingestion/resources/csv_import_batch.ex")
-    apply_source = File.read!("lib/event_sales/ingestion/csv/apply_import.ex")
-    worker_source = File.read!("lib/event_sales/ingestion/workers/process_csv_import_worker.ex")
+  test "queue_apply enqueues CSV apply worker and writes audit for passed dry-run", %{
+    admin: admin,
+    event: event
+  } do
+    assert {:ok, batch} =
+             CsvImports.dry_run_file(
+               fixture_path("import_valid.csv"),
+               %{event_id: event.id, source_filename: "import_valid.csv"},
+               actor: admin
+             )
 
-    for forbidden <- ["queue_apply", "mark_applying", "mark_applied", ":applying", ":applied"] do
-      refute batch_source =~ forbidden
-    end
+    assert {:ok, %{batch: queued, job: job}} = CsvImports.queue_apply(batch.id, actor: admin)
 
-    assert apply_source =~ "Placeholder"
-    assert worker_source =~ "Placeholder"
+    assert queued.id == batch.id
+    assert job.queue == "csv_imports"
+
+    assert_enqueued(
+      worker: ProcessCsvImportWorker,
+      queue: :csv_imports,
+      args: %{"csv_import_batch_id" => batch.id}
+    )
+
+    assert [audit] =
+             AuditLog
+             |> Ash.Query.filter(event_type == :csv_apply_requested)
+             |> Ash.read!(domain: Audit)
+
+    assert audit.actor_type == :user
+    assert audit.actor_user_id == admin.id
+    assert audit.subject_type == "csv_import_batch"
+    assert audit.subject_id == batch.id
+    assert audit.event_id == event.id
+    assert audit.source == :csv
+    assert audit.metadata["result"] == "queued"
+    assert audit.metadata["valid_count"] == 2
+    refute Map.has_key?(audit.metadata, "rows")
+  end
+
+  test "queue_apply rejects non-admins and does not enqueue", %{
+    staff: staff,
+    admin: admin,
+    event: event
+  } do
+    assert {:ok, batch} =
+             CsvImports.dry_run_file(
+               fixture_path("import_valid.csv"),
+               %{event_id: event.id, source_filename: "import_valid.csv"},
+               actor: admin
+             )
+
+    assert {:error, :forbidden} = CsvImports.queue_apply(batch.id, actor: staff)
+    refute_enqueued(worker: ProcessCsvImportWorker)
+  end
+
+  test "queue_apply rejects failed and empty batches", %{admin: admin, event: event} do
+    assert {:ok, failed} =
+             CsvImports.dry_run_file(
+               fixture_path("import_invalid.csv"),
+               %{event_id: event.id, source_filename: "import_invalid.csv"},
+               actor: admin
+             )
+
+    assert failed.status == :dry_run_failed
+    assert {:error, :invalid_status} = CsvImports.queue_apply(failed.id, actor: admin)
+
+    empty = create_empty_passed_batch!(event, admin)
+    assert {:error, :empty_batch} = CsvImports.queue_apply(empty.id, actor: admin)
+    refute_enqueued(worker: ProcessCsvImportWorker)
+  end
+
+  test "queue_apply does not audit queued result when enqueue fails", %{
+    admin: admin,
+    event: event
+  } do
+    assert {:ok, batch} =
+             CsvImports.dry_run_file(
+               fixture_path("import_valid.csv"),
+               %{event_id: event.id, source_filename: "import_valid.csv"},
+               actor: admin
+             )
+
+    assert {:error, {:enqueue_failed, :oban_down}} =
+             CsvImports.queue_apply(batch.id,
+               actor: admin,
+               oban_insert: fn _changeset -> {:error, :oban_down} end
+             )
+
+    assert [] =
+             AuditLog
+             |> Ash.Query.filter(event_type == :csv_apply_requested)
+             |> Ash.read!(domain: Audit)
+
+    refute_enqueued(worker: ProcessCsvImportWorker)
   end
 
   defp fixture_path(name), do: Path.join(["test", "fixtures", "csv", name])
@@ -233,5 +319,28 @@ defmodule EventSales.Ingestion.CsvImportsTest do
     }
 
     Ash.create!(ProductMapping, Map.merge(defaults, attrs), action: :create, domain: Catalog)
+  end
+
+  defp create_empty_passed_batch!(event, user) do
+    batch =
+      Ash.create!(
+        CsvImportBatch,
+        %{
+          event_id: event.id,
+          uploaded_by_user_id: user.id,
+          source_filename: "empty.csv"
+        },
+        action: :create_dry_run,
+        domain: Ingestion
+      )
+
+    validating = Ash.update!(batch, %{}, action: :mark_validating, domain: Ingestion)
+
+    Ash.update!(
+      validating,
+      %{row_count: 0, valid_count: 0, error_count: 0, duplicate_count: 0},
+      action: :mark_dry_run_passed,
+      domain: Ingestion
+    )
   end
 end
