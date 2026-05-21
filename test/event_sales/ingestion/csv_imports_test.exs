@@ -1,0 +1,183 @@
+defmodule EventSales.Ingestion.CsvImportsTest do
+  use EventSales.DataCase, async: false
+
+  require Ash.Query
+
+  alias EventSales.Accounts
+  alias EventSales.Accounts.Resources.{Role, User, UserRole}
+  alias EventSales.Catalog
+  alias EventSales.Catalog.Resources.ProductMapping
+  alias EventSales.Ingestion
+  alias EventSales.Ingestion.CsvImports
+  alias EventSales.Ingestion.Resources.{CsvImportBatch, CsvImportRow}
+  alias EventSales.Sales
+  alias EventSales.Sales.Resources.{Order, OrderItem}
+  alias EventSales.TestSupport.SalesHelpers
+
+  setup do
+    admin = create_user!("csv-admin@example.com")
+    staff = create_user!("csv-staff@example.com")
+    create_global_role!(admin, :admin)
+    create_global_role!(staff, :staff)
+
+    source = SalesHelpers.create_source_system!()
+    event = SalesHelpers.create_event!(source, %{name: "CSV Facade Event"})
+    ticket = SalesHelpers.create_ticket_type!(event, %{name: "GA"})
+    create_mapping!(source, event, ticket, %{woo_product_id: 501, woo_variation_id: 601})
+
+    {:ok, admin: admin, staff: staff, source: source, event: event}
+  end
+
+  test "dry_run_file persists batch and rows for an admin", %{admin: admin, event: event} do
+    assert {:ok, batch} =
+             CsvImports.dry_run_file(
+               fixture_path("import_valid.csv"),
+               %{event_id: event.id, source_filename: "../unsafe/import_valid.csv"},
+               actor: admin
+             )
+
+    assert batch.status == :dry_run_passed
+    assert batch.source_filename == "import_valid.csv"
+    assert batch.row_count == 2
+    assert batch.valid_count == 2
+    assert batch.error_count == 0
+
+    assert {:ok, rows} = CsvImports.list_rows(batch.id, actor: admin)
+    assert length(rows) == 2
+    assert Enum.all?(rows, &(&1.status == :valid))
+  end
+
+  test "dry_run_file requires an event scope", %{admin: admin} do
+    assert {:error, :event_required} =
+             CsvImports.dry_run_file(
+               fixture_path("import_valid.csv"),
+               %{source_filename: "x.csv"},
+               actor: admin
+             )
+  end
+
+  test "non-admin actors are denied without side effects", %{staff: staff, event: event} do
+    assert {:error, :forbidden} =
+             CsvImports.dry_run_file(
+               fixture_path("import_valid.csv"),
+               %{event_id: event.id, source_filename: "x.csv"},
+               actor: staff
+             )
+
+    assert Ash.count!(CsvImportBatch, domain: Ingestion) == 0
+    assert Ash.count!(CsvImportRow, domain: Ingestion) == 0
+  end
+
+  test "dry-runs never mutate sales truth across failure modes", %{admin: admin, event: event} do
+    for fixture <- [
+          "import_valid.csv",
+          "import_invalid.csv",
+          "import_duplicate_rows.csv",
+          "import_unknown_mapping.csv"
+        ] do
+      before_orders = Ash.count!(Order, domain: Sales)
+      before_items = Ash.count!(OrderItem, domain: Sales)
+
+      assert {:ok, _batch} =
+               CsvImports.dry_run_file(
+                 fixture_path(fixture),
+                 %{event_id: event.id, source_filename: fixture},
+                 actor: admin
+               )
+
+      assert Ash.count!(Order, domain: Sales) == before_orders
+      assert Ash.count!(OrderItem, domain: Sales) == before_items
+    end
+  end
+
+  test "telemetry emits dry-run start and stop without row data", %{admin: admin, event: event} do
+    test_pid = self()
+    ref = make_ref()
+
+    :telemetry.attach_many(
+      "csv-import-test-#{inspect(ref)}",
+      [
+        EventSales.Telemetry.csv_import_dry_run_start(),
+        EventSales.Telemetry.csv_import_dry_run_stop()
+      ],
+      fn event, measurements, metadata, _config ->
+        send(test_pid, {ref, event, measurements, metadata})
+      end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach("csv-import-test-#{inspect(ref)}") end)
+
+    assert {:ok, _batch} =
+             CsvImports.dry_run_file(
+               fixture_path("import_valid.csv"),
+               %{event_id: event.id, source_filename: "import_valid.csv"},
+               actor: admin
+             )
+
+    assert_receive {^ref, [:event_sales, :csv_import, :dry_run, :start], _, start_metadata}
+
+    assert_receive {^ref, [:event_sales, :csv_import, :dry_run, :stop], stop_measurements,
+                    stop_metadata}
+
+    assert Map.has_key?(start_metadata, :event_id)
+    assert stop_measurements.row_count == 2
+    assert stop_metadata.status == :dry_run_passed
+    refute Map.has_key?(stop_metadata, :rows)
+  end
+
+  test "Slice 16 does not expose apply actions or statuses" do
+    batch_source = File.read!("lib/event_sales/ingestion/resources/csv_import_batch.ex")
+    apply_source = File.read!("lib/event_sales/ingestion/csv/apply_import.ex")
+    worker_source = File.read!("lib/event_sales/ingestion/workers/process_csv_import_worker.ex")
+
+    for forbidden <- ["queue_apply", "mark_applying", "mark_applied", ":applying", ":applied"] do
+      refute batch_source =~ forbidden
+    end
+
+    assert apply_source =~ "Placeholder"
+    assert worker_source =~ "Placeholder"
+  end
+
+  defp fixture_path(name), do: Path.join(["test", "fixtures", "csv", name])
+
+  defp create_user!(email, password \\ "valid-pass-123") do
+    Ash.create!(
+      User,
+      %{email: email, name: "Test User", password: password, password_confirmation: password},
+      action: :register_with_password,
+      domain: Accounts
+    )
+  end
+
+  defp create_global_role!(user, role_name) do
+    role =
+      Role
+      |> Ash.Query.filter(name == ^role_name)
+      |> Ash.read_one!(domain: Accounts)
+      |> case do
+        nil -> Ash.create!(Role, %{name: role_name}, action: :create, domain: Accounts)
+        role -> role
+      end
+
+    Ash.create!(UserRole, %{user_id: user.id, role_id: role.id},
+      action: :create,
+      domain: Accounts
+    )
+  end
+
+  defp create_mapping!(source, event, ticket, attrs) do
+    defaults = %{
+      source_system_id: source.id,
+      event_id: event.id,
+      ticket_type_id: ticket.id,
+      woo_product_id: 1,
+      woo_variation_id: nil,
+      original_label: "Ticket",
+      current_label: "Ticket",
+      active: true
+    }
+
+    Ash.create!(ProductMapping, Map.merge(defaults, attrs), action: :create, domain: Catalog)
+  end
+end

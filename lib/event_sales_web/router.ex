@@ -75,6 +75,7 @@ defmodule EventSalesWeb.Router do
     live "/dashboard", Live.Admin.DashboardLive
     live "/events", Live.Admin.EventsLive
     live "/events/:id", Live.Admin.EventDetailLive
+    live "/imports", Live.Admin.ImportsLive
     live "/webhooks", Live.Admin.WebhooksLive
     live "/sync", Live.Admin.SyncLive
     live "/reconciliation", Live.Admin.ReconciliationLive

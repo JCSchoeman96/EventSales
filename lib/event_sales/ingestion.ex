@@ -17,5 +17,7 @@ defmodule EventSales.Ingestion do
     resource EventSales.Ingestion.Resources.TickeraAttendeeSnapshot
     resource EventSales.Ingestion.Resources.TickeraReconciliationRun
     resource EventSales.Ingestion.Resources.TickeraReconciliationFinding
+    resource EventSales.Ingestion.Resources.CsvImportBatch
+    resource EventSales.Ingestion.Resources.CsvImportRow
   end
 end

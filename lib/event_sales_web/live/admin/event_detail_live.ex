@@ -98,13 +98,12 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLive do
           >
             Export CSV
           </button>
-          <button
-            type="button"
-            disabled
-            class="inline-flex items-center justify-center rounded border border-zinc-200 bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-500"
+          <.link
+            navigate={~p"/admin/imports?event_id=#{@event_id}"}
+            class="inline-flex items-center justify-center rounded border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800"
           >
             Import CSV
-          </button>
+          </.link>
         </div>
       </div>
 
