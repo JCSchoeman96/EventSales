@@ -38,7 +38,9 @@ defmodule EventSales.DomainBoundariesTest do
     EventSales.Ingestion.Resources.TickeraAttendeeSyncRun,
     EventSales.Ingestion.Resources.TickeraAttendeeSnapshot,
     EventSales.Ingestion.Resources.TickeraReconciliationRun,
-    EventSales.Ingestion.Resources.TickeraReconciliationFinding
+    EventSales.Ingestion.Resources.TickeraReconciliationFinding,
+    EventSales.Ingestion.Resources.CsvImportBatch,
+    EventSales.Ingestion.Resources.CsvImportRow
   ]
   @analytics_resources [
     EventSales.Analytics.Resources.EventAggregateSnapshot,
