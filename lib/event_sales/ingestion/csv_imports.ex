@@ -66,8 +66,8 @@ defmodule EventSales.Ingestion.CsvImports do
     with :ok <- authorize_admin(opts),
          {:ok, %CsvImportBatch{} = batch} <- Ash.get(CsvImportBatch, batch_id, domain: Ingestion),
          :ok <- validate_applyable(batch),
-         {:ok, _audit} <- audit_apply_requested(batch, opts),
-         {:ok, job} <- enqueue_apply(batch) do
+         {:ok, job} <- enqueue_apply(batch, opts),
+         {:ok, _audit} <- audit_apply_requested(batch, opts) do
       {:ok, %{batch: batch, job: job}}
     else
       {:ok, nil} -> {:error, :not_found}
@@ -217,11 +217,13 @@ defmodule EventSales.Ingestion.CsvImports do
     |> AuditLogger.csv_apply_requested()
   end
 
-  defp enqueue_apply(%CsvImportBatch{id: batch_id}) do
+  defp enqueue_apply(%CsvImportBatch{id: batch_id}, opts) do
+    oban_insert = Keyword.get(opts, :oban_insert, &Oban.insert/1)
+
     case batch_id
          |> then(&%{"csv_import_batch_id" => &1})
          |> ProcessCsvImportWorker.new()
-         |> Oban.insert() do
+         |> oban_insert.() do
       {:ok, job} -> {:ok, job}
       {:error, reason} -> {:error, {:enqueue_failed, reason}}
     end

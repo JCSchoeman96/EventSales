@@ -241,6 +241,31 @@ defmodule EventSales.Ingestion.CsvImportsTest do
     refute_enqueued(worker: ProcessCsvImportWorker)
   end
 
+  test "queue_apply does not audit queued result when enqueue fails", %{
+    admin: admin,
+    event: event
+  } do
+    assert {:ok, batch} =
+             CsvImports.dry_run_file(
+               fixture_path("import_valid.csv"),
+               %{event_id: event.id, source_filename: "import_valid.csv"},
+               actor: admin
+             )
+
+    assert {:error, {:enqueue_failed, :oban_down}} =
+             CsvImports.queue_apply(batch.id,
+               actor: admin,
+               oban_insert: fn _changeset -> {:error, :oban_down} end
+             )
+
+    assert [] =
+             AuditLog
+             |> Ash.Query.filter(event_type == :csv_apply_requested)
+             |> Ash.read!(domain: Audit)
+
+    refute_enqueued(worker: ProcessCsvImportWorker)
+  end
+
   defp fixture_path(name), do: Path.join(["test", "fixtures", "csv", name])
 
   defp malformed_csv_path do

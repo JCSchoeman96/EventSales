@@ -51,8 +51,9 @@ defmodule EventSales.Ingestion.Csv.ApplyImport do
     with {:ok, applying} <- ensure_applying(batch),
          {:ok, event} <- Ash.get(Event, applying.event_id, domain: Catalog),
          {:ok, rows} <- rows_for_apply(applying.id),
-         {:ok, applied} <- apply_rows(applying, event, rows, opts) do
-      Telemetry.emit(Telemetry.csv_import_apply_stop(), stop_measurements(applied, rows), %{
+         {:ok, applied} <- apply_rows(applying, event, rows, opts),
+         {:ok, final_rows} <- rows_for_measurements(applied.id) do
+      Telemetry.emit(Telemetry.csv_import_apply_stop(), stop_measurements(final_rows), %{
         batch_id: applied.id,
         event_id: applied.event_id,
         status: applied.status,
@@ -86,6 +87,12 @@ defmodule EventSales.Ingestion.Csv.ApplyImport do
     |> Ash.read(domain: Ingestion)
   end
 
+  defp rows_for_measurements(batch_id) do
+    CsvImportRow
+    |> Ash.Query.filter(csv_import_batch_id == ^batch_id)
+    |> Ash.read(domain: Ingestion)
+  end
+
   defp apply_rows(batch, _event, rows, _opts) when rows == [] do
     mark_batch_applied(batch)
   end
@@ -111,7 +118,8 @@ defmodule EventSales.Ingestion.Csv.ApplyImport do
     |> Enum.reduce_while({:ok, batch}, fn {_key, group_rows}, {:ok, current_batch} ->
       case apply_group(current_batch, event, group_rows, opts) do
         {:ok, _order} -> {:cont, {:ok, current_batch}}
-        {:error, reason} -> {:halt, fail_group(current_batch, group_rows, reason)}
+        {:error, {:permanent, reason}} -> {:halt, fail_group(current_batch, group_rows, reason)}
+        {:error, reason} -> {:halt, {:error, reason}}
       end
     end)
     |> finalize_groups()
@@ -121,14 +129,33 @@ defmodule EventSales.Ingestion.Csv.ApplyImport do
   defp finalize_groups({:error, reason}), do: {:error, reason}
 
   defp apply_group(batch, event, rows, opts) do
-    with {:ok, normalized_order} <- build_order(rows),
-         {:ok, order} <- upsert_group(event.source_system_id, normalized_order, opts) do
-      notifier(opts).notify_order_imported(order, batch, event.id, opts)
+    case build_order(rows) do
+      {:ok, normalized_order} ->
+        apply_built_group(batch, event, rows, normalized_order, opts)
 
-      case mark_rows_applied(rows) do
-        :ok -> {:ok, order}
-        {:error, reason} -> {:error, reason}
-      end
+      {:error, reason} ->
+        {:error, {:permanent, reason}}
+    end
+  end
+
+  defp apply_built_group(batch, event, rows, normalized_order, opts) do
+    case upsert_group(event.source_system_id, normalized_order, opts) do
+      {:ok, order} ->
+        notifier(opts).notify_order_imported(order, batch, event.id, opts)
+        mark_group_applied(rows, order, opts)
+
+      {:error, {:permanent, reason}} ->
+        {:error, {:permanent, reason}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp mark_group_applied(rows, order, opts) do
+    case row_marker(opts).mark_rows_applied(rows) do
+      :ok -> {:ok, order}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -137,7 +164,7 @@ defmodule EventSales.Ingestion.Csv.ApplyImport do
 
     Repo.transaction(fn ->
       case upserter.upsert_normalized_order(source_system_id, normalized_order) do
-        {:ok, :stale_noop} -> Repo.rollback(:stale_noop)
+        {:ok, :stale_noop} -> Repo.rollback({:permanent, :stale_noop})
         {:ok, order} -> order
         {:error, reason} -> Repo.rollback(reason)
       end
@@ -245,7 +272,9 @@ defmodule EventSales.Ingestion.Csv.ApplyImport do
   defp group_key(%CsvImportRow{normalized_data: %{"woo_order_id" => value}}), do: to_string(value)
   defp group_key(%CsvImportRow{id: id}), do: "invalid:#{id}"
 
-  defp mark_rows_applied(rows) do
+  @doc false
+  @spec mark_rows_applied([CsvImportRow.t()]) :: :ok | {:error, term()}
+  def mark_rows_applied(rows) do
     applied_at = DateTime.utc_now()
 
     Enum.reduce_while(rows, :ok, fn row, :ok ->
@@ -381,11 +410,14 @@ defmodule EventSales.Ingestion.Csv.ApplyImport do
   end
 
   defp notifier(opts), do: Keyword.get(opts, :order_processed_notifier, OrderProcessedNotifier)
+  defp row_marker(opts), do: Keyword.get(opts, :row_marker, __MODULE__)
 
-  defp stop_measurements(_batch, rows) do
+  defp stop_measurements(rows) do
     %{
       row_count: length(rows),
       applied_count: Enum.count(rows, &(&1.status == :applied)),
+      failed_count: Enum.count(rows, &(&1.status == :failed)),
+      skipped_count: Enum.count(rows, &(&1.status in [:invalid, :duplicate, :skipped])),
       valid_count: Enum.count(rows, &(&1.status == :valid))
     }
   end

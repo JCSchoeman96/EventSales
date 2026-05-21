@@ -35,6 +35,21 @@ defmodule EventSales.Ingestion.Csv.ApplyImportTest do
     admin: admin,
     event: event
   } do
+    test_pid = self()
+    handler_id = "csv-apply-stop-#{System.unique_integer([:positive])}"
+
+    :ok =
+      :telemetry.attach(
+        handler_id,
+        EventSales.Telemetry.csv_import_apply_stop(),
+        fn event_name, measurements, metadata, _config ->
+          send(test_pid, {:csv_apply_stop, event_name, measurements, metadata})
+        end,
+        nil
+      )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+
     assert {:ok, batch} =
              CsvImports.dry_run_file(
                fixture_path("import_valid.csv"),
@@ -58,6 +73,13 @@ defmodule EventSales.Ingestion.Csv.ApplyImportTest do
                item.item_kind == :ticket and
                item.mapping_status == :mapped
            end)
+
+    assert_receive {:csv_apply_stop, [:event_sales, :csv_import, :apply, :stop], measurements,
+                    metadata}
+
+    assert measurements.applied_count == 2
+    assert measurements.failed_count == 0
+    assert metadata.status == :applied
   end
 
   test "applied batch is a terminal no-op", %{admin: admin, event: event} do
@@ -136,6 +158,56 @@ defmodule EventSales.Ingestion.Csv.ApplyImportTest do
     assert row.status == :failed
     assert Enum.join(row.error_messages, " ") =~ "stale"
     assert Ash.get!(CsvImportBatch, batch.id, domain: Ingestion).status == :failed
+  end
+
+  test "transient row marking failure leaves batch applying and retry does not duplicate", %{
+    admin: admin,
+    event: event,
+    ticket: ticket
+  } do
+    batch = create_passed_batch!(event, admin, %{row_count: 2, valid_count: 2})
+
+    create_valid_row!(
+      batch,
+      2,
+      normalized_row(event, ticket, %{
+        "woo_order_id" => 91_001,
+        "order_number" => "CSV-91001",
+        "woo_line_item_id" => 80_001
+      })
+    )
+
+    create_valid_row!(
+      batch,
+      3,
+      normalized_row(event, ticket, %{
+        "woo_order_id" => 91_002,
+        "order_number" => "CSV-91002",
+        "woo_line_item_id" => 80_002,
+        "payment_gateway_transaction_id" => "csv-apply-2"
+      })
+    )
+
+    assert {:error, :row_mark_timeout} =
+             ApplyImport.apply(batch.id, row_marker: __MODULE__.FailSecondGroupRowMarker)
+
+    assert Ash.get!(CsvImportBatch, batch.id, domain: Ingestion).status == :applying
+    assert Enum.map(rows(batch.id), & &1.status) == [:applied, :valid]
+    assert Ash.count!(Order, domain: Sales) == 2
+    assert Ash.count!(OrderItem, domain: Sales) == 2
+
+    assert {:ok, applied} = ApplyImport.apply(batch.id)
+    assert applied.status == :applied
+    assert Enum.map(rows(batch.id), & &1.status) == [:applied, :applied]
+    assert Ash.count!(Order, domain: Sales) == 2
+    assert Ash.count!(OrderItem, domain: Sales) == 2
+  end
+
+  defmodule FailSecondGroupRowMarker do
+    @moduledoc false
+
+    def mark_rows_applied([%{row_number: 3}]), do: {:error, :row_mark_timeout}
+    def mark_rows_applied(rows), do: ApplyImport.mark_rows_applied(rows)
   end
 
   defp fixture_path(name), do: Path.join(["test", "fixtures", "csv", name])
