@@ -67,6 +67,30 @@ defmodule EventSalesWeb.Live.Admin.ImportsLive do
     end
   end
 
+  def handle_event("apply", %{"batch_id" => batch_id}, socket) do
+    case CsvImports.queue_apply(batch_id, actor: socket.assigns.current_user) do
+      {:ok, %{batch: batch}} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "CSV apply queued")
+         |> assign(:latest_batch, batch)
+         |> load_rows(batch.id)
+         |> load_batches()}
+
+      {:error, :empty_batch} ->
+        {:noreply, put_flash(socket, :error, "CSV import has no valid rows to apply")}
+
+      {:error, :invalid_status} ->
+        {:noreply, put_flash(socket, :error, "Only passed dry-runs can be applied")}
+
+      {:error, :forbidden} ->
+        {:noreply, put_flash(socket, :error, "You are not allowed to apply imports")}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "CSV apply could not be queued")}
+    end
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -131,7 +155,7 @@ defmodule EventSalesWeb.Live.Admin.ImportsLive do
 
       <section :if={@latest_batch} class="mb-8 border border-zinc-200 bg-white p-4">
         <h2 class="mb-3 text-base font-semibold text-zinc-900">Latest dry-run</h2>
-        <div class="grid gap-3 text-sm sm:grid-cols-5">
+        <div class="grid gap-3 text-sm sm:grid-cols-6">
           <div>
             <div class="text-xs font-semibold uppercase text-zinc-500">Status</div>
             <div class="text-zinc-900">{@latest_batch.status}</div>
@@ -151,6 +175,17 @@ defmodule EventSalesWeb.Live.Admin.ImportsLive do
           <div>
             <div class="text-xs font-semibold uppercase text-zinc-500">Duplicates</div>
             <div class="text-zinc-900">{@latest_batch.duplicate_count}</div>
+          </div>
+          <div :if={applyable?(@latest_batch)}>
+            <div class="text-xs font-semibold uppercase text-zinc-500">Action</div>
+            <button
+              type="button"
+              phx-click="apply"
+              phx-value-batch_id={@latest_batch.id}
+              class="mt-1 rounded border border-zinc-900 bg-zinc-900 px-3 py-2 text-sm font-medium text-white"
+            >
+              Apply import
+            </button>
           </div>
         </div>
       </section>
@@ -187,6 +222,7 @@ defmodule EventSalesWeb.Live.Admin.ImportsLive do
               <th class="px-3 py-2">Status</th>
               <th class="px-3 py-2">Rows</th>
               <th class="px-3 py-2">Errors</th>
+              <th class="px-3 py-2">Actions</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-zinc-100 bg-white">
@@ -196,9 +232,20 @@ defmodule EventSalesWeb.Live.Admin.ImportsLive do
               <td class="px-3 py-2 text-zinc-700">{batch.status}</td>
               <td class="px-3 py-2 text-zinc-700">{batch.row_count}</td>
               <td class="px-3 py-2 text-zinc-700">{batch.error_count}</td>
+              <td class="px-3 py-2 text-zinc-700">
+                <button
+                  :if={applyable?(batch)}
+                  type="button"
+                  phx-click="apply"
+                  phx-value-batch_id={batch.id}
+                  class="rounded border border-zinc-900 bg-zinc-900 px-3 py-1 text-xs font-medium text-white"
+                >
+                  Apply import
+                </button>
+              </td>
             </tr>
             <tr :if={@batches == []}>
-              <td class="px-3 py-6 text-center text-zinc-500" colspan="5">No imports yet.</td>
+              <td class="px-3 py-6 text-center text-zinc-500" colspan="6">No imports yet.</td>
             </tr>
           </tbody>
         </table>
@@ -253,6 +300,11 @@ defmodule EventSalesWeb.Live.Admin.ImportsLive do
     |> String.split(":")
     |> List.last()
   end
+
+  defp applyable?(%{status: :dry_run_passed, valid_count: valid_count}) when valid_count > 0,
+    do: true
+
+  defp applyable?(_batch), do: false
 
   defp format_datetime(nil), do: "-"
   defp format_datetime(datetime), do: Calendar.strftime(datetime, "%Y-%m-%d %H:%M")

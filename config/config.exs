@@ -33,7 +33,8 @@ config :event_sales, Oban,
     analytics_rebuilds: 1,
     reconciliation: 1,
     tickera_sync: 1,
-    tickera_reconciliation: 1
+    tickera_reconciliation: 1,
+    csv_imports: 1
   ]
 
 config :event_sales, :tickera_reconciliation, stale_snapshot_after_hours: 24

@@ -6,11 +6,13 @@ defmodule EventSales.Ingestion.CsvImports do
   require Ash.Query
 
   alias EventSales.Accounts.Policies
+  alias EventSales.Audit.Logger, as: AuditLogger
   alias EventSales.Catalog
   alias EventSales.Catalog.Resources.Event
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Csv.DryRunValidator
   alias EventSales.Ingestion.Resources.{CsvImportBatch, CsvImportRow}
+  alias EventSales.Ingestion.Workers.ProcessCsvImportWorker
   alias EventSales.Telemetry
 
   @default_limit 50
@@ -52,6 +54,24 @@ defmodule EventSales.Ingestion.CsvImports do
   def get_batch(id, opts \\ []) do
     with :ok <- authorize_admin(opts) do
       Ash.get(CsvImportBatch, id, domain: Ingestion)
+    end
+  end
+
+  @doc "Queues a validated CSV dry-run for asynchronous apply."
+  @spec queue_apply(Ecto.UUID.t(), keyword()) ::
+          {:ok, %{batch: CsvImportBatch.t(), job: Oban.Job.t()}}
+          | {:error,
+             :forbidden | :not_found | :invalid_status | :empty_batch | :enqueue_failed | term()}
+  def queue_apply(batch_id, opts \\ []) when is_binary(batch_id) do
+    with :ok <- authorize_admin(opts),
+         {:ok, %CsvImportBatch{} = batch} <- Ash.get(CsvImportBatch, batch_id, domain: Ingestion),
+         :ok <- validate_applyable(batch),
+         {:ok, _audit} <- audit_apply_requested(batch, opts),
+         {:ok, job} <- enqueue_apply(batch) do
+      {:ok, %{batch: batch, job: job}}
+    else
+      {:ok, nil} -> {:error, :not_found}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -164,6 +184,46 @@ defmodule EventSales.Ingestion.CsvImports do
       :ok
     else
       {:error, :forbidden}
+    end
+  end
+
+  defp validate_applyable(%CsvImportBatch{status: status}) when status != :dry_run_passed,
+    do: {:error, :invalid_status}
+
+  defp validate_applyable(%CsvImportBatch{valid_count: 0}), do: {:error, :empty_batch}
+
+  defp validate_applyable(%CsvImportBatch{}), do: :ok
+
+  defp audit_apply_requested(batch, opts) do
+    actor = Keyword.get(opts, :actor)
+
+    %{
+      actor_type: :user,
+      actor_user_id: actor && actor.id,
+      actor_role: :admin,
+      subject_type: "csv_import_batch",
+      subject_id: batch.id,
+      event_id: batch.event_id,
+      source: :csv,
+      metadata: %{
+        "result" => "queued",
+        "row_count" => batch.row_count,
+        "valid_count" => batch.valid_count,
+        "error_count" => batch.error_count,
+        "duplicate_count" => batch.duplicate_count,
+        "source_filename" => batch.source_filename
+      }
+    }
+    |> AuditLogger.csv_apply_requested()
+  end
+
+  defp enqueue_apply(%CsvImportBatch{id: batch_id}) do
+    case batch_id
+         |> then(&%{"csv_import_batch_id" => &1})
+         |> ProcessCsvImportWorker.new()
+         |> Oban.insert() do
+      {:ok, job} -> {:ok, job}
+      {:error, reason} -> {:error, {:enqueue_failed, reason}}
     end
   end
 

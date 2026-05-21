@@ -32,6 +32,12 @@ defmodule EventSales.TelemetryTest do
                     %{topic: "order.created"}}
   end
 
+  test "CSV import apply telemetry events are named" do
+    assert EventSalesTelemetry.csv_import_apply_start() in EventSalesTelemetry.event_names()
+    assert EventSalesTelemetry.csv_import_apply_stop() in EventSalesTelemetry.event_names()
+    assert EventSalesTelemetry.csv_import_apply_exception() in EventSalesTelemetry.event_names()
+  end
+
   test "webhook accepted and rejected counters are defined" do
     assert_metric(%Counter{
       name: [:event_sales, :webhook, :accepted, :count],

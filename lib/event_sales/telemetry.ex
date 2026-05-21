@@ -53,6 +53,9 @@ defmodule EventSales.Telemetry do
   @csv_import_dry_run_start [:event_sales, :csv_import, :dry_run, :start]
   @csv_import_dry_run_stop [:event_sales, :csv_import, :dry_run, :stop]
   @csv_import_dry_run_exception [:event_sales, :csv_import, :dry_run, :exception]
+  @csv_import_apply_start [:event_sales, :csv_import, :apply, :start]
+  @csv_import_apply_stop [:event_sales, :csv_import, :apply, :stop]
+  @csv_import_apply_exception [:event_sales, :csv_import, :apply, :exception]
 
   @doc """
   Returns every custom EventSales telemetry event name defined in Slice 0.8.
@@ -96,7 +99,10 @@ defmodule EventSales.Telemetry do
       tickera_sync_exception(),
       csv_import_dry_run_start(),
       csv_import_dry_run_stop(),
-      csv_import_dry_run_exception()
+      csv_import_dry_run_exception(),
+      csv_import_apply_start(),
+      csv_import_apply_stop(),
+      csv_import_apply_exception()
     ]
   end
 
@@ -247,6 +253,18 @@ defmodule EventSales.Telemetry do
   @doc "CSV import dry-run failed unexpectedly."
   @spec csv_import_dry_run_exception() :: event_name()
   def csv_import_dry_run_exception, do: @csv_import_dry_run_exception
+
+  @doc "CSV import apply started."
+  @spec csv_import_apply_start() :: event_name()
+  def csv_import_apply_start, do: @csv_import_apply_start
+
+  @doc "CSV import apply completed."
+  @spec csv_import_apply_stop() :: event_name()
+  def csv_import_apply_stop, do: @csv_import_apply_stop
+
+  @doc "CSV import apply failed unexpectedly."
+  @spec csv_import_apply_exception() :: event_name()
+  def csv_import_apply_exception, do: @csv_import_apply_exception
 
   @doc "Returns the low-cardinality product metadata cache event for the cache outcome."
   @spec product_metadata_cache_event(:hit | :miss | :put) :: event_name()
