@@ -68,7 +68,7 @@ defmodule EventSales.Ingestion.CsvImports do
   defp run_validation(path, batch, event) do
     with {:ok, validating} <- update_batch(batch, :mark_validating, %{}),
          {:ok, result} <-
-           DryRunValidator.validate_file(path, %{
+           validate_file(path, %{
              event_id: event.id,
              source_system_id: event.source_system_id
            }),
@@ -93,6 +93,13 @@ defmodule EventSales.Ingestion.CsvImports do
 
         {:ok, failed}
     end
+  end
+
+  defp validate_file(path, attrs) do
+    DryRunValidator.validate_file(path, attrs)
+  rescue
+    error in NimbleCSV.ParseError -> {:error, {:invalid_csv, Exception.message(error)}}
+    error in File.Error -> {:error, {:file_error, Exception.message(error)}}
   end
 
   defp finalize_batch(batch, result) do

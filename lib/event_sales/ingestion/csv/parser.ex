@@ -34,6 +34,13 @@ defmodule EventSales.Ingestion.Csv.Parser do
     "payment_gateway_transaction_id"
   ]
 
+  @forbidden_headers [
+    "raw_total",
+    "raw_discount_total",
+    "raw_tax_total",
+    "discount_total"
+  ]
+
   @type parsed_row :: %{row_number: pos_integer(), raw: %{String.t() => String.t()}}
 
   @doc "Required Slice 16 CSV headers."
@@ -52,6 +59,7 @@ defmodule EventSales.Ingestion.Csv.Parser do
   def stream_rows(path) when is_binary(path) do
     with {:ok, headers} <- read_headers(path),
          :ok <- reject_duplicate_headers(headers),
+         :ok <- reject_forbidden_headers(headers),
          :ok <- require_headers(headers) do
       stream =
         path
@@ -100,6 +108,19 @@ defmodule EventSales.Ingestion.Csv.Parser do
     case missing do
       [] -> :ok
       missing -> {:error, {:missing_required_headers, missing}}
+    end
+  end
+
+  defp reject_forbidden_headers(headers) do
+    forbidden =
+      headers
+      |> Enum.filter(&(&1 in @forbidden_headers))
+      |> Enum.uniq()
+      |> Enum.sort()
+
+    case forbidden do
+      [] -> :ok
+      forbidden -> {:error, {:forbidden_headers, forbidden}}
     end
   end
 

@@ -126,6 +126,47 @@ defmodule EventSales.Ingestion.CsvImportsTest do
     refute Map.has_key?(stop_metadata, :rows)
   end
 
+  test "malformed CSV marks batch failed and emits exception telemetry", %{
+    admin: admin,
+    event: event
+  } do
+    test_pid = self()
+    ref = make_ref()
+
+    :telemetry.attach(
+      "csv-import-exception-test-#{inspect(ref)}",
+      EventSales.Telemetry.csv_import_dry_run_exception(),
+      fn event, measurements, metadata, _config ->
+        send(test_pid, {ref, event, measurements, metadata})
+      end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach("csv-import-exception-test-#{inspect(ref)}") end)
+
+    before_orders = Ash.count!(Order, domain: Sales)
+    before_items = Ash.count!(OrderItem, domain: Sales)
+
+    assert {:ok, batch} =
+             CsvImports.dry_run_file(
+               malformed_csv_path(),
+               %{event_id: event.id, source_filename: "malformed.csv"},
+               actor: admin
+             )
+
+    assert batch.status == :failed
+    assert batch.last_error =~ "invalid_csv"
+    assert batch.row_count == 0
+
+    assert_receive {^ref, [:event_sales, :csv_import, :dry_run, :exception], %{count: 1},
+                    metadata}
+
+    assert metadata.batch_id == batch.id
+    assert metadata.reason =~ "invalid_csv"
+    assert Ash.count!(Order, domain: Sales) == before_orders
+    assert Ash.count!(OrderItem, domain: Sales) == before_items
+  end
+
   test "Slice 16 does not expose apply actions or statuses" do
     batch_source = File.read!("lib/event_sales/ingestion/resources/csv_import_batch.ex")
     apply_source = File.read!("lib/event_sales/ingestion/csv/apply_import.ex")
@@ -140,6 +181,19 @@ defmodule EventSales.Ingestion.CsvImportsTest do
   end
 
   defp fixture_path(name), do: Path.join(["test", "fixtures", "csv", name])
+
+  defp malformed_csv_path do
+    path = Path.join(System.tmp_dir!(), "event-sales-imports-#{System.unique_integer()}.csv")
+    headers = EventSales.Ingestion.Csv.Parser.required_headers()
+
+    File.write!(path, """
+    #{Enum.join(headers, ",")}
+    10001,ES-10001,70001,501,2,1000.00,900.00,900.00,completed,ZAR,2026-05-01T08:00:00,2026-05-01T08:05:00
+    10002,"ES-10002,70002,501,1,100.00,100.00,100.00,completed,ZAR,2026-05-01T08:00:00,2026-05-01T08:05:00
+    """)
+
+    path
+  end
 
   defp create_user!(email, password \\ "valid-pass-123") do
     Ash.create!(

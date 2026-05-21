@@ -96,6 +96,33 @@ defmodule EventSalesWeb.Live.Admin.ImportsLiveTest do
     assert html =~ "line_total must be a non-negative money value"
   end
 
+  test "malformed CSV does not crash the LiveView dry-run path", %{
+    conn: conn,
+    admin: admin,
+    event: event
+  } do
+    {:ok, view, _html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/imports?event_id=#{event.id}")
+
+    upload =
+      file_input(view, "#csv-import-form", :csv, [
+        %{
+          name: "malformed.csv",
+          content: malformed_csv(),
+          type: "text/csv"
+        }
+      ])
+
+    render_upload(upload, "malformed.csv")
+    html = render_submit(view, "dry_run", %{"import" => %{"event_id" => event.id}})
+
+    assert html =~ "Dry-run found errors"
+    assert html =~ "failed"
+    refute html =~ "Apply import"
+  end
+
   test "ImportsLive source stays inside approved boundaries" do
     source = File.read!("lib/event_sales_web/live/admin/imports_live.ex")
 
@@ -114,6 +141,16 @@ defmodule EventSalesWeb.Live.Admin.ImportsLiveTest do
   end
 
   defp fixture_path(name), do: Path.join(["test", "fixtures", "csv", name])
+
+  defp malformed_csv do
+    headers = EventSales.Ingestion.Csv.Parser.required_headers()
+
+    """
+    #{Enum.join(headers, ",")}
+    10001,ES-10001,70001,501,2,1000.00,900.00,900.00,completed,ZAR,2026-05-01T08:00:00,2026-05-01T08:05:00
+    10002,"ES-10002,70002,501,1,100.00,100.00,100.00,completed,ZAR,2026-05-01T08:00:00,2026-05-01T08:05:00
+    """
+  end
 
   defp sign_in_as(conn, user) do
     Plug.Test.init_test_session(conn, %{current_user_id: user.id})

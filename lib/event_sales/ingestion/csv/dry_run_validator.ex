@@ -52,6 +52,9 @@ defmodule EventSales.Ingestion.Csv.DryRunValidator do
          rows: rows
        }}
     end
+  rescue
+    error in NimbleCSV.ParseError -> {:error, {:invalid_csv, Exception.message(error)}}
+    error in File.Error -> {:error, {:file_error, Exception.message(error)}}
   end
 
   defp validate_row(%{row_number: row_number, raw: raw}, acc, event_id, source_system_id) do
@@ -114,8 +117,8 @@ defmodule EventSales.Ingestion.Csv.DryRunValidator do
       |> put_datetime(raw, "created_at_source", required?: true)
       |> put_datetime(raw, "updated_at_source", required?: true)
       |> put_datetime(raw, "completed_at", required?: false)
-      |> put_string(raw, "order_number")
-      |> put_string(raw, "currency")
+      |> put_required_string(raw, "order_number")
+      |> put_currency(raw)
       |> put_string(raw, "name")
       |> put_string(raw, "customer_name")
       |> put_string(raw, "customer_email")
@@ -224,6 +227,30 @@ defmodule EventSales.Ingestion.Csv.DryRunValidator do
 
   defp put_string({normalized, errors}, raw, field) do
     {Map.put(normalized, field, blank_to_nil(raw[field])), errors}
+  end
+
+  defp put_required_string({normalized, errors}, raw, field) do
+    case blank_to_nil(raw[field]) do
+      nil -> {normalized, errors ++ ["#{field} is required"]}
+      value -> {Map.put(normalized, field, value), errors}
+    end
+  end
+
+  defp put_currency({normalized, errors}, raw) do
+    case blank_to_nil(raw["currency"]) do
+      nil ->
+        {normalized, errors ++ ["currency is required"]}
+
+      <<_::binary-size(3)>> = currency ->
+        if Regex.match?(~r/^[A-Z]{3}$/, currency) do
+          {Map.put(normalized, "currency", currency), errors}
+        else
+          {normalized, errors ++ ["currency must be a 3-letter uppercase code"]}
+        end
+
+      _currency ->
+        {normalized, errors ++ ["currency must be a 3-letter uppercase code"]}
+    end
   end
 
   defp validate_mapping(

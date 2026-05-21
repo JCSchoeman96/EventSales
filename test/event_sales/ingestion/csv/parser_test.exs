@@ -54,6 +54,31 @@ defmodule EventSales.Ingestion.Csv.ParserTest do
     refute "raw_total" in missing
   end
 
+  test "rejects forbidden legacy headers" do
+    path =
+      write_csv!("""
+      #{Enum.join(@required_headers ++ ["raw_total", "discount_total"], ",")}
+      10001,ES-10001,70001,501,2,1000.00,900.00,900.00,completed,ZAR,2026-05-01T08:00:00,2026-05-01T08:05:00,900.00,0.00
+      """)
+
+    assert {:error, {:forbidden_headers, forbidden}} = Parser.stream_rows(path)
+    assert forbidden == ["discount_total", "raw_total"]
+  end
+
+  test "accepts V3 order total headers" do
+    path =
+      write_csv!("""
+      #{Enum.join(@required_headers ++ ["order_raw_discount_total", "order_raw_tax_total"], ",")}
+      10001,ES-10001,70001,501,2,1000.00,900.00,900.00,completed,ZAR,2026-05-01T08:00:00,2026-05-01T08:05:00,0.00,0.00
+      """)
+
+    assert {:ok, stream} = Parser.stream_rows(path)
+    assert [%{raw: row}] = Enum.to_list(stream)
+    assert row["order_raw_total"] == "900.00"
+    assert row["order_raw_discount_total"] == "0.00"
+    assert row["order_raw_tax_total"] == "0.00"
+  end
+
   test "large files remain enumerable for chunked consumers" do
     path =
       1..2_000

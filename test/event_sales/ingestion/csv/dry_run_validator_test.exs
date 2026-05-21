@@ -59,6 +59,76 @@ defmodule EventSales.Ingestion.Csv.DryRunValidatorTest do
     end)
   end
 
+  test "blank required order number and currency produce row errors", %{
+    source: source,
+    event: event,
+    ticket: ticket
+  } do
+    create_mapping!(source, event, ticket, %{woo_product_id: 501, woo_variation_id: nil})
+
+    assert_no_sales_mutation(fn ->
+      path =
+        write_csv!([
+          valid_row(%{
+            "order_number" => "",
+            "currency" => ""
+          })
+        ])
+
+      assert {:ok, result} =
+               DryRunValidator.validate_file(path, %{
+                 event_id: event.id,
+                 source_system_id: source.id
+               })
+
+      assert [%{status: :invalid, error_messages: messages}] = result.rows
+      assert "order_number is required" in messages
+      assert "currency is required" in messages
+    end)
+  end
+
+  test "currency must be a three-letter uppercase code", %{
+    source: source,
+    event: event,
+    ticket: ticket
+  } do
+    create_mapping!(source, event, ticket, %{woo_product_id: 501, woo_variation_id: nil})
+
+    path =
+      write_csv!([
+        valid_row(%{"currency" => "zar"})
+      ])
+
+    assert {:ok, result} =
+             DryRunValidator.validate_file(path, %{
+               event_id: event.id,
+               source_system_id: source.id
+             })
+
+    assert [%{status: :invalid, error_messages: messages}] = result.rows
+    assert "currency must be a 3-letter uppercase code" in messages
+  end
+
+  test "malformed CSV rows return a controlled validation error", %{
+    source: source,
+    event: event
+  } do
+    path =
+      write_raw_csv!("""
+      #{Enum.join(EventSales.Ingestion.Csv.Parser.required_headers(), ",")}
+      10001,ES-10001,70001,501,2,1000.00,900.00,900.00,completed,ZAR,2026-05-01T08:00:00,2026-05-01T08:05:00
+      10002,"ES-10002,70002,501,1,100.00,100.00,100.00,completed,ZAR,2026-05-01T08:00:00,2026-05-01T08:05:00
+      """)
+
+    assert {:error, {:invalid_csv, message}} =
+             DryRunValidator.validate_file(path, %{
+               event_id: event.id,
+               source_system_id: source.id
+             })
+
+    assert is_binary(message)
+  end
+
   test "unknown mappings fail without creating catalog or sales records", %{
     source: source,
     event: event
@@ -205,6 +275,12 @@ defmodule EventSales.Ingestion.Csv.DryRunValidatorTest do
       end)
 
     File.write!(path, Enum.join(headers, ",") <> "\n" <> body <> "\n")
+    path
+  end
+
+  defp write_raw_csv!(contents) do
+    path = Path.join(System.tmp_dir!(), "event-sales-validator-#{System.unique_integer()}.csv")
+    File.write!(path, contents)
     path
   end
 
