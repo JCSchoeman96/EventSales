@@ -98,18 +98,21 @@ defmodule EventSales.Accounts.Policies do
   @spec event_dashboard_role(User.t() | nil, Ecto.UUID.t()) ::
           :admin | :event_owner | :event_staff | nil
   def event_dashboard_role(user, event_id) do
-    cond do
-      global_admin?(user) ->
-        :admin
+    case Ecto.UUID.cast(event_id) do
+      {:ok, event_uuid} ->
+        event_dashboard_role_for_uuid(user, event_uuid)
 
-      has_unexpired_event_grant?(user, event_id, :event_owner) ->
-        :event_owner
-
-      has_unexpired_event_grant?(user, event_id, :event_staff) ->
-        :event_staff
-
-      true ->
+      :error ->
         nil
+    end
+  end
+
+  defp event_dashboard_role_for_uuid(user, event_id) do
+    cond do
+      global_admin?(user) -> :admin
+      has_unexpired_event_grant?(user, event_id, :event_owner) -> :event_owner
+      has_unexpired_event_grant?(user, event_id, :event_staff) -> :event_staff
+      true -> nil
     end
   end
 

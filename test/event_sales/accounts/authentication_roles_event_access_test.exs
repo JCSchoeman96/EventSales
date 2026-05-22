@@ -106,11 +106,13 @@ defmodule EventSales.Accounts.AuthenticationRolesEventAccessTest do
     refute Policies.can_access_event_dashboard?(unassigned, @event_a)
     refute Policies.can_access_event_dashboard?(owner, @event_b)
     refute Policies.can_access_event_dashboard?(owner, "not-a-uuid")
+    refute Policies.can_access_event_dashboard?(admin, "not-a-uuid")
 
     assert Policies.event_dashboard_role(admin, @event_a) == :admin
     assert Policies.event_dashboard_role(owner, @event_a) == :event_owner
     assert Policies.event_dashboard_role(event_staff, @event_a) == :event_staff
     assert Policies.event_dashboard_role(global_staff, @event_a) == nil
+    assert Policies.event_dashboard_role(admin, "not-a-uuid") == nil
   end
 
   test "event dashboard role prefers admin, then owner, then staff" do
