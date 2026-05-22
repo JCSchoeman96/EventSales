@@ -242,6 +242,28 @@ defmodule EventSales.Exports.EventSalesCsvTest do
     assert {:error, :forbidden} = EventSalesCsv.orders_csv(event.id, actor: nil)
   end
 
+  test "summary export preserves total row last when capped", %{
+    admin: admin,
+    source: source,
+    event: event,
+    balcony: balcony,
+    stalls: stalls
+  } do
+    completed = create_order!(source, :completed, order_number: "SUMMARY-CAP")
+    create_item!(completed, event, balcony, quantity: 1, line_total: Decimal.new("125.00"))
+    create_item!(completed, event, stalls, quantity: 2, line_total: Decimal.new("200.00"))
+
+    assert {:ok, chunks, true} = EventSalesCsv.summary_csv(event.id, actor: admin, max_rows: 1)
+
+    rows = csv_rows(chunks)
+
+    assert [
+             _headers,
+             ["ticket_type", _, "Exports Event", _, "Balcony", "", "1", "", "125.00", "ZAR"],
+             ["total", _, "Exports Event", "", "Total", "10", "3", "7", "325.00", "ZAR"]
+           ] = rows
+  end
+
   test "order export caps data rows and reports truncation", %{
     admin: admin,
     source: source,

@@ -58,11 +58,12 @@ defmodule EventSales.Exports.EventSalesCsv do
     with :ok <- authorize(opts),
          {:ok, event} <- fetch_event(event_id) do
       max_rows = max_rows(opts)
-      rows = summary_rows(event)
-      visible_rows = Enum.take(rows, max_rows)
-      truncated? = length(rows) > max_rows
+      {ticket_rows, total_row} = summary_rows(event)
+      visible_ticket_rows = Enum.take(ticket_rows, max_rows)
+      truncated? = length(ticket_rows) > max_rows
 
-      {:ok, CsvStream.encode_rows([@summary_headers | visible_rows]), truncated?}
+      {:ok, CsvStream.encode_rows([@summary_headers | visible_ticket_rows] ++ [total_row]),
+       truncated?}
     end
   end
 
@@ -114,7 +115,7 @@ defmodule EventSales.Exports.EventSalesCsv do
       |> ticket_type_summary_rows()
       |> Enum.map(&summary_ticket_row(event, &1))
 
-    ticket_rows ++ [total_summary_row(event, ticket_rows)]
+    {ticket_rows, total_summary_row(event, ticket_rows)}
   end
 
   defp ticket_type_summary_rows(event_id) do
