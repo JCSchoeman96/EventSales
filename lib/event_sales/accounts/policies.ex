@@ -84,6 +84,35 @@ defmodule EventSales.Accounts.Policies do
     end
   end
 
+  @doc """
+  Returns true when an actor may read aggregate dashboard data for the event.
+  """
+  @spec can_access_event_dashboard?(User.t() | nil, Ecto.UUID.t()) :: boolean()
+  def can_access_event_dashboard?(user, event_id) do
+    not is_nil(event_dashboard_role(user, event_id))
+  end
+
+  @doc """
+  Returns the dashboard role that authorizes event aggregate access.
+  """
+  @spec event_dashboard_role(User.t() | nil, Ecto.UUID.t()) ::
+          :admin | :event_owner | :event_staff | nil
+  def event_dashboard_role(user, event_id) do
+    cond do
+      global_admin?(user) ->
+        :admin
+
+      has_unexpired_event_grant?(user, event_id, :event_owner) ->
+        :event_owner
+
+      has_unexpired_event_grant?(user, event_id, :event_staff) ->
+        :event_staff
+
+      true ->
+        nil
+    end
+  end
+
   @spec has_global_role?(User.t() | nil, atom()) :: boolean()
   defp has_global_role?(%User{id: user_id}, role) when role in @global_roles do
     %{rows: [[count]]} =
