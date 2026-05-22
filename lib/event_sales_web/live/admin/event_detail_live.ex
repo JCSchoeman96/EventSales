@@ -91,13 +91,18 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLive do
           <p class="text-sm text-zinc-600">{@detail.slug} - {@detail.status}</p>
         </div>
         <div class="flex gap-2">
-          <button
-            type="button"
-            disabled
-            class="inline-flex items-center justify-center rounded border border-zinc-200 bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-500"
+          <.link
+            href={~p"/admin/events/#{@event_id}/exports/summary.csv"}
+            class="inline-flex items-center justify-center rounded border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800"
           >
-            Export CSV
-          </button>
+            Summary CSV
+          </.link>
+          <.link
+            href={~p"/admin/events/#{@event_id}/exports/orders.csv"}
+            class="inline-flex items-center justify-center rounded border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800"
+          >
+            Orders CSV
+          </.link>
           <.link
             navigate={~p"/admin/imports?event_id=#{@event_id}"}
             class="inline-flex items-center justify-center rounded border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800"

@@ -75,6 +75,8 @@ defmodule EventSalesWeb.Router do
     live "/dashboard", Live.Admin.DashboardLive
     live "/events", Live.Admin.EventsLive
     live "/events/:id", Live.Admin.EventDetailLive
+    get "/events/:event_id/exports/summary.csv", Admin.EventExportController, :summary
+    get "/events/:event_id/exports/orders.csv", Admin.EventExportController, :orders
     live "/imports", Live.Admin.ImportsLive
     live "/webhooks", Live.Admin.WebhooksLive
     live "/sync", Live.Admin.SyncLive
