@@ -194,6 +194,25 @@ defmodule EventSales.DomainBoundariesTest do
     end
   end
 
+  test "event-scoped dashboard facade remains aggregate-only" do
+    forbidden_patterns = [
+      "Repo",
+      "sales_order_items",
+      "sales_orders",
+      "OrderItem",
+      "Order",
+      "WooCommerce",
+      "Tickera",
+      "EventSalesWeb"
+    ]
+
+    scan_path = "lib/event_sales/analytics/event_scoped_dashboard.ex"
+
+    for pattern <- forbidden_patterns do
+      assert [] = files_containing([scan_path], pattern)
+    end
+  end
+
   test "WooCommerceClient is wired only into approved ingestion REST boundaries" do
     allowed_prefixes = [
       "lib/event_sales/ingestion/clients/"
