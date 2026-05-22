@@ -1,4 +1,4 @@
-defmodule EventSalesWeb.Live.Components.SalesChart do
+defmodule EventSalesWeb.Live.Admin.Components.SalesChart do
   @moduledoc """
   Placeholder for Slice 1.0.
 

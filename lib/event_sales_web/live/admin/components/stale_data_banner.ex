@@ -1,4 +1,4 @@
-defmodule EventSalesWeb.Live.Components.StaleDataBanner do
+defmodule EventSalesWeb.Live.Admin.Components.StaleDataBanner do
   @moduledoc """
   Presentational banner for dashboard hot-state freshness.
   """

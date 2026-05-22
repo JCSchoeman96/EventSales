@@ -12,6 +12,15 @@ defmodule EventSales.Exports.EventSalesCsvTest do
   alias EventSales.TestSupport.SalesHelpers
 
   setup do
+    original_staff_visibility = Application.get_env(:event_sales, :staff_customer_pii_visibility)
+
+    on_exit(fn ->
+      case original_staff_visibility do
+        nil -> Application.delete_env(:event_sales, :staff_customer_pii_visibility)
+        value -> Application.put_env(:event_sales, :staff_customer_pii_visibility, value)
+      end
+    end)
+
     admin = create_user!("exports-admin@example.com")
     create_global_role!(admin, :admin)
     staff = create_user!("exports-staff@example.com")
@@ -236,10 +245,36 @@ defmodule EventSales.Exports.EventSalesCsvTest do
   end
 
   test "exports require admin actor", %{staff: staff, event: event} do
+    Application.put_env(:event_sales, :staff_customer_pii_visibility, :full)
+
     assert {:error, :forbidden} = EventSalesCsv.summary_csv(event.id, actor: staff)
     assert {:error, :forbidden} = EventSalesCsv.orders_csv(event.id, actor: staff)
     assert {:error, :forbidden} = EventSalesCsv.summary_csv(event.id, actor: nil)
     assert {:error, :forbidden} = EventSalesCsv.orders_csv(event.id, actor: nil)
+  end
+
+  test "exports remain pii-free when staff pii config is full", %{
+    admin: admin,
+    source: source,
+    event: event,
+    stalls: stalls
+  } do
+    Application.put_env(:event_sales, :staff_customer_pii_visibility, :full)
+
+    order = create_order!(source, :completed, order_number: "PII-FREE")
+    create_item!(order, event, stalls, woo_line_item_id: 404)
+
+    assert {:ok, summary_chunks, false} = EventSalesCsv.summary_csv(event.id, actor: admin)
+    assert {:ok, order_chunks, false} = EventSalesCsv.orders_csv(event.id, actor: admin)
+
+    export_body = csv_body(summary_chunks) <> csv_body(order_chunks)
+
+    refute export_body =~ "Private Customer"
+    refute export_body =~ "private@example.test"
+    refute export_body =~ "txn_private"
+    refute export_body =~ "customer_name"
+    refute export_body =~ "customer_email"
+    refute export_body =~ "payment_gateway_transaction_id"
   end
 
   test "summary export preserves total row last when capped", %{

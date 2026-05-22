@@ -93,10 +93,10 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLiveTest do
     assert html =~ "GA"
     assert html =~ "completed"
     assert html =~ "MIXED-DETAIL"
+    assert html =~ "Private Customer"
+    assert html =~ "private@example.test"
     assert html =~ "Detail Unmapped"
     refute html =~ "Other Detail Event"
-    refute html =~ "Private Customer"
-    refute html =~ "private@example.test"
     refute html =~ "txn_private"
   end
 

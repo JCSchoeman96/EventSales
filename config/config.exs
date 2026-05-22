@@ -23,6 +23,8 @@ config :event_sales,
 
 config :event_sales, :internal_tools, ash_admin_enabled: config_env() in [:dev, :test]
 
+config :event_sales, :staff_customer_pii_visibility, :masked
+
 config :event_sales, Oban,
   repo: EventSales.Repo,
   notifier: Oban.Notifiers.Postgres,

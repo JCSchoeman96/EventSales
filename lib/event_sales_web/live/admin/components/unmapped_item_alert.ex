@@ -1,4 +1,4 @@
-defmodule EventSalesWeb.Live.Components.UnmappedItemAlert do
+defmodule EventSalesWeb.Live.Admin.Components.UnmappedItemAlert do
   @moduledoc """
   Presentational alert list for unmapped dashboard rows.
   """
