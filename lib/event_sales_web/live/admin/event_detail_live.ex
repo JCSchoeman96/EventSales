@@ -5,9 +5,11 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLive do
 
   use EventSalesWeb, :live_view
 
+  alias EventSales.Accounts.PiiPolicy
   alias EventSales.Analytics.{DashboardPubSub, EventDetail}
   alias EventSalesWeb.Live.Admin.Pagination, as: AdminPagination
   alias EventSalesWeb.Live.Admin.Session, as: AdminSession
+  alias EventSalesWeb.Presenters.CustomerPresenter
 
   @impl true
   def mount(%{"id" => event_id}, session, socket) do
@@ -194,6 +196,8 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLive do
             <thead class="bg-zinc-50 text-left text-xs font-semibold uppercase text-zinc-600">
               <tr>
                 <th class="px-3 py-2">Order</th>
+                <th class="px-3 py-2">Customer</th>
+                <th class="px-3 py-2">Email</th>
                 <th class="px-3 py-2">Status</th>
                 <th class="px-3 py-2">Total</th>
                 <th class="px-3 py-2">Completed</th>
@@ -203,6 +207,8 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLive do
             <tbody id="recent-orders" phx-update="stream" class="divide-y divide-zinc-100 bg-white">
               <tr :for={{dom_id, order} <- @streams.recent_orders} id={dom_id}>
                 <td class="px-3 py-2 font-medium text-zinc-900">{order.order_number}</td>
+                <td class="px-3 py-2 text-zinc-700">{order.customer_name || "-"}</td>
+                <td class="px-3 py-2 text-zinc-700">{order.customer_email || "-"}</td>
                 <td class="px-3 py-2 text-zinc-700">{order.status}</td>
                 <td class="px-3 py-2 text-zinc-700">{format_money(order.raw_total)}</td>
                 <td class="px-3 py-2 text-zinc-700">{format_datetime(order.completed_at)}</td>
@@ -315,6 +321,8 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLive do
            page: page
          ) do
       {:ok, %{rows: rows, page: page_info}} ->
+        rows = present_recent_order_customers(rows, socket.assigns.current_user)
+
         socket
         |> assign(:recent_orders_page, page_info)
         |> stream(:recent_orders, rows, reset: true)
@@ -357,6 +365,14 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLive do
     end
 
     socket
+  end
+
+  defp present_recent_order_customers(rows, current_user) do
+    visibility = PiiPolicy.customer_pii_visibility(current_user, context: :customer_record)
+
+    Enum.map(rows, fn row ->
+      Map.merge(row, CustomerPresenter.present(row, pii_visibility: visibility))
+    end)
   end
 
   defp empty_detail(event_id) do

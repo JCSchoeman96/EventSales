@@ -56,6 +56,8 @@ defmodule EventSales.Analytics.EventDetail do
           status: atom(),
           currency: String.t(),
           raw_total: Decimal.t(),
+          customer_name: String.t() | nil,
+          customer_email: String.t() | nil,
           completed_at: DateTime.t() | nil,
           updated_at_source: DateTime.t()
         }
@@ -329,6 +331,8 @@ defmodule EventSales.Analytics.EventDetail do
           field(order, :status),
           field(order, :currency),
           field(order, :raw_total),
+          field(order, :customer_name),
+          field(order, :customer_email),
           field(order, :completed_at),
           field(order, :updated_at_source)
         ],
@@ -341,6 +345,8 @@ defmodule EventSales.Analytics.EventDetail do
           status: field(order, :status),
           currency: field(order, :currency),
           raw_total: field(order, :raw_total),
+          customer_name: field(order, :customer_name),
+          customer_email: field(order, :customer_email),
           completed_at: field(order, :completed_at),
           updated_at_source: field(order, :updated_at_source)
         }
@@ -395,12 +401,10 @@ defmodule EventSales.Analytics.EventDetail do
   end
 
   defp normalize_recent_order(row) do
-    %{
-      row
-      | status: status_atom(row.status),
-        completed_at: utc_datetime(row.completed_at),
-        updated_at_source: utc_datetime(row.updated_at_source)
-    }
+    row
+    |> Map.put(:status, status_atom(row.status))
+    |> Map.put(:completed_at, utc_datetime(row.completed_at))
+    |> Map.put(:updated_at_source, utc_datetime(row.updated_at_source))
   end
 
   defp normalize_unmapped_item(row) do

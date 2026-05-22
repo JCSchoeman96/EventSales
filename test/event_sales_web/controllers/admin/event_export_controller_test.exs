@@ -14,6 +14,14 @@ defmodule EventSalesWeb.Admin.EventExportControllerTest do
 
   setup do
     EventSales.DataCase.setup_sandbox(%{async: false})
+    original_staff_visibility = Application.get_env(:event_sales, :staff_customer_pii_visibility)
+
+    on_exit(fn ->
+      case original_staff_visibility do
+        nil -> Application.delete_env(:event_sales, :staff_customer_pii_visibility)
+        value -> Application.put_env(:event_sales, :staff_customer_pii_visibility, value)
+      end
+    end)
 
     admin = create_user!("event-export-admin@example.com")
     create_global_role!(admin, :admin)
@@ -95,6 +103,8 @@ defmodule EventSalesWeb.Admin.EventExportControllerTest do
     event: event,
     admin: admin
   } do
+    Application.put_env(:event_sales, :staff_customer_pii_visibility, :full)
+
     conn =
       conn
       |> sign_in_as(admin)

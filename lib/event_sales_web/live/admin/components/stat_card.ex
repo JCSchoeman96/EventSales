@@ -1,4 +1,4 @@
-defmodule EventSalesWeb.Live.Components.StatCard do
+defmodule EventSalesWeb.Live.Admin.Components.StatCard do
   @moduledoc """
   Presentational statistic card for admin dashboard metrics.
   """

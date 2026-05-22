@@ -1,4 +1,4 @@
-defmodule EventSalesWeb.Live.Components.OrderTable do
+defmodule EventSalesWeb.Live.Admin.Components.OrderTable do
   @moduledoc """
   Presentational recent-order table for the admin dashboard.
   """

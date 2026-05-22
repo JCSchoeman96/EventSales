@@ -8,7 +8,7 @@ defmodule EventSalesWeb.Live.Admin.DashboardLiveTest do
 
   alias EventSales.Accounts
   alias EventSales.Accounts.Resources.{Role, User, UserRole}
-  alias EventSales.Analytics.{DashboardCache, DashboardPubSub, HotStateAggregator}
+  alias EventSales.Analytics.{AdminDashboard, DashboardCache, DashboardPubSub, HotStateAggregator}
   alias EventSales.Repo
   alias EventSales.Sales
   alias EventSales.Sales.Resources.{Order, OrderItem}
@@ -93,6 +93,16 @@ defmodule EventSalesWeb.Live.Admin.DashboardLiveTest do
     refute html =~ "private@example.test"
     refute html =~ "Private Customer"
     refute html =~ "txn_private"
+
+    assert {:ok, dashboard} = AdminDashboard.snapshot()
+    dashboard_dump = inspect(dashboard)
+
+    refute dashboard_dump =~ "private@example.test"
+    refute dashboard_dump =~ "Private Customer"
+    refute dashboard_dump =~ "txn_private"
+    refute dashboard_dump =~ "customer_email"
+    refute dashboard_dump =~ "customer_name"
+    refute dashboard_dump =~ "payment_gateway_transaction_id"
   end
 
   test "manual refresh requests hot-state rebuild and rate limits by user", %{conn: conn} do

@@ -147,6 +147,24 @@ defmodule EventSales.DomainBoundariesTest do
              implementation_files("lib/event_sales_web") |> files_containing("use Ash.Resource")
   end
 
+  test "core business modules do not depend on web-layer modules" do
+    allowed_files = [
+      "lib/event_sales/application.ex"
+    ]
+
+    matches =
+      implementation_files("lib/event_sales")
+      |> Enum.reject(fn path ->
+        path
+        |> Path.relative_to_cwd()
+        |> String.replace("\\", "/")
+        |> then(&(&1 in allowed_files))
+      end)
+      |> files_containing("EventSalesWeb.")
+
+    assert [] = matches
+  end
+
   test "web layer and MappingResolver do not reference WooCommerce REST boundaries" do
     scan_paths =
       implementation_files("lib/event_sales_web") ++

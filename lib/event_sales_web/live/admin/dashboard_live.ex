@@ -11,7 +11,7 @@ defmodule EventSalesWeb.Live.Admin.DashboardLive do
   alias EventSalesWeb.Live.Admin.ManualActionRateLimiter
   alias EventSalesWeb.Live.Admin.Session, as: AdminSession
 
-  alias EventSalesWeb.Live.Components.{
+  alias EventSalesWeb.Live.Admin.Components.{
     OrderTable,
     StaleDataBanner,
     StatCard,
