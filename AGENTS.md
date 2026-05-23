@@ -45,6 +45,7 @@ No secrets or real customer data in code, tests, logs, fixtures, or docs.
 Task is not complete unless required checks pass.
 Always open or update a PR after meaningful work.
 ```
+- Use rg for broad text search; use ast-grep run or ast-grep scan for structural code discovery.
 
 ## Repo helper scripts
 
@@ -99,3 +100,4 @@ say unsure
 |> ask concise question
 |> do not invent architecture
 ```
+- Use rg for broad text search; use ast-grep run or ast-grep scan for structural code discovery.
