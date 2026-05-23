@@ -1,6 +1,7 @@
 defmodule EventSalesWeb.Router do
   use EventSalesWeb, :router
   import AshAdmin.Router
+  import Oban.Web.Router
 
   @content_security_policy (case Mix.env() do
                               :dev ->
@@ -82,6 +83,12 @@ defmodule EventSalesWeb.Router do
     live "/sync", Live.Admin.SyncLive
     live "/reconciliation", Live.Admin.ReconciliationLive
     get "/reconciliation/export.csv", Admin.ReconciliationExportController, :show
+
+    oban_dashboard("/oban",
+      resolver: EventSalesWeb.ObanWebResolver,
+      oban_name: Oban,
+      as: :oban_dashboard
+    )
   end
 
   # Other scopes may use custom stacks.
