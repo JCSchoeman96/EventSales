@@ -162,8 +162,15 @@ defmodule EventSales.Ingestion.Csv.ApplyImport do
   defp upsert_group(source_system_id, normalized_order, opts) do
     upserter = Keyword.get(opts, :order_upserter, OrderUpserter)
 
+    upserter_opts = [
+      ash_action_opts: [
+        context: %{warn_on_transaction_hooks?: false},
+        return_notifications?: true
+      ]
+    ]
+
     Repo.transaction(fn ->
-      case upserter.upsert_normalized_order(source_system_id, normalized_order) do
+      case upsert_normalized_order(upserter, source_system_id, normalized_order, upserter_opts) do
         {:ok, :stale_noop} -> Repo.rollback({:permanent, :stale_noop})
         {:ok, order} -> order
         {:error, reason} -> Repo.rollback(reason)
@@ -172,6 +179,14 @@ defmodule EventSales.Ingestion.Csv.ApplyImport do
     |> case do
       {:ok, order} -> {:ok, order}
       {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp upsert_normalized_order(upserter, source_system_id, normalized_order, opts) do
+    if Code.ensure_loaded?(upserter) and function_exported?(upserter, :upsert_normalized_order, 3) do
+      upserter.upsert_normalized_order(source_system_id, normalized_order, opts)
+    else
+      upserter.upsert_normalized_order(source_system_id, normalized_order)
     end
   end
 

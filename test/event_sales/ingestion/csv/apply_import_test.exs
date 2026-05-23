@@ -1,6 +1,8 @@
 defmodule EventSales.Ingestion.Csv.ApplyImportTest do
   use EventSales.DataCase, async: false
 
+  import ExUnit.CaptureLog
+
   require Ash.Query
 
   alias EventSales.Accounts
@@ -96,6 +98,27 @@ defmodule EventSales.Ingestion.Csv.ApplyImportTest do
     assert applied_again.status == :applied
     assert Ash.count!(Order, domain: Sales) == 2
     assert Ash.count!(OrderItem, domain: Sales) == 2
+  end
+
+  test "CSV transactional upsert does not emit Ash missed-notification warnings", %{
+    admin: admin,
+    event: event
+  } do
+    assert {:ok, batch} =
+             CsvImports.dry_run_file(
+               fixture_path("import_valid.csv"),
+               %{event_id: event.id, source_filename: "import_valid.csv"},
+               actor: admin
+             )
+
+    log =
+      capture_log(fn ->
+        assert {:ok, applied} = ApplyImport.apply(batch.id)
+        assert applied.status == :applied
+      end)
+
+    refute log =~ "Missed"
+    refute log =~ "missed_notifications"
   end
 
   test "invalid dry-run status does not apply", %{admin: admin, event: event} do

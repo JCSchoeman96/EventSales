@@ -222,11 +222,12 @@ defmodule EventSales.Ingestion.Resources.SyncRunTest do
     |> Map.put_new(:requested_via, :manual)
     |> then(fn attrs ->
       SyncRun
-      |> Ash.Changeset.for_create(:queue_manual_scoped, attrs)
-      |> Ash.create(
-        domain: Ingestion,
+      |> Ash.Changeset.for_create(
+        :queue_manual_scoped,
+        attrs,
         context: %{scoped_manual_sync_now: now}
       )
+      |> Ash.create(domain: Ingestion)
     end)
   end
 

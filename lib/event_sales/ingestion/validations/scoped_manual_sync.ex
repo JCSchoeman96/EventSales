@@ -61,6 +61,18 @@ defmodule EventSales.Ingestion.Validations.ScopedManualSync do
     end
   end
 
+  defp validation_now(_opts, %Ash.Resource.Validation.Context{
+         source_context: %{scoped_manual_sync_now: %DateTime{} = dt}
+       }) do
+    dt
+  end
+
+  defp validation_now(_opts, %Ash.Resource.Validation.Context{
+         source_context: %{private: %{scoped_manual_sync_now: %DateTime{} = dt}}
+       }) do
+    dt
+  end
+
   defp validation_now(_opts, %{scoped_manual_sync_now: %DateTime{} = dt}), do: dt
   defp validation_now(_opts, %{private: %{scoped_manual_sync_now: %DateTime{} = dt}}), do: dt
   defp validation_now(_opts, _), do: nil
