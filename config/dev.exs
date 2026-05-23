@@ -86,3 +86,7 @@ config :phoenix_live_view,
   debug_attributes: true,
   # Enable helpful, but potentially expensive runtime checks
   enable_expensive_runtime_checks: true
+
+# Mishka Chelekom generators expect a Tailwind v4+ version configured.
+# EventSales ships precompiled Tailwind output in priv/static/assets/default.css.
+config :tailwind, version: "4.0.9"

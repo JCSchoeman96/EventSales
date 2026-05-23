@@ -13,6 +13,7 @@ defmodule EventSalesWeb.Live.Admin.DashboardLive do
 
   alias EventSalesWeb.Live.Admin.Components.{
     OrderTable,
+    SalesChart,
     StaleDataBanner,
     StatCard,
     StatusBadge,
@@ -27,6 +28,7 @@ defmodule EventSalesWeb.Live.Admin.DashboardLive do
      |> assign(:current_user_id, AdminSession.current_user_id(session))
      |> assign(:subscribed_event_ids, MapSet.new())
      |> load_dashboard()
+     |> assign_chart_data()
      |> maybe_subscribe_to_event_topics()}
   end
 
@@ -89,6 +91,17 @@ defmodule EventSalesWeb.Live.Admin.DashboardLive do
         <StatCard.card title="Revenue" value={format_money(@dashboard.kpis.total_revenue)} />
         <StatCard.card title="Today Tickets" value={@dashboard.kpis.today_sold} />
         <StatCard.card title="Today Revenue" value={format_money(@dashboard.kpis.today_revenue)} />
+      </section>
+
+      <section class="mb-6">
+        <h2 class="mb-3 text-base font-semibold text-zinc-900">Sales Trend</h2>
+        <.live_component
+          module={SalesChart}
+          id="main"
+          labels={@chart_labels}
+          revenue={@chart_revenue}
+          tickets={@chart_tickets}
+        />
       </section>
 
       <section class="mb-6 grid gap-6 lg:grid-cols-2">
@@ -185,6 +198,31 @@ defmodule EventSalesWeb.Live.Admin.DashboardLive do
         |> assign(:dashboard, empty_dashboard())
         |> put_flash(:error, "Dashboard data could not be loaded")
     end
+  end
+
+  defp assign_chart_data(socket) do
+    # Chart data — replace with real query result when AdminDashboard.daily_buckets/2 exists
+    daily = Map.get(socket.assigns.dashboard, :daily_buckets, [])
+
+    socket
+    |> assign(
+      :chart_labels,
+      Enum.map(daily, fn %{date: %Date{} = date} -> Date.to_string(date) end)
+    )
+    |> assign(
+      :chart_revenue,
+      Enum.map(daily, fn %{revenue_cents: cents} when is_integer(cents) -> div(cents, 100) end)
+    )
+    |> assign(
+      :chart_tickets,
+      Enum.map(daily, fn %{tickets_sold: sold} when is_integer(sold) -> sold end)
+    )
+  rescue
+    _ ->
+      socket
+      |> assign(:chart_labels, [])
+      |> assign(:chart_revenue, [])
+      |> assign(:chart_tickets, [])
   end
 
   defp maybe_subscribe_to_event_topics(socket) do
