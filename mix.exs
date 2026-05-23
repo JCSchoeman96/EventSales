@@ -69,6 +69,7 @@ defmodule EventSales.MixProject do
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.11.1"},
       {:oban, "~> 2.22"},
+      {:oban_web, "~> 2.12"},
       {:nimble_csv, "~> 1.3"},
       {:redix, "~> 1.5"},
       {:igniter, "~> 0.8", only: [:dev, :test], runtime: false},
