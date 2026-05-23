@@ -11,7 +11,7 @@ defmodule EventSales.MixProject do
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
-      dialyzer: [plt_add_apps: [:ex_unit]],
+      dialyzer: [plt_add_apps: [:ex_unit, :mix]],
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
       listeners: [Phoenix.CodeReloader]
     ]
@@ -41,6 +41,9 @@ defmodule EventSales.MixProject do
   end
 
   # Specifies which paths to compile per environment.
+  defp elixirc_paths(:prod),
+    do: ["lib/event_sales.ex", "lib/event_sales", "lib/event_sales_web.ex", "lib/event_sales_web"]
+
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
 
@@ -77,7 +80,8 @@ defmodule EventSales.MixProject do
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.14.1", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
-      {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false}
+      {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false},
+      {:sourceror, "~> 1.7", only: [:dev, :test], runtime: false}
     ]
   end
 
@@ -107,6 +111,7 @@ defmodule EventSales.MixProject do
         "cmd bash scripts/check_no_web_woocommerce_refs.sh",
         "ash.codegen --dry-run",
         "cmd git diff --exit-code priv/repo/migrations priv/resource_snapshots",
+        "project.index --check",
         "credo --strict",
         "test"
       ],
@@ -119,6 +124,7 @@ defmodule EventSales.MixProject do
         "cmd bash scripts/check_no_web_woocommerce_refs.sh",
         "ash.codegen --dry-run",
         "cmd git diff --exit-code priv/repo/migrations priv/resource_snapshots",
+        "project.index --check",
         "credo --strict",
         "sobelow",
         "deps.audit",

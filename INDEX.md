@@ -1,0 +1,1683 @@
+# INDEX
+
+Schema version: `1`
+
+Generator: `mix project.index`
+
+Project root: `.`
+
+## File Count
+
+224
+
+## Files
+
+- `config/config.exs`
+- `config/dev.exs`
+- `config/prod.exs`
+- `config/runtime.exs`
+- `config/test.exs`
+- `lib/event_sales.ex`
+- `lib/event_sales/accounts.ex`
+- `lib/event_sales/accounts/auth_overrides.ex`
+- `lib/event_sales/accounts/pii_policy.ex`
+- `lib/event_sales/accounts/policies.ex`
+- `lib/event_sales/accounts/resources/event_access_grant.ex`
+- `lib/event_sales/accounts/resources/role.ex`
+- `lib/event_sales/accounts/resources/user.ex`
+- `lib/event_sales/accounts/resources/user_role.ex`
+- `lib/event_sales/admin_read/pagination.ex`
+- `lib/event_sales/analytics.ex`
+- `lib/event_sales/analytics/admin_dashboard.ex`
+- `lib/event_sales/analytics/aggregate_event.ex`
+- `lib/event_sales/analytics/aggregate_event_idempotency.ex`
+- `lib/event_sales/analytics/aggregators/event_aggregator.ex`
+- `lib/event_sales/analytics/cache_keys.ex`
+- `lib/event_sales/analytics/dashboard_cache.ex`
+- `lib/event_sales/analytics/dashboard_pub_sub.ex`
+- `lib/event_sales/analytics/event_detail.ex`
+- `lib/event_sales/analytics/event_scoped_dashboard.ex`
+- `lib/event_sales/analytics/hot_state_aggregator.ex`
+- `lib/event_sales/analytics/metric_rules.ex`
+- `lib/event_sales/analytics/order_processed_notifier.ex`
+- `lib/event_sales/analytics/resources/daily_sales_aggregate_snapshot.ex`
+- `lib/event_sales/analytics/resources/event_aggregate_snapshot.ex`
+- `lib/event_sales/analytics/snapshot_codec.ex`
+- `lib/event_sales/analytics/snapshot_queries.ex`
+- `lib/event_sales/analytics/snapshot_reader.ex`
+- `lib/event_sales/analytics/snapshot_refresh.ex`
+- `lib/event_sales/analytics/snapshot_store/adapter.ex`
+- `lib/event_sales/analytics/snapshot_store/noop_adapter.ex`
+- `lib/event_sales/analytics/snapshot_store/redix_adapter.ex`
+- `lib/event_sales/analytics/workers/rebuild_hot_state_worker.ex`
+- `lib/event_sales/analytics/workers/refresh_snapshot_worker.ex`
+- `lib/event_sales/application.ex`
+- `lib/event_sales/ash_baseline/domain.ex`
+- `lib/event_sales/ash_baseline/resources/auth_user.ex`
+- `lib/event_sales/ash_baseline/resources/paper_trail_proof.ex`
+- `lib/event_sales/ash_baseline/resources/state_machine_proof.ex`
+- `lib/event_sales/audit.ex`
+- `lib/event_sales/audit/logger.ex`
+- `lib/event_sales/audit/metadata_sanitizer.ex`
+- `lib/event_sales/audit/paper_trail.ex`
+- `lib/event_sales/audit/resources/audit_log.ex`
+- `lib/event_sales/catalog.ex`
+- `lib/event_sales/catalog/cache_invalidation.ex`
+- `lib/event_sales/catalog/changes/mapping_side_effects_after_action.ex`
+- `lib/event_sales/catalog/changes/normalize_base_url.ex`
+- `lib/event_sales/catalog/changes/validate_event_dates.ex`
+- `lib/event_sales/catalog/changes/validate_ticket_type_event.ex`
+- `lib/event_sales/catalog/mapping_resolver.ex`
+- `lib/event_sales/catalog/mapping_side_effects.ex`
+- `lib/event_sales/catalog/missing_catalog_resolver.ex`
+- `lib/event_sales/catalog/product_metadata_cache.ex`
+- `lib/event_sales/catalog/product_metadata_updater.ex`
+- `lib/event_sales/catalog/resources/event.ex`
+- `lib/event_sales/catalog/resources/event_dashboard_setting.ex`
+- `lib/event_sales/catalog/resources/product_mapping.ex`
+- `lib/event_sales/catalog/resources/source_system.ex`
+- `lib/event_sales/catalog/resources/ticket_type.ex`
+- `lib/event_sales/catalog/workers/mapping_changed_worker.ex`
+- `lib/event_sales/exports/csv_stream.ex`
+- `lib/event_sales/exports/event_sales_csv.ex`
+- `lib/event_sales/ingestion.ex`
+- `lib/event_sales/ingestion/admin_reconciliation_dashboard.ex`
+- `lib/event_sales/ingestion/clients/httpc_transport.ex`
+- `lib/event_sales/ingestion/clients/tickera_attendee_client.ex`
+- `lib/event_sales/ingestion/clients/tickera_error.ex`
+- `lib/event_sales/ingestion/clients/woocommerce_client.ex`
+- `lib/event_sales/ingestion/clients/woocommerce_error.ex`
+- `lib/event_sales/ingestion/clients/woocommerce_transport.ex`
+- `lib/event_sales/ingestion/csv/apply_import.ex`
+- `lib/event_sales/ingestion/csv/dry_run_validator.ex`
+- `lib/event_sales/ingestion/csv/parser.ex`
+- `lib/event_sales/ingestion/csv_imports.ex`
+- `lib/event_sales/ingestion/findings_csv_export.ex`
+- `lib/event_sales/ingestion/handlers/product_updated_handler.ex`
+- `lib/event_sales/ingestion/intake_backpressure.ex`
+- `lib/event_sales/ingestion/manual_sync.ex`
+- `lib/event_sales/ingestion/order_reconciliation.ex`
+- `lib/event_sales/ingestion/parsers/woocommerce_order_parser.ex`
+- `lib/event_sales/ingestion/reconciliation_peak_guard.ex`
+- `lib/event_sales/ingestion/redis_webhook_buffer.ex`
+- `lib/event_sales/ingestion/redis_webhook_buffer/adapter.ex`
+- `lib/event_sales/ingestion/redis_webhook_buffer/redix_adapter.ex`
+- `lib/event_sales/ingestion/resources/csv_import_batch.ex`
+- `lib/event_sales/ingestion/resources/csv_import_row.ex`
+- `lib/event_sales/ingestion/resources/sync_cursor.ex`
+- `lib/event_sales/ingestion/resources/sync_run.ex`
+- `lib/event_sales/ingestion/resources/tickera_attendee_snapshot.ex`
+- `lib/event_sales/ingestion/resources/tickera_attendee_sync_run.ex`
+- `lib/event_sales/ingestion/resources/tickera_event_source.ex`
+- `lib/event_sales/ingestion/resources/tickera_reconciliation_finding.ex`
+- `lib/event_sales/ingestion/resources/tickera_reconciliation_run.ex`
+- `lib/event_sales/ingestion/resources/webhook_delivery_failure.ex`
+- `lib/event_sales/ingestion/resources/webhook_event.ex`
+- `lib/event_sales/ingestion/rest_circuit_breaker.ex`
+- `lib/event_sales/ingestion/rest_rate_limiter.ex`
+- `lib/event_sales/ingestion/security/raw_body_reader.ex`
+- `lib/event_sales/ingestion/security/webhook_replay_guard.ex`
+- `lib/event_sales/ingestion/security/webhook_signature.ex`
+- `lib/event_sales/ingestion/sync_debug.ex`
+- `lib/event_sales/ingestion/tickera_attendee_snapshot_hash.ex`
+- `lib/event_sales/ingestion/tickera_attendee_snapshots.ex`
+- `lib/event_sales/ingestion/tickera_attendee_sync.ex`
+- `lib/event_sales/ingestion/tickera_attendee_sync_queue.ex`
+- `lib/event_sales/ingestion/tickera_attendee_sync_runs.ex`
+- `lib/event_sales/ingestion/tickera_event_sources.ex`
+- `lib/event_sales/ingestion/tickera_reconciliation.ex`
+- `lib/event_sales/ingestion/tickera_reconciliation_findings.ex`
+- `lib/event_sales/ingestion/tickera_reconciliation_runs.ex`
+- `lib/event_sales/ingestion/validations/authorized_tickera_state_mutation.ex`
+- `lib/event_sales/ingestion/validations/bounded_metadata.ex`
+- `lib/event_sales/ingestion/validations/scoped_manual_sync.ex`
+- `lib/event_sales/ingestion/webhook_debug.ex`
+- `lib/event_sales/ingestion/webhook_enqueue.ex`
+- `lib/event_sales/ingestion/webhook_event_store.ex`
+- `lib/event_sales/ingestion/webhook_intake.ex`
+- `lib/event_sales/ingestion/webhook_processor.ex`
+- `lib/event_sales/ingestion/webhook_replay.ex`
+- `lib/event_sales/ingestion/workers/backfill_orders_worker.ex`
+- `lib/event_sales/ingestion/workers/missing_catalog_resolution_worker.ex`
+- `lib/event_sales/ingestion/workers/process_csv_import_worker.ex`
+- `lib/event_sales/ingestion/workers/process_webhook_worker.ex`
+- `lib/event_sales/ingestion/workers/purge_raw_payloads_worker.ex`
+- `lib/event_sales/ingestion/workers/reconcile_orders_worker.ex`
+- `lib/event_sales/ingestion/workers/reconcile_tickera_attendees_worker.ex`
+- `lib/event_sales/ingestion/workers/redis_webhook_buffer_drainer.ex`
+- `lib/event_sales/ingestion/workers/sync_tickera_attendees_worker.ex`
+- `lib/event_sales/maintenance/cache_cleanup_worker.ex`
+- `lib/event_sales/maintenance/db_topology_check_worker.ex`
+- `lib/event_sales/maintenance/oban_topology_smoke_worker.ex`
+- `lib/event_sales/release.ex`
+- `lib/event_sales/repo.ex`
+- `lib/event_sales/sales.ex`
+- `lib/event_sales/sales/changes/guard_source_version.ex`
+- `lib/event_sales/sales/changes/sync_status_from_source.ex`
+- `lib/event_sales/sales/changes/validate_ticket_type_event.ex`
+- `lib/event_sales/sales/order_item_mapper.ex`
+- `lib/event_sales/sales/order_upserter.ex`
+- `lib/event_sales/sales/resources/coupon_snapshot.ex`
+- `lib/event_sales/sales/resources/order.ex`
+- `lib/event_sales/sales/resources/order_item.ex`
+- `lib/event_sales/sales/source_version_guard.ex`
+- `lib/event_sales/sales/status_rules.ex`
+- `lib/event_sales/telemetry.ex`
+- `lib/event_sales_web.ex`
+- `lib/event_sales_web/auth/hooks.ex`
+- `lib/event_sales_web/auth/routes.ex`
+- `lib/event_sales_web/components/core_components.ex`
+- `lib/event_sales_web/components/layouts.ex`
+- `lib/event_sales_web/components/layouts/root.html.heex`
+- `lib/event_sales_web/controllers/admin/event_export_controller.ex`
+- `lib/event_sales_web/controllers/admin/reconciliation_export_controller.ex`
+- `lib/event_sales_web/controllers/auth_controller.ex`
+- `lib/event_sales_web/controllers/error_html.ex`
+- `lib/event_sales_web/controllers/error_json.ex`
+- `lib/event_sales_web/controllers/export_controller.ex`
+- `lib/event_sales_web/controllers/health_controller.ex`
+- `lib/event_sales_web/controllers/page_controller.ex`
+- `lib/event_sales_web/controllers/page_html.ex`
+- `lib/event_sales_web/controllers/page_html/home.html.heex`
+- `lib/event_sales_web/controllers/webhook_controller.ex`
+- `lib/event_sales_web/endpoint.ex`
+- `lib/event_sales_web/live/admin/components/order_table.ex`
+- `lib/event_sales_web/live/admin/components/sales_chart.ex`
+- `lib/event_sales_web/live/admin/components/stale_data_banner.ex`
+- `lib/event_sales_web/live/admin/components/stat_card.ex`
+- `lib/event_sales_web/live/admin/components/status_badge.ex`
+- `lib/event_sales_web/live/admin/components/unmapped_item_alert.ex`
+- `lib/event_sales_web/live/admin/dashboard_live.ex`
+- `lib/event_sales_web/live/admin/event_detail_live.ex`
+- `lib/event_sales_web/live/admin/events_live.ex`
+- `lib/event_sales_web/live/admin/imports_live.ex`
+- `lib/event_sales_web/live/admin/manual_action_rate_limiter.ex`
+- `lib/event_sales_web/live/admin/mappings_live.ex`
+- `lib/event_sales_web/live/admin/orders_live.ex`
+- `lib/event_sales_web/live/admin/pagination.ex`
+- `lib/event_sales_web/live/admin/reconciliation_live.ex`
+- `lib/event_sales_web/live/admin/session.ex`
+- `lib/event_sales_web/live/admin/sync_live.ex`
+- `lib/event_sales_web/live/admin/webhooks_live.ex`
+- `lib/event_sales_web/live/auth/reset_password_live.ex`
+- `lib/event_sales_web/live/auth/sign_in_live.ex`
+- `lib/event_sales_web/oban_web_resolver.ex`
+- `lib/event_sales_web/plugs/admin_only.ex`
+- `lib/event_sales_web/plugs/internal_only.ex`
+- `lib/event_sales_web/plugs/load_current_user.ex`
+- `lib/event_sales_web/plugs/rate_limit_manual_actions.ex`
+- `lib/event_sales_web/plugs/rate_limit_webhook_intake.ex`
+- `lib/event_sales_web/plugs/raw_body_reader.ex`
+- `lib/event_sales_web/presenters/customer_presenter.ex`
+- `lib/event_sales_web/router.ex`
+- `lib/event_sales_web/telemetry.ex`
+- `lib/mix/tasks/project.index.ex`
+- `lib/project_index/elixir_file.ex`
+- `lib/project_index/render_json.ex`
+- `lib/project_index/render_markdown.ex`
+- `lib/project_index/scanner.ex`
+- `rel/overlays/.gitkeep`
+- `test/support/analytics/error_event_aggregator.ex`
+- `test/support/analytics/memory_event_aggregator.ex`
+- `test/support/analytics/memory_snapshot_store_adapter.ex`
+- `test/support/analytics/selective_event_aggregator.ex`
+- `test/support/auth_helpers.ex`
+- `test/support/conn_case.ex`
+- `test/support/data_case.ex`
+- `test/support/db_topology_helpers.ex`
+- `test/support/fakes/fake_tickera_attendee_client.ex`
+- `test/support/fixture_helpers.ex`
+- `test/support/fixture_verification_helpers.ex`
+- `test/support/ingestion/memory_webhook_buffer_adapter.ex`
+- `test/support/ingestion/stub_webhook_event_store.ex`
+- `test/support/mapping_setup_helpers.ex`
+- `test/support/oban_helpers.ex`
+- `test/support/sales_helpers.ex`
+- `test/support/telemetry_helpers.ex`
+- `test/support/tickera_sync_test_helpers.ex`
+- `test/support/woocommerce_webhook_helpers.ex`
+
+## Modules
+
+- `EventSales` - `lib/event_sales.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSales.Accounts` - `lib/event_sales/accounts.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Domain`
+- `EventSales.Accounts.AuthOverrides` - `lib/event_sales/accounts/auth_overrides.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSales.Accounts.PiiPolicy` - `lib/event_sales/accounts/pii_policy.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 3
+  - public_funs: `customer_pii_visibility/2`, `can_view_raw_payload?/1`, `staff_customer_pii_visibility/0`
+  - uses: _none_
+- `EventSales.Accounts.Policies` - `lib/event_sales/accounts/policies.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 7
+  - public_funs: `global_admin?/1`, `global_staff?/1`, `has_event_role?/3`, `has_unexpired_event_grant?/3`, `can_view_revenue?/2`, `can_access_event_dashboard?/2`, `event_dashboard_role/2`
+  - uses: _none_
+- `EventSales.Accounts.Resources.EventAccessGrant` - `lib/event_sales/accounts/resources/event_access_grant.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
+- `EventSales.Accounts.Resources.Role` - `lib/event_sales/accounts/resources/role.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
+- `EventSales.Accounts.Resources.User` - `lib/event_sales/accounts/resources/user.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
+- `EventSales.Accounts.Resources.UserRole` - `lib/event_sales/accounts/resources/user_role.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
+- `EventSales.AdminRead.Pagination` - `lib/event_sales/admin_read/pagination.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `pagination/3`, `normalize_positive_integer/2`, `split_page/2`, `page_info/3`
+  - uses: _none_
+- `EventSales.Analytics` - `lib/event_sales/analytics.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Domain`
+- `EventSales.Analytics.AdminDashboard` - `lib/event_sales/analytics/admin_dashboard.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 3
+  - public_funs: `snapshot/1`, `event_row/2`, `replace_event_row/2`
+  - uses: _none_
+- `EventSales.Analytics.AggregateEvent` - `lib/event_sales/analytics/aggregate_event.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `new/1`
+  - uses: _none_
+- `EventSales.Analytics.AggregateEventIdempotency` - `lib/event_sales/analytics/aggregate_event_idempotency.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 4
+  - public_funs: `duplicate?/2`, `reserve/2`, `clear_in_flight/2`, `mark_applied/3`
+  - uses: _none_
+- `EventSales.Analytics.Aggregators.EventAggregator` - `lib/event_sales/analytics/aggregators/event_aggregator.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `summary_for_event/2`
+  - uses: _none_
+- `EventSales.Analytics.CacheKeys` - `lib/event_sales/analytics/cache_keys.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 2
+  - public_funs: `event_summary/1`, `redis_event_snapshot/1`
+  - uses: _none_
+- `EventSales.Analytics.DashboardCache` - `lib/event_sales/analytics/dashboard_cache.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 6
+  - public_funs: `table_name/0`, `ensure_table!/0`, `delete_table_for_test!/0`, `get_event_summary/1`, `put_event_summary/3`, `invalidate_event/2`
+  - uses: _none_
+- `EventSales.Analytics.DashboardPubSub` - `lib/event_sales/analytics/dashboard_pub_sub.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 3
+  - public_funs: `event_topic/1`, `subscribe_event/1`, `broadcast_hot_state_updated/2`
+  - uses: _none_
+- `EventSales.Analytics.EventDetail` - `lib/event_sales/analytics/event_detail.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `list_events/1`, `get_event_detail/2`, `recent_orders/2`, `unmapped_items/2`
+  - uses: _none_
+- `EventSales.Analytics.EventScopedDashboard` - `lib/event_sales/analytics/event_scoped_dashboard.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `summary/2`
+  - uses: _none_
+- `EventSales.Analytics.HotStateAggregator` - `lib/event_sales/analytics/hot_state_aggregator.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 7
+  - public_funs: `start_link/1`, `apply_event/2`, `summary_for_event/1`, `status/0`, `request_rebuild/1`, `rebuild_finished/1`, `reset_for_test!/0`, `delete_cache_table_for_test!/0`, `init/1`, `handle_continue/2`, `handle_call/3`, `handle_cast/2`
+  - uses: `GenServer`
+- `EventSales.Analytics.MetricRules` - `lib/event_sales/analytics/metric_rules.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 9
+  - public_funs: `business_timezone/0`, `business_date/2`, `same_business_date?/3`, `counts_as_sold?/2`, `sold_quantity/2`, `completed_revenue/2`, `visible_in_status_breakdown?/2`, `status_bucket/1`, `summarize/2`
+  - uses: _none_
+- `EventSales.Analytics.OrderProcessedNotifier` - `lib/event_sales/analytics/order_processed_notifier.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 3
+  - public_funs: `notify_order_processed/3`, `notify_order_reconciled/4`, `notify_order_imported/4`
+  - uses: _none_
+- `EventSales.Analytics.Resources.DailySalesAggregateSnapshot` - `lib/event_sales/analytics/resources/daily_sales_aggregate_snapshot.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
+- `EventSales.Analytics.Resources.EventAggregateSnapshot` - `lib/event_sales/analytics/resources/event_aggregate_snapshot.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
+- `EventSales.Analytics.SnapshotCodec` - `lib/event_sales/analytics/snapshot_codec.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 2
+  - public_funs: `encode/1`, `decode/1`
+  - uses: _none_
+- `EventSales.Analytics.SnapshotQueries` - `lib/event_sales/analytics/snapshot_queries.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `event_ids_page/2`
+  - uses: _none_
+- `EventSales.Analytics.SnapshotReader` - `lib/event_sales/analytics/snapshot_reader.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 2
+  - public_funs: `summary_for_event/1`, `daily_summary_for_event/3`
+  - uses: _none_
+- `EventSales.Analytics.SnapshotRefresh` - `lib/event_sales/analytics/snapshot_refresh.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 2
+  - public_funs: `refresh_event/2`, `refresh_daily/3`
+  - uses: _none_
+- `EventSales.Analytics.SnapshotStore.Adapter` - `lib/event_sales/analytics/snapshot_store/adapter.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSales.Analytics.SnapshotStore.NoopAdapter` - `lib/event_sales/analytics/snapshot_store/noop_adapter.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `put/3`, `list_event_summaries/1`
+  - uses: _none_
+- `EventSales.Analytics.SnapshotStore.RedixAdapter` - `lib/event_sales/analytics/snapshot_store/redix_adapter.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `redix_name/0`, `put/3`, `list_event_summaries/1`
+  - uses: _none_
+- `EventSales.Analytics.Workers.RebuildHotStateWorker` - `lib/event_sales/analytics/workers/rebuild_hot_state_worker.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `perform/1`, `timeout/1`
+  - uses: `Oban.Worker`
+- `EventSales.Analytics.Workers.RefreshSnapshotWorker` - `lib/event_sales/analytics/workers/refresh_snapshot_worker.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `perform/1`
+  - uses: `Oban.Worker`
+- `EventSales.Application` - `lib/event_sales/application.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `start/2`, `config_change/3`
+  - uses: `Application`
+- `EventSales.AshBaseline.Domain` - `lib/event_sales/ash_baseline/domain.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Domain`
+- `EventSales.AshBaseline.Resources.AuthUser` - `lib/event_sales/ash_baseline/resources/auth_user.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
+- `EventSales.AshBaseline.Resources.PaperTrailProof` - `lib/event_sales/ash_baseline/resources/paper_trail_proof.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
+- `EventSales.AshBaseline.Resources.StateMachineProof` - `lib/event_sales/ash_baseline/resources/state_machine_proof.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
+- `EventSales.Audit` - `lib/event_sales/audit.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Domain`
+- `EventSales.Audit.Logger` - `lib/event_sales/audit/logger.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 10
+  - public_funs: `manual_sync_requested/1`, `tickera_attendee_sync_requested/1`, `tickera_reconciliation_run_requested/1`, `csv_apply_requested/1`, `event_sales_export_requested/1`, `webhook_replay_requested/1`, `log_webhook_replay_ignored/1`, `log_webhook_duplicate_payload_mismatch/1`, `log_webhook_stale_replay/1`, `log/2`
+  - uses: _none_
+- `EventSales.Audit.MetadataSanitizer` - `lib/event_sales/audit/metadata_sanitizer.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `sanitize/1`, `max_bytes/0`
+  - uses: _none_
+- `EventSales.Audit.PaperTrail` - `lib/event_sales/audit/paper_trail.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSales.Audit.Resources.AuditLog` - `lib/event_sales/audit/resources/audit_log.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
+- `EventSales.Catalog` - `lib/event_sales/catalog.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Domain`
+- `EventSales.Catalog.CacheInvalidation` - `lib/event_sales/catalog/cache_invalidation.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `emit_for_event/2`
+  - uses: _none_
+- `EventSales.Catalog.Changes.MappingSideEffectsAfterAction` - `lib/event_sales/catalog/changes/mapping_side_effects_after_action.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `change/3`
+  - uses: `Ash.Resource.Change`
+- `EventSales.Catalog.Changes.NormalizeBaseUrl` - `lib/event_sales/catalog/changes/normalize_base_url.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `change/3`
+  - uses: `Ash.Resource.Change`
+- `EventSales.Catalog.Changes.ValidateEventDates` - `lib/event_sales/catalog/changes/validate_event_dates.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `change/3`
+  - uses: `Ash.Resource.Change`
+- `EventSales.Catalog.Changes.ValidateTicketTypeEvent` - `lib/event_sales/catalog/changes/validate_ticket_type_event.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `change/3`
+  - uses: `Ash.Resource.Change`
+- `EventSales.Catalog.MappingResolver` - `lib/event_sales/catalog/mapping_resolver.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `resolve/3`
+  - uses: _none_
+- `EventSales.Catalog.MappingSideEffects` - `lib/event_sales/catalog/mapping_side_effects.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `on_mapping_changed!/1`
+  - uses: _none_
+- `EventSales.Catalog.MissingCatalogResolver` - `lib/event_sales/catalog/missing_catalog_resolver.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `recover_product/4`
+  - uses: _none_
+- `EventSales.Catalog.ProductMetadataCache` - `lib/event_sales/catalog/product_metadata_cache.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 5
+  - public_funs: `start_link/1`, `get/3`, `put/2`, `invalidate/3`, `cleanup_expired/0`, `reset_for_test!/0`, `init/1`, `handle_call/3`
+  - uses: `GenServer`
+- `EventSales.Catalog.ProductMetadataUpdater` - `lib/event_sales/catalog/product_metadata_updater.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `update_from_payload/2`
+  - uses: _none_
+- `EventSales.Catalog.Resources.Event` - `lib/event_sales/catalog/resources/event.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
+- `EventSales.Catalog.Resources.EventDashboardSetting` - `lib/event_sales/catalog/resources/event_dashboard_setting.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
+- `EventSales.Catalog.Resources.ProductMapping` - `lib/event_sales/catalog/resources/product_mapping.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
+- `EventSales.Catalog.Resources.SourceSystem` - `lib/event_sales/catalog/resources/source_system.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
+- `EventSales.Catalog.Resources.TicketType` - `lib/event_sales/catalog/resources/ticket_type.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
+- `EventSales.Catalog.Workers.MappingChangedWorker` - `lib/event_sales/catalog/workers/mapping_changed_worker.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `perform/1`
+  - uses: `Oban.Worker`
+- `EventSales.Exports.CsvStream` - `lib/event_sales/exports/csv_stream.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `encode_rows/1`
+  - uses: _none_
+- `EventSales.Exports.EventSalesCsv` - `lib/event_sales/exports/event_sales_csv.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `summary_csv/2`, `orders_csv/2`
+  - uses: _none_
+- `EventSales.Ingestion` - `lib/event_sales/ingestion.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Domain`
+- `EventSales.Ingestion.AdminReconciliationDashboard` - `lib/event_sales/ingestion/admin_reconciliation_dashboard.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 3
+  - public_funs: `snapshot/1`, `list_runs/1`, `list_findings/1`, `get_finding/2`, `finding_row/2`, `resolve_finding/3`, `ignore_finding/3`, `reopen_finding/2`, `queue_attendee_sync/2`, `queue_reconciliation/2`, `stream_findings_for_export/1`, `filter_opts_from/1`, `export_row_limit/1`
+  - uses: _none_
+- `EventSales.Ingestion.Clients.HttpcTransport` - `lib/event_sales/ingestion/clients/httpc_transport.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `request/5`
+  - uses: _none_
+- `EventSales.Ingestion.Clients.TickeraAttendeeClient` - `lib/event_sales/ingestion/clients/tickera_attendee_client.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 2
+  - public_funs: `fetch_attendees_page/5`, `safe_log_url/1`
+  - uses: _none_
+- `EventSales.Ingestion.Clients.TickeraError` - `lib/event_sales/ingestion/clients/tickera_error.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `exception/1`, `message/1`, `retryable?/1`
+  - uses: _none_
+- `EventSales.Ingestion.Clients.WooCommerceClient` - `lib/event_sales/ingestion/clients/woocommerce_client.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 4
+  - public_funs: `fetch_order/2`, `fetch_product/2`, `list_orders/2`, `list_products/2`
+  - uses: _none_
+- `EventSales.Ingestion.Clients.WooCommerceError` - `lib/event_sales/ingestion/clients/woocommerce_error.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `exception/1`, `message/1`
+  - uses: _none_
+- `EventSales.Ingestion.Clients.WooCommerceTransport` - `lib/event_sales/ingestion/clients/woocommerce_transport.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSales.Ingestion.Csv.ApplyImport` - `lib/event_sales/ingestion/csv/apply_import.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 2
+  - public_funs: `apply/2`, `mark_rows_applied/1`
+  - uses: _none_
+- `EventSales.Ingestion.Csv.DryRunValidator` - `lib/event_sales/ingestion/csv/dry_run_validator.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `validate_file/2`
+  - uses: _none_
+- `EventSales.Ingestion.Csv.Parser` - `lib/event_sales/ingestion/csv/parser.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 3
+  - public_funs: `required_headers/0`, `accepted_headers/0`, `stream_rows/1`
+  - uses: _none_
+- `EventSales.Ingestion.CsvImports` - `lib/event_sales/ingestion/csv_imports.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 2
+  - public_funs: `dry_run_file/3`, `list_batches/1`, `get_batch/2`, `queue_apply/2`, `list_rows/2`
+  - uses: _none_
+- `EventSales.Ingestion.FindingsCsvExport` - `lib/event_sales/ingestion/findings_csv_export.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `build/1`
+  - uses: _none_
+- `EventSales.Ingestion.Handlers.ProductUpdatedHandler` - `lib/event_sales/ingestion/handlers/product_updated_handler.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `handle/1`
+  - uses: _none_
+- `EventSales.Ingestion.IntakeBackpressure` - `lib/event_sales/ingestion/intake_backpressure.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 2
+  - public_funs: `pool_saturated?/1`, `classify_persist_error/1`
+  - uses: _none_
+- `EventSales.Ingestion.ManualSync` - `lib/event_sales/ingestion/manual_sync.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `queue_manual_scoped/3`
+  - uses: _none_
+- `EventSales.Ingestion.OrderReconciliation` - `lib/event_sales/ingestion/order_reconciliation.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 4
+  - public_funs: `load_or_init_cursor/2`, `woo_params/2`, `matches_event_mapping?/2`, `run_step/3`
+  - uses: _none_
+- `EventSales.Ingestion.Parsers.WoocommerceOrderParser` - `lib/event_sales/ingestion/parsers/woocommerce_order_parser.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `parse/1`
+  - uses: _none_
+- `EventSales.Ingestion.ReconciliationPeakGuard` - `lib/event_sales/ingestion/reconciliation_peak_guard.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `validate/4`
+  - uses: _none_
+- `EventSales.Ingestion.RedisWebhookBuffer` - `lib/event_sales/ingestion/redis_webhook_buffer.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 13
+  - public_funs: `redix_name/0`, `max_entries/0`, `max_entry_bytes/0`, `key/1`, `adapter_name/0`, `push/1`, `claim/0`, `ack/1`, `requeue/1`, `depth/0`, `processing_depth/0`, `entry_from_intake_context/1`, `decode_entry/1`
+  - uses: _none_
+- `EventSales.Ingestion.RedisWebhookBuffer.Adapter` - `lib/event_sales/ingestion/redis_webhook_buffer/adapter.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSales.Ingestion.RedisWebhookBuffer.RedixAdapter` - `lib/event_sales/ingestion/redis_webhook_buffer/redix_adapter.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `push/1`, `claim/0`, `ack/1`, `requeue/1`, `depth/0`, `processing_depth/0`
+  - uses: _none_
+- `EventSales.Ingestion.Resources.CsvImportBatch` - `lib/event_sales/ingestion/resources/csv_import_batch.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
+- `EventSales.Ingestion.Resources.CsvImportRow` - `lib/event_sales/ingestion/resources/csv_import_row.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
+- `EventSales.Ingestion.Resources.SyncCursor` - `lib/event_sales/ingestion/resources/sync_cursor.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
+- `EventSales.Ingestion.Resources.SyncRun` - `lib/event_sales/ingestion/resources/sync_run.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `set_started_at/2`, `set_finished_at/2`
+  - uses: `Ash.Resource`
+- `EventSales.Ingestion.Resources.TickeraAttendeeSnapshot` - `lib/event_sales/ingestion/resources/tickera_attendee_snapshot.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `normalize_snapshot/2`
+  - uses: `Ash.Resource`
+- `EventSales.Ingestion.Resources.TickeraAttendeeSyncRun` - `lib/event_sales/ingestion/resources/tickera_attendee_sync_run.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `set_started_at/2`, `set_finished_at/2`
+  - uses: `Ash.Resource`
+- `EventSales.Ingestion.Resources.TickeraEventSource` - `lib/event_sales/ingestion/resources/tickera_event_source.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `normalize_config/2`
+  - uses: `Ash.Resource`
+- `EventSales.Ingestion.Resources.TickeraReconciliationFinding` - `lib/event_sales/ingestion/resources/tickera_reconciliation_finding.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `set_resolved_at/2`
+  - uses: `Ash.Resource`
+- `EventSales.Ingestion.Resources.TickeraReconciliationRun` - `lib/event_sales/ingestion/resources/tickera_reconciliation_run.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `set_started_at/2`, `set_finished_at/2`
+  - uses: `Ash.Resource`
+- `EventSales.Ingestion.Resources.WebhookDeliveryFailure` - `lib/event_sales/ingestion/resources/webhook_delivery_failure.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
+- `EventSales.Ingestion.Resources.WebhookEvent` - `lib/event_sales/ingestion/resources/webhook_event.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
+- `EventSales.Ingestion.RestCircuitBreaker` - `lib/event_sales/ingestion/rest_circuit_breaker.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 3
+  - public_funs: `start_link/1`, `run/1`, `snapshot/0`, `reset_for_test!/0`, `init/1`, `handle_call/3`
+  - uses: `GenServer`
+- `EventSales.Ingestion.RestRateLimiter` - `lib/event_sales/ingestion/rest_rate_limiter.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 3
+  - public_funs: `start_link/1`, `checkout/2`, `snapshot/0`, `reset_for_test!/1`, `init/1`, `handle_call/3`, `handle_cast/2`, `handle_info/2`
+  - uses: `GenServer`
+- `EventSales.Ingestion.Security.RawBodyReader` - `lib/event_sales/ingestion/security/raw_body_reader.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `raw_body_key/0`, `put_raw_body/2`, `fetch_raw_body/1`
+  - uses: _none_
+- `EventSales.Ingestion.Security.WebhookReplayGuard` - `lib/event_sales/ingestion/security/webhook_replay_guard.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `payload_hash/1`, `classify_duplicate/2`, `check_stale/4`, `source_updated_at_from_payload/1`, `sanitize_headers/1`
+  - uses: _none_
+- `EventSales.Ingestion.Security.WebhookSignature` - `lib/event_sales/ingestion/security/webhook_signature.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `verify/3`, `sign/2`
+  - uses: _none_
+- `EventSales.Ingestion.SyncDebug` - `lib/event_sales/ingestion/sync_debug.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `list_runs/1`, `event_scope/2`
+  - uses: _none_
+- `EventSales.Ingestion.TickeraAttendeeSnapshotHash` - `lib/event_sales/ingestion/tickera_attendee_snapshot_hash.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `hash/1`
+  - uses: _none_
+- `EventSales.Ingestion.TickeraAttendeeSnapshots` - `lib/event_sales/ingestion/tickera_attendee_snapshots.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `list_for_event/2`, `list_for_source/2`, `get_by_ticket_code/3`, `upsert_from_tickera/2`
+  - uses: _none_
+- `EventSales.Ingestion.TickeraAttendeeSync` - `lib/event_sales/ingestion/tickera_attendee_sync.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `run_step/2`
+  - uses: _none_
+- `EventSales.Ingestion.TickeraAttendeeSyncQueue` - `lib/event_sales/ingestion/tickera_attendee_sync_queue.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `queue_manual/3`
+  - uses: _none_
+- `EventSales.Ingestion.TickeraAttendeeSyncRuns` - `lib/event_sales/ingestion/tickera_attendee_sync_runs.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `list_runs/1`, `get_run/2`, `queue_manual/3`, `mark_started/2`, `mark_resumed/2`, `mark_completed/2`, `cancel/2`, `mark_paused/3`, `mark_failed/3`, `record_page/3`, `record_counts/3`
+  - uses: _none_
+- `EventSales.Ingestion.TickeraEventSources` - `lib/event_sales/ingestion/tickera_event_sources.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `list_sources/1`, `get_source/2`, `get_source_for_event/2`, `create_source/2`, `update_source/3`, `activate_source/2`, `deactivate_source/2`
+  - uses: _none_
+- `EventSales.Ingestion.TickeraReconciliation` - `lib/event_sales/ingestion/tickera_reconciliation.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `run/2`
+  - uses: _none_
+- `EventSales.Ingestion.TickeraReconciliationFindings` - `lib/event_sales/ingestion/tickera_reconciliation_findings.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `list_for_event/2`, `list_for_run/2`, `get_finding/2`, `list_filtered/1`, `count_filtered/1`, `upsert_open/2`, `resolve/3`, `ignore/3`, `reopen/2`, `source_scope_key/1`, `fingerprint/1`
+  - uses: _none_
+- `EventSales.Ingestion.TickeraReconciliationRuns` - `lib/event_sales/ingestion/tickera_reconciliation_runs.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `list_runs/1`, `get_run/2`, `queue_manual_for_event/2`, `queue_manual/3`, `mark_started/2`, `mark_completed/3`, `mark_failed/3`, `cancel/2`, `record_counts/3`
+  - uses: _none_
+- `EventSales.Ingestion.Validations.AuthorizedTickeraStateMutation` - `lib/event_sales/ingestion/validations/authorized_tickera_state_mutation.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `init/1`, `validate/3`
+  - uses: `Ash.Resource.Validation`
+- `EventSales.Ingestion.Validations.BoundedMetadata` - `lib/event_sales/ingestion/validations/bounded_metadata.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `init/1`, `validate/3`
+  - uses: `Ash.Resource.Validation`
+- `EventSales.Ingestion.Validations.ScopedManualSync` - `lib/event_sales/ingestion/validations/scoped_manual_sync.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `init/1`, `validate/3`
+  - uses: `Ash.Resource.Validation`
+- `EventSales.Ingestion.WebhookDebug` - `lib/event_sales/ingestion/webhook_debug.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `list_events/1`, `get_payload/2`
+  - uses: _none_
+- `EventSales.Ingestion.WebhookEnqueue` - `lib/event_sales/ingestion/webhook_enqueue.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `enqueue_processing_once/1`
+  - uses: _none_
+- `Default` - `lib/event_sales/ingestion/webhook_event_store.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `create_receive/1`
+  - uses: _none_
+- `EventSales.Ingestion.WebhookEventStore` - `lib/event_sales/ingestion/webhook_event_store.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `create_receive/1`
+  - uses: _none_
+- `EventSales.Ingestion.WebhookIntake` - `lib/event_sales/ingestion/webhook_intake.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `accept/1`
+  - uses: _none_
+- `EventSales.Ingestion.WebhookProcessor` - `lib/event_sales/ingestion/webhook_processor.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `process/2`
+  - uses: _none_
+- `EventSales.Ingestion.WebhookReplay` - `lib/event_sales/ingestion/webhook_replay.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `replay_failed/2`
+  - uses: _none_
+- `EventSales.Ingestion.Workers.BackfillOrdersWorker` - `lib/event_sales/ingestion/workers/backfill_orders_worker.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSales.Ingestion.Workers.MissingCatalogResolutionWorker` - `lib/event_sales/ingestion/workers/missing_catalog_resolution_worker.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `perform/1`
+  - uses: `Oban.Worker`
+- `EventSales.Ingestion.Workers.ProcessCsvImportWorker` - `lib/event_sales/ingestion/workers/process_csv_import_worker.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `perform/1`
+  - uses: `Oban.Worker`
+- `EventSales.Ingestion.Workers.ProcessWebhookWorker` - `lib/event_sales/ingestion/workers/process_webhook_worker.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `perform/1`, `backoff/1`
+  - uses: `Oban.Worker`
+- `EventSales.Ingestion.Workers.PurgeRawPayloadsWorker` - `lib/event_sales/ingestion/workers/purge_raw_payloads_worker.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSales.Ingestion.Workers.ReconcileOrdersWorker` - `lib/event_sales/ingestion/workers/reconcile_orders_worker.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `perform/1`
+  - uses: `Oban.Worker`
+- `EventSales.Ingestion.Workers.ReconcileTickeraAttendeesWorker` - `lib/event_sales/ingestion/workers/reconcile_tickera_attendees_worker.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `perform/1`
+  - uses: `Oban.Worker`
+- `EventSales.Ingestion.Workers.RedisWebhookBufferDrainer` - `lib/event_sales/ingestion/workers/redis_webhook_buffer_drainer.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `perform/1`, `drain_batch/1`
+  - uses: `Oban.Worker`
+- `EventSales.Ingestion.Workers.SyncTickeraAttendeesWorker` - `lib/event_sales/ingestion/workers/sync_tickera_attendees_worker.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `perform/1`
+  - uses: `Oban.Worker`
+- `EventSales.Maintenance.CacheCleanupWorker` - `lib/event_sales/maintenance/cache_cleanup_worker.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSales.Maintenance.DbTopologyCheckWorker` - `lib/event_sales/maintenance/db_topology_check_worker.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSales.Maintenance.ObanTopologySmokeWorker` - `lib/event_sales/maintenance/oban_topology_smoke_worker.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `perform/1`, `backoff/1`
+  - uses: `Oban.Worker`
+- `EventSales.Release` - `lib/event_sales/release.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `migrate/1`, `rollback/3`, `migration_database_url/1`
+  - uses: _none_
+- `EventSales.Repo` - `lib/event_sales/repo.ex`
+  - moduledoc?: false
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `installed_extensions/0`, `min_pg_version/0`
+  - uses: `AshPostgres.Repo`
+- `EventSales.Sales` - `lib/event_sales/sales.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Domain`
+- `EventSales.Sales.Changes.GuardSourceVersion` - `lib/event_sales/sales/changes/guard_source_version.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `change/3`
+  - uses: `Ash.Resource.Change`
+- `EventSales.Sales.Changes.SyncStatusFromSource` - `lib/event_sales/sales/changes/sync_status_from_source.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `change/3`
+  - uses: `Ash.Resource.Change`
+- `EventSales.Sales.Changes.ValidateTicketTypeEvent` - `lib/event_sales/sales/changes/validate_ticket_type_event.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `change/3`
+  - uses: `Ash.Resource.Change`
+- `EventSales.Sales.OrderItemMapper` - `lib/event_sales/sales/order_item_mapper.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 3
+  - public_funs: `map_item/1`, `map_pending_items_for_order/1`, `list_unmapped_queue/1`
+  - uses: _none_
+- `EventSales.Sales.OrderUpserter` - `lib/event_sales/sales/order_upserter.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 3
+  - public_funs: `upsert_order/3`, `upsert_normalized_order/3`, `upsert_from_webhook_event/1`
+  - uses: _none_
+- `EventSales.Sales.Resources.CouponSnapshot` - `lib/event_sales/sales/resources/coupon_snapshot.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
+- `EventSales.Sales.Resources.Order` - `lib/event_sales/sales/resources/order.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
+- `EventSales.Sales.Resources.OrderItem` - `lib/event_sales/sales/resources/order_item.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
+- `EventSales.Sales.SourceVersionGuard` - `lib/event_sales/sales/source_version_guard.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `allows_update?/2`
+  - uses: _none_
+- `EventSales.Sales.StatusRules` - `lib/event_sales/sales/status_rules.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 4
+  - public_funs: `counts_toward_sold_tickets?/2`, `counts_toward_completed_revenue?/2`, `visible_status?/2`, `excluded_from_sold?/2`
+  - uses: _none_
+- `EventSales.Telemetry` - `lib/event_sales/telemetry.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 43
+  - public_funs: `event_names/0`, `webhook_accepted/0`, `webhook_rejected/0`, `webhook_backpressure/0`, `webhook_buffered/0`, `webhook_drained/0`, `webhook_replay_audit_failed/0`, `rest_request_stop/0`, `rest_request_exception/0`, `hot_state_rebuild_start/0`, `hot_state_rebuild_stop/0`, `hot_state_rebuild_exception/0`, `hot_state_event_applied/0`, `hot_state_event_ignored/0`, `hot_state_snapshot_write/0`, `snapshot_refresh_start/0`, `snapshot_refresh_stop/0`, `snapshot_refresh_exception/0`, `cache_invalidate/0`, `missing_catalog_recovery_start/0`, `missing_catalog_recovery_stop/0`, `missing_catalog_recovery_exception/0`, `product_metadata_cache_hit/0`, `product_metadata_cache_miss/0`, `product_metadata_cache_put/0`, `product_metadata_update/0`, `reconciliation_start/0`, `reconciliation_stop/0`, `reconciliation_exception/0`, `reconciliation_pause/0`, `tickera_request_stop/0`, `tickera_request_exception/0`, `tickera_sync_start/0`, `tickera_sync_stop/0`, `tickera_sync_exception/0`, `csv_import_dry_run_start/0`, `csv_import_dry_run_stop/0`, `csv_import_dry_run_exception/0`, `csv_import_apply_start/0`, `csv_import_apply_stop/0`, `csv_import_apply_exception/0`, `product_metadata_cache_event/1`, `emit/3`
+  - uses: _none_
+- `EventSalesWeb` - `lib/event_sales_web.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 1
+  - public_funs: `static_paths/0`, `router/0`, `channel/0`, `controller/0`, `live_view/0`, `live_component/0`, `html/0`, `verified_routes/0`
+  - uses: `Phoenix.Channel`, `Phoenix.Component`, `Phoenix.Controller`, `Phoenix.LiveComponent`, `Phoenix.LiveView`, `Phoenix.Router`, `Phoenix.VerifiedRoutes`
+- `EventSalesWeb.Auth.Hooks` - `lib/event_sales_web/auth/hooks.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSalesWeb.Auth.Routes` - `lib/event_sales_web/auth/routes.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSalesWeb.CoreComponents` - `lib/event_sales_web/components/core_components.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 9
+  - public_funs: `flash/1`, `button/1`, `input/1`, `header/1`, `table/1`, `list/1`, `icon/1`, `show/2`, `hide/2`, `translate_error/1`, `translate_errors/2`
+  - uses: `Phoenix.Component`
+- `EventSalesWeb.Layouts` - `lib/event_sales_web/components/layouts.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 2
+  - public_funs: `app/1`, `flash_group/1`
+  - uses: `EventSalesWeb`
+- `EventSalesWeb.Admin.EventExportController` - `lib/event_sales_web/controllers/admin/event_export_controller.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `summary/2`, `orders/2`
+  - uses: `EventSalesWeb`
+- `EventSalesWeb.Admin.ReconciliationExportController` - `lib/event_sales_web/controllers/admin/reconciliation_export_controller.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `show/2`
+  - uses: `EventSalesWeb`
+- `EventSalesWeb.Controllers.AuthController` - `lib/event_sales_web/controllers/auth_controller.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSalesWeb.ErrorHTML` - `lib/event_sales_web/controllers/error_html.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `render/2`
+  - uses: `EventSalesWeb`
+- `EventSalesWeb.ErrorJSON` - `lib/event_sales_web/controllers/error_json.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `render/2`
+  - uses: _none_
+- `EventSalesWeb.Controllers.ExportController` - `lib/event_sales_web/controllers/export_controller.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSalesWeb.HealthController` - `lib/event_sales_web/controllers/health_controller.ex`
+  - moduledoc?: false
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `show/2`
+  - uses: `EventSalesWeb`
+- `EventSalesWeb.PageController` - `lib/event_sales_web/controllers/page_controller.ex`
+  - moduledoc?: false
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `home/2`
+  - uses: `EventSalesWeb`
+- `EventSalesWeb.PageHTML` - `lib/event_sales_web/controllers/page_html.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `EventSalesWeb`
+- `EventSalesWeb.WebhookController` - `lib/event_sales_web/controllers/webhook_controller.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `woocommerce/2`
+  - uses: `EventSalesWeb`
+- `EventSalesWeb.Endpoint` - `lib/event_sales_web/endpoint.ex`
+  - moduledoc?: false
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Phoenix.Endpoint`
+- `EventSalesWeb.Live.Admin.Components.OrderTable` - `lib/event_sales_web/live/admin/components/order_table.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `table/1`
+  - uses: `Phoenix.Component`
+- `EventSalesWeb.Live.Admin.Components.SalesChart` - `lib/event_sales_web/live/admin/components/sales_chart.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSalesWeb.Live.Admin.Components.StaleDataBanner` - `lib/event_sales_web/live/admin/components/stale_data_banner.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `banner/1`
+  - uses: `Phoenix.Component`
+- `EventSalesWeb.Live.Admin.Components.StatCard` - `lib/event_sales_web/live/admin/components/stat_card.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `card/1`
+  - uses: `Phoenix.Component`
+- `EventSalesWeb.Live.Admin.Components.StatusBadge` - `lib/event_sales_web/live/admin/components/status_badge.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `badge/1`
+  - uses: `Phoenix.Component`
+- `EventSalesWeb.Live.Admin.Components.UnmappedItemAlert` - `lib/event_sales_web/live/admin/components/unmapped_item_alert.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `list/1`
+  - uses: `Phoenix.Component`
+- `EventSalesWeb.Live.Admin.DashboardLive` - `lib/event_sales_web/live/admin/dashboard_live.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `mount/3`, `handle_event/3`, `handle_info/2`, `render/1`
+  - uses: `EventSalesWeb`
+- `EventSalesWeb.Live.Admin.EventDetailLive` - `lib/event_sales_web/live/admin/event_detail_live.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `mount/3`, `handle_event/3`, `handle_info/2`, `render/1`
+  - uses: `EventSalesWeb`
+- `EventSalesWeb.Live.Admin.EventsLive` - `lib/event_sales_web/live/admin/events_live.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `mount/3`, `handle_event/3`, `render/1`
+  - uses: `EventSalesWeb`
+- `EventSalesWeb.Live.Admin.ImportsLive` - `lib/event_sales_web/live/admin/imports_live.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `mount/3`, `handle_event/3`, `render/1`
+  - uses: `EventSalesWeb`
+- `EventSalesWeb.Live.Admin.ManualActionRateLimiter` - `lib/event_sales_web/live/admin/manual_action_rate_limiter.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 2
+  - public_funs: `allow?/3`, `reset_for_test!/0`
+  - uses: _none_
+- `EventSalesWeb.Live.Admin.MappingsLive` - `lib/event_sales_web/live/admin/mappings_live.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `mount/3`, `render/1`
+  - uses: `EventSalesWeb`
+- `EventSalesWeb.Live.Admin.OrdersLive` - `lib/event_sales_web/live/admin/orders_live.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSalesWeb.Live.Admin.Pagination` - `lib/event_sales_web/live/admin/pagination.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `empty_page/0`
+  - uses: _none_
+- `EventSalesWeb.Live.Admin.ReconciliationLive` - `lib/event_sales_web/live/admin/reconciliation_live.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `mount/3`, `handle_params/3`, `handle_event/3`, `render/1`
+  - uses: `EventSalesWeb`
+- `EventSalesWeb.Live.Admin.Session` - `lib/event_sales_web/live/admin/session.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `current_user/1`, `current_user_id/1`
+  - uses: _none_
+- `EventSalesWeb.Live.Admin.SyncLive` - `lib/event_sales_web/live/admin/sync_live.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `mount/3`, `handle_event/3`, `render/1`
+  - uses: `EventSalesWeb`
+- `EventSalesWeb.Live.Admin.WebhooksLive` - `lib/event_sales_web/live/admin/webhooks_live.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `mount/3`, `handle_event/3`, `render/1`
+  - uses: `EventSalesWeb`
+- `EventSalesWeb.Live.Auth.ResetPasswordLive` - `lib/event_sales_web/live/auth/reset_password_live.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSalesWeb.Live.Auth.SignInLive` - `lib/event_sales_web/live/auth/sign_in_live.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSalesWeb.ObanWebResolver` - `lib/event_sales_web/oban_web_resolver.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `resolve_user/1`, `resolve_access/1`, `resolve_instances/1`, `resolve_refresh/1`
+  - uses: _none_
+- `EventSalesWeb.Plugs.AdminOnly` - `lib/event_sales_web/plugs/admin_only.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `init/1`, `call/2`
+  - uses: _none_
+- `EventSalesWeb.Plugs.InternalOnly` - `lib/event_sales_web/plugs/internal_only.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `init/1`, `call/2`
+  - uses: _none_
+- `EventSalesWeb.Plugs.LoadCurrentUser` - `lib/event_sales_web/plugs/load_current_user.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `init/1`, `call/2`
+  - uses: _none_
+- `EventSalesWeb.Plugs.RateLimitManualActions` - `lib/event_sales_web/plugs/rate_limit_manual_actions.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSalesWeb.Plugs.RateLimitWebhookIntake` - `lib/event_sales_web/plugs/rate_limit_webhook_intake.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSalesWeb.Plugs.RawBodyReader` - `lib/event_sales_web/plugs/raw_body_reader.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `read_body/2`, `fetch_raw_body/1`
+  - uses: _none_
+- `EventSalesWeb.Presenters.CustomerPresenter` - `lib/event_sales_web/presenters/customer_presenter.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `present/2`
+  - uses: _none_
+- `EventSalesWeb.Router` - `lib/event_sales_web/router.ex`
+  - moduledoc?: false
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `EventSalesWeb`
+- `EventSalesWeb.Telemetry` - `lib/event_sales_web/telemetry.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `start_link/1`, `init/1`, `metrics/0`
+  - uses: `Supervisor`
+- `Mix.Tasks.Project.Index` - `lib/mix/tasks/project.index.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `run/1`
+  - uses: `Mix.Task`
+- `ProjectIndex.ElixirFile` - `lib/project_index/elixir_file.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `parse/1`
+  - uses: _none_
+- `ProjectIndex.RenderJson` - `lib/project_index/render_json.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `render_module_manifest/1`, `render_domain_map/1`
+  - uses: _none_
+- `ProjectIndex.RenderMarkdown` - `lib/project_index/render_markdown.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `render/1`
+  - uses: _none_
+- `ProjectIndex.Scanner` - `lib/project_index/scanner.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `scan_project/1`
+  - uses: _none_
+- `EventSales.TestSupport.Analytics.ErrorEventAggregator` - `test/support/analytics/error_event_aggregator.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `summary_for_event/2`
+  - uses: _none_
+- `EventSales.TestSupport.Analytics.MemoryEventAggregator` - `test/support/analytics/memory_event_aggregator.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `put_summary/2`, `put_error/2`, `summary_for_event/2`, `call_count/1`, `reset!/0`
+  - uses: _none_
+- `EventSales.TestSupport.Analytics.MemorySnapshotStoreAdapter` - `test/support/analytics/memory_snapshot_store_adapter.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `put/3`, `list_event_summaries/1`, `writes/0`, `fail_writes!/1`, `last_list_opts/0`, `put_raw_snapshot_for_test!/2`, `reset!/0`
+  - uses: _none_
+- `EventSales.TestSupport.Analytics.SelectiveEventAggregator` - `test/support/analytics/selective_event_aggregator.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `fail_event!/2`, `reset!/0`, `summary_for_event/2`
+  - uses: _none_
+- `EventSales.TestSupport.AuthHelpers` - `test/support/auth_helpers.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSalesWeb.ConnCase` - `test/support/conn_case.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `EventSalesWeb`, `ExUnit.CaseTemplate`
+- `EventSales.DataCase` - `test/support/data_case.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 2
+  - public_funs: `setup_sandbox/1`, `errors_on/1`
+  - uses: `ExUnit.CaseTemplate`
+- `EventSales.TestSupport.DbTopologyHelpers` - `test/support/db_topology_helpers.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSales.TestSupport.Fakes.FakeTickeraAttendeeClient` - `test/support/fakes/fake_tickera_attendee_client.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `child_spec/1`, `start_link/1`, `reset!/1`, `calls/0`, `fetch_attendees_page/5`
+  - uses: _none_
+- `EventSales.TestSupport.FixtureHelpers` - `test/support/fixture_helpers.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `fixture_path!/2`, `read_fixture!/2`, `decode_json_fixture!/2`
+  - uses: _none_
+- `EventSales.TestSupport.FixtureVerificationHelpers` - `test/support/fixture_verification_helpers.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `required_fixtures/0`, `required_fixtures/1`, `required_fixture!/1`, `committed_woocommerce_fixtures/0`, `decode_fixture!/1`, `missing_order_paths/1`, `missing_product_paths/2`, `sensitive_findings/1`, `format_finding/1`, `future_placeholder_allowed?/1`, `parser_work_blocked?/0`, `parser_work_allowed?/0`
+  - uses: _none_
+- `EventSales.TestSupport.Ingestion.MemoryWebhookBufferAdapter` - `test/support/ingestion/memory_webhook_buffer_adapter.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 3
+  - public_funs: `force_ack_unavailable!/0`, `clear_ack_override!/0`, `push/1`, `claim/0`, `ack/1`, `requeue/1`, `depth/0`, `processing_depth/0`, `reset!/0`
+  - uses: _none_
+- `EventSales.TestSupport.Ingestion.StubWebhookEventStore` - `test/support/ingestion/stub_webhook_event_store.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `set_persist_error/1`, `clear!/0`, `create_receive/1`
+  - uses: _none_
+- `EventSales.TestSupport.MappingSetupHelpers` - `test/support/mapping_setup_helpers.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `completed_order_mapping_context/0`
+  - uses: _none_
+- `EventSales.TestSupport.ObanHelpers` - `test/support/oban_helpers.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `insert_test_job/1`, `drain_default_queue/0`
+  - uses: `Oban.Worker`
+- `TestWorker` - `test/support/oban_helpers.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `perform/1`
+  - uses: `Oban.Worker`
+- `EventSales.TestSupport.SalesHelpers` - `test/support/sales_helpers.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `create_source_system!/1`, `create_event!/2`, `create_ticket_type!/2`, `normalized_order_attrs_from_fixture!/2`, `create_order_from_fixture!/2`, `create_order_item_from_line!/3`, `create_mixed_event_order!/1`
+  - uses: _none_
+- `EventSales.TestSupport.TelemetryHelpers` - `test/support/telemetry_helpers.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSales.TestSupport.TickeraSyncTestHelpers` - `test/support/tickera_sync_test_helpers.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `setup_fake_client/1`, `setup_admin/1`, `attendee/1`, `page_result/1`, `default_page_result/0`, `queue_sync_run!/3`, `start_sync_run!/1`, `queue_running_sync_run!/3`, `put_env!/2`, `refute_secret_leaks!/2`
+  - uses: _none_
+- `EventSales.TestSupport.WooCommerceWebhookHelpers` - `test/support/woocommerce_webhook_helpers.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `sign_raw_body/2`, `signed_headers/2`
+  - uses: _none_
+
+## Ash
+
+### Resources
+
+- `EventSales.Accounts.Resources.EventAccessGrant` - `lib/event_sales/accounts/resources/event_access_grant.ex`
+- `EventSales.Accounts.Resources.Role` - `lib/event_sales/accounts/resources/role.ex`
+- `EventSales.Accounts.Resources.User` - `lib/event_sales/accounts/resources/user.ex`
+- `EventSales.Accounts.Resources.UserRole` - `lib/event_sales/accounts/resources/user_role.ex`
+- `EventSales.Analytics.Resources.DailySalesAggregateSnapshot` - `lib/event_sales/analytics/resources/daily_sales_aggregate_snapshot.ex`
+- `EventSales.Analytics.Resources.EventAggregateSnapshot` - `lib/event_sales/analytics/resources/event_aggregate_snapshot.ex`
+- `EventSales.AshBaseline.Resources.AuthUser` - `lib/event_sales/ash_baseline/resources/auth_user.ex`
+- `EventSales.AshBaseline.Resources.PaperTrailProof` - `lib/event_sales/ash_baseline/resources/paper_trail_proof.ex`
+- `EventSales.AshBaseline.Resources.StateMachineProof` - `lib/event_sales/ash_baseline/resources/state_machine_proof.ex`
+- `EventSales.Audit.Resources.AuditLog` - `lib/event_sales/audit/resources/audit_log.ex`
+- `EventSales.Catalog.Resources.Event` - `lib/event_sales/catalog/resources/event.ex`
+- `EventSales.Catalog.Resources.EventDashboardSetting` - `lib/event_sales/catalog/resources/event_dashboard_setting.ex`
+- `EventSales.Catalog.Resources.ProductMapping` - `lib/event_sales/catalog/resources/product_mapping.ex`
+- `EventSales.Catalog.Resources.SourceSystem` - `lib/event_sales/catalog/resources/source_system.ex`
+- `EventSales.Catalog.Resources.TicketType` - `lib/event_sales/catalog/resources/ticket_type.ex`
+- `EventSales.Ingestion.Resources.CsvImportBatch` - `lib/event_sales/ingestion/resources/csv_import_batch.ex`
+- `EventSales.Ingestion.Resources.CsvImportRow` - `lib/event_sales/ingestion/resources/csv_import_row.ex`
+- `EventSales.Ingestion.Resources.SyncCursor` - `lib/event_sales/ingestion/resources/sync_cursor.ex`
+- `EventSales.Ingestion.Resources.SyncRun` - `lib/event_sales/ingestion/resources/sync_run.ex`
+- `EventSales.Ingestion.Resources.TickeraAttendeeSnapshot` - `lib/event_sales/ingestion/resources/tickera_attendee_snapshot.ex`
+- `EventSales.Ingestion.Resources.TickeraAttendeeSyncRun` - `lib/event_sales/ingestion/resources/tickera_attendee_sync_run.ex`
+- `EventSales.Ingestion.Resources.TickeraEventSource` - `lib/event_sales/ingestion/resources/tickera_event_source.ex`
+- `EventSales.Ingestion.Resources.TickeraReconciliationFinding` - `lib/event_sales/ingestion/resources/tickera_reconciliation_finding.ex`
+- `EventSales.Ingestion.Resources.TickeraReconciliationRun` - `lib/event_sales/ingestion/resources/tickera_reconciliation_run.ex`
+- `EventSales.Ingestion.Resources.WebhookDeliveryFailure` - `lib/event_sales/ingestion/resources/webhook_delivery_failure.ex`
+- `EventSales.Ingestion.Resources.WebhookEvent` - `lib/event_sales/ingestion/resources/webhook_event.ex`
+- `EventSales.Sales.Resources.CouponSnapshot` - `lib/event_sales/sales/resources/coupon_snapshot.ex`
+- `EventSales.Sales.Resources.Order` - `lib/event_sales/sales/resources/order.ex`
+- `EventSales.Sales.Resources.OrderItem` - `lib/event_sales/sales/resources/order_item.ex`
+
+### Domains
+
+- `EventSales.Accounts` - `lib/event_sales/accounts.ex`
+- `EventSales.Analytics` - `lib/event_sales/analytics.ex`
+- `EventSales.AshBaseline.Domain` - `lib/event_sales/ash_baseline/domain.ex`
+- `EventSales.Audit` - `lib/event_sales/audit.ex`
+- `EventSales.Catalog` - `lib/event_sales/catalog.ex`
+- `EventSales.Ingestion` - `lib/event_sales/ingestion.ex`
+- `EventSales.Sales` - `lib/event_sales/sales.ex`
+
+### Changes
+
+- `EventSales.Catalog.Changes.MappingSideEffectsAfterAction` - `lib/event_sales/catalog/changes/mapping_side_effects_after_action.ex`
+- `EventSales.Catalog.Changes.NormalizeBaseUrl` - `lib/event_sales/catalog/changes/normalize_base_url.ex`
+- `EventSales.Catalog.Changes.ValidateEventDates` - `lib/event_sales/catalog/changes/validate_event_dates.ex`
+- `EventSales.Catalog.Changes.ValidateTicketTypeEvent` - `lib/event_sales/catalog/changes/validate_ticket_type_event.ex`
+- `EventSales.Sales.Changes.GuardSourceVersion` - `lib/event_sales/sales/changes/guard_source_version.ex`
+- `EventSales.Sales.Changes.SyncStatusFromSource` - `lib/event_sales/sales/changes/sync_status_from_source.ex`
+- `EventSales.Sales.Changes.ValidateTicketTypeEvent` - `lib/event_sales/sales/changes/validate_ticket_type_event.ex`
+
+### Validations
+
+- `EventSales.Ingestion.Validations.AuthorizedTickeraStateMutation` - `lib/event_sales/ingestion/validations/authorized_tickera_state_mutation.ex`
+- `EventSales.Ingestion.Validations.BoundedMetadata` - `lib/event_sales/ingestion/validations/bounded_metadata.ex`
+- `EventSales.Ingestion.Validations.ScopedManualSync` - `lib/event_sales/ingestion/validations/scoped_manual_sync.ex`
+
+### Calculations
+
+_none_
+
+### Policies
+
+_none_
+
+## Phoenix
+
+### LiveViews
+
+- `EventSalesWeb` - `lib/event_sales_web.ex`
+- `EventSalesWeb.Live.Admin.DashboardLive` - `lib/event_sales_web/live/admin/dashboard_live.ex`
+- `EventSalesWeb.Live.Admin.EventDetailLive` - `lib/event_sales_web/live/admin/event_detail_live.ex`
+- `EventSalesWeb.Live.Admin.EventsLive` - `lib/event_sales_web/live/admin/events_live.ex`
+- `EventSalesWeb.Live.Admin.ImportsLive` - `lib/event_sales_web/live/admin/imports_live.ex`
+- `EventSalesWeb.Live.Admin.MappingsLive` - `lib/event_sales_web/live/admin/mappings_live.ex`
+- `EventSalesWeb.Live.Admin.ReconciliationLive` - `lib/event_sales_web/live/admin/reconciliation_live.ex`
+- `EventSalesWeb.Live.Admin.SyncLive` - `lib/event_sales_web/live/admin/sync_live.ex`
+- `EventSalesWeb.Live.Admin.WebhooksLive` - `lib/event_sales_web/live/admin/webhooks_live.ex`
+
+### Controllers
+
+- `EventSalesWeb` - `lib/event_sales_web.ex`
+- `EventSalesWeb.Admin.EventExportController` - `lib/event_sales_web/controllers/admin/event_export_controller.ex`
+- `EventSalesWeb.Admin.ReconciliationExportController` - `lib/event_sales_web/controllers/admin/reconciliation_export_controller.ex`
+- `EventSalesWeb.ErrorHTML` - `lib/event_sales_web/controllers/error_html.ex`
+- `EventSalesWeb.HealthController` - `lib/event_sales_web/controllers/health_controller.ex`
+- `EventSalesWeb.PageController` - `lib/event_sales_web/controllers/page_controller.ex`
+- `EventSalesWeb.PageHTML` - `lib/event_sales_web/controllers/page_html.ex`
+- `EventSalesWeb.WebhookController` - `lib/event_sales_web/controllers/webhook_controller.ex`
+
+### Components
+
+- `EventSalesWeb` - `lib/event_sales_web.ex`
+- `EventSalesWeb.CoreComponents` - `lib/event_sales_web/components/core_components.ex`
+- `EventSalesWeb.Live.Admin.Components.OrderTable` - `lib/event_sales_web/live/admin/components/order_table.ex`
+- `EventSalesWeb.Live.Admin.Components.StaleDataBanner` - `lib/event_sales_web/live/admin/components/stale_data_banner.ex`
+- `EventSalesWeb.Live.Admin.Components.StatCard` - `lib/event_sales_web/live/admin/components/stat_card.ex`
+- `EventSalesWeb.Live.Admin.Components.StatusBadge` - `lib/event_sales_web/live/admin/components/status_badge.ex`
+- `EventSalesWeb.Live.Admin.Components.UnmappedItemAlert` - `lib/event_sales_web/live/admin/components/unmapped_item_alert.ex`
+
+### Routers
+
+- `EventSalesWeb` - `lib/event_sales_web.ex`
+
+### Plugs
+
+- `EventSalesWeb.Plugs.AdminOnly` - `lib/event_sales_web/plugs/admin_only.ex`
+- `EventSalesWeb.Plugs.InternalOnly` - `lib/event_sales_web/plugs/internal_only.ex`
+- `EventSalesWeb.Plugs.LoadCurrentUser` - `lib/event_sales_web/plugs/load_current_user.ex`
+- `EventSalesWeb.Plugs.RateLimitManualActions` - `lib/event_sales_web/plugs/rate_limit_manual_actions.ex`
+- `EventSalesWeb.Plugs.RateLimitWebhookIntake` - `lib/event_sales_web/plugs/rate_limit_webhook_intake.ex`
+- `EventSalesWeb.Plugs.RawBodyReader` - `lib/event_sales_web/plugs/raw_body_reader.ex`
+
+## Oban
+
+### Workers
+
+- `EventSales.Analytics.Workers.RebuildHotStateWorker` - `lib/event_sales/analytics/workers/rebuild_hot_state_worker.ex`
+- `EventSales.Analytics.Workers.RefreshSnapshotWorker` - `lib/event_sales/analytics/workers/refresh_snapshot_worker.ex`
+- `EventSales.Catalog.Workers.MappingChangedWorker` - `lib/event_sales/catalog/workers/mapping_changed_worker.ex`
+- `EventSales.Ingestion.Workers.MissingCatalogResolutionWorker` - `lib/event_sales/ingestion/workers/missing_catalog_resolution_worker.ex`
+- `EventSales.Ingestion.Workers.ProcessCsvImportWorker` - `lib/event_sales/ingestion/workers/process_csv_import_worker.ex`
+- `EventSales.Ingestion.Workers.ProcessWebhookWorker` - `lib/event_sales/ingestion/workers/process_webhook_worker.ex`
+- `EventSales.Ingestion.Workers.ReconcileOrdersWorker` - `lib/event_sales/ingestion/workers/reconcile_orders_worker.ex`
+- `EventSales.Ingestion.Workers.ReconcileTickeraAttendeesWorker` - `lib/event_sales/ingestion/workers/reconcile_tickera_attendees_worker.ex`
+- `EventSales.Ingestion.Workers.RedisWebhookBufferDrainer` - `lib/event_sales/ingestion/workers/redis_webhook_buffer_drainer.ex`
+- `EventSales.Ingestion.Workers.SyncTickeraAttendeesWorker` - `lib/event_sales/ingestion/workers/sync_tickera_attendees_worker.ex`
+- `EventSales.Maintenance.ObanTopologySmokeWorker` - `lib/event_sales/maintenance/oban_topology_smoke_worker.ex`
+- `EventSales.TestSupport.ObanHelpers` - `test/support/oban_helpers.ex`
+- `TestWorker` - `test/support/oban_helpers.ex`

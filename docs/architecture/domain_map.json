@@ -1,0 +1,1698 @@
+{
+  "ash": {
+    "calculations": [],
+    "changes": [
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Catalog.Changes.MappingSideEffectsAfterAction",
+        "parse_error": null,
+        "path": "lib/event_sales/catalog/changes/mapping_side_effects_after_action.ex",
+        "public_funs": [
+          {
+            "arity": 3,
+            "name": "change"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource.Change"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Catalog.Changes.NormalizeBaseUrl",
+        "parse_error": null,
+        "path": "lib/event_sales/catalog/changes/normalize_base_url.ex",
+        "public_funs": [
+          {
+            "arity": 3,
+            "name": "change"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource.Change"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Catalog.Changes.ValidateEventDates",
+        "parse_error": null,
+        "path": "lib/event_sales/catalog/changes/validate_event_dates.ex",
+        "public_funs": [
+          {
+            "arity": 3,
+            "name": "change"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource.Change"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Catalog.Changes.ValidateTicketTypeEvent",
+        "parse_error": null,
+        "path": "lib/event_sales/catalog/changes/validate_ticket_type_event.ex",
+        "public_funs": [
+          {
+            "arity": 3,
+            "name": "change"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource.Change"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Sales.Changes.GuardSourceVersion",
+        "parse_error": null,
+        "path": "lib/event_sales/sales/changes/guard_source_version.ex",
+        "public_funs": [
+          {
+            "arity": 3,
+            "name": "change"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource.Change"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Sales.Changes.SyncStatusFromSource",
+        "parse_error": null,
+        "path": "lib/event_sales/sales/changes/sync_status_from_source.ex",
+        "public_funs": [
+          {
+            "arity": 3,
+            "name": "change"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource.Change"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Sales.Changes.ValidateTicketTypeEvent",
+        "parse_error": null,
+        "path": "lib/event_sales/sales/changes/validate_ticket_type_event.ex",
+        "public_funs": [
+          {
+            "arity": 3,
+            "name": "change"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource.Change"
+        ]
+      }
+    ],
+    "domains": [
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Accounts",
+        "parse_error": null,
+        "path": "lib/event_sales/accounts.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Domain"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Analytics",
+        "parse_error": null,
+        "path": "lib/event_sales/analytics.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Domain"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.AshBaseline.Domain",
+        "parse_error": null,
+        "path": "lib/event_sales/ash_baseline/domain.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Domain"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Audit",
+        "parse_error": null,
+        "path": "lib/event_sales/audit.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Domain"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Catalog",
+        "parse_error": null,
+        "path": "lib/event_sales/catalog.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Domain"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Ingestion",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Domain"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Sales",
+        "parse_error": null,
+        "path": "lib/event_sales/sales.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Domain"
+        ]
+      }
+    ],
+    "policies": [],
+    "resources": [
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Accounts.Resources.EventAccessGrant",
+        "parse_error": null,
+        "path": "lib/event_sales/accounts/resources/event_access_grant.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Accounts.Resources.Role",
+        "parse_error": null,
+        "path": "lib/event_sales/accounts/resources/role.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Accounts.Resources.User",
+        "parse_error": null,
+        "path": "lib/event_sales/accounts/resources/user.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Accounts.Resources.UserRole",
+        "parse_error": null,
+        "path": "lib/event_sales/accounts/resources/user_role.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Analytics.Resources.DailySalesAggregateSnapshot",
+        "parse_error": null,
+        "path": "lib/event_sales/analytics/resources/daily_sales_aggregate_snapshot.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Analytics.Resources.EventAggregateSnapshot",
+        "parse_error": null,
+        "path": "lib/event_sales/analytics/resources/event_aggregate_snapshot.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.AshBaseline.Resources.AuthUser",
+        "parse_error": null,
+        "path": "lib/event_sales/ash_baseline/resources/auth_user.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.AshBaseline.Resources.PaperTrailProof",
+        "parse_error": null,
+        "path": "lib/event_sales/ash_baseline/resources/paper_trail_proof.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.AshBaseline.Resources.StateMachineProof",
+        "parse_error": null,
+        "path": "lib/event_sales/ash_baseline/resources/state_machine_proof.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Audit.Resources.AuditLog",
+        "parse_error": null,
+        "path": "lib/event_sales/audit/resources/audit_log.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Catalog.Resources.Event",
+        "parse_error": null,
+        "path": "lib/event_sales/catalog/resources/event.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Catalog.Resources.EventDashboardSetting",
+        "parse_error": null,
+        "path": "lib/event_sales/catalog/resources/event_dashboard_setting.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Catalog.Resources.ProductMapping",
+        "parse_error": null,
+        "path": "lib/event_sales/catalog/resources/product_mapping.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Catalog.Resources.SourceSystem",
+        "parse_error": null,
+        "path": "lib/event_sales/catalog/resources/source_system.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Catalog.Resources.TicketType",
+        "parse_error": null,
+        "path": "lib/event_sales/catalog/resources/ticket_type.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Ingestion.Resources.CsvImportBatch",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/resources/csv_import_batch.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Ingestion.Resources.CsvImportRow",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/resources/csv_import_row.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Ingestion.Resources.SyncCursor",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/resources/sync_cursor.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Ingestion.Resources.SyncRun",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/resources/sync_run.ex",
+        "public_funs": [
+          {
+            "arity": 2,
+            "name": "set_started_at"
+          },
+          {
+            "arity": 2,
+            "name": "set_finished_at"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Ingestion.Resources.TickeraAttendeeSnapshot",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/resources/tickera_attendee_snapshot.ex",
+        "public_funs": [
+          {
+            "arity": 2,
+            "name": "normalize_snapshot"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Ingestion.Resources.TickeraAttendeeSyncRun",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/resources/tickera_attendee_sync_run.ex",
+        "public_funs": [
+          {
+            "arity": 2,
+            "name": "set_started_at"
+          },
+          {
+            "arity": 2,
+            "name": "set_finished_at"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Ingestion.Resources.TickeraEventSource",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/resources/tickera_event_source.ex",
+        "public_funs": [
+          {
+            "arity": 2,
+            "name": "normalize_config"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Ingestion.Resources.TickeraReconciliationFinding",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/resources/tickera_reconciliation_finding.ex",
+        "public_funs": [
+          {
+            "arity": 2,
+            "name": "set_resolved_at"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Ingestion.Resources.TickeraReconciliationRun",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/resources/tickera_reconciliation_run.ex",
+        "public_funs": [
+          {
+            "arity": 2,
+            "name": "set_started_at"
+          },
+          {
+            "arity": 2,
+            "name": "set_finished_at"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Ingestion.Resources.WebhookDeliveryFailure",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/resources/webhook_delivery_failure.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Ingestion.Resources.WebhookEvent",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/resources/webhook_event.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Sales.Resources.CouponSnapshot",
+        "parse_error": null,
+        "path": "lib/event_sales/sales/resources/coupon_snapshot.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Sales.Resources.Order",
+        "parse_error": null,
+        "path": "lib/event_sales/sales/resources/order.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Sales.Resources.OrderItem",
+        "parse_error": null,
+        "path": "lib/event_sales/sales/resources/order_item.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      }
+    ],
+    "validations": [
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Ingestion.Validations.AuthorizedTickeraStateMutation",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/validations/authorized_tickera_state_mutation.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "init"
+          },
+          {
+            "arity": 3,
+            "name": "validate"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource.Validation"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Ingestion.Validations.BoundedMetadata",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/validations/bounded_metadata.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "init"
+          },
+          {
+            "arity": 3,
+            "name": "validate"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource.Validation"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Ingestion.Validations.ScopedManualSync",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/validations/scoped_manual_sync.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "init"
+          },
+          {
+            "arity": 3,
+            "name": "validate"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource.Validation"
+        ]
+      }
+    ]
+  },
+  "generator": "mix project.index",
+  "oban": {
+    "workers": [
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Analytics.Workers.RebuildHotStateWorker",
+        "parse_error": null,
+        "path": "lib/event_sales/analytics/workers/rebuild_hot_state_worker.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "perform"
+          },
+          {
+            "arity": 1,
+            "name": "timeout"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Oban.Worker"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Analytics.Workers.RefreshSnapshotWorker",
+        "parse_error": null,
+        "path": "lib/event_sales/analytics/workers/refresh_snapshot_worker.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "perform"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Oban.Worker"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Catalog.Workers.MappingChangedWorker",
+        "parse_error": null,
+        "path": "lib/event_sales/catalog/workers/mapping_changed_worker.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "perform"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Oban.Worker"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Ingestion.Workers.MissingCatalogResolutionWorker",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/workers/missing_catalog_resolution_worker.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "perform"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Oban.Worker"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Ingestion.Workers.ProcessCsvImportWorker",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/workers/process_csv_import_worker.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "perform"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Oban.Worker"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Ingestion.Workers.ProcessWebhookWorker",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/workers/process_webhook_worker.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "perform"
+          },
+          {
+            "arity": 1,
+            "name": "backoff"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Oban.Worker"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Ingestion.Workers.ReconcileOrdersWorker",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/workers/reconcile_orders_worker.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "perform"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Oban.Worker"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Ingestion.Workers.ReconcileTickeraAttendeesWorker",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/workers/reconcile_tickera_attendees_worker.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "perform"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Oban.Worker"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Ingestion.Workers.RedisWebhookBufferDrainer",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/workers/redis_webhook_buffer_drainer.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "perform"
+          },
+          {
+            "arity": 1,
+            "name": "drain_batch"
+          }
+        ],
+        "specs?": true,
+        "uses": [
+          "Oban.Worker"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Ingestion.Workers.SyncTickeraAttendeesWorker",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/workers/sync_tickera_attendees_worker.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "perform"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Oban.Worker"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Maintenance.ObanTopologySmokeWorker",
+        "parse_error": null,
+        "path": "lib/event_sales/maintenance/oban_topology_smoke_worker.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "perform"
+          },
+          {
+            "arity": 1,
+            "name": "backoff"
+          }
+        ],
+        "specs?": true,
+        "uses": [
+          "Oban.Worker"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.TestSupport.ObanHelpers",
+        "parse_error": null,
+        "path": "test/support/oban_helpers.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "insert_test_job"
+          },
+          {
+            "arity": 0,
+            "name": "drain_default_queue"
+          }
+        ],
+        "specs?": true,
+        "uses": [
+          "Oban.Worker"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "TestWorker",
+        "parse_error": null,
+        "path": "test/support/oban_helpers.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "perform"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Oban.Worker"
+        ]
+      }
+    ]
+  },
+  "phoenix": {
+    "components": [
+      {
+        "docs_count": 1,
+        "moduledoc?": true,
+        "name": "EventSalesWeb",
+        "parse_error": null,
+        "path": "lib/event_sales_web.ex",
+        "public_funs": [
+          {
+            "arity": 0,
+            "name": "static_paths"
+          },
+          {
+            "arity": 0,
+            "name": "router"
+          },
+          {
+            "arity": 0,
+            "name": "channel"
+          },
+          {
+            "arity": 0,
+            "name": "controller"
+          },
+          {
+            "arity": 0,
+            "name": "live_view"
+          },
+          {
+            "arity": 0,
+            "name": "live_component"
+          },
+          {
+            "arity": 0,
+            "name": "html"
+          },
+          {
+            "arity": 0,
+            "name": "verified_routes"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Phoenix.Channel",
+          "Phoenix.Component",
+          "Phoenix.Controller",
+          "Phoenix.LiveComponent",
+          "Phoenix.LiveView",
+          "Phoenix.Router",
+          "Phoenix.VerifiedRoutes"
+        ]
+      },
+      {
+        "docs_count": 9,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.CoreComponents",
+        "parse_error": null,
+        "path": "lib/event_sales_web/components/core_components.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "flash"
+          },
+          {
+            "arity": 1,
+            "name": "button"
+          },
+          {
+            "arity": 1,
+            "name": "input"
+          },
+          {
+            "arity": 1,
+            "name": "header"
+          },
+          {
+            "arity": 1,
+            "name": "table"
+          },
+          {
+            "arity": 1,
+            "name": "list"
+          },
+          {
+            "arity": 1,
+            "name": "icon"
+          },
+          {
+            "arity": 2,
+            "name": "show"
+          },
+          {
+            "arity": 2,
+            "name": "hide"
+          },
+          {
+            "arity": 1,
+            "name": "translate_error"
+          },
+          {
+            "arity": 2,
+            "name": "translate_errors"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Phoenix.Component"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Live.Admin.Components.OrderTable",
+        "parse_error": null,
+        "path": "lib/event_sales_web/live/admin/components/order_table.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "table"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Phoenix.Component"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Live.Admin.Components.StaleDataBanner",
+        "parse_error": null,
+        "path": "lib/event_sales_web/live/admin/components/stale_data_banner.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "banner"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Phoenix.Component"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Live.Admin.Components.StatCard",
+        "parse_error": null,
+        "path": "lib/event_sales_web/live/admin/components/stat_card.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "card"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Phoenix.Component"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Live.Admin.Components.StatusBadge",
+        "parse_error": null,
+        "path": "lib/event_sales_web/live/admin/components/status_badge.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "badge"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Phoenix.Component"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Live.Admin.Components.UnmappedItemAlert",
+        "parse_error": null,
+        "path": "lib/event_sales_web/live/admin/components/unmapped_item_alert.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "list"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Phoenix.Component"
+        ]
+      }
+    ],
+    "controllers": [
+      {
+        "docs_count": 1,
+        "moduledoc?": true,
+        "name": "EventSalesWeb",
+        "parse_error": null,
+        "path": "lib/event_sales_web.ex",
+        "public_funs": [
+          {
+            "arity": 0,
+            "name": "static_paths"
+          },
+          {
+            "arity": 0,
+            "name": "router"
+          },
+          {
+            "arity": 0,
+            "name": "channel"
+          },
+          {
+            "arity": 0,
+            "name": "controller"
+          },
+          {
+            "arity": 0,
+            "name": "live_view"
+          },
+          {
+            "arity": 0,
+            "name": "live_component"
+          },
+          {
+            "arity": 0,
+            "name": "html"
+          },
+          {
+            "arity": 0,
+            "name": "verified_routes"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Phoenix.Channel",
+          "Phoenix.Component",
+          "Phoenix.Controller",
+          "Phoenix.LiveComponent",
+          "Phoenix.LiveView",
+          "Phoenix.Router",
+          "Phoenix.VerifiedRoutes"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Admin.EventExportController",
+        "parse_error": null,
+        "path": "lib/event_sales_web/controllers/admin/event_export_controller.ex",
+        "public_funs": [
+          {
+            "arity": 2,
+            "name": "summary"
+          },
+          {
+            "arity": 2,
+            "name": "orders"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "EventSalesWeb"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Admin.ReconciliationExportController",
+        "parse_error": null,
+        "path": "lib/event_sales_web/controllers/admin/reconciliation_export_controller.ex",
+        "public_funs": [
+          {
+            "arity": 2,
+            "name": "show"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "EventSalesWeb"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.ErrorHTML",
+        "parse_error": null,
+        "path": "lib/event_sales_web/controllers/error_html.ex",
+        "public_funs": [
+          {
+            "arity": 2,
+            "name": "render"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "EventSalesWeb"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": false,
+        "name": "EventSalesWeb.HealthController",
+        "parse_error": null,
+        "path": "lib/event_sales_web/controllers/health_controller.ex",
+        "public_funs": [
+          {
+            "arity": 2,
+            "name": "show"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "EventSalesWeb"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": false,
+        "name": "EventSalesWeb.PageController",
+        "parse_error": null,
+        "path": "lib/event_sales_web/controllers/page_controller.ex",
+        "public_funs": [
+          {
+            "arity": 2,
+            "name": "home"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "EventSalesWeb"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.PageHTML",
+        "parse_error": null,
+        "path": "lib/event_sales_web/controllers/page_html.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "EventSalesWeb"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.WebhookController",
+        "parse_error": null,
+        "path": "lib/event_sales_web/controllers/webhook_controller.ex",
+        "public_funs": [
+          {
+            "arity": 2,
+            "name": "woocommerce"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "EventSalesWeb"
+        ]
+      }
+    ],
+    "live_views": [
+      {
+        "docs_count": 1,
+        "moduledoc?": true,
+        "name": "EventSalesWeb",
+        "parse_error": null,
+        "path": "lib/event_sales_web.ex",
+        "public_funs": [
+          {
+            "arity": 0,
+            "name": "static_paths"
+          },
+          {
+            "arity": 0,
+            "name": "router"
+          },
+          {
+            "arity": 0,
+            "name": "channel"
+          },
+          {
+            "arity": 0,
+            "name": "controller"
+          },
+          {
+            "arity": 0,
+            "name": "live_view"
+          },
+          {
+            "arity": 0,
+            "name": "live_component"
+          },
+          {
+            "arity": 0,
+            "name": "html"
+          },
+          {
+            "arity": 0,
+            "name": "verified_routes"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Phoenix.Channel",
+          "Phoenix.Component",
+          "Phoenix.Controller",
+          "Phoenix.LiveComponent",
+          "Phoenix.LiveView",
+          "Phoenix.Router",
+          "Phoenix.VerifiedRoutes"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Live.Admin.DashboardLive",
+        "parse_error": null,
+        "path": "lib/event_sales_web/live/admin/dashboard_live.ex",
+        "public_funs": [
+          {
+            "arity": 3,
+            "name": "mount"
+          },
+          {
+            "arity": 3,
+            "name": "handle_event"
+          },
+          {
+            "arity": 2,
+            "name": "handle_info"
+          },
+          {
+            "arity": 1,
+            "name": "render"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "EventSalesWeb"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Live.Admin.EventDetailLive",
+        "parse_error": null,
+        "path": "lib/event_sales_web/live/admin/event_detail_live.ex",
+        "public_funs": [
+          {
+            "arity": 3,
+            "name": "mount"
+          },
+          {
+            "arity": 3,
+            "name": "handle_event"
+          },
+          {
+            "arity": 2,
+            "name": "handle_info"
+          },
+          {
+            "arity": 1,
+            "name": "render"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "EventSalesWeb"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Live.Admin.EventsLive",
+        "parse_error": null,
+        "path": "lib/event_sales_web/live/admin/events_live.ex",
+        "public_funs": [
+          {
+            "arity": 3,
+            "name": "mount"
+          },
+          {
+            "arity": 3,
+            "name": "handle_event"
+          },
+          {
+            "arity": 1,
+            "name": "render"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "EventSalesWeb"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Live.Admin.ImportsLive",
+        "parse_error": null,
+        "path": "lib/event_sales_web/live/admin/imports_live.ex",
+        "public_funs": [
+          {
+            "arity": 3,
+            "name": "mount"
+          },
+          {
+            "arity": 3,
+            "name": "handle_event"
+          },
+          {
+            "arity": 1,
+            "name": "render"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "EventSalesWeb"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Live.Admin.MappingsLive",
+        "parse_error": null,
+        "path": "lib/event_sales_web/live/admin/mappings_live.ex",
+        "public_funs": [
+          {
+            "arity": 3,
+            "name": "mount"
+          },
+          {
+            "arity": 1,
+            "name": "render"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "EventSalesWeb"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Live.Admin.ReconciliationLive",
+        "parse_error": null,
+        "path": "lib/event_sales_web/live/admin/reconciliation_live.ex",
+        "public_funs": [
+          {
+            "arity": 3,
+            "name": "mount"
+          },
+          {
+            "arity": 3,
+            "name": "handle_params"
+          },
+          {
+            "arity": 3,
+            "name": "handle_event"
+          },
+          {
+            "arity": 1,
+            "name": "render"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "EventSalesWeb"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Live.Admin.SyncLive",
+        "parse_error": null,
+        "path": "lib/event_sales_web/live/admin/sync_live.ex",
+        "public_funs": [
+          {
+            "arity": 3,
+            "name": "mount"
+          },
+          {
+            "arity": 3,
+            "name": "handle_event"
+          },
+          {
+            "arity": 1,
+            "name": "render"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "EventSalesWeb"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Live.Admin.WebhooksLive",
+        "parse_error": null,
+        "path": "lib/event_sales_web/live/admin/webhooks_live.ex",
+        "public_funs": [
+          {
+            "arity": 3,
+            "name": "mount"
+          },
+          {
+            "arity": 3,
+            "name": "handle_event"
+          },
+          {
+            "arity": 1,
+            "name": "render"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "EventSalesWeb"
+        ]
+      }
+    ],
+    "plugs": [
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Plugs.AdminOnly",
+        "parse_error": null,
+        "path": "lib/event_sales_web/plugs/admin_only.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "init"
+          },
+          {
+            "arity": 2,
+            "name": "call"
+          }
+        ],
+        "specs?": false,
+        "uses": []
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Plugs.InternalOnly",
+        "parse_error": null,
+        "path": "lib/event_sales_web/plugs/internal_only.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "init"
+          },
+          {
+            "arity": 2,
+            "name": "call"
+          }
+        ],
+        "specs?": false,
+        "uses": []
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Plugs.LoadCurrentUser",
+        "parse_error": null,
+        "path": "lib/event_sales_web/plugs/load_current_user.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "init"
+          },
+          {
+            "arity": 2,
+            "name": "call"
+          }
+        ],
+        "specs?": false,
+        "uses": []
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Plugs.RateLimitManualActions",
+        "parse_error": null,
+        "path": "lib/event_sales_web/plugs/rate_limit_manual_actions.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": []
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Plugs.RateLimitWebhookIntake",
+        "parse_error": null,
+        "path": "lib/event_sales_web/plugs/rate_limit_webhook_intake.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": []
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Plugs.RawBodyReader",
+        "parse_error": null,
+        "path": "lib/event_sales_web/plugs/raw_body_reader.ex",
+        "public_funs": [
+          {
+            "arity": 2,
+            "name": "read_body"
+          },
+          {
+            "arity": 1,
+            "name": "fetch_raw_body"
+          }
+        ],
+        "specs?": true,
+        "uses": []
+      }
+    ],
+    "routers": [
+      {
+        "docs_count": 1,
+        "moduledoc?": true,
+        "name": "EventSalesWeb",
+        "parse_error": null,
+        "path": "lib/event_sales_web.ex",
+        "public_funs": [
+          {
+            "arity": 0,
+            "name": "static_paths"
+          },
+          {
+            "arity": 0,
+            "name": "router"
+          },
+          {
+            "arity": 0,
+            "name": "channel"
+          },
+          {
+            "arity": 0,
+            "name": "controller"
+          },
+          {
+            "arity": 0,
+            "name": "live_view"
+          },
+          {
+            "arity": 0,
+            "name": "live_component"
+          },
+          {
+            "arity": 0,
+            "name": "html"
+          },
+          {
+            "arity": 0,
+            "name": "verified_routes"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Phoenix.Channel",
+          "Phoenix.Component",
+          "Phoenix.Controller",
+          "Phoenix.LiveComponent",
+          "Phoenix.LiveView",
+          "Phoenix.Router",
+          "Phoenix.VerifiedRoutes"
+        ]
+      }
+    ]
+  },
+  "root": ".",
+  "schema_version": 1
+}
