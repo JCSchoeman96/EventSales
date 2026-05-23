@@ -51,6 +51,32 @@ defmodule ProjectIndex.ElixirFileTest do
     assert module.uses == []
   end
 
+  @tag :project_index
+  test "does not attribute nested module or defimpl functions to the outer module" do
+    path =
+      write_temp_file("""
+      defmodule EventSales.Outer do
+        def outer_fun(), do: :outer
+
+        defmodule Inner do
+          def inner_fun(), do: :inner
+        end
+
+        defimpl String.Chars do
+          def to_string(value), do: inspect(value)
+        end
+      end
+      """)
+
+    assert %{modules: [outer, inner]} = ProjectIndex.ElixirFile.parse(path)
+
+    assert outer.name == "EventSales.Outer"
+    assert outer.public_funs == [%{name: "outer_fun", arity: 0}]
+
+    assert inner.name == "Inner"
+    assert inner.public_funs == [%{name: "inner_fun", arity: 0}]
+  end
+
   defp write_temp_file(source) do
     dir =
       Path.join(

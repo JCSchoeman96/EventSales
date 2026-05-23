@@ -267,7 +267,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: true
   - docs_count: 7
-  - public_funs: `global_admin?/1`, `global_staff?/1`, `has_event_role?/3`, `when/2`, `has_unexpired_event_grant?/3`, `can_view_revenue?/2`, `can_access_event_dashboard?/2`, `event_dashboard_role/2`
+  - public_funs: `global_admin?/1`, `global_staff?/1`, `has_event_role?/3`, `has_unexpired_event_grant?/3`, `can_view_revenue?/2`, `can_access_event_dashboard?/2`, `event_dashboard_role/2`
   - uses: _none_
 - `EventSales.Accounts.Resources.EventAccessGrant` - `lib/event_sales/accounts/resources/event_access_grant.ex`
   - moduledoc?: true
@@ -297,7 +297,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: `pagination/3`, `when/2`, `normalize_positive_integer/2`, `split_page/2`, `page_info/3`
+  - public_funs: `pagination/3`, `normalize_positive_integer/2`, `split_page/2`, `page_info/3`
   - uses: _none_
 - `EventSales.Analytics` - `lib/event_sales/analytics.ex`
   - moduledoc?: true
@@ -309,73 +309,73 @@ Project root: `.`
   - moduledoc?: true
   - specs?: true
   - docs_count: 3
-  - public_funs: `snapshot/1`, `when/2`
+  - public_funs: `snapshot/1`, `event_row/2`, `replace_event_row/2`
   - uses: _none_
 - `EventSales.Analytics.AggregateEvent` - `lib/event_sales/analytics/aggregate_event.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 1
-  - public_funs: `new/1`, `when/2`
+  - public_funs: `new/1`
   - uses: _none_
 - `EventSales.Analytics.AggregateEventIdempotency` - `lib/event_sales/analytics/aggregate_event_idempotency.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 4
-  - public_funs: `when/2`
+  - public_funs: `duplicate?/2`, `reserve/2`, `clear_in_flight/2`, `mark_applied/3`
   - uses: _none_
 - `EventSales.Analytics.Aggregators.EventAggregator` - `lib/event_sales/analytics/aggregators/event_aggregator.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 1
-  - public_funs: `when/2`
+  - public_funs: `summary_for_event/2`
   - uses: _none_
 - `EventSales.Analytics.CacheKeys` - `lib/event_sales/analytics/cache_keys.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 2
-  - public_funs: `when/2`
+  - public_funs: `event_summary/1`, `redis_event_snapshot/1`
   - uses: _none_
 - `EventSales.Analytics.DashboardCache` - `lib/event_sales/analytics/dashboard_cache.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 6
-  - public_funs: `table_name/0`, `ensure_table!/0`, `delete_table_for_test!/0`, `when/2`
+  - public_funs: `table_name/0`, `ensure_table!/0`, `delete_table_for_test!/0`, `get_event_summary/1`, `put_event_summary/3`, `invalidate_event/2`
   - uses: _none_
 - `EventSales.Analytics.DashboardPubSub` - `lib/event_sales/analytics/dashboard_pub_sub.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 3
-  - public_funs: `when/2`
+  - public_funs: `event_topic/1`, `subscribe_event/1`, `broadcast_hot_state_updated/2`
   - uses: _none_
 - `EventSales.Analytics.EventDetail` - `lib/event_sales/analytics/event_detail.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 0
-  - public_funs: `list_events/1`, `when/2`
+  - public_funs: `list_events/1`, `get_event_detail/2`, `recent_orders/2`, `unmapped_items/2`
   - uses: _none_
 - `EventSales.Analytics.EventScopedDashboard` - `lib/event_sales/analytics/event_scoped_dashboard.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 1
-  - public_funs: `when/2`
+  - public_funs: `summary/2`
   - uses: _none_
 - `EventSales.Analytics.HotStateAggregator` - `lib/event_sales/analytics/hot_state_aggregator.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 7
-  - public_funs: `start_link/1`, `apply_event/2`, `summary_for_event/1`, `status/0`, `request_rebuild/1`, `when/2`, `reset_for_test!/0`, `delete_cache_table_for_test!/0`, `init/1`, `handle_continue/2`, `handle_call/3`, `handle_cast/2`
+  - public_funs: `start_link/1`, `apply_event/2`, `summary_for_event/1`, `status/0`, `request_rebuild/1`, `rebuild_finished/1`, `reset_for_test!/0`, `delete_cache_table_for_test!/0`, `init/1`, `handle_continue/2`, `handle_call/3`, `handle_cast/2`
   - uses: `GenServer`
 - `EventSales.Analytics.MetricRules` - `lib/event_sales/analytics/metric_rules.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 9
-  - public_funs: `business_timezone/0`, `business_date/2`, `when/2`, `same_business_date?/3`, `counts_as_sold?/2`, `sold_quantity/2`, `completed_revenue/2`, `visible_in_status_breakdown?/2`, `status_bucket/1`, `summarize/2`
+  - public_funs: `business_timezone/0`, `business_date/2`, `same_business_date?/3`, `counts_as_sold?/2`, `sold_quantity/2`, `completed_revenue/2`, `visible_in_status_breakdown?/2`, `status_bucket/1`, `summarize/2`
   - uses: _none_
 - `EventSales.Analytics.OrderProcessedNotifier` - `lib/event_sales/analytics/order_processed_notifier.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 3
-  - public_funs: `notify_order_processed/3`, `when/2`
+  - public_funs: `notify_order_processed/3`, `notify_order_reconciled/4`, `notify_order_imported/4`
   - uses: _none_
 - `EventSales.Analytics.Resources.DailySalesAggregateSnapshot` - `lib/event_sales/analytics/resources/daily_sales_aggregate_snapshot.ex`
   - moduledoc?: true
@@ -393,25 +393,25 @@ Project root: `.`
   - moduledoc?: true
   - specs?: true
   - docs_count: 2
-  - public_funs: `when/2`, `encode/1`, `decode/1`
+  - public_funs: `encode/1`, `decode/1`
   - uses: _none_
 - `EventSales.Analytics.SnapshotQueries` - `lib/event_sales/analytics/snapshot_queries.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 1
-  - public_funs: `when/2`
+  - public_funs: `event_ids_page/2`
   - uses: _none_
 - `EventSales.Analytics.SnapshotReader` - `lib/event_sales/analytics/snapshot_reader.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 2
-  - public_funs: `when/2`
+  - public_funs: `summary_for_event/1`, `daily_summary_for_event/3`
   - uses: _none_
 - `EventSales.Analytics.SnapshotRefresh` - `lib/event_sales/analytics/snapshot_refresh.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 2
-  - public_funs: `when/2`, `refresh_daily/3`
+  - public_funs: `refresh_event/2`, `refresh_daily/3`
   - uses: _none_
 - `EventSales.Analytics.SnapshotStore.Adapter` - `lib/event_sales/analytics/snapshot_store/adapter.ex`
   - moduledoc?: true
@@ -429,7 +429,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: true
   - docs_count: 1
-  - public_funs: `redix_name/0`, `when/2`, `list_event_summaries/1`
+  - public_funs: `redix_name/0`, `put/3`, `list_event_summaries/1`
   - uses: _none_
 - `EventSales.Analytics.Workers.RebuildHotStateWorker` - `lib/event_sales/analytics/workers/rebuild_hot_state_worker.ex`
   - moduledoc?: true
@@ -441,7 +441,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: `when/2`, `perform/1`
+  - public_funs: `perform/1`
   - uses: `Oban.Worker`
 - `EventSales.Application` - `lib/event_sales/application.ex`
   - moduledoc?: true
@@ -483,13 +483,13 @@ Project root: `.`
   - moduledoc?: true
   - specs?: true
   - docs_count: 10
-  - public_funs: `manual_sync_requested/1`, `tickera_attendee_sync_requested/1`, `tickera_reconciliation_run_requested/1`, `csv_apply_requested/1`, `event_sales_export_requested/1`, `webhook_replay_requested/1`, `log_webhook_replay_ignored/1`, `log_webhook_duplicate_payload_mismatch/1`, `log_webhook_stale_replay/1`, `when/2`, `log/2`
+  - public_funs: `manual_sync_requested/1`, `tickera_attendee_sync_requested/1`, `tickera_reconciliation_run_requested/1`, `csv_apply_requested/1`, `event_sales_export_requested/1`, `webhook_replay_requested/1`, `log_webhook_replay_ignored/1`, `log_webhook_duplicate_payload_mismatch/1`, `log_webhook_stale_replay/1`, `log/2`
   - uses: _none_
 - `EventSales.Audit.MetadataSanitizer` - `lib/event_sales/audit/metadata_sanitizer.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 1
-  - public_funs: `when/2`, `sanitize/1`, `max_bytes/0`
+  - public_funs: `sanitize/1`, `max_bytes/0`
   - uses: _none_
 - `EventSales.Audit.PaperTrail` - `lib/event_sales/audit/paper_trail.ex`
   - moduledoc?: true
@@ -513,7 +513,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: true
   - docs_count: 1
-  - public_funs: `when/2`
+  - public_funs: `emit_for_event/2`
   - uses: _none_
 - `EventSales.Catalog.Changes.MappingSideEffectsAfterAction` - `lib/event_sales/catalog/changes/mapping_side_effects_after_action.ex`
   - moduledoc?: true
@@ -543,7 +543,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: true
   - docs_count: 1
-  - public_funs: `when/2`
+  - public_funs: `resolve/3`
   - uses: _none_
 - `EventSales.Catalog.MappingSideEffects` - `lib/event_sales/catalog/mapping_side_effects.ex`
   - moduledoc?: true
@@ -555,19 +555,19 @@ Project root: `.`
   - moduledoc?: true
   - specs?: true
   - docs_count: 1
-  - public_funs: `when/2`
+  - public_funs: `recover_product/4`
   - uses: _none_
 - `EventSales.Catalog.ProductMetadataCache` - `lib/event_sales/catalog/product_metadata_cache.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 5
-  - public_funs: `start_link/1`, `get/3`, `put/2`, `when/2`, `invalidate/3`, `cleanup_expired/0`, `reset_for_test!/0`, `init/1`, `handle_call/3`
+  - public_funs: `start_link/1`, `get/3`, `put/2`, `invalidate/3`, `cleanup_expired/0`, `reset_for_test!/0`, `init/1`, `handle_call/3`
   - uses: `GenServer`
 - `EventSales.Catalog.ProductMetadataUpdater` - `lib/event_sales/catalog/product_metadata_updater.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 1
-  - public_funs: `when/2`, `update_from_payload/2`
+  - public_funs: `update_from_payload/2`
   - uses: _none_
 - `EventSales.Catalog.Resources.Event` - `lib/event_sales/catalog/resources/event.ex`
   - moduledoc?: true
@@ -639,13 +639,13 @@ Project root: `.`
   - moduledoc?: true
   - specs?: true
   - docs_count: 2
-  - public_funs: `fetch_attendees_page/5`, `when/2`, `safe_log_url/1`
+  - public_funs: `fetch_attendees_page/5`, `safe_log_url/1`
   - uses: _none_
 - `EventSales.Ingestion.Clients.TickeraError` - `lib/event_sales/ingestion/clients/tickera_error.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 0
-  - public_funs: `exception/1`, `when/2`, `retryable?/1`
+  - public_funs: `exception/1`, `message/1`, `retryable?/1`
   - uses: _none_
 - `EventSales.Ingestion.Clients.WooCommerceClient` - `lib/event_sales/ingestion/clients/woocommerce_client.ex`
   - moduledoc?: true
@@ -657,7 +657,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: `exception/1`, `when/2`
+  - public_funs: `exception/1`, `message/1`
   - uses: _none_
 - `EventSales.Ingestion.Clients.WooCommerceTransport` - `lib/event_sales/ingestion/clients/woocommerce_transport.ex`
   - moduledoc?: true
@@ -669,7 +669,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: true
   - docs_count: 2
-  - public_funs: `when/2`, `mark_rows_applied/1`
+  - public_funs: `apply/2`, `mark_rows_applied/1`
   - uses: _none_
 - `EventSales.Ingestion.Csv.DryRunValidator` - `lib/event_sales/ingestion/csv/dry_run_validator.ex`
   - moduledoc?: true
@@ -681,13 +681,13 @@ Project root: `.`
   - moduledoc?: true
   - specs?: true
   - docs_count: 3
-  - public_funs: `required_headers/0`, `accepted_headers/0`, `when/2`
+  - public_funs: `required_headers/0`, `accepted_headers/0`, `stream_rows/1`
   - uses: _none_
 - `EventSales.Ingestion.CsvImports` - `lib/event_sales/ingestion/csv_imports.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 2
-  - public_funs: `dry_run_file/3`, `list_batches/1`, `get_batch/2`, `when/2`, `list_rows/2`
+  - public_funs: `dry_run_file/3`, `list_batches/1`, `get_batch/2`, `queue_apply/2`, `list_rows/2`
   - uses: _none_
 - `EventSales.Ingestion.FindingsCsvExport` - `lib/event_sales/ingestion/findings_csv_export.ex`
   - moduledoc?: true
@@ -717,13 +717,13 @@ Project root: `.`
   - moduledoc?: true
   - specs?: true
   - docs_count: 4
-  - public_funs: `load_or_init_cursor/2`, `woo_params/2`, `when/2`, `run_step/3`
+  - public_funs: `load_or_init_cursor/2`, `woo_params/2`, `matches_event_mapping?/2`, `run_step/3`
   - uses: _none_
 - `EventSales.Ingestion.Parsers.WoocommerceOrderParser` - `lib/event_sales/ingestion/parsers/woocommerce_order_parser.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 1
-  - public_funs: `when/2`, `parse/1`
+  - public_funs: `parse/1`
   - uses: _none_
 - `EventSales.Ingestion.ReconciliationPeakGuard` - `lib/event_sales/ingestion/reconciliation_peak_guard.ex`
   - moduledoc?: true
@@ -735,7 +735,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: true
   - docs_count: 13
-  - public_funs: `redix_name/0`, `max_entries/0`, `max_entry_bytes/0`, `when/2`, `adapter_name/0`, `claim/0`, `depth/0`, `processing_depth/0`
+  - public_funs: `redix_name/0`, `max_entries/0`, `max_entry_bytes/0`, `key/1`, `adapter_name/0`, `push/1`, `claim/0`, `ack/1`, `requeue/1`, `depth/0`, `processing_depth/0`, `entry_from_intake_context/1`, `decode_entry/1`
   - uses: _none_
 - `EventSales.Ingestion.RedisWebhookBuffer.Adapter` - `lib/event_sales/ingestion/redis_webhook_buffer/adapter.ex`
   - moduledoc?: true
@@ -747,7 +747,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: `when/2`, `claim/0`, `depth/0`, `processing_depth/0`
+  - public_funs: `push/1`, `claim/0`, `ack/1`, `requeue/1`, `depth/0`, `processing_depth/0`
   - uses: _none_
 - `EventSales.Ingestion.Resources.CsvImportBatch` - `lib/event_sales/ingestion/resources/csv_import_batch.ex`
   - moduledoc?: true
@@ -819,25 +819,25 @@ Project root: `.`
   - moduledoc?: true
   - specs?: true
   - docs_count: 3
-  - public_funs: `start_link/1`, `when/2`, `snapshot/0`, `reset_for_test!/0`, `init/1`, `handle_call/3`
+  - public_funs: `start_link/1`, `run/1`, `snapshot/0`, `reset_for_test!/0`, `init/1`, `handle_call/3`
   - uses: `GenServer`
 - `EventSales.Ingestion.RestRateLimiter` - `lib/event_sales/ingestion/rest_rate_limiter.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 3
-  - public_funs: `start_link/1`, `when/2`, `snapshot/0`, `reset_for_test!/1`, `init/1`, `handle_call/3`, `handle_cast/2`, `handle_info/2`
+  - public_funs: `start_link/1`, `checkout/2`, `snapshot/0`, `reset_for_test!/1`, `init/1`, `handle_call/3`, `handle_cast/2`, `handle_info/2`
   - uses: `GenServer`
 - `EventSales.Ingestion.Security.RawBodyReader` - `lib/event_sales/ingestion/security/raw_body_reader.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 0
-  - public_funs: `raw_body_key/0`, `when/2`, `fetch_raw_body/1`
+  - public_funs: `raw_body_key/0`, `put_raw_body/2`, `fetch_raw_body/1`
   - uses: _none_
 - `EventSales.Ingestion.Security.WebhookReplayGuard` - `lib/event_sales/ingestion/security/webhook_replay_guard.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 0
-  - public_funs: `when/2`, `check_stale/4`, `source_updated_at_from_payload/1`
+  - public_funs: `payload_hash/1`, `classify_duplicate/2`, `check_stale/4`, `source_updated_at_from_payload/1`, `sanitize_headers/1`
   - uses: _none_
 - `EventSales.Ingestion.Security.WebhookSignature` - `lib/event_sales/ingestion/security/webhook_signature.ex`
   - moduledoc?: true
@@ -849,13 +849,13 @@ Project root: `.`
   - moduledoc?: true
   - specs?: true
   - docs_count: 0
-  - public_funs: `list_runs/1`, `event_scope/2`, `when/2`
+  - public_funs: `list_runs/1`, `event_scope/2`
   - uses: _none_
 - `EventSales.Ingestion.TickeraAttendeeSnapshotHash` - `lib/event_sales/ingestion/tickera_attendee_snapshot_hash.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 0
-  - public_funs: `when/2`
+  - public_funs: `hash/1`
   - uses: _none_
 - `EventSales.Ingestion.TickeraAttendeeSnapshots` - `lib/event_sales/ingestion/tickera_attendee_snapshots.ex`
   - moduledoc?: true
@@ -927,7 +927,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: true
   - docs_count: 0
-  - public_funs: `list_events/1`, `when/2`, `get_payload/2`
+  - public_funs: `list_events/1`, `get_payload/2`
   - uses: _none_
 - `EventSales.Ingestion.WebhookEnqueue` - `lib/event_sales/ingestion/webhook_enqueue.ex`
   - moduledoc?: true
@@ -945,7 +945,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: true
   - docs_count: 1
-  - public_funs: `when/2`, `create_receive/1`
+  - public_funs: `create_receive/1`
   - uses: _none_
 - `EventSales.Ingestion.WebhookIntake` - `lib/event_sales/ingestion/webhook_intake.ex`
   - moduledoc?: true
@@ -957,13 +957,13 @@ Project root: `.`
   - moduledoc?: true
   - specs?: true
   - docs_count: 1
-  - public_funs: `when/2`
+  - public_funs: `process/2`
   - uses: _none_
 - `EventSales.Ingestion.WebhookReplay` - `lib/event_sales/ingestion/webhook_replay.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 1
-  - public_funs: `replay_failed/2`, `when/2`
+  - public_funs: `replay_failed/2`
   - uses: _none_
 - `EventSales.Ingestion.Workers.BackfillOrdersWorker` - `lib/event_sales/ingestion/workers/backfill_orders_worker.ex`
   - moduledoc?: true
@@ -981,7 +981,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: `when/2`, `perform/1`
+  - public_funs: `perform/1`
   - uses: `Oban.Worker`
 - `EventSales.Ingestion.Workers.ProcessWebhookWorker` - `lib/event_sales/ingestion/workers/process_webhook_worker.ex`
   - moduledoc?: true
@@ -999,25 +999,25 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: `when/2`, `perform/1`
+  - public_funs: `perform/1`
   - uses: `Oban.Worker`
 - `EventSales.Ingestion.Workers.ReconcileTickeraAttendeesWorker` - `lib/event_sales/ingestion/workers/reconcile_tickera_attendees_worker.ex`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: `when/2`, `perform/1`
+  - public_funs: `perform/1`
   - uses: `Oban.Worker`
 - `EventSales.Ingestion.Workers.RedisWebhookBufferDrainer` - `lib/event_sales/ingestion/workers/redis_webhook_buffer_drainer.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 0
-  - public_funs: `perform/1`, `when/2`
+  - public_funs: `perform/1`, `drain_batch/1`
   - uses: `Oban.Worker`
 - `EventSales.Ingestion.Workers.SyncTickeraAttendeesWorker` - `lib/event_sales/ingestion/workers/sync_tickera_attendees_worker.ex`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: `when/2`, `perform/1`
+  - public_funs: `perform/1`
   - uses: `Oban.Worker`
 - `EventSales.Maintenance.CacheCleanupWorker` - `lib/event_sales/maintenance/cache_cleanup_worker.ex`
   - moduledoc?: true
@@ -1041,7 +1041,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: true
   - docs_count: 0
-  - public_funs: `migrate/1`, `rollback/3`, `migration_database_url/1`, `when/2`
+  - public_funs: `migrate/1`, `rollback/3`, `migration_database_url/1`
   - uses: _none_
 - `EventSales.Repo` - `lib/event_sales/repo.ex`
   - moduledoc?: false
@@ -1077,13 +1077,13 @@ Project root: `.`
   - moduledoc?: true
   - specs?: true
   - docs_count: 3
-  - public_funs: `when/2`, `map_item/1`, `map_pending_items_for_order/1`, `list_unmapped_queue/1`
+  - public_funs: `map_item/1`, `map_pending_items_for_order/1`, `list_unmapped_queue/1`
   - uses: _none_
 - `EventSales.Sales.OrderUpserter` - `lib/event_sales/sales/order_upserter.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 3
-  - public_funs: `when/2`, `upsert_from_webhook_event/1`
+  - public_funs: `upsert_order/3`, `upsert_normalized_order/3`, `upsert_from_webhook_event/1`
   - uses: _none_
 - `EventSales.Sales.Resources.CouponSnapshot` - `lib/event_sales/sales/resources/coupon_snapshot.ex`
   - moduledoc?: true
@@ -1143,7 +1143,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 9
-  - public_funs: `flash/1`, `button/1`, `input/1`, `header/1`, `table/1`, `list/1`, `icon/1`, `show/2`, `hide/2`, `translate_error/1`, `when/2`
+  - public_funs: `flash/1`, `button/1`, `input/1`, `header/1`, `table/1`, `list/1`, `icon/1`, `show/2`, `hide/2`, `translate_error/1`, `translate_errors/2`
   - uses: `Phoenix.Component`
 - `EventSalesWeb.Layouts` - `lib/event_sales_web/components/layouts.ex`
   - moduledoc?: true
@@ -1257,13 +1257,13 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: `mount/3`, `handle_event/3`, `when/2`, `render/1`
+  - public_funs: `mount/3`, `handle_event/3`, `handle_info/2`, `render/1`
   - uses: `EventSalesWeb`
 - `EventSalesWeb.Live.Admin.EventDetailLive` - `lib/event_sales_web/live/admin/event_detail_live.ex`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: `mount/3`, `handle_event/3`, `when/2`, `render/1`
+  - public_funs: `mount/3`, `handle_event/3`, `handle_info/2`, `render/1`
   - uses: `EventSalesWeb`
 - `EventSalesWeb.Live.Admin.EventsLive` - `lib/event_sales_web/live/admin/events_live.ex`
   - moduledoc?: true
@@ -1281,7 +1281,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: true
   - docs_count: 2
-  - public_funs: `when/2`, `reset_for_test!/0`
+  - public_funs: `allow?/3`, `reset_for_test!/0`
   - uses: _none_
 - `EventSalesWeb.Live.Admin.MappingsLive` - `lib/event_sales_web/live/admin/mappings_live.ex`
   - moduledoc?: true
@@ -1311,7 +1311,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: `when/2`, `current_user/1`, `current_user_id/1`
+  - public_funs: `current_user/1`, `current_user_id/1`
   - uses: _none_
 - `EventSalesWeb.Live.Admin.SyncLive` - `lib/event_sales_web/live/admin/sync_live.ex`
   - moduledoc?: true
@@ -1497,7 +1497,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 3
-  - public_funs: `force_ack_unavailable!/0`, `clear_ack_override!/0`, `when/2`, `claim/0`, `depth/0`, `processing_depth/0`, `reset!/0`
+  - public_funs: `force_ack_unavailable!/0`, `clear_ack_override!/0`, `push/1`, `claim/0`, `ack/1`, `requeue/1`, `depth/0`, `processing_depth/0`, `reset!/0`
   - uses: _none_
 - `EventSales.TestSupport.Ingestion.StubWebhookEventStore` - `test/support/ingestion/stub_webhook_event_store.ex`
   - moduledoc?: true
@@ -1515,7 +1515,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: true
   - docs_count: 0
-  - public_funs: `perform/1`, `when/2`, `drain_default_queue/0`
+  - public_funs: `insert_test_job/1`, `drain_default_queue/0`
   - uses: `Oban.Worker`
 - `TestWorker` - `test/support/oban_helpers.ex`
   - moduledoc?: true
@@ -1539,13 +1539,13 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: `setup_fake_client/1`, `setup_admin/1`, `attendee/1`, `page_result/1`, `default_page_result/0`, `queue_sync_run!/3`, `start_sync_run!/1`, `queue_running_sync_run!/3`, `put_env!/2`, `when/2`
+  - public_funs: `setup_fake_client/1`, `setup_admin/1`, `attendee/1`, `page_result/1`, `default_page_result/0`, `queue_sync_run!/3`, `start_sync_run!/1`, `queue_running_sync_run!/3`, `put_env!/2`, `refute_secret_leaks!/2`
   - uses: _none_
 - `EventSales.TestSupport.WooCommerceWebhookHelpers` - `test/support/woocommerce_webhook_helpers.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 0
-  - public_funs: `sign_raw_body/2`, `when/2`
+  - public_funs: `sign_raw_body/2`, `signed_headers/2`
   - uses: _none_
 
 ## Ash
@@ -1657,7 +1657,12 @@ _none_
 
 ### Plugs
 
-_none_
+- `EventSalesWeb.Plugs.AdminOnly` - `lib/event_sales_web/plugs/admin_only.ex`
+- `EventSalesWeb.Plugs.InternalOnly` - `lib/event_sales_web/plugs/internal_only.ex`
+- `EventSalesWeb.Plugs.LoadCurrentUser` - `lib/event_sales_web/plugs/load_current_user.ex`
+- `EventSalesWeb.Plugs.RateLimitManualActions` - `lib/event_sales_web/plugs/rate_limit_manual_actions.ex`
+- `EventSalesWeb.Plugs.RateLimitWebhookIntake` - `lib/event_sales_web/plugs/rate_limit_webhook_intake.ex`
+- `EventSalesWeb.Plugs.RawBodyReader` - `lib/event_sales_web/plugs/raw_body_reader.ex`
 
 ## Oban
 

@@ -108,7 +108,11 @@ defmodule ProjectIndex.Scanner do
         end),
       components: filter_by_use(modules, "Phoenix.Component"),
       routers: filter_by_use(modules, "Phoenix.Router"),
-      plugs: filter_by_use(modules, "Plug.Builder")
+      plugs:
+        Enum.filter(modules, fn module ->
+          used?(module, "Plug.Builder") or used?(module, "Plug.Conn") or
+            path_contains?(module, "/plugs/")
+        end)
     }
   end
 

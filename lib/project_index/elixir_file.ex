@@ -115,20 +115,34 @@ defmodule ProjectIndex.ElixirFile do
   end
 
   defp public_funs(block) do
-    {_ast, funs} =
-      Macro.prewalk(block, [], fn
-        {:def, _meta, [{name, _fun_meta, args_ast} | _rest]} = node, acc when is_atom(name) ->
-          arity = if is_list(args_ast), do: length(args_ast), else: 0
-          {node, [%{name: Atom.to_string(name), arity: arity} | acc]}
-
-        node, acc ->
-          {node, acc}
-      end)
-
-    funs
-    |> Enum.reverse()
+    block
+    |> block_statements()
+    |> Enum.flat_map(&public_fun_from_statement/1)
     |> Enum.uniq()
   end
+
+  defp block_statements({:__block__, _meta, statements}) when is_list(statements), do: statements
+  defp block_statements(statement), do: [statement]
+
+  defp public_fun_from_statement({:def, _meta, [head | _rest]}) do
+    case function_head_name_and_arity(head) do
+      {name, arity} -> [%{name: Atom.to_string(name), arity: arity}]
+      :error -> []
+    end
+  end
+
+  defp public_fun_from_statement(_statement), do: []
+
+  defp function_head_name_and_arity({:when, _meta, [head | _guards]}) do
+    function_head_name_and_arity(head)
+  end
+
+  defp function_head_name_and_arity({name, _meta, args_ast}) when is_atom(name) do
+    arity = if is_list(args_ast), do: length(args_ast), else: 0
+    {name, arity}
+  end
+
+  defp function_head_name_and_arity(_head), do: :error
 
   defp used_modules(block) do
     {_ast, modules} =

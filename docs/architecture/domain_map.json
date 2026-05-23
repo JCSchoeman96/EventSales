@@ -699,10 +699,6 @@
         "path": "lib/event_sales/analytics/workers/refresh_snapshot_worker.ex",
         "public_funs": [
           {
-            "arity": 2,
-            "name": "when"
-          },
-          {
             "arity": 1,
             "name": "perform"
           }
@@ -754,10 +750,6 @@
         "path": "lib/event_sales/ingestion/workers/process_csv_import_worker.ex",
         "public_funs": [
           {
-            "arity": 2,
-            "name": "when"
-          },
-          {
             "arity": 1,
             "name": "perform"
           }
@@ -796,10 +788,6 @@
         "path": "lib/event_sales/ingestion/workers/reconcile_orders_worker.ex",
         "public_funs": [
           {
-            "arity": 2,
-            "name": "when"
-          },
-          {
             "arity": 1,
             "name": "perform"
           }
@@ -816,10 +804,6 @@
         "parse_error": null,
         "path": "lib/event_sales/ingestion/workers/reconcile_tickera_attendees_worker.ex",
         "public_funs": [
-          {
-            "arity": 2,
-            "name": "when"
-          },
           {
             "arity": 1,
             "name": "perform"
@@ -842,8 +826,8 @@
             "name": "perform"
           },
           {
-            "arity": 2,
-            "name": "when"
+            "arity": 1,
+            "name": "drain_batch"
           }
         ],
         "specs?": true,
@@ -858,10 +842,6 @@
         "parse_error": null,
         "path": "lib/event_sales/ingestion/workers/sync_tickera_attendees_worker.ex",
         "public_funs": [
-          {
-            "arity": 2,
-            "name": "when"
-          },
           {
             "arity": 1,
             "name": "perform"
@@ -902,11 +882,7 @@
         "public_funs": [
           {
             "arity": 1,
-            "name": "perform"
-          },
-          {
-            "arity": 2,
-            "name": "when"
+            "name": "insert_test_job"
           },
           {
             "arity": 0,
@@ -1039,7 +1015,7 @@
           },
           {
             "arity": 2,
-            "name": "when"
+            "name": "translate_errors"
           }
         ],
         "specs?": false,
@@ -1373,7 +1349,7 @@
           },
           {
             "arity": 2,
-            "name": "when"
+            "name": "handle_info"
           },
           {
             "arity": 1,
@@ -1402,7 +1378,7 @@
           },
           {
             "arity": 2,
-            "name": "when"
+            "name": "handle_info"
           },
           {
             "arity": 1,
@@ -1565,7 +1541,104 @@
         ]
       }
     ],
-    "plugs": [],
+    "plugs": [
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Plugs.AdminOnly",
+        "parse_error": null,
+        "path": "lib/event_sales_web/plugs/admin_only.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "init"
+          },
+          {
+            "arity": 2,
+            "name": "call"
+          }
+        ],
+        "specs?": false,
+        "uses": []
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Plugs.InternalOnly",
+        "parse_error": null,
+        "path": "lib/event_sales_web/plugs/internal_only.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "init"
+          },
+          {
+            "arity": 2,
+            "name": "call"
+          }
+        ],
+        "specs?": false,
+        "uses": []
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Plugs.LoadCurrentUser",
+        "parse_error": null,
+        "path": "lib/event_sales_web/plugs/load_current_user.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "init"
+          },
+          {
+            "arity": 2,
+            "name": "call"
+          }
+        ],
+        "specs?": false,
+        "uses": []
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Plugs.RateLimitManualActions",
+        "parse_error": null,
+        "path": "lib/event_sales_web/plugs/rate_limit_manual_actions.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": []
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Plugs.RateLimitWebhookIntake",
+        "parse_error": null,
+        "path": "lib/event_sales_web/plugs/rate_limit_webhook_intake.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": []
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Plugs.RawBodyReader",
+        "parse_error": null,
+        "path": "lib/event_sales_web/plugs/raw_body_reader.ex",
+        "public_funs": [
+          {
+            "arity": 2,
+            "name": "read_body"
+          },
+          {
+            "arity": 1,
+            "name": "fetch_raw_body"
+          }
+        ],
+        "specs?": true,
+        "uses": []
+      }
+    ],
     "routers": [
       {
         "docs_count": 1,

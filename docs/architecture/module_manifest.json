@@ -302,10 +302,6 @@
           "name": "has_event_role?"
         },
         {
-          "arity": 2,
-          "name": "when"
-        },
-        {
           "arity": 3,
           "name": "has_unexpired_event_grant?"
         },
@@ -386,10 +382,6 @@
         },
         {
           "arity": 2,
-          "name": "when"
-        },
-        {
-          "arity": 2,
           "name": "normalize_positive_integer"
         },
         {
@@ -429,7 +421,11 @@
         },
         {
           "arity": 2,
-          "name": "when"
+          "name": "event_row"
+        },
+        {
+          "arity": 2,
+          "name": "replace_event_row"
         }
       ],
       "specs?": true,
@@ -445,10 +441,6 @@
         {
           "arity": 1,
           "name": "new"
-        },
-        {
-          "arity": 2,
-          "name": "when"
         }
       ],
       "specs?": true,
@@ -463,7 +455,19 @@
       "public_funs": [
         {
           "arity": 2,
-          "name": "when"
+          "name": "duplicate?"
+        },
+        {
+          "arity": 2,
+          "name": "reserve"
+        },
+        {
+          "arity": 2,
+          "name": "clear_in_flight"
+        },
+        {
+          "arity": 3,
+          "name": "mark_applied"
         }
       ],
       "specs?": true,
@@ -478,7 +482,7 @@
       "public_funs": [
         {
           "arity": 2,
-          "name": "when"
+          "name": "summary_for_event"
         }
       ],
       "specs?": true,
@@ -492,8 +496,12 @@
       "path": "lib/event_sales/analytics/cache_keys.ex",
       "public_funs": [
         {
-          "arity": 2,
-          "name": "when"
+          "arity": 1,
+          "name": "event_summary"
+        },
+        {
+          "arity": 1,
+          "name": "redis_event_snapshot"
         }
       ],
       "specs?": true,
@@ -519,8 +527,16 @@
           "name": "delete_table_for_test!"
         },
         {
+          "arity": 1,
+          "name": "get_event_summary"
+        },
+        {
+          "arity": 3,
+          "name": "put_event_summary"
+        },
+        {
           "arity": 2,
-          "name": "when"
+          "name": "invalidate_event"
         }
       ],
       "specs?": true,
@@ -534,8 +550,16 @@
       "path": "lib/event_sales/analytics/dashboard_pub_sub.ex",
       "public_funs": [
         {
+          "arity": 1,
+          "name": "event_topic"
+        },
+        {
+          "arity": 1,
+          "name": "subscribe_event"
+        },
+        {
           "arity": 2,
-          "name": "when"
+          "name": "broadcast_hot_state_updated"
         }
       ],
       "specs?": true,
@@ -554,7 +578,15 @@
         },
         {
           "arity": 2,
-          "name": "when"
+          "name": "get_event_detail"
+        },
+        {
+          "arity": 2,
+          "name": "recent_orders"
+        },
+        {
+          "arity": 2,
+          "name": "unmapped_items"
         }
       ],
       "specs?": true,
@@ -569,7 +601,7 @@
       "public_funs": [
         {
           "arity": 2,
-          "name": "when"
+          "name": "summary"
         }
       ],
       "specs?": true,
@@ -603,8 +635,8 @@
           "name": "request_rebuild"
         },
         {
-          "arity": 2,
-          "name": "when"
+          "arity": 1,
+          "name": "rebuild_finished"
         },
         {
           "arity": 0,
@@ -652,10 +684,6 @@
           "name": "business_date"
         },
         {
-          "arity": 2,
-          "name": "when"
-        },
-        {
           "arity": 3,
           "name": "same_business_date?"
         },
@@ -699,8 +727,12 @@
           "name": "notify_order_processed"
         },
         {
-          "arity": 2,
-          "name": "when"
+          "arity": 4,
+          "name": "notify_order_reconciled"
+        },
+        {
+          "arity": 4,
+          "name": "notify_order_imported"
         }
       ],
       "specs?": true,
@@ -738,10 +770,6 @@
       "path": "lib/event_sales/analytics/snapshot_codec.ex",
       "public_funs": [
         {
-          "arity": 2,
-          "name": "when"
-        },
-        {
           "arity": 1,
           "name": "encode"
         },
@@ -762,7 +790,7 @@
       "public_funs": [
         {
           "arity": 2,
-          "name": "when"
+          "name": "event_ids_page"
         }
       ],
       "specs?": true,
@@ -776,8 +804,12 @@
       "path": "lib/event_sales/analytics/snapshot_reader.ex",
       "public_funs": [
         {
-          "arity": 2,
-          "name": "when"
+          "arity": 1,
+          "name": "summary_for_event"
+        },
+        {
+          "arity": 3,
+          "name": "daily_summary_for_event"
         }
       ],
       "specs?": true,
@@ -792,7 +824,7 @@
       "public_funs": [
         {
           "arity": 2,
-          "name": "when"
+          "name": "refresh_event"
         },
         {
           "arity": 3,
@@ -843,8 +875,8 @@
           "name": "redix_name"
         },
         {
-          "arity": 2,
-          "name": "when"
+          "arity": 3,
+          "name": "put"
         },
         {
           "arity": 1,
@@ -882,10 +914,6 @@
       "parse_error": null,
       "path": "lib/event_sales/analytics/workers/refresh_snapshot_worker.ex",
       "public_funs": [
-        {
-          "arity": 2,
-          "name": "when"
-        },
         {
           "arity": 1,
           "name": "perform"
@@ -1022,10 +1050,6 @@
         },
         {
           "arity": 2,
-          "name": "when"
-        },
-        {
-          "arity": 2,
           "name": "log"
         }
       ],
@@ -1039,10 +1063,6 @@
       "parse_error": null,
       "path": "lib/event_sales/audit/metadata_sanitizer.ex",
       "public_funs": [
-        {
-          "arity": 2,
-          "name": "when"
-        },
         {
           "arity": 1,
           "name": "sanitize"
@@ -1098,7 +1118,7 @@
       "public_funs": [
         {
           "arity": 2,
-          "name": "when"
+          "name": "emit_for_event"
         }
       ],
       "specs?": true,
@@ -1180,8 +1200,8 @@
       "path": "lib/event_sales/catalog/mapping_resolver.ex",
       "public_funs": [
         {
-          "arity": 2,
-          "name": "when"
+          "arity": 3,
+          "name": "resolve"
         }
       ],
       "specs?": true,
@@ -1210,8 +1230,8 @@
       "path": "lib/event_sales/catalog/missing_catalog_resolver.ex",
       "public_funs": [
         {
-          "arity": 2,
-          "name": "when"
+          "arity": 4,
+          "name": "recover_product"
         }
       ],
       "specs?": true,
@@ -1235,10 +1255,6 @@
         {
           "arity": 2,
           "name": "put"
-        },
-        {
-          "arity": 2,
-          "name": "when"
         },
         {
           "arity": 3,
@@ -1273,10 +1289,6 @@
       "parse_error": null,
       "path": "lib/event_sales/catalog/product_metadata_updater.ex",
       "public_funs": [
-        {
-          "arity": 2,
-          "name": "when"
-        },
         {
           "arity": 2,
           "name": "update_from_payload"
@@ -1498,10 +1510,6 @@
           "name": "fetch_attendees_page"
         },
         {
-          "arity": 2,
-          "name": "when"
-        },
-        {
           "arity": 1,
           "name": "safe_log_url"
         }
@@ -1521,8 +1529,8 @@
           "name": "exception"
         },
         {
-          "arity": 2,
-          "name": "when"
+          "arity": 1,
+          "name": "message"
         },
         {
           "arity": 1,
@@ -1571,8 +1579,8 @@
           "name": "exception"
         },
         {
-          "arity": 2,
-          "name": "when"
+          "arity": 1,
+          "name": "message"
         }
       ],
       "specs?": false,
@@ -1597,7 +1605,7 @@
       "public_funs": [
         {
           "arity": 2,
-          "name": "when"
+          "name": "apply"
         },
         {
           "arity": 1,
@@ -1638,8 +1646,8 @@
           "name": "accepted_headers"
         },
         {
-          "arity": 2,
-          "name": "when"
+          "arity": 1,
+          "name": "stream_rows"
         }
       ],
       "specs?": true,
@@ -1666,7 +1674,7 @@
         },
         {
           "arity": 2,
-          "name": "when"
+          "name": "queue_apply"
         },
         {
           "arity": 2,
@@ -1757,7 +1765,7 @@
         },
         {
           "arity": 2,
-          "name": "when"
+          "name": "matches_event_mapping?"
         },
         {
           "arity": 3,
@@ -1774,10 +1782,6 @@
       "parse_error": null,
       "path": "lib/event_sales/ingestion/parsers/woocommerce_order_parser.ex",
       "public_funs": [
-        {
-          "arity": 2,
-          "name": "when"
-        },
         {
           "arity": 1,
           "name": "parse"
@@ -1821,16 +1825,28 @@
           "name": "max_entry_bytes"
         },
         {
-          "arity": 2,
-          "name": "when"
+          "arity": 1,
+          "name": "key"
         },
         {
           "arity": 0,
           "name": "adapter_name"
         },
         {
+          "arity": 1,
+          "name": "push"
+        },
+        {
           "arity": 0,
           "name": "claim"
+        },
+        {
+          "arity": 1,
+          "name": "ack"
+        },
+        {
+          "arity": 1,
+          "name": "requeue"
         },
         {
           "arity": 0,
@@ -1839,6 +1855,14 @@
         {
           "arity": 0,
           "name": "processing_depth"
+        },
+        {
+          "arity": 1,
+          "name": "entry_from_intake_context"
+        },
+        {
+          "arity": 1,
+          "name": "decode_entry"
         }
       ],
       "specs?": true,
@@ -1862,12 +1886,20 @@
       "path": "lib/event_sales/ingestion/redis_webhook_buffer/redix_adapter.ex",
       "public_funs": [
         {
-          "arity": 2,
-          "name": "when"
+          "arity": 1,
+          "name": "push"
         },
         {
           "arity": 0,
           "name": "claim"
+        },
+        {
+          "arity": 1,
+          "name": "ack"
+        },
+        {
+          "arity": 1,
+          "name": "requeue"
         },
         {
           "arity": 0,
@@ -2067,8 +2099,8 @@
           "name": "start_link"
         },
         {
-          "arity": 2,
-          "name": "when"
+          "arity": 1,
+          "name": "run"
         },
         {
           "arity": 0,
@@ -2105,7 +2137,7 @@
         },
         {
           "arity": 2,
-          "name": "when"
+          "name": "checkout"
         },
         {
           "arity": 0,
@@ -2150,7 +2182,7 @@
         },
         {
           "arity": 2,
-          "name": "when"
+          "name": "put_raw_body"
         },
         {
           "arity": 1,
@@ -2168,8 +2200,12 @@
       "path": "lib/event_sales/ingestion/security/webhook_replay_guard.ex",
       "public_funs": [
         {
+          "arity": 1,
+          "name": "payload_hash"
+        },
+        {
           "arity": 2,
-          "name": "when"
+          "name": "classify_duplicate"
         },
         {
           "arity": 4,
@@ -2178,6 +2214,10 @@
         {
           "arity": 1,
           "name": "source_updated_at_from_payload"
+        },
+        {
+          "arity": 1,
+          "name": "sanitize_headers"
         }
       ],
       "specs?": true,
@@ -2216,10 +2256,6 @@
         {
           "arity": 2,
           "name": "event_scope"
-        },
-        {
-          "arity": 2,
-          "name": "when"
         }
       ],
       "specs?": true,
@@ -2233,8 +2269,8 @@
       "path": "lib/event_sales/ingestion/tickera_attendee_snapshot_hash.ex",
       "public_funs": [
         {
-          "arity": 2,
-          "name": "when"
+          "arity": 1,
+          "name": "hash"
         }
       ],
       "specs?": true,
@@ -2584,10 +2620,6 @@
         },
         {
           "arity": 2,
-          "name": "when"
-        },
-        {
-          "arity": 2,
           "name": "get_payload"
         }
       ],
@@ -2632,10 +2664,6 @@
       "path": "lib/event_sales/ingestion/webhook_event_store.ex",
       "public_funs": [
         {
-          "arity": 2,
-          "name": "when"
-        },
-        {
           "arity": 1,
           "name": "create_receive"
         }
@@ -2667,7 +2695,7 @@
       "public_funs": [
         {
           "arity": 2,
-          "name": "when"
+          "name": "process"
         }
       ],
       "specs?": true,
@@ -2683,10 +2711,6 @@
         {
           "arity": 2,
           "name": "replay_failed"
-        },
-        {
-          "arity": 2,
-          "name": "when"
         }
       ],
       "specs?": true,
@@ -2726,10 +2750,6 @@
       "parse_error": null,
       "path": "lib/event_sales/ingestion/workers/process_csv_import_worker.ex",
       "public_funs": [
-        {
-          "arity": 2,
-          "name": "when"
-        },
         {
           "arity": 1,
           "name": "perform"
@@ -2779,10 +2799,6 @@
       "path": "lib/event_sales/ingestion/workers/reconcile_orders_worker.ex",
       "public_funs": [
         {
-          "arity": 2,
-          "name": "when"
-        },
-        {
           "arity": 1,
           "name": "perform"
         }
@@ -2799,10 +2815,6 @@
       "parse_error": null,
       "path": "lib/event_sales/ingestion/workers/reconcile_tickera_attendees_worker.ex",
       "public_funs": [
-        {
-          "arity": 2,
-          "name": "when"
-        },
         {
           "arity": 1,
           "name": "perform"
@@ -2825,8 +2837,8 @@
           "name": "perform"
         },
         {
-          "arity": 2,
-          "name": "when"
+          "arity": 1,
+          "name": "drain_batch"
         }
       ],
       "specs?": true,
@@ -2841,10 +2853,6 @@
       "parse_error": null,
       "path": "lib/event_sales/ingestion/workers/sync_tickera_attendees_worker.ex",
       "public_funs": [
-        {
-          "arity": 2,
-          "name": "when"
-        },
         {
           "arity": 1,
           "name": "perform"
@@ -2914,10 +2922,6 @@
         {
           "arity": 1,
           "name": "migration_database_url"
-        },
-        {
-          "arity": 2,
-          "name": "when"
         }
       ],
       "specs?": true,
@@ -3015,10 +3019,6 @@
       "path": "lib/event_sales/sales/order_item_mapper.ex",
       "public_funs": [
         {
-          "arity": 2,
-          "name": "when"
-        },
-        {
           "arity": 1,
           "name": "map_item"
         },
@@ -3042,8 +3042,12 @@
       "path": "lib/event_sales/sales/order_upserter.ex",
       "public_funs": [
         {
-          "arity": 2,
-          "name": "when"
+          "arity": 3,
+          "name": "upsert_order"
+        },
+        {
+          "arity": 3,
+          "name": "upsert_normalized_order"
         },
         {
           "arity": 1,
@@ -3434,7 +3438,7 @@
         },
         {
           "arity": 2,
-          "name": "when"
+          "name": "translate_errors"
         }
       ],
       "specs?": false,
@@ -3740,7 +3744,7 @@
         },
         {
           "arity": 2,
-          "name": "when"
+          "name": "handle_info"
         },
         {
           "arity": 1,
@@ -3769,7 +3773,7 @@
         },
         {
           "arity": 2,
-          "name": "when"
+          "name": "handle_info"
         },
         {
           "arity": 1,
@@ -3839,8 +3843,8 @@
       "path": "lib/event_sales_web/live/admin/manual_action_rate_limiter.ex",
       "public_funs": [
         {
-          "arity": 2,
-          "name": "when"
+          "arity": 3,
+          "name": "allow?"
         },
         {
           "arity": 0,
@@ -3932,10 +3936,6 @@
       "parse_error": null,
       "path": "lib/event_sales_web/live/admin/session.ex",
       "public_funs": [
-        {
-          "arity": 2,
-          "name": "when"
-        },
         {
           "arity": 1,
           "name": "current_user"
@@ -4565,12 +4565,20 @@
           "name": "clear_ack_override!"
         },
         {
-          "arity": 2,
-          "name": "when"
+          "arity": 1,
+          "name": "push"
         },
         {
           "arity": 0,
           "name": "claim"
+        },
+        {
+          "arity": 1,
+          "name": "ack"
+        },
+        {
+          "arity": 1,
+          "name": "requeue"
         },
         {
           "arity": 0,
@@ -4635,11 +4643,7 @@
       "public_funs": [
         {
           "arity": 1,
-          "name": "perform"
-        },
-        {
-          "arity": 2,
-          "name": "when"
+          "name": "insert_test_job"
         },
         {
           "arity": 0,
@@ -4762,7 +4766,7 @@
         },
         {
           "arity": 2,
-          "name": "when"
+          "name": "refute_secret_leaks!"
         }
       ],
       "specs?": false,
@@ -4781,7 +4785,7 @@
         },
         {
           "arity": 2,
-          "name": "when"
+          "name": "signed_headers"
         }
       ],
       "specs?": true,

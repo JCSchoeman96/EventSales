@@ -34,6 +34,21 @@ defmodule Mix.Tasks.Project.IndexTest do
     end)
   end
 
+  @tag :project_index
+  test "check mode raises a clean stale message when an output is missing" do
+    root = temp_root()
+    write(root, "lib/sample.ex", "defmodule Sample do\nend\n")
+
+    in_root(root, fn ->
+      capture_io(fn -> Mix.Tasks.Project.Index.run([]) end)
+      File.rm!("docs/architecture/module_manifest.json")
+
+      assert_raise Mix.Error, ~r/stale: docs\/architecture\/module_manifest\.json/, fn ->
+        capture_io(fn -> Mix.Tasks.Project.Index.run(["--check"]) end)
+      end
+    end)
+  end
+
   defp temp_root do
     root =
       Path.join(System.tmp_dir!(), "project-index-task-#{System.unique_integer([:positive])}")

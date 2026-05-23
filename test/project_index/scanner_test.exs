@@ -78,6 +78,15 @@ defmodule ProjectIndex.ScannerTest do
     end
     """)
 
+    write(root, "lib/event_sales_web/plugs/admin_only.ex", """
+    defmodule EventSalesWeb.Plugs.AdminOnly do
+      import Plug.Conn
+
+      def init(opts), do: opts
+      def call(conn, _opts), do: conn
+    end
+    """)
+
     write(root, "lib/event_sales/ingestion/workers/process_webhook_worker.ex", """
     defmodule EventSales.Ingestion.Workers.ProcessWebhookWorker do
       use Oban.Worker, queue: :default
@@ -93,6 +102,7 @@ defmodule ProjectIndex.ScannerTest do
     assert names(result.phoenix.live_views) == ["EventSalesWeb.Admin.DashboardLive"]
     assert names(result.phoenix.controllers) == ["EventSalesWeb.PageController"]
     assert names(result.phoenix.components) == ["EventSalesWeb.Admin.Components.StatCard"]
+    assert names(result.phoenix.plugs) == ["EventSalesWeb.Plugs.AdminOnly"]
     assert names(result.oban.workers) == ["EventSales.Ingestion.Workers.ProcessWebhookWorker"]
   end
 
