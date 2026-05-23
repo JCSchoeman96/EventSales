@@ -38,7 +38,9 @@ defmodule EventSales.DomainBoundariesTest do
     EventSales.Ingestion.Resources.TickeraAttendeeSyncRun,
     EventSales.Ingestion.Resources.TickeraAttendeeSnapshot,
     EventSales.Ingestion.Resources.TickeraReconciliationRun,
-    EventSales.Ingestion.Resources.TickeraReconciliationFinding
+    EventSales.Ingestion.Resources.TickeraReconciliationFinding,
+    EventSales.Ingestion.Resources.CsvImportBatch,
+    EventSales.Ingestion.Resources.CsvImportRow
   ]
   @analytics_resources [
     EventSales.Analytics.Resources.EventAggregateSnapshot,
@@ -145,6 +147,24 @@ defmodule EventSales.DomainBoundariesTest do
              implementation_files("lib/event_sales_web") |> files_containing("use Ash.Resource")
   end
 
+  test "core business modules do not depend on web-layer modules" do
+    allowed_files = [
+      "lib/event_sales/application.ex"
+    ]
+
+    matches =
+      implementation_files("lib/event_sales")
+      |> Enum.reject(fn path ->
+        path
+        |> Path.relative_to_cwd()
+        |> String.replace("\\", "/")
+        |> then(&(&1 in allowed_files))
+      end)
+      |> files_containing("EventSalesWeb.")
+
+    assert [] = matches
+  end
+
   test "web layer and MappingResolver do not reference WooCommerce REST boundaries" do
     scan_paths =
       implementation_files("lib/event_sales_web") ++
@@ -171,6 +191,25 @@ defmodule EventSales.DomainBoundariesTest do
       for pattern <- forbidden_patterns do
         assert [] = files_containing([path], pattern)
       end
+    end
+  end
+
+  test "event-scoped dashboard facade remains aggregate-only" do
+    forbidden_patterns = [
+      "Repo",
+      "sales_order_items",
+      "sales_orders",
+      "OrderItem",
+      "Order",
+      "WooCommerce",
+      "Tickera",
+      "EventSalesWeb"
+    ]
+
+    scan_path = "lib/event_sales/analytics/event_scoped_dashboard.ex"
+
+    for pattern <- forbidden_patterns do
+      assert [] = files_containing([scan_path], pattern)
     end
   end
 

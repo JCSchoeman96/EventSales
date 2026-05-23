@@ -40,6 +40,7 @@ defmodule EventSales.Telemetry do
   @product_metadata_cache_hit [:event_sales, :catalog, :product_metadata_cache, :hit]
   @product_metadata_cache_miss [:event_sales, :catalog, :product_metadata_cache, :miss]
   @product_metadata_cache_put [:event_sales, :catalog, :product_metadata_cache, :put]
+  @product_metadata_update [:event_sales, :catalog, :product_metadata, :update]
   @reconciliation_start [:event_sales, :reconciliation, :start]
   @reconciliation_stop [:event_sales, :reconciliation, :stop]
   @reconciliation_exception [:event_sales, :reconciliation, :exception]
@@ -49,6 +50,12 @@ defmodule EventSales.Telemetry do
   @tickera_sync_start [:event_sales, :tickera, :sync, :start]
   @tickera_sync_stop [:event_sales, :tickera, :sync, :stop]
   @tickera_sync_exception [:event_sales, :tickera, :sync, :exception]
+  @csv_import_dry_run_start [:event_sales, :csv_import, :dry_run, :start]
+  @csv_import_dry_run_stop [:event_sales, :csv_import, :dry_run, :stop]
+  @csv_import_dry_run_exception [:event_sales, :csv_import, :dry_run, :exception]
+  @csv_import_apply_start [:event_sales, :csv_import, :apply, :start]
+  @csv_import_apply_stop [:event_sales, :csv_import, :apply, :stop]
+  @csv_import_apply_exception [:event_sales, :csv_import, :apply, :exception]
 
   @doc """
   Returns every custom EventSales telemetry event name defined in Slice 0.8.
@@ -80,6 +87,7 @@ defmodule EventSales.Telemetry do
       product_metadata_cache_hit(),
       product_metadata_cache_miss(),
       product_metadata_cache_put(),
+      product_metadata_update(),
       reconciliation_start(),
       reconciliation_stop(),
       reconciliation_exception(),
@@ -88,7 +96,13 @@ defmodule EventSales.Telemetry do
       tickera_request_exception(),
       tickera_sync_start(),
       tickera_sync_stop(),
-      tickera_sync_exception()
+      tickera_sync_exception(),
+      csv_import_dry_run_start(),
+      csv_import_dry_run_stop(),
+      csv_import_dry_run_exception(),
+      csv_import_apply_start(),
+      csv_import_apply_stop(),
+      csv_import_apply_exception()
     ]
   end
 
@@ -188,6 +202,10 @@ defmodule EventSales.Telemetry do
   @spec product_metadata_cache_put() :: event_name()
   def product_metadata_cache_put, do: @product_metadata_cache_put
 
+  @doc "WooCommerce product.updated metadata handling result."
+  @spec product_metadata_update() :: event_name()
+  def product_metadata_update, do: @product_metadata_update
+
   @doc "Scoped order reconciliation started."
   @spec reconciliation_start() :: event_name()
   def reconciliation_start, do: @reconciliation_start
@@ -223,6 +241,30 @@ defmodule EventSales.Telemetry do
   @doc "Tickera attendee sync step failed unexpectedly."
   @spec tickera_sync_exception() :: event_name()
   def tickera_sync_exception, do: @tickera_sync_exception
+
+  @doc "CSV import dry-run started."
+  @spec csv_import_dry_run_start() :: event_name()
+  def csv_import_dry_run_start, do: @csv_import_dry_run_start
+
+  @doc "CSV import dry-run completed."
+  @spec csv_import_dry_run_stop() :: event_name()
+  def csv_import_dry_run_stop, do: @csv_import_dry_run_stop
+
+  @doc "CSV import dry-run failed unexpectedly."
+  @spec csv_import_dry_run_exception() :: event_name()
+  def csv_import_dry_run_exception, do: @csv_import_dry_run_exception
+
+  @doc "CSV import apply started."
+  @spec csv_import_apply_start() :: event_name()
+  def csv_import_apply_start, do: @csv_import_apply_start
+
+  @doc "CSV import apply completed."
+  @spec csv_import_apply_stop() :: event_name()
+  def csv_import_apply_stop, do: @csv_import_apply_stop
+
+  @doc "CSV import apply failed unexpectedly."
+  @spec csv_import_apply_exception() :: event_name()
+  def csv_import_apply_exception, do: @csv_import_apply_exception
 
   @doc "Returns the low-cardinality product metadata cache event for the cache outcome."
   @spec product_metadata_cache_event(:hit | :miss | :put) :: event_name()

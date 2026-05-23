@@ -86,6 +86,59 @@ defmodule EventSales.Accounts.AuthenticationRolesEventAccessTest do
     refute Policies.can_view_revenue?(event_staff, @event_a)
   end
 
+  test "event dashboard access helper allows admin and assigned event roles only" do
+    admin = create_user!("dashboard-helper-admin@example.com")
+    global_staff = create_user!("dashboard-helper-global-staff@example.com")
+    owner = create_user!("dashboard-helper-owner@example.com")
+    event_staff = create_user!("dashboard-helper-event-staff@example.com")
+    unassigned = create_user!("dashboard-helper-unassigned@example.com")
+
+    create_global_role!(admin, :admin)
+    create_global_role!(global_staff, :staff)
+    create_event_grant!(owner, @event_a, :event_owner)
+    create_event_grant!(event_staff, @event_a, :event_staff)
+
+    assert Policies.can_access_event_dashboard?(admin, @event_a)
+    assert Policies.can_access_event_dashboard?(owner, @event_a)
+    assert Policies.can_access_event_dashboard?(event_staff, @event_a)
+
+    refute Policies.can_access_event_dashboard?(global_staff, @event_a)
+    refute Policies.can_access_event_dashboard?(unassigned, @event_a)
+    refute Policies.can_access_event_dashboard?(owner, @event_b)
+    refute Policies.can_access_event_dashboard?(owner, "not-a-uuid")
+    refute Policies.can_access_event_dashboard?(admin, "not-a-uuid")
+
+    assert Policies.event_dashboard_role(admin, @event_a) == :admin
+    assert Policies.event_dashboard_role(owner, @event_a) == :event_owner
+    assert Policies.event_dashboard_role(event_staff, @event_a) == :event_staff
+    assert Policies.event_dashboard_role(global_staff, @event_a) == nil
+    assert Policies.event_dashboard_role(admin, "not-a-uuid") == nil
+  end
+
+  test "event dashboard role prefers admin, then owner, then staff" do
+    admin_owner = create_user!("dashboard-helper-admin-owner@example.com")
+    owner_staff = create_user!("dashboard-helper-owner-staff@example.com")
+
+    create_global_role!(admin_owner, :admin)
+    create_event_grant!(admin_owner, @event_a, :event_owner)
+    create_event_grant!(owner_staff, @event_a, :event_owner)
+    create_event_grant!(owner_staff, @event_a, :event_staff)
+
+    assert Policies.event_dashboard_role(admin_owner, @event_a) == :admin
+    assert Policies.event_dashboard_role(owner_staff, @event_a) == :event_owner
+  end
+
+  test "expired grants do not authorize event dashboard access" do
+    owner = create_user!("dashboard-helper-expired-owner@example.com")
+
+    create_event_grant!(owner, @event_a, :event_owner,
+      expires_at: DateTime.add(DateTime.utc_now(), -60, :second)
+    )
+
+    refute Policies.can_access_event_dashboard?(owner, @event_a)
+    assert Policies.event_dashboard_role(owner, @event_a) == nil
+  end
+
   test "duplicate role, user role, and active event grant are rejected" do
     user = create_user!("duplicates@example.com")
     role = create_role(:staff)

@@ -18,10 +18,11 @@ defmodule EventSales.Sales.OrderUpserter do
   Parses and persists a WooCommerce order payload for a source system.
   """
   @spec upsert_order(Ecto.UUID.t(), map()) :: upsert_result()
-  def upsert_order(source_system_id, payload)
+  @spec upsert_order(Ecto.UUID.t(), map(), keyword()) :: upsert_result()
+  def upsert_order(source_system_id, payload, opts \\ [])
       when is_binary(source_system_id) and is_map(payload) do
     with {:ok, normalized} <- WoocommerceOrderParser.parse(payload) do
-      upsert_normalized_order(source_system_id, normalized)
+      upsert_normalized_order(source_system_id, normalized, opts)
     end
   end
 
@@ -29,14 +30,15 @@ defmodule EventSales.Sales.OrderUpserter do
   Persists an already parsed WooCommerce order for a source system.
   """
   @spec upsert_normalized_order(Ecto.UUID.t(), map()) :: upsert_result()
-  def upsert_normalized_order(source_system_id, normalized)
+  @spec upsert_normalized_order(Ecto.UUID.t(), map(), keyword()) :: upsert_result()
+  def upsert_normalized_order(source_system_id, normalized, opts \\ [])
       when is_binary(source_system_id) and is_map(normalized) do
     case find_order(source_system_id, normalized.woo_order_id) do
       {:ok, nil} ->
-        create_order_with_children(source_system_id, normalized)
+        create_order_with_children(source_system_id, normalized, opts)
 
       {:ok, %Order{} = existing} ->
-        update_order_with_children(existing, source_system_id, normalized)
+        update_order_with_children(existing, source_system_id, normalized, opts)
 
       {:error, reason} ->
         {:error, reason}
@@ -54,32 +56,34 @@ defmodule EventSales.Sales.OrderUpserter do
     upsert_order(source_system_id, payload)
   end
 
-  defp create_order_with_children(source_system_id, normalized) do
+  defp create_order_with_children(source_system_id, normalized, opts) do
     attrs = order_attrs(source_system_id, normalized)
 
-    with {:ok, order} <- Ash.create(Order, attrs, action: :create_normalized, domain: Sales),
-         :ok <- upsert_child_rows(order, normalized) do
+    with {:ok, order} <- ash_create(Order, attrs, :create_normalized, opts),
+         :ok <- upsert_child_rows(order, normalized, opts) do
       {:ok, order}
     end
   end
 
-  defp update_order_with_children(%Order{} = existing, source_system_id, normalized) do
+  defp update_order_with_children(%Order{} = existing, source_system_id, normalized, opts) do
     cond do
       DateTime.compare(existing.updated_at_source, normalized.updated_at_source) == :gt ->
         {:ok, :stale_noop}
 
       SourceVersionGuard.allows_update?(existing.updated_at_source, normalized.updated_at_source) ->
         with {:ok, order} <-
-               Ash.update(existing, order_attrs(source_system_id, normalized),
-                 action: :sync_from_normalized,
-                 domain: Sales
+               ash_update(
+                 existing,
+                 order_attrs(source_system_id, normalized),
+                 :sync_from_normalized,
+                 opts
                ),
-             :ok <- upsert_child_rows(order, normalized) do
+             :ok <- upsert_child_rows(order, normalized, opts) do
           {:ok, order}
         end
 
       DateTime.compare(existing.updated_at_source, normalized.updated_at_source) == :eq ->
-        with :ok <- upsert_child_rows(existing, normalized) do
+        with :ok <- upsert_child_rows(existing, normalized, opts) do
           {:ok, existing}
         end
 
@@ -88,29 +92,31 @@ defmodule EventSales.Sales.OrderUpserter do
     end
   end
 
-  defp upsert_child_rows(%Order{} = order, normalized) do
-    with :ok <- upsert_order_items(order, normalized.line_items),
-         :ok <- upsert_coupons(order, normalized.coupons),
+  defp upsert_child_rows(%Order{} = order, normalized, opts) do
+    with :ok <- upsert_order_items(order, normalized.line_items, opts),
+         :ok <- upsert_coupons(order, normalized.coupons, opts),
          {:ok, _mapped_items} <- OrderItemMapper.map_pending_items_for_order(order) do
       :ok
     end
   end
 
-  defp upsert_order_items(%Order{} = order, line_items) do
+  defp upsert_order_items(%Order{} = order, line_items, opts) do
     Enum.reduce_while(line_items, :ok, fn line_item, :ok ->
-      case upsert_order_item(order, line_item) do
+      case upsert_order_item(order, line_item, opts) do
         {:ok, _item} -> {:cont, :ok}
         {:error, reason} -> {:halt, {:error, reason}}
       end
     end)
   end
 
-  defp upsert_order_item(%Order{} = order, line_item) do
+  defp upsert_order_item(%Order{} = order, line_item, opts) do
     case find_order_item(order.id, line_item.woo_line_item_id) do
       {:ok, nil} ->
         attrs =
           line_item
           |> Map.take([
+            :event_id,
+            :ticket_type_id,
             :woo_line_item_id,
             :woo_product_id,
             :woo_variation_id,
@@ -124,11 +130,13 @@ defmodule EventSales.Sales.OrderUpserter do
           ])
           |> Map.put(:order_id, order.id)
 
-        Ash.create(OrderItem, attrs, action: :create_normalized, domain: Sales)
+        ash_create(OrderItem, attrs, :create_normalized, opts)
 
       {:ok, %OrderItem{} = existing} ->
         attrs =
           Map.take(line_item, [
+            :event_id,
+            :ticket_type_id,
             :woo_product_id,
             :woo_variation_id,
             :name,
@@ -138,23 +146,37 @@ defmodule EventSales.Sales.OrderUpserter do
             :discount_total
           ])
 
-        Ash.update(existing, attrs, action: :sync_from_order, domain: Sales)
+        action =
+          if mapped_import_line?(line_item) do
+            :sync_from_mapped_import
+          else
+            :sync_from_order
+          end
+
+        ash_update(existing, attrs, action, opts)
 
       {:error, reason} ->
         {:error, reason}
     end
   end
 
-  defp upsert_coupons(%Order{} = order, coupons) do
+  defp mapped_import_line?(line_item) do
+    Map.has_key?(line_item, :event_id) and
+      Map.has_key?(line_item, :ticket_type_id) and
+      not is_nil(Map.get(line_item, :event_id)) and
+      not is_nil(Map.get(line_item, :ticket_type_id))
+  end
+
+  defp upsert_coupons(%Order{} = order, coupons, opts) do
     Enum.reduce_while(coupons, :ok, fn coupon, :ok ->
-      case upsert_coupon(order, coupon) do
+      case upsert_coupon(order, coupon, opts) do
         {:ok, _coupon} -> {:cont, :ok}
         {:error, reason} -> {:halt, {:error, reason}}
       end
     end)
   end
 
-  defp upsert_coupon(%Order{} = order, coupon) do
+  defp upsert_coupon(%Order{} = order, coupon, opts) do
     case find_coupon(order.id, coupon.code) do
       {:ok, nil} ->
         attrs =
@@ -162,11 +184,11 @@ defmodule EventSales.Sales.OrderUpserter do
           |> Map.take([:code, :discount_amount, :discount_tax])
           |> Map.put(:order_id, order.id)
 
-        Ash.create(CouponSnapshot, attrs, action: :create_snapshot, domain: Sales)
+        ash_create(CouponSnapshot, attrs, :create_snapshot, opts)
 
       {:ok, %CouponSnapshot{} = existing} ->
         attrs = Map.take(coupon, [:discount_amount, :discount_tax])
-        Ash.update(existing, attrs, action: :sync_from_order, domain: Sales)
+        ash_update(existing, attrs, :sync_from_order, opts)
 
       {:error, reason} ->
         {:error, reason}
@@ -192,6 +214,26 @@ defmodule EventSales.Sales.OrderUpserter do
     |> Ash.Query.filter(order_id == ^order_id and code == ^code)
     |> Ash.Query.limit(1)
     |> Ash.read_one(domain: Sales)
+  end
+
+  defp ash_opts(opts, action) do
+    opts
+    |> Keyword.get(:ash_action_opts, [])
+    |> Keyword.merge(action: action, domain: Sales)
+  end
+
+  defp ash_create(resource, attrs, action, opts) do
+    case Ash.create(resource, attrs, ash_opts(opts, action)) do
+      {:ok, record, _notifications} -> {:ok, record}
+      other -> other
+    end
+  end
+
+  defp ash_update(record, attrs, action, opts) do
+    case Ash.update(record, attrs, ash_opts(opts, action)) do
+      {:ok, record, _notifications} -> {:ok, record}
+      other -> other
+    end
   end
 
   defp order_attrs(source_system_id, normalized) do

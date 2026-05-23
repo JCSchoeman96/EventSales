@@ -93,10 +93,10 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLiveTest do
     assert html =~ "GA"
     assert html =~ "completed"
     assert html =~ "MIXED-DETAIL"
+    assert html =~ "Private Customer"
+    assert html =~ "private@example.test"
     assert html =~ "Detail Unmapped"
     refute html =~ "Other Detail Event"
-    refute html =~ "Private Customer"
-    refute html =~ "private@example.test"
     refute html =~ "txn_private"
   end
 
@@ -240,7 +240,7 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLiveTest do
     assert html =~ "Event not found"
   end
 
-  test "export and import placeholders are disabled without click handlers", %{conn: conn} do
+  test "event detail renders event-scoped export links", %{conn: conn} do
     admin = create_user!("event-detail-placeholders@example.com")
     create_global_role!(admin, :admin)
 
@@ -257,10 +257,12 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLiveTest do
       |> sign_in_as(admin)
       |> live("/admin/events/#{event.id}")
 
-    assert html =~ "Export CSV"
+    assert html =~ "Summary CSV"
+    assert html =~ "Orders CSV"
     assert html =~ "Import CSV"
-    assert html =~ ~s(disabled)
-    refute html =~ "phx-click=\"export"
+    assert html =~ ~s(/admin/events/#{event.id}/exports/summary.csv)
+    assert html =~ ~s(/admin/events/#{event.id}/exports/orders.csv)
+    refute html =~ "Export CSV"
     refute html =~ "phx-click=\"import"
   end
 

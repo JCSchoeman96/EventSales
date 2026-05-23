@@ -169,6 +169,12 @@ defmodule EventSalesWeb.Telemetry do
         tags: [:scope, :reason, :source],
         description: "Event-scoped dashboard cache invalidations"
       ),
+      counter("event_sales.catalog.product_metadata.update.count",
+        event_name: EventSales.Telemetry.product_metadata_update(),
+        measurement: :count,
+        tags: [:result, :source],
+        description: "WooCommerce product.updated metadata handling results"
+      ),
       counter("event_sales.snapshots.refresh.start.count",
         event_name: EventSales.Telemetry.snapshot_refresh_start(),
         measurement: :count,

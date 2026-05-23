@@ -2,7 +2,7 @@ defmodule EventSales.Ingestion.WebhookIntake do
   @moduledoc """
   Web-agnostic WooCommerce webhook intake: verify, persist, enqueue.
 
-  HTTP mapping lives in `EventSalesWeb.WebhookController`.
+  HTTP mapping lives in the web-layer webhook controller.
   """
 
   require Ash.Query

@@ -1,4 +1,4 @@
-defmodule EventSalesWeb.Live.Components.StatusBadge do
+defmodule EventSalesWeb.Live.Admin.Components.StatusBadge do
   @moduledoc """
   Presentational status badge for dashboard status counts.
   """

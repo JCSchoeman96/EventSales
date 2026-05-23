@@ -164,8 +164,8 @@ defmodule EventSales.Analytics.EventDetailTest do
 
     assert {:ok, %{rows: [recent]}} = EventDetail.recent_orders(event.id, actor: admin)
     assert recent.order_number == "MIXED-1"
-    refute Map.has_key?(recent, :customer_email)
-    refute Map.has_key?(recent, :customer_name)
+    assert recent.customer_email == "private@example.test"
+    assert recent.customer_name == "Private Customer"
     refute Map.has_key?(recent, :payment_gateway_transaction_id)
   end
 

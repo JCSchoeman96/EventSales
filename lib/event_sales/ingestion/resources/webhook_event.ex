@@ -9,7 +9,12 @@ defmodule EventSales.Ingestion.Resources.WebhookEvent do
 
   @statuses [:queued, :processing, :processed, :failed, :ignored, :buffered]
   @accepted_via_values [:postgres, :redis_buffer]
-  @ignore_reasons [:unsupported_topic, :stale_source_version, :duplicate_resource_hash]
+  @ignore_reasons [
+    :unsupported_topic,
+    :stale_source_version,
+    :duplicate_resource_hash,
+    :unknown_product
+  ]
 
   postgres do
     table "ingestion_webhook_events"

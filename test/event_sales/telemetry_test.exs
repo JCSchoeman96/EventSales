@@ -32,6 +32,12 @@ defmodule EventSales.TelemetryTest do
                     %{topic: "order.created"}}
   end
 
+  test "CSV import apply telemetry events are named" do
+    assert EventSalesTelemetry.csv_import_apply_start() in EventSalesTelemetry.event_names()
+    assert EventSalesTelemetry.csv_import_apply_stop() in EventSalesTelemetry.event_names()
+    assert EventSalesTelemetry.csv_import_apply_exception() in EventSalesTelemetry.event_names()
+  end
+
   test "webhook accepted and rejected counters are defined" do
     assert_metric(%Counter{
       name: [:event_sales, :webhook, :accepted, :count],
@@ -172,6 +178,15 @@ defmodule EventSales.TelemetryTest do
       event_name: [:event_sales, :cache, :invalidate],
       measurement: :count,
       tags: [:scope, :reason, :source]
+    })
+  end
+
+  test "product metadata update telemetry metric is defined with low-cardinality tags" do
+    assert_metric_with_tags(%Counter{
+      name: [:event_sales, :catalog, :product_metadata, :update, :count],
+      event_name: [:event_sales, :catalog, :product_metadata, :update],
+      measurement: :count,
+      tags: [:result, :source]
     })
   end
 

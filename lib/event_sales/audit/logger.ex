@@ -32,6 +32,10 @@ defmodule EventSales.Audit.Logger do
   @spec csv_apply_requested(attrs()) :: result()
   def csv_apply_requested(attrs), do: log(:csv_apply_requested, attrs)
 
+  @doc "Writes an event sales export request audit event."
+  @spec event_sales_export_requested(attrs()) :: result()
+  def event_sales_export_requested(attrs), do: log(:event_sales_export_requested, attrs)
+
   @doc "Writes a webhook replay request audit event."
   @spec webhook_replay_requested(attrs()) :: result()
   def webhook_replay_requested(attrs), do: log(:webhook_replay_requested, attrs)

@@ -1,2 +1,3 @@
-placeholder
-Slice 16.0 fixture pending
+woo_order_id,order_number,woo_line_item_id,woo_product_id,woo_variation_id,quantity,line_subtotal,line_total,line_discount_total,order_raw_total,order_raw_discount_total,order_raw_tax_total,status,currency,created_at_source,updated_at_source,completed_at,name,customer_name,customer_email,payment_method,payment_method_title,payment_gateway_transaction_id
+12001,ES-12001,72001,501,601,1,500.00,500.00,0.00,500.00,0.00,0.00,completed,ZAR,2026-05-01T09:00:00,2026-05-01T09:05:00,2026-05-01T09:05:00,General Admission,Synthetic Duplicate,synthetic.duplicate@example.test,payfast,Synthetic PayFast,synthetic-txn-duplicate-1
+12001,ES-12001,72001,501,601,1,500.00,500.00,0.00,500.00,0.00,0.00,completed,ZAR,2026-05-01T09:00:00,2026-05-01T09:05:00,2026-05-01T09:05:00,General Admission,Synthetic Duplicate,synthetic.duplicate@example.test,payfast,Synthetic PayFast,synthetic-txn-duplicate-1

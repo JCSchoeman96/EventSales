@@ -9,13 +9,14 @@ defmodule EventSales.Ingestion.WebhookProcessor do
   require Ash.Query
 
   alias EventSales.Ingestion
+  alias EventSales.Ingestion.Handlers.ProductUpdatedHandler
   alias EventSales.Ingestion.Resources.WebhookEvent
   alias EventSales.Sales.OrderUpserter
   alias EventSales.Sales.Resources.Order
   alias EventSales.Telemetry
 
   @terminal_statuses [:processed, :failed, :ignored]
-  @supported_order_topics ~w(order.created order.updated)
+  @supported_topics ~w(order.created order.updated product.updated)
   @max_error_message_length 512
 
   @type process_result ::
@@ -72,10 +73,20 @@ defmodule EventSales.Ingestion.WebhookProcessor do
       {:error, {:transient, reason}} ->
         mark_retryable(event, reason)
         {:error, {:transient, reason}}
+
+      {:ignored, reason} ->
+        mark_ignored(event, reason)
     end
   end
 
   defp default_handler(%WebhookEvent{} = event) do
+    case event.topic do
+      topic when topic in ~w(order.created order.updated) -> handle_order_event(event)
+      "product.updated" -> ProductUpdatedHandler.handle(event)
+    end
+  end
+
+  defp handle_order_event(%WebhookEvent{} = event) do
     case order_upserter().upsert_from_webhook_event(event) do
       {:ok, %Order{} = order} ->
         notify_order_processed(order, event)
@@ -154,7 +165,7 @@ defmodule EventSales.Ingestion.WebhookProcessor do
     end
   end
 
-  defp unsupported_topic?(topic), do: topic not in @supported_order_topics
+  defp unsupported_topic?(topic), do: topic not in @supported_topics
 
   defp duplicate_processed_resource_hash?(%WebhookEvent{} = event) do
     WebhookEvent
