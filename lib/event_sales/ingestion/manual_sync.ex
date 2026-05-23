@@ -68,8 +68,10 @@ defmodule EventSales.Ingestion.ManualSync do
       |> Map.put_new(:requested_via, :manual)
 
     SyncRun
-    |> Ash.Changeset.for_create(:queue_manual_scoped, attrs)
-    |> Ash.create(domain: Ingestion, context: %{scoped_manual_sync_now: now})
+    |> Ash.Changeset.for_create(:queue_manual_scoped, attrs,
+      context: %{scoped_manual_sync_now: now}
+    )
+    |> Ash.create(domain: Ingestion)
   end
 
   defp enqueue_worker(%SyncRun{id: sync_run_id}) do

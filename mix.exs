@@ -71,6 +71,8 @@ defmodule EventSales.MixProject do
       {:oban, "~> 2.22"},
       {:nimble_csv, "~> 1.3"},
       {:redix, "~> 1.5"},
+      {:igniter, "~> 0.8", only: [:dev, :test], runtime: false},
+      {:owl, "~> 0.13", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.14.1", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
