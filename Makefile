@@ -11,7 +11,7 @@ HEX_HTTP_CONCURRENCY ?= 1
 export HEX_HTTP_TIMEOUT
 export HEX_HTTP_CONCURRENCY
 
-.PHONY: ready ready-local doctor sync toolchain deps infra db db-test quality test reset-db stop-db logs-db
+.PHONY: ready ready-local doctor sync toolchain deps infra db db-test quality test index index-check reset-db stop-db logs-db
 
 ready: doctor sync toolchain deps infra db db-test quality test
 	@echo ""
@@ -89,6 +89,12 @@ test:
 	@echo ""
 	@echo "=== 12. Running Full Test Suite ==="
 	@$(MIX) test
+
+index:
+	@$(MIX) project.index
+
+index-check:
+	@$(MIX) project.index --check
 
 reset-db:
 	@echo ""

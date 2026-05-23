@@ -1,0 +1,4793 @@
+{
+  "files": [
+    "config/config.exs",
+    "config/dev.exs",
+    "config/prod.exs",
+    "config/runtime.exs",
+    "config/test.exs",
+    "lib/event_sales.ex",
+    "lib/event_sales/accounts.ex",
+    "lib/event_sales/accounts/auth_overrides.ex",
+    "lib/event_sales/accounts/pii_policy.ex",
+    "lib/event_sales/accounts/policies.ex",
+    "lib/event_sales/accounts/resources/event_access_grant.ex",
+    "lib/event_sales/accounts/resources/role.ex",
+    "lib/event_sales/accounts/resources/user.ex",
+    "lib/event_sales/accounts/resources/user_role.ex",
+    "lib/event_sales/admin_read/pagination.ex",
+    "lib/event_sales/analytics.ex",
+    "lib/event_sales/analytics/admin_dashboard.ex",
+    "lib/event_sales/analytics/aggregate_event.ex",
+    "lib/event_sales/analytics/aggregate_event_idempotency.ex",
+    "lib/event_sales/analytics/aggregators/event_aggregator.ex",
+    "lib/event_sales/analytics/cache_keys.ex",
+    "lib/event_sales/analytics/dashboard_cache.ex",
+    "lib/event_sales/analytics/dashboard_pub_sub.ex",
+    "lib/event_sales/analytics/event_detail.ex",
+    "lib/event_sales/analytics/event_scoped_dashboard.ex",
+    "lib/event_sales/analytics/hot_state_aggregator.ex",
+    "lib/event_sales/analytics/metric_rules.ex",
+    "lib/event_sales/analytics/order_processed_notifier.ex",
+    "lib/event_sales/analytics/resources/daily_sales_aggregate_snapshot.ex",
+    "lib/event_sales/analytics/resources/event_aggregate_snapshot.ex",
+    "lib/event_sales/analytics/snapshot_codec.ex",
+    "lib/event_sales/analytics/snapshot_queries.ex",
+    "lib/event_sales/analytics/snapshot_reader.ex",
+    "lib/event_sales/analytics/snapshot_refresh.ex",
+    "lib/event_sales/analytics/snapshot_store/adapter.ex",
+    "lib/event_sales/analytics/snapshot_store/noop_adapter.ex",
+    "lib/event_sales/analytics/snapshot_store/redix_adapter.ex",
+    "lib/event_sales/analytics/workers/rebuild_hot_state_worker.ex",
+    "lib/event_sales/analytics/workers/refresh_snapshot_worker.ex",
+    "lib/event_sales/application.ex",
+    "lib/event_sales/ash_baseline/domain.ex",
+    "lib/event_sales/ash_baseline/resources/auth_user.ex",
+    "lib/event_sales/ash_baseline/resources/paper_trail_proof.ex",
+    "lib/event_sales/ash_baseline/resources/state_machine_proof.ex",
+    "lib/event_sales/audit.ex",
+    "lib/event_sales/audit/logger.ex",
+    "lib/event_sales/audit/metadata_sanitizer.ex",
+    "lib/event_sales/audit/paper_trail.ex",
+    "lib/event_sales/audit/resources/audit_log.ex",
+    "lib/event_sales/catalog.ex",
+    "lib/event_sales/catalog/cache_invalidation.ex",
+    "lib/event_sales/catalog/changes/mapping_side_effects_after_action.ex",
+    "lib/event_sales/catalog/changes/normalize_base_url.ex",
+    "lib/event_sales/catalog/changes/validate_event_dates.ex",
+    "lib/event_sales/catalog/changes/validate_ticket_type_event.ex",
+    "lib/event_sales/catalog/mapping_resolver.ex",
+    "lib/event_sales/catalog/mapping_side_effects.ex",
+    "lib/event_sales/catalog/missing_catalog_resolver.ex",
+    "lib/event_sales/catalog/product_metadata_cache.ex",
+    "lib/event_sales/catalog/product_metadata_updater.ex",
+    "lib/event_sales/catalog/resources/event.ex",
+    "lib/event_sales/catalog/resources/event_dashboard_setting.ex",
+    "lib/event_sales/catalog/resources/product_mapping.ex",
+    "lib/event_sales/catalog/resources/source_system.ex",
+    "lib/event_sales/catalog/resources/ticket_type.ex",
+    "lib/event_sales/catalog/workers/mapping_changed_worker.ex",
+    "lib/event_sales/exports/csv_stream.ex",
+    "lib/event_sales/exports/event_sales_csv.ex",
+    "lib/event_sales/ingestion.ex",
+    "lib/event_sales/ingestion/admin_reconciliation_dashboard.ex",
+    "lib/event_sales/ingestion/clients/httpc_transport.ex",
+    "lib/event_sales/ingestion/clients/tickera_attendee_client.ex",
+    "lib/event_sales/ingestion/clients/tickera_error.ex",
+    "lib/event_sales/ingestion/clients/woocommerce_client.ex",
+    "lib/event_sales/ingestion/clients/woocommerce_error.ex",
+    "lib/event_sales/ingestion/clients/woocommerce_transport.ex",
+    "lib/event_sales/ingestion/csv/apply_import.ex",
+    "lib/event_sales/ingestion/csv/dry_run_validator.ex",
+    "lib/event_sales/ingestion/csv/parser.ex",
+    "lib/event_sales/ingestion/csv_imports.ex",
+    "lib/event_sales/ingestion/findings_csv_export.ex",
+    "lib/event_sales/ingestion/handlers/product_updated_handler.ex",
+    "lib/event_sales/ingestion/intake_backpressure.ex",
+    "lib/event_sales/ingestion/manual_sync.ex",
+    "lib/event_sales/ingestion/order_reconciliation.ex",
+    "lib/event_sales/ingestion/parsers/woocommerce_order_parser.ex",
+    "lib/event_sales/ingestion/reconciliation_peak_guard.ex",
+    "lib/event_sales/ingestion/redis_webhook_buffer.ex",
+    "lib/event_sales/ingestion/redis_webhook_buffer/adapter.ex",
+    "lib/event_sales/ingestion/redis_webhook_buffer/redix_adapter.ex",
+    "lib/event_sales/ingestion/resources/csv_import_batch.ex",
+    "lib/event_sales/ingestion/resources/csv_import_row.ex",
+    "lib/event_sales/ingestion/resources/sync_cursor.ex",
+    "lib/event_sales/ingestion/resources/sync_run.ex",
+    "lib/event_sales/ingestion/resources/tickera_attendee_snapshot.ex",
+    "lib/event_sales/ingestion/resources/tickera_attendee_sync_run.ex",
+    "lib/event_sales/ingestion/resources/tickera_event_source.ex",
+    "lib/event_sales/ingestion/resources/tickera_reconciliation_finding.ex",
+    "lib/event_sales/ingestion/resources/tickera_reconciliation_run.ex",
+    "lib/event_sales/ingestion/resources/webhook_delivery_failure.ex",
+    "lib/event_sales/ingestion/resources/webhook_event.ex",
+    "lib/event_sales/ingestion/rest_circuit_breaker.ex",
+    "lib/event_sales/ingestion/rest_rate_limiter.ex",
+    "lib/event_sales/ingestion/security/raw_body_reader.ex",
+    "lib/event_sales/ingestion/security/webhook_replay_guard.ex",
+    "lib/event_sales/ingestion/security/webhook_signature.ex",
+    "lib/event_sales/ingestion/sync_debug.ex",
+    "lib/event_sales/ingestion/tickera_attendee_snapshot_hash.ex",
+    "lib/event_sales/ingestion/tickera_attendee_snapshots.ex",
+    "lib/event_sales/ingestion/tickera_attendee_sync.ex",
+    "lib/event_sales/ingestion/tickera_attendee_sync_queue.ex",
+    "lib/event_sales/ingestion/tickera_attendee_sync_runs.ex",
+    "lib/event_sales/ingestion/tickera_event_sources.ex",
+    "lib/event_sales/ingestion/tickera_reconciliation.ex",
+    "lib/event_sales/ingestion/tickera_reconciliation_findings.ex",
+    "lib/event_sales/ingestion/tickera_reconciliation_runs.ex",
+    "lib/event_sales/ingestion/validations/authorized_tickera_state_mutation.ex",
+    "lib/event_sales/ingestion/validations/bounded_metadata.ex",
+    "lib/event_sales/ingestion/validations/scoped_manual_sync.ex",
+    "lib/event_sales/ingestion/webhook_debug.ex",
+    "lib/event_sales/ingestion/webhook_enqueue.ex",
+    "lib/event_sales/ingestion/webhook_event_store.ex",
+    "lib/event_sales/ingestion/webhook_intake.ex",
+    "lib/event_sales/ingestion/webhook_processor.ex",
+    "lib/event_sales/ingestion/webhook_replay.ex",
+    "lib/event_sales/ingestion/workers/backfill_orders_worker.ex",
+    "lib/event_sales/ingestion/workers/missing_catalog_resolution_worker.ex",
+    "lib/event_sales/ingestion/workers/process_csv_import_worker.ex",
+    "lib/event_sales/ingestion/workers/process_webhook_worker.ex",
+    "lib/event_sales/ingestion/workers/purge_raw_payloads_worker.ex",
+    "lib/event_sales/ingestion/workers/reconcile_orders_worker.ex",
+    "lib/event_sales/ingestion/workers/reconcile_tickera_attendees_worker.ex",
+    "lib/event_sales/ingestion/workers/redis_webhook_buffer_drainer.ex",
+    "lib/event_sales/ingestion/workers/sync_tickera_attendees_worker.ex",
+    "lib/event_sales/maintenance/cache_cleanup_worker.ex",
+    "lib/event_sales/maintenance/db_topology_check_worker.ex",
+    "lib/event_sales/maintenance/oban_topology_smoke_worker.ex",
+    "lib/event_sales/release.ex",
+    "lib/event_sales/repo.ex",
+    "lib/event_sales/sales.ex",
+    "lib/event_sales/sales/changes/guard_source_version.ex",
+    "lib/event_sales/sales/changes/sync_status_from_source.ex",
+    "lib/event_sales/sales/changes/validate_ticket_type_event.ex",
+    "lib/event_sales/sales/order_item_mapper.ex",
+    "lib/event_sales/sales/order_upserter.ex",
+    "lib/event_sales/sales/resources/coupon_snapshot.ex",
+    "lib/event_sales/sales/resources/order.ex",
+    "lib/event_sales/sales/resources/order_item.ex",
+    "lib/event_sales/sales/source_version_guard.ex",
+    "lib/event_sales/sales/status_rules.ex",
+    "lib/event_sales/telemetry.ex",
+    "lib/event_sales_web.ex",
+    "lib/event_sales_web/auth/hooks.ex",
+    "lib/event_sales_web/auth/routes.ex",
+    "lib/event_sales_web/components/core_components.ex",
+    "lib/event_sales_web/components/layouts.ex",
+    "lib/event_sales_web/components/layouts/root.html.heex",
+    "lib/event_sales_web/controllers/admin/event_export_controller.ex",
+    "lib/event_sales_web/controllers/admin/reconciliation_export_controller.ex",
+    "lib/event_sales_web/controllers/auth_controller.ex",
+    "lib/event_sales_web/controllers/error_html.ex",
+    "lib/event_sales_web/controllers/error_json.ex",
+    "lib/event_sales_web/controllers/export_controller.ex",
+    "lib/event_sales_web/controllers/health_controller.ex",
+    "lib/event_sales_web/controllers/page_controller.ex",
+    "lib/event_sales_web/controllers/page_html.ex",
+    "lib/event_sales_web/controllers/page_html/home.html.heex",
+    "lib/event_sales_web/controllers/webhook_controller.ex",
+    "lib/event_sales_web/endpoint.ex",
+    "lib/event_sales_web/live/admin/components/order_table.ex",
+    "lib/event_sales_web/live/admin/components/sales_chart.ex",
+    "lib/event_sales_web/live/admin/components/stale_data_banner.ex",
+    "lib/event_sales_web/live/admin/components/stat_card.ex",
+    "lib/event_sales_web/live/admin/components/status_badge.ex",
+    "lib/event_sales_web/live/admin/components/unmapped_item_alert.ex",
+    "lib/event_sales_web/live/admin/dashboard_live.ex",
+    "lib/event_sales_web/live/admin/event_detail_live.ex",
+    "lib/event_sales_web/live/admin/events_live.ex",
+    "lib/event_sales_web/live/admin/imports_live.ex",
+    "lib/event_sales_web/live/admin/manual_action_rate_limiter.ex",
+    "lib/event_sales_web/live/admin/mappings_live.ex",
+    "lib/event_sales_web/live/admin/orders_live.ex",
+    "lib/event_sales_web/live/admin/pagination.ex",
+    "lib/event_sales_web/live/admin/reconciliation_live.ex",
+    "lib/event_sales_web/live/admin/session.ex",
+    "lib/event_sales_web/live/admin/sync_live.ex",
+    "lib/event_sales_web/live/admin/webhooks_live.ex",
+    "lib/event_sales_web/live/auth/reset_password_live.ex",
+    "lib/event_sales_web/live/auth/sign_in_live.ex",
+    "lib/event_sales_web/oban_web_resolver.ex",
+    "lib/event_sales_web/plugs/admin_only.ex",
+    "lib/event_sales_web/plugs/internal_only.ex",
+    "lib/event_sales_web/plugs/load_current_user.ex",
+    "lib/event_sales_web/plugs/rate_limit_manual_actions.ex",
+    "lib/event_sales_web/plugs/rate_limit_webhook_intake.ex",
+    "lib/event_sales_web/plugs/raw_body_reader.ex",
+    "lib/event_sales_web/presenters/customer_presenter.ex",
+    "lib/event_sales_web/router.ex",
+    "lib/event_sales_web/telemetry.ex",
+    "lib/mix/tasks/project.index.ex",
+    "lib/project_index/elixir_file.ex",
+    "lib/project_index/render_json.ex",
+    "lib/project_index/render_markdown.ex",
+    "lib/project_index/scanner.ex",
+    "rel/overlays/.gitkeep",
+    "test/support/analytics/error_event_aggregator.ex",
+    "test/support/analytics/memory_event_aggregator.ex",
+    "test/support/analytics/memory_snapshot_store_adapter.ex",
+    "test/support/analytics/selective_event_aggregator.ex",
+    "test/support/auth_helpers.ex",
+    "test/support/conn_case.ex",
+    "test/support/data_case.ex",
+    "test/support/db_topology_helpers.ex",
+    "test/support/fakes/fake_tickera_attendee_client.ex",
+    "test/support/fixture_helpers.ex",
+    "test/support/fixture_verification_helpers.ex",
+    "test/support/ingestion/memory_webhook_buffer_adapter.ex",
+    "test/support/ingestion/stub_webhook_event_store.ex",
+    "test/support/mapping_setup_helpers.ex",
+    "test/support/oban_helpers.ex",
+    "test/support/sales_helpers.ex",
+    "test/support/telemetry_helpers.ex",
+    "test/support/tickera_sync_test_helpers.ex",
+    "test/support/woocommerce_webhook_helpers.ex"
+  ],
+  "generator": "mix project.index",
+  "modules": [
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales",
+      "parse_error": null,
+      "path": "lib/event_sales.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Accounts",
+      "parse_error": null,
+      "path": "lib/event_sales/accounts.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Domain"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Accounts.AuthOverrides",
+      "parse_error": null,
+      "path": "lib/event_sales/accounts/auth_overrides.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 3,
+      "moduledoc?": true,
+      "name": "EventSales.Accounts.PiiPolicy",
+      "parse_error": null,
+      "path": "lib/event_sales/accounts/pii_policy.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "customer_pii_visibility"
+        },
+        {
+          "arity": 1,
+          "name": "can_view_raw_payload?"
+        },
+        {
+          "arity": 0,
+          "name": "staff_customer_pii_visibility"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 7,
+      "moduledoc?": true,
+      "name": "EventSales.Accounts.Policies",
+      "parse_error": null,
+      "path": "lib/event_sales/accounts/policies.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "global_admin?"
+        },
+        {
+          "arity": 1,
+          "name": "global_staff?"
+        },
+        {
+          "arity": 3,
+          "name": "has_event_role?"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 3,
+          "name": "has_unexpired_event_grant?"
+        },
+        {
+          "arity": 2,
+          "name": "can_view_revenue?"
+        },
+        {
+          "arity": 2,
+          "name": "can_access_event_dashboard?"
+        },
+        {
+          "arity": 2,
+          "name": "event_dashboard_role"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Accounts.Resources.EventAccessGrant",
+      "parse_error": null,
+      "path": "lib/event_sales/accounts/resources/event_access_grant.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Accounts.Resources.Role",
+      "parse_error": null,
+      "path": "lib/event_sales/accounts/resources/role.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Accounts.Resources.User",
+      "parse_error": null,
+      "path": "lib/event_sales/accounts/resources/user.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Accounts.Resources.UserRole",
+      "parse_error": null,
+      "path": "lib/event_sales/accounts/resources/user_role.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.AdminRead.Pagination",
+      "parse_error": null,
+      "path": "lib/event_sales/admin_read/pagination.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "pagination"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 2,
+          "name": "normalize_positive_integer"
+        },
+        {
+          "arity": 2,
+          "name": "split_page"
+        },
+        {
+          "arity": 3,
+          "name": "page_info"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Domain"
+      ]
+    },
+    {
+      "docs_count": 3,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.AdminDashboard",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/admin_dashboard.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "snapshot"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.AggregateEvent",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/aggregate_event.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "new"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 4,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.AggregateEventIdempotency",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/aggregate_event_idempotency.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "when"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.Aggregators.EventAggregator",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/aggregators/event_aggregator.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "when"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 2,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.CacheKeys",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/cache_keys.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "when"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 6,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.DashboardCache",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/dashboard_cache.ex",
+      "public_funs": [
+        {
+          "arity": 0,
+          "name": "table_name"
+        },
+        {
+          "arity": 0,
+          "name": "ensure_table!"
+        },
+        {
+          "arity": 0,
+          "name": "delete_table_for_test!"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 3,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.DashboardPubSub",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/dashboard_pub_sub.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "when"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.EventDetail",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/event_detail.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "list_events"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.EventScopedDashboard",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/event_scoped_dashboard.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "when"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 7,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.HotStateAggregator",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/hot_state_aggregator.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "start_link"
+        },
+        {
+          "arity": 2,
+          "name": "apply_event"
+        },
+        {
+          "arity": 1,
+          "name": "summary_for_event"
+        },
+        {
+          "arity": 0,
+          "name": "status"
+        },
+        {
+          "arity": 1,
+          "name": "request_rebuild"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 0,
+          "name": "reset_for_test!"
+        },
+        {
+          "arity": 0,
+          "name": "delete_cache_table_for_test!"
+        },
+        {
+          "arity": 1,
+          "name": "init"
+        },
+        {
+          "arity": 2,
+          "name": "handle_continue"
+        },
+        {
+          "arity": 3,
+          "name": "handle_call"
+        },
+        {
+          "arity": 2,
+          "name": "handle_cast"
+        }
+      ],
+      "specs?": true,
+      "uses": [
+        "GenServer"
+      ]
+    },
+    {
+      "docs_count": 9,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.MetricRules",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/metric_rules.ex",
+      "public_funs": [
+        {
+          "arity": 0,
+          "name": "business_timezone"
+        },
+        {
+          "arity": 2,
+          "name": "business_date"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 3,
+          "name": "same_business_date?"
+        },
+        {
+          "arity": 2,
+          "name": "counts_as_sold?"
+        },
+        {
+          "arity": 2,
+          "name": "sold_quantity"
+        },
+        {
+          "arity": 2,
+          "name": "completed_revenue"
+        },
+        {
+          "arity": 2,
+          "name": "visible_in_status_breakdown?"
+        },
+        {
+          "arity": 1,
+          "name": "status_bucket"
+        },
+        {
+          "arity": 2,
+          "name": "summarize"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 3,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.OrderProcessedNotifier",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/order_processed_notifier.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "notify_order_processed"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.Resources.DailySalesAggregateSnapshot",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/resources/daily_sales_aggregate_snapshot.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.Resources.EventAggregateSnapshot",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/resources/event_aggregate_snapshot.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 2,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.SnapshotCodec",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/snapshot_codec.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 1,
+          "name": "encode"
+        },
+        {
+          "arity": 1,
+          "name": "decode"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.SnapshotQueries",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/snapshot_queries.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "when"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 2,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.SnapshotReader",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/snapshot_reader.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "when"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 2,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.SnapshotRefresh",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/snapshot_refresh.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 3,
+          "name": "refresh_daily"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.SnapshotStore.Adapter",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/snapshot_store/adapter.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.SnapshotStore.NoopAdapter",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/snapshot_store/noop_adapter.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "put"
+        },
+        {
+          "arity": 1,
+          "name": "list_event_summaries"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.SnapshotStore.RedixAdapter",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/snapshot_store/redix_adapter.ex",
+      "public_funs": [
+        {
+          "arity": 0,
+          "name": "redix_name"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 1,
+          "name": "list_event_summaries"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.Workers.RebuildHotStateWorker",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/workers/rebuild_hot_state_worker.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "perform"
+        },
+        {
+          "arity": 1,
+          "name": "timeout"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Oban.Worker"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.Workers.RefreshSnapshotWorker",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/workers/refresh_snapshot_worker.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 1,
+          "name": "perform"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Oban.Worker"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Application",
+      "parse_error": null,
+      "path": "lib/event_sales/application.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "start"
+        },
+        {
+          "arity": 3,
+          "name": "config_change"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Application"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.AshBaseline.Domain",
+      "parse_error": null,
+      "path": "lib/event_sales/ash_baseline/domain.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Domain"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.AshBaseline.Resources.AuthUser",
+      "parse_error": null,
+      "path": "lib/event_sales/ash_baseline/resources/auth_user.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.AshBaseline.Resources.PaperTrailProof",
+      "parse_error": null,
+      "path": "lib/event_sales/ash_baseline/resources/paper_trail_proof.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.AshBaseline.Resources.StateMachineProof",
+      "parse_error": null,
+      "path": "lib/event_sales/ash_baseline/resources/state_machine_proof.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Audit",
+      "parse_error": null,
+      "path": "lib/event_sales/audit.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Domain"
+      ]
+    },
+    {
+      "docs_count": 10,
+      "moduledoc?": true,
+      "name": "EventSales.Audit.Logger",
+      "parse_error": null,
+      "path": "lib/event_sales/audit/logger.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "manual_sync_requested"
+        },
+        {
+          "arity": 1,
+          "name": "tickera_attendee_sync_requested"
+        },
+        {
+          "arity": 1,
+          "name": "tickera_reconciliation_run_requested"
+        },
+        {
+          "arity": 1,
+          "name": "csv_apply_requested"
+        },
+        {
+          "arity": 1,
+          "name": "event_sales_export_requested"
+        },
+        {
+          "arity": 1,
+          "name": "webhook_replay_requested"
+        },
+        {
+          "arity": 1,
+          "name": "log_webhook_replay_ignored"
+        },
+        {
+          "arity": 1,
+          "name": "log_webhook_duplicate_payload_mismatch"
+        },
+        {
+          "arity": 1,
+          "name": "log_webhook_stale_replay"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 2,
+          "name": "log"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Audit.MetadataSanitizer",
+      "parse_error": null,
+      "path": "lib/event_sales/audit/metadata_sanitizer.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 1,
+          "name": "sanitize"
+        },
+        {
+          "arity": 0,
+          "name": "max_bytes"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Audit.PaperTrail",
+      "parse_error": null,
+      "path": "lib/event_sales/audit/paper_trail.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Audit.Resources.AuditLog",
+      "parse_error": null,
+      "path": "lib/event_sales/audit/resources/audit_log.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Domain"
+      ]
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.CacheInvalidation",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/cache_invalidation.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "when"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.Changes.MappingSideEffectsAfterAction",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/changes/mapping_side_effects_after_action.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "change"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource.Change"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.Changes.NormalizeBaseUrl",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/changes/normalize_base_url.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "change"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource.Change"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.Changes.ValidateEventDates",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/changes/validate_event_dates.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "change"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource.Change"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.Changes.ValidateTicketTypeEvent",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/changes/validate_ticket_type_event.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "change"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource.Change"
+      ]
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.MappingResolver",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/mapping_resolver.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "when"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.MappingSideEffects",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/mapping_side_effects.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "on_mapping_changed!"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.MissingCatalogResolver",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/missing_catalog_resolver.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "when"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 5,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.ProductMetadataCache",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/product_metadata_cache.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "start_link"
+        },
+        {
+          "arity": 3,
+          "name": "get"
+        },
+        {
+          "arity": 2,
+          "name": "put"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 3,
+          "name": "invalidate"
+        },
+        {
+          "arity": 0,
+          "name": "cleanup_expired"
+        },
+        {
+          "arity": 0,
+          "name": "reset_for_test!"
+        },
+        {
+          "arity": 1,
+          "name": "init"
+        },
+        {
+          "arity": 3,
+          "name": "handle_call"
+        }
+      ],
+      "specs?": true,
+      "uses": [
+        "GenServer"
+      ]
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.ProductMetadataUpdater",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/product_metadata_updater.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 2,
+          "name": "update_from_payload"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.Resources.Event",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/resources/event.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.Resources.EventDashboardSetting",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/resources/event_dashboard_setting.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.Resources.ProductMapping",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/resources/product_mapping.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.Resources.SourceSystem",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/resources/source_system.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.Resources.TicketType",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/resources/ticket_type.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.Workers.MappingChangedWorker",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/workers/mapping_changed_worker.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "perform"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Oban.Worker"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Exports.CsvStream",
+      "parse_error": null,
+      "path": "lib/event_sales/exports/csv_stream.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "encode_rows"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Exports.EventSalesCsv",
+      "parse_error": null,
+      "path": "lib/event_sales/exports/event_sales_csv.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "summary_csv"
+        },
+        {
+          "arity": 2,
+          "name": "orders_csv"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Domain"
+      ]
+    },
+    {
+      "docs_count": 3,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.AdminReconciliationDashboard",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/admin_reconciliation_dashboard.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "snapshot"
+        },
+        {
+          "arity": 1,
+          "name": "list_runs"
+        },
+        {
+          "arity": 1,
+          "name": "list_findings"
+        },
+        {
+          "arity": 2,
+          "name": "get_finding"
+        },
+        {
+          "arity": 2,
+          "name": "finding_row"
+        },
+        {
+          "arity": 3,
+          "name": "resolve_finding"
+        },
+        {
+          "arity": 3,
+          "name": "ignore_finding"
+        },
+        {
+          "arity": 2,
+          "name": "reopen_finding"
+        },
+        {
+          "arity": 2,
+          "name": "queue_attendee_sync"
+        },
+        {
+          "arity": 2,
+          "name": "queue_reconciliation"
+        },
+        {
+          "arity": 1,
+          "name": "stream_findings_for_export"
+        },
+        {
+          "arity": 1,
+          "name": "filter_opts_from"
+        },
+        {
+          "arity": 1,
+          "name": "export_row_limit"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Clients.HttpcTransport",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/clients/httpc_transport.ex",
+      "public_funs": [
+        {
+          "arity": 5,
+          "name": "request"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 2,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Clients.TickeraAttendeeClient",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/clients/tickera_attendee_client.ex",
+      "public_funs": [
+        {
+          "arity": 5,
+          "name": "fetch_attendees_page"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 1,
+          "name": "safe_log_url"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Clients.TickeraError",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/clients/tickera_error.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "exception"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 1,
+          "name": "retryable?"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 4,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Clients.WooCommerceClient",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/clients/woocommerce_client.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "fetch_order"
+        },
+        {
+          "arity": 2,
+          "name": "fetch_product"
+        },
+        {
+          "arity": 2,
+          "name": "list_orders"
+        },
+        {
+          "arity": 2,
+          "name": "list_products"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Clients.WooCommerceError",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/clients/woocommerce_error.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "exception"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Clients.WooCommerceTransport",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/clients/woocommerce_transport.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 2,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Csv.ApplyImport",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/csv/apply_import.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 1,
+          "name": "mark_rows_applied"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Csv.DryRunValidator",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/csv/dry_run_validator.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "validate_file"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 3,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Csv.Parser",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/csv/parser.ex",
+      "public_funs": [
+        {
+          "arity": 0,
+          "name": "required_headers"
+        },
+        {
+          "arity": 0,
+          "name": "accepted_headers"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 2,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.CsvImports",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/csv_imports.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "dry_run_file"
+        },
+        {
+          "arity": 1,
+          "name": "list_batches"
+        },
+        {
+          "arity": 2,
+          "name": "get_batch"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 2,
+          "name": "list_rows"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.FindingsCsvExport",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/findings_csv_export.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "build"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Handlers.ProductUpdatedHandler",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/handlers/product_updated_handler.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "handle"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 2,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.IntakeBackpressure",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/intake_backpressure.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "pool_saturated?"
+        },
+        {
+          "arity": 1,
+          "name": "classify_persist_error"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.ManualSync",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/manual_sync.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "queue_manual_scoped"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 4,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.OrderReconciliation",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/order_reconciliation.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "load_or_init_cursor"
+        },
+        {
+          "arity": 2,
+          "name": "woo_params"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 3,
+          "name": "run_step"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Parsers.WoocommerceOrderParser",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/parsers/woocommerce_order_parser.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 1,
+          "name": "parse"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.ReconciliationPeakGuard",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/reconciliation_peak_guard.ex",
+      "public_funs": [
+        {
+          "arity": 4,
+          "name": "validate"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 13,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.RedisWebhookBuffer",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/redis_webhook_buffer.ex",
+      "public_funs": [
+        {
+          "arity": 0,
+          "name": "redix_name"
+        },
+        {
+          "arity": 0,
+          "name": "max_entries"
+        },
+        {
+          "arity": 0,
+          "name": "max_entry_bytes"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 0,
+          "name": "adapter_name"
+        },
+        {
+          "arity": 0,
+          "name": "claim"
+        },
+        {
+          "arity": 0,
+          "name": "depth"
+        },
+        {
+          "arity": 0,
+          "name": "processing_depth"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.RedisWebhookBuffer.Adapter",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/redis_webhook_buffer/adapter.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.RedisWebhookBuffer.RedixAdapter",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/redis_webhook_buffer/redix_adapter.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 0,
+          "name": "claim"
+        },
+        {
+          "arity": 0,
+          "name": "depth"
+        },
+        {
+          "arity": 0,
+          "name": "processing_depth"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Resources.CsvImportBatch",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/resources/csv_import_batch.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Resources.CsvImportRow",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/resources/csv_import_row.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Resources.SyncCursor",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/resources/sync_cursor.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Resources.SyncRun",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/resources/sync_run.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "set_started_at"
+        },
+        {
+          "arity": 2,
+          "name": "set_finished_at"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Resources.TickeraAttendeeSnapshot",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/resources/tickera_attendee_snapshot.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "normalize_snapshot"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Resources.TickeraAttendeeSyncRun",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/resources/tickera_attendee_sync_run.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "set_started_at"
+        },
+        {
+          "arity": 2,
+          "name": "set_finished_at"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Resources.TickeraEventSource",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/resources/tickera_event_source.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "normalize_config"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Resources.TickeraReconciliationFinding",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/resources/tickera_reconciliation_finding.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "set_resolved_at"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Resources.TickeraReconciliationRun",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/resources/tickera_reconciliation_run.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "set_started_at"
+        },
+        {
+          "arity": 2,
+          "name": "set_finished_at"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Resources.WebhookDeliveryFailure",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/resources/webhook_delivery_failure.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Resources.WebhookEvent",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/resources/webhook_event.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 3,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.RestCircuitBreaker",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/rest_circuit_breaker.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "start_link"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 0,
+          "name": "snapshot"
+        },
+        {
+          "arity": 0,
+          "name": "reset_for_test!"
+        },
+        {
+          "arity": 1,
+          "name": "init"
+        },
+        {
+          "arity": 3,
+          "name": "handle_call"
+        }
+      ],
+      "specs?": true,
+      "uses": [
+        "GenServer"
+      ]
+    },
+    {
+      "docs_count": 3,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.RestRateLimiter",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/rest_rate_limiter.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "start_link"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 0,
+          "name": "snapshot"
+        },
+        {
+          "arity": 1,
+          "name": "reset_for_test!"
+        },
+        {
+          "arity": 1,
+          "name": "init"
+        },
+        {
+          "arity": 3,
+          "name": "handle_call"
+        },
+        {
+          "arity": 2,
+          "name": "handle_cast"
+        },
+        {
+          "arity": 2,
+          "name": "handle_info"
+        }
+      ],
+      "specs?": true,
+      "uses": [
+        "GenServer"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Security.RawBodyReader",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/security/raw_body_reader.ex",
+      "public_funs": [
+        {
+          "arity": 0,
+          "name": "raw_body_key"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 1,
+          "name": "fetch_raw_body"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Security.WebhookReplayGuard",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/security/webhook_replay_guard.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 4,
+          "name": "check_stale"
+        },
+        {
+          "arity": 1,
+          "name": "source_updated_at_from_payload"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Security.WebhookSignature",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/security/webhook_signature.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "verify"
+        },
+        {
+          "arity": 2,
+          "name": "sign"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.SyncDebug",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/sync_debug.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "list_runs"
+        },
+        {
+          "arity": 2,
+          "name": "event_scope"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.TickeraAttendeeSnapshotHash",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/tickera_attendee_snapshot_hash.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "when"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.TickeraAttendeeSnapshots",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/tickera_attendee_snapshots.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "list_for_event"
+        },
+        {
+          "arity": 2,
+          "name": "list_for_source"
+        },
+        {
+          "arity": 3,
+          "name": "get_by_ticket_code"
+        },
+        {
+          "arity": 2,
+          "name": "upsert_from_tickera"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.TickeraAttendeeSync",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/tickera_attendee_sync.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "run_step"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.TickeraAttendeeSyncQueue",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/tickera_attendee_sync_queue.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "queue_manual"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.TickeraAttendeeSyncRuns",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/tickera_attendee_sync_runs.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "list_runs"
+        },
+        {
+          "arity": 2,
+          "name": "get_run"
+        },
+        {
+          "arity": 3,
+          "name": "queue_manual"
+        },
+        {
+          "arity": 2,
+          "name": "mark_started"
+        },
+        {
+          "arity": 2,
+          "name": "mark_resumed"
+        },
+        {
+          "arity": 2,
+          "name": "mark_completed"
+        },
+        {
+          "arity": 2,
+          "name": "cancel"
+        },
+        {
+          "arity": 3,
+          "name": "mark_paused"
+        },
+        {
+          "arity": 3,
+          "name": "mark_failed"
+        },
+        {
+          "arity": 3,
+          "name": "record_page"
+        },
+        {
+          "arity": 3,
+          "name": "record_counts"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.TickeraEventSources",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/tickera_event_sources.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "list_sources"
+        },
+        {
+          "arity": 2,
+          "name": "get_source"
+        },
+        {
+          "arity": 2,
+          "name": "get_source_for_event"
+        },
+        {
+          "arity": 2,
+          "name": "create_source"
+        },
+        {
+          "arity": 3,
+          "name": "update_source"
+        },
+        {
+          "arity": 2,
+          "name": "activate_source"
+        },
+        {
+          "arity": 2,
+          "name": "deactivate_source"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.TickeraReconciliation",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/tickera_reconciliation.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "run"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.TickeraReconciliationFindings",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/tickera_reconciliation_findings.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "list_for_event"
+        },
+        {
+          "arity": 2,
+          "name": "list_for_run"
+        },
+        {
+          "arity": 2,
+          "name": "get_finding"
+        },
+        {
+          "arity": 1,
+          "name": "list_filtered"
+        },
+        {
+          "arity": 1,
+          "name": "count_filtered"
+        },
+        {
+          "arity": 2,
+          "name": "upsert_open"
+        },
+        {
+          "arity": 3,
+          "name": "resolve"
+        },
+        {
+          "arity": 3,
+          "name": "ignore"
+        },
+        {
+          "arity": 2,
+          "name": "reopen"
+        },
+        {
+          "arity": 1,
+          "name": "source_scope_key"
+        },
+        {
+          "arity": 1,
+          "name": "fingerprint"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.TickeraReconciliationRuns",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/tickera_reconciliation_runs.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "list_runs"
+        },
+        {
+          "arity": 2,
+          "name": "get_run"
+        },
+        {
+          "arity": 2,
+          "name": "queue_manual_for_event"
+        },
+        {
+          "arity": 3,
+          "name": "queue_manual"
+        },
+        {
+          "arity": 2,
+          "name": "mark_started"
+        },
+        {
+          "arity": 3,
+          "name": "mark_completed"
+        },
+        {
+          "arity": 3,
+          "name": "mark_failed"
+        },
+        {
+          "arity": 2,
+          "name": "cancel"
+        },
+        {
+          "arity": 3,
+          "name": "record_counts"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Validations.AuthorizedTickeraStateMutation",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/validations/authorized_tickera_state_mutation.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "init"
+        },
+        {
+          "arity": 3,
+          "name": "validate"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource.Validation"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Validations.BoundedMetadata",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/validations/bounded_metadata.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "init"
+        },
+        {
+          "arity": 3,
+          "name": "validate"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource.Validation"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Validations.ScopedManualSync",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/validations/scoped_manual_sync.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "init"
+        },
+        {
+          "arity": 3,
+          "name": "validate"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource.Validation"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.WebhookDebug",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/webhook_debug.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "list_events"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 2,
+          "name": "get_payload"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.WebhookEnqueue",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/webhook_enqueue.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "enqueue_processing_once"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "Default",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/webhook_event_store.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "create_receive"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.WebhookEventStore",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/webhook_event_store.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 1,
+          "name": "create_receive"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.WebhookIntake",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/webhook_intake.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "accept"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.WebhookProcessor",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/webhook_processor.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "when"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.WebhookReplay",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/webhook_replay.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "replay_failed"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Workers.BackfillOrdersWorker",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/workers/backfill_orders_worker.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Workers.MissingCatalogResolutionWorker",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/workers/missing_catalog_resolution_worker.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "perform"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Oban.Worker"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Workers.ProcessCsvImportWorker",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/workers/process_csv_import_worker.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 1,
+          "name": "perform"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Oban.Worker"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Workers.ProcessWebhookWorker",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/workers/process_webhook_worker.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "perform"
+        },
+        {
+          "arity": 1,
+          "name": "backoff"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Oban.Worker"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Workers.PurgeRawPayloadsWorker",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/workers/purge_raw_payloads_worker.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Workers.ReconcileOrdersWorker",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/workers/reconcile_orders_worker.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 1,
+          "name": "perform"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Oban.Worker"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Workers.ReconcileTickeraAttendeesWorker",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/workers/reconcile_tickera_attendees_worker.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 1,
+          "name": "perform"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Oban.Worker"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Workers.RedisWebhookBufferDrainer",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/workers/redis_webhook_buffer_drainer.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "perform"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        }
+      ],
+      "specs?": true,
+      "uses": [
+        "Oban.Worker"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Workers.SyncTickeraAttendeesWorker",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/workers/sync_tickera_attendees_worker.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 1,
+          "name": "perform"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Oban.Worker"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Maintenance.CacheCleanupWorker",
+      "parse_error": null,
+      "path": "lib/event_sales/maintenance/cache_cleanup_worker.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Maintenance.DbTopologyCheckWorker",
+      "parse_error": null,
+      "path": "lib/event_sales/maintenance/db_topology_check_worker.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Maintenance.ObanTopologySmokeWorker",
+      "parse_error": null,
+      "path": "lib/event_sales/maintenance/oban_topology_smoke_worker.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "perform"
+        },
+        {
+          "arity": 1,
+          "name": "backoff"
+        }
+      ],
+      "specs?": true,
+      "uses": [
+        "Oban.Worker"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Release",
+      "parse_error": null,
+      "path": "lib/event_sales/release.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "migrate"
+        },
+        {
+          "arity": 3,
+          "name": "rollback"
+        },
+        {
+          "arity": 1,
+          "name": "migration_database_url"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": false,
+      "name": "EventSales.Repo",
+      "parse_error": null,
+      "path": "lib/event_sales/repo.ex",
+      "public_funs": [
+        {
+          "arity": 0,
+          "name": "installed_extensions"
+        },
+        {
+          "arity": 0,
+          "name": "min_pg_version"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "AshPostgres.Repo"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Sales",
+      "parse_error": null,
+      "path": "lib/event_sales/sales.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Domain"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Sales.Changes.GuardSourceVersion",
+      "parse_error": null,
+      "path": "lib/event_sales/sales/changes/guard_source_version.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "change"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource.Change"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Sales.Changes.SyncStatusFromSource",
+      "parse_error": null,
+      "path": "lib/event_sales/sales/changes/sync_status_from_source.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "change"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource.Change"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Sales.Changes.ValidateTicketTypeEvent",
+      "parse_error": null,
+      "path": "lib/event_sales/sales/changes/validate_ticket_type_event.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "change"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource.Change"
+      ]
+    },
+    {
+      "docs_count": 3,
+      "moduledoc?": true,
+      "name": "EventSales.Sales.OrderItemMapper",
+      "parse_error": null,
+      "path": "lib/event_sales/sales/order_item_mapper.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 1,
+          "name": "map_item"
+        },
+        {
+          "arity": 1,
+          "name": "map_pending_items_for_order"
+        },
+        {
+          "arity": 1,
+          "name": "list_unmapped_queue"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 3,
+      "moduledoc?": true,
+      "name": "EventSales.Sales.OrderUpserter",
+      "parse_error": null,
+      "path": "lib/event_sales/sales/order_upserter.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 1,
+          "name": "upsert_from_webhook_event"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Sales.Resources.CouponSnapshot",
+      "parse_error": null,
+      "path": "lib/event_sales/sales/resources/coupon_snapshot.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Sales.Resources.Order",
+      "parse_error": null,
+      "path": "lib/event_sales/sales/resources/order.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Sales.Resources.OrderItem",
+      "parse_error": null,
+      "path": "lib/event_sales/sales/resources/order_item.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Sales.SourceVersionGuard",
+      "parse_error": null,
+      "path": "lib/event_sales/sales/source_version_guard.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "allows_update?"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 4,
+      "moduledoc?": true,
+      "name": "EventSales.Sales.StatusRules",
+      "parse_error": null,
+      "path": "lib/event_sales/sales/status_rules.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "counts_toward_sold_tickets?"
+        },
+        {
+          "arity": 2,
+          "name": "counts_toward_completed_revenue?"
+        },
+        {
+          "arity": 2,
+          "name": "visible_status?"
+        },
+        {
+          "arity": 2,
+          "name": "excluded_from_sold?"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 43,
+      "moduledoc?": true,
+      "name": "EventSales.Telemetry",
+      "parse_error": null,
+      "path": "lib/event_sales/telemetry.ex",
+      "public_funs": [
+        {
+          "arity": 0,
+          "name": "event_names"
+        },
+        {
+          "arity": 0,
+          "name": "webhook_accepted"
+        },
+        {
+          "arity": 0,
+          "name": "webhook_rejected"
+        },
+        {
+          "arity": 0,
+          "name": "webhook_backpressure"
+        },
+        {
+          "arity": 0,
+          "name": "webhook_buffered"
+        },
+        {
+          "arity": 0,
+          "name": "webhook_drained"
+        },
+        {
+          "arity": 0,
+          "name": "webhook_replay_audit_failed"
+        },
+        {
+          "arity": 0,
+          "name": "rest_request_stop"
+        },
+        {
+          "arity": 0,
+          "name": "rest_request_exception"
+        },
+        {
+          "arity": 0,
+          "name": "hot_state_rebuild_start"
+        },
+        {
+          "arity": 0,
+          "name": "hot_state_rebuild_stop"
+        },
+        {
+          "arity": 0,
+          "name": "hot_state_rebuild_exception"
+        },
+        {
+          "arity": 0,
+          "name": "hot_state_event_applied"
+        },
+        {
+          "arity": 0,
+          "name": "hot_state_event_ignored"
+        },
+        {
+          "arity": 0,
+          "name": "hot_state_snapshot_write"
+        },
+        {
+          "arity": 0,
+          "name": "snapshot_refresh_start"
+        },
+        {
+          "arity": 0,
+          "name": "snapshot_refresh_stop"
+        },
+        {
+          "arity": 0,
+          "name": "snapshot_refresh_exception"
+        },
+        {
+          "arity": 0,
+          "name": "cache_invalidate"
+        },
+        {
+          "arity": 0,
+          "name": "missing_catalog_recovery_start"
+        },
+        {
+          "arity": 0,
+          "name": "missing_catalog_recovery_stop"
+        },
+        {
+          "arity": 0,
+          "name": "missing_catalog_recovery_exception"
+        },
+        {
+          "arity": 0,
+          "name": "product_metadata_cache_hit"
+        },
+        {
+          "arity": 0,
+          "name": "product_metadata_cache_miss"
+        },
+        {
+          "arity": 0,
+          "name": "product_metadata_cache_put"
+        },
+        {
+          "arity": 0,
+          "name": "product_metadata_update"
+        },
+        {
+          "arity": 0,
+          "name": "reconciliation_start"
+        },
+        {
+          "arity": 0,
+          "name": "reconciliation_stop"
+        },
+        {
+          "arity": 0,
+          "name": "reconciliation_exception"
+        },
+        {
+          "arity": 0,
+          "name": "reconciliation_pause"
+        },
+        {
+          "arity": 0,
+          "name": "tickera_request_stop"
+        },
+        {
+          "arity": 0,
+          "name": "tickera_request_exception"
+        },
+        {
+          "arity": 0,
+          "name": "tickera_sync_start"
+        },
+        {
+          "arity": 0,
+          "name": "tickera_sync_stop"
+        },
+        {
+          "arity": 0,
+          "name": "tickera_sync_exception"
+        },
+        {
+          "arity": 0,
+          "name": "csv_import_dry_run_start"
+        },
+        {
+          "arity": 0,
+          "name": "csv_import_dry_run_stop"
+        },
+        {
+          "arity": 0,
+          "name": "csv_import_dry_run_exception"
+        },
+        {
+          "arity": 0,
+          "name": "csv_import_apply_start"
+        },
+        {
+          "arity": 0,
+          "name": "csv_import_apply_stop"
+        },
+        {
+          "arity": 0,
+          "name": "csv_import_apply_exception"
+        },
+        {
+          "arity": 1,
+          "name": "product_metadata_cache_event"
+        },
+        {
+          "arity": 3,
+          "name": "emit"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSalesWeb",
+      "parse_error": null,
+      "path": "lib/event_sales_web.ex",
+      "public_funs": [
+        {
+          "arity": 0,
+          "name": "static_paths"
+        },
+        {
+          "arity": 0,
+          "name": "router"
+        },
+        {
+          "arity": 0,
+          "name": "channel"
+        },
+        {
+          "arity": 0,
+          "name": "controller"
+        },
+        {
+          "arity": 0,
+          "name": "live_view"
+        },
+        {
+          "arity": 0,
+          "name": "live_component"
+        },
+        {
+          "arity": 0,
+          "name": "html"
+        },
+        {
+          "arity": 0,
+          "name": "verified_routes"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Phoenix.Channel",
+        "Phoenix.Component",
+        "Phoenix.Controller",
+        "Phoenix.LiveComponent",
+        "Phoenix.LiveView",
+        "Phoenix.Router",
+        "Phoenix.VerifiedRoutes"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Auth.Hooks",
+      "parse_error": null,
+      "path": "lib/event_sales_web/auth/hooks.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Auth.Routes",
+      "parse_error": null,
+      "path": "lib/event_sales_web/auth/routes.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 9,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.CoreComponents",
+      "parse_error": null,
+      "path": "lib/event_sales_web/components/core_components.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "flash"
+        },
+        {
+          "arity": 1,
+          "name": "button"
+        },
+        {
+          "arity": 1,
+          "name": "input"
+        },
+        {
+          "arity": 1,
+          "name": "header"
+        },
+        {
+          "arity": 1,
+          "name": "table"
+        },
+        {
+          "arity": 1,
+          "name": "list"
+        },
+        {
+          "arity": 1,
+          "name": "icon"
+        },
+        {
+          "arity": 2,
+          "name": "show"
+        },
+        {
+          "arity": 2,
+          "name": "hide"
+        },
+        {
+          "arity": 1,
+          "name": "translate_error"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Phoenix.Component"
+      ]
+    },
+    {
+      "docs_count": 2,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Layouts",
+      "parse_error": null,
+      "path": "lib/event_sales_web/components/layouts.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "app"
+        },
+        {
+          "arity": 1,
+          "name": "flash_group"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "EventSalesWeb"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Admin.EventExportController",
+      "parse_error": null,
+      "path": "lib/event_sales_web/controllers/admin/event_export_controller.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "summary"
+        },
+        {
+          "arity": 2,
+          "name": "orders"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "EventSalesWeb"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Admin.ReconciliationExportController",
+      "parse_error": null,
+      "path": "lib/event_sales_web/controllers/admin/reconciliation_export_controller.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "show"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "EventSalesWeb"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Controllers.AuthController",
+      "parse_error": null,
+      "path": "lib/event_sales_web/controllers/auth_controller.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.ErrorHTML",
+      "parse_error": null,
+      "path": "lib/event_sales_web/controllers/error_html.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "render"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "EventSalesWeb"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.ErrorJSON",
+      "parse_error": null,
+      "path": "lib/event_sales_web/controllers/error_json.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "render"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Controllers.ExportController",
+      "parse_error": null,
+      "path": "lib/event_sales_web/controllers/export_controller.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": false,
+      "name": "EventSalesWeb.HealthController",
+      "parse_error": null,
+      "path": "lib/event_sales_web/controllers/health_controller.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "show"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "EventSalesWeb"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": false,
+      "name": "EventSalesWeb.PageController",
+      "parse_error": null,
+      "path": "lib/event_sales_web/controllers/page_controller.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "home"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "EventSalesWeb"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.PageHTML",
+      "parse_error": null,
+      "path": "lib/event_sales_web/controllers/page_html.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "EventSalesWeb"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.WebhookController",
+      "parse_error": null,
+      "path": "lib/event_sales_web/controllers/webhook_controller.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "woocommerce"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "EventSalesWeb"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": false,
+      "name": "EventSalesWeb.Endpoint",
+      "parse_error": null,
+      "path": "lib/event_sales_web/endpoint.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Phoenix.Endpoint"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Live.Admin.Components.OrderTable",
+      "parse_error": null,
+      "path": "lib/event_sales_web/live/admin/components/order_table.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "table"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Phoenix.Component"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Live.Admin.Components.SalesChart",
+      "parse_error": null,
+      "path": "lib/event_sales_web/live/admin/components/sales_chart.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Live.Admin.Components.StaleDataBanner",
+      "parse_error": null,
+      "path": "lib/event_sales_web/live/admin/components/stale_data_banner.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "banner"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Phoenix.Component"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Live.Admin.Components.StatCard",
+      "parse_error": null,
+      "path": "lib/event_sales_web/live/admin/components/stat_card.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "card"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Phoenix.Component"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Live.Admin.Components.StatusBadge",
+      "parse_error": null,
+      "path": "lib/event_sales_web/live/admin/components/status_badge.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "badge"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Phoenix.Component"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Live.Admin.Components.UnmappedItemAlert",
+      "parse_error": null,
+      "path": "lib/event_sales_web/live/admin/components/unmapped_item_alert.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "list"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Phoenix.Component"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Live.Admin.DashboardLive",
+      "parse_error": null,
+      "path": "lib/event_sales_web/live/admin/dashboard_live.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "mount"
+        },
+        {
+          "arity": 3,
+          "name": "handle_event"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 1,
+          "name": "render"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "EventSalesWeb"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Live.Admin.EventDetailLive",
+      "parse_error": null,
+      "path": "lib/event_sales_web/live/admin/event_detail_live.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "mount"
+        },
+        {
+          "arity": 3,
+          "name": "handle_event"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 1,
+          "name": "render"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "EventSalesWeb"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Live.Admin.EventsLive",
+      "parse_error": null,
+      "path": "lib/event_sales_web/live/admin/events_live.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "mount"
+        },
+        {
+          "arity": 3,
+          "name": "handle_event"
+        },
+        {
+          "arity": 1,
+          "name": "render"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "EventSalesWeb"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Live.Admin.ImportsLive",
+      "parse_error": null,
+      "path": "lib/event_sales_web/live/admin/imports_live.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "mount"
+        },
+        {
+          "arity": 3,
+          "name": "handle_event"
+        },
+        {
+          "arity": 1,
+          "name": "render"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "EventSalesWeb"
+      ]
+    },
+    {
+      "docs_count": 2,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Live.Admin.ManualActionRateLimiter",
+      "parse_error": null,
+      "path": "lib/event_sales_web/live/admin/manual_action_rate_limiter.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 0,
+          "name": "reset_for_test!"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Live.Admin.MappingsLive",
+      "parse_error": null,
+      "path": "lib/event_sales_web/live/admin/mappings_live.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "mount"
+        },
+        {
+          "arity": 1,
+          "name": "render"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "EventSalesWeb"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Live.Admin.OrdersLive",
+      "parse_error": null,
+      "path": "lib/event_sales_web/live/admin/orders_live.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Live.Admin.Pagination",
+      "parse_error": null,
+      "path": "lib/event_sales_web/live/admin/pagination.ex",
+      "public_funs": [
+        {
+          "arity": 0,
+          "name": "empty_page"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Live.Admin.ReconciliationLive",
+      "parse_error": null,
+      "path": "lib/event_sales_web/live/admin/reconciliation_live.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "mount"
+        },
+        {
+          "arity": 3,
+          "name": "handle_params"
+        },
+        {
+          "arity": 3,
+          "name": "handle_event"
+        },
+        {
+          "arity": 1,
+          "name": "render"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "EventSalesWeb"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Live.Admin.Session",
+      "parse_error": null,
+      "path": "lib/event_sales_web/live/admin/session.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 1,
+          "name": "current_user"
+        },
+        {
+          "arity": 1,
+          "name": "current_user_id"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Live.Admin.SyncLive",
+      "parse_error": null,
+      "path": "lib/event_sales_web/live/admin/sync_live.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "mount"
+        },
+        {
+          "arity": 3,
+          "name": "handle_event"
+        },
+        {
+          "arity": 1,
+          "name": "render"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "EventSalesWeb"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Live.Admin.WebhooksLive",
+      "parse_error": null,
+      "path": "lib/event_sales_web/live/admin/webhooks_live.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "mount"
+        },
+        {
+          "arity": 3,
+          "name": "handle_event"
+        },
+        {
+          "arity": 1,
+          "name": "render"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "EventSalesWeb"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Live.Auth.ResetPasswordLive",
+      "parse_error": null,
+      "path": "lib/event_sales_web/live/auth/reset_password_live.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Live.Auth.SignInLive",
+      "parse_error": null,
+      "path": "lib/event_sales_web/live/auth/sign_in_live.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.ObanWebResolver",
+      "parse_error": null,
+      "path": "lib/event_sales_web/oban_web_resolver.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "resolve_user"
+        },
+        {
+          "arity": 1,
+          "name": "resolve_access"
+        },
+        {
+          "arity": 1,
+          "name": "resolve_instances"
+        },
+        {
+          "arity": 1,
+          "name": "resolve_refresh"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Plugs.AdminOnly",
+      "parse_error": null,
+      "path": "lib/event_sales_web/plugs/admin_only.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "init"
+        },
+        {
+          "arity": 2,
+          "name": "call"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Plugs.InternalOnly",
+      "parse_error": null,
+      "path": "lib/event_sales_web/plugs/internal_only.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "init"
+        },
+        {
+          "arity": 2,
+          "name": "call"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Plugs.LoadCurrentUser",
+      "parse_error": null,
+      "path": "lib/event_sales_web/plugs/load_current_user.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "init"
+        },
+        {
+          "arity": 2,
+          "name": "call"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Plugs.RateLimitManualActions",
+      "parse_error": null,
+      "path": "lib/event_sales_web/plugs/rate_limit_manual_actions.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Plugs.RateLimitWebhookIntake",
+      "parse_error": null,
+      "path": "lib/event_sales_web/plugs/rate_limit_webhook_intake.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Plugs.RawBodyReader",
+      "parse_error": null,
+      "path": "lib/event_sales_web/plugs/raw_body_reader.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "read_body"
+        },
+        {
+          "arity": 1,
+          "name": "fetch_raw_body"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Presenters.CustomerPresenter",
+      "parse_error": null,
+      "path": "lib/event_sales_web/presenters/customer_presenter.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "present"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": false,
+      "name": "EventSalesWeb.Router",
+      "parse_error": null,
+      "path": "lib/event_sales_web/router.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "EventSalesWeb"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Telemetry",
+      "parse_error": null,
+      "path": "lib/event_sales_web/telemetry.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "start_link"
+        },
+        {
+          "arity": 1,
+          "name": "init"
+        },
+        {
+          "arity": 0,
+          "name": "metrics"
+        }
+      ],
+      "specs?": true,
+      "uses": [
+        "Supervisor"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "Mix.Tasks.Project.Index",
+      "parse_error": null,
+      "path": "lib/mix/tasks/project.index.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "run"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Mix.Task"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "ProjectIndex.ElixirFile",
+      "parse_error": null,
+      "path": "lib/project_index/elixir_file.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "parse"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "ProjectIndex.RenderJson",
+      "parse_error": null,
+      "path": "lib/project_index/render_json.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "render_module_manifest"
+        },
+        {
+          "arity": 1,
+          "name": "render_domain_map"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "ProjectIndex.RenderMarkdown",
+      "parse_error": null,
+      "path": "lib/project_index/render_markdown.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "render"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "ProjectIndex.Scanner",
+      "parse_error": null,
+      "path": "lib/project_index/scanner.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "scan_project"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.Analytics.ErrorEventAggregator",
+      "parse_error": null,
+      "path": "test/support/analytics/error_event_aggregator.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "summary_for_event"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.Analytics.MemoryEventAggregator",
+      "parse_error": null,
+      "path": "test/support/analytics/memory_event_aggregator.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "put_summary"
+        },
+        {
+          "arity": 2,
+          "name": "put_error"
+        },
+        {
+          "arity": 2,
+          "name": "summary_for_event"
+        },
+        {
+          "arity": 1,
+          "name": "call_count"
+        },
+        {
+          "arity": 0,
+          "name": "reset!"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.Analytics.MemorySnapshotStoreAdapter",
+      "parse_error": null,
+      "path": "test/support/analytics/memory_snapshot_store_adapter.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "put"
+        },
+        {
+          "arity": 1,
+          "name": "list_event_summaries"
+        },
+        {
+          "arity": 0,
+          "name": "writes"
+        },
+        {
+          "arity": 1,
+          "name": "fail_writes!"
+        },
+        {
+          "arity": 0,
+          "name": "last_list_opts"
+        },
+        {
+          "arity": 2,
+          "name": "put_raw_snapshot_for_test!"
+        },
+        {
+          "arity": 0,
+          "name": "reset!"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.Analytics.SelectiveEventAggregator",
+      "parse_error": null,
+      "path": "test/support/analytics/selective_event_aggregator.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "fail_event!"
+        },
+        {
+          "arity": 0,
+          "name": "reset!"
+        },
+        {
+          "arity": 2,
+          "name": "summary_for_event"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.AuthHelpers",
+      "parse_error": null,
+      "path": "test/support/auth_helpers.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.ConnCase",
+      "parse_error": null,
+      "path": "test/support/conn_case.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "EventSalesWeb",
+        "ExUnit.CaseTemplate"
+      ]
+    },
+    {
+      "docs_count": 2,
+      "moduledoc?": true,
+      "name": "EventSales.DataCase",
+      "parse_error": null,
+      "path": "test/support/data_case.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "setup_sandbox"
+        },
+        {
+          "arity": 1,
+          "name": "errors_on"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "ExUnit.CaseTemplate"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.DbTopologyHelpers",
+      "parse_error": null,
+      "path": "test/support/db_topology_helpers.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.Fakes.FakeTickeraAttendeeClient",
+      "parse_error": null,
+      "path": "test/support/fakes/fake_tickera_attendee_client.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "child_spec"
+        },
+        {
+          "arity": 1,
+          "name": "start_link"
+        },
+        {
+          "arity": 1,
+          "name": "reset!"
+        },
+        {
+          "arity": 0,
+          "name": "calls"
+        },
+        {
+          "arity": 5,
+          "name": "fetch_attendees_page"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.FixtureHelpers",
+      "parse_error": null,
+      "path": "test/support/fixture_helpers.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "fixture_path!"
+        },
+        {
+          "arity": 2,
+          "name": "read_fixture!"
+        },
+        {
+          "arity": 2,
+          "name": "decode_json_fixture!"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.FixtureVerificationHelpers",
+      "parse_error": null,
+      "path": "test/support/fixture_verification_helpers.ex",
+      "public_funs": [
+        {
+          "arity": 0,
+          "name": "required_fixtures"
+        },
+        {
+          "arity": 1,
+          "name": "required_fixtures"
+        },
+        {
+          "arity": 1,
+          "name": "required_fixture!"
+        },
+        {
+          "arity": 0,
+          "name": "committed_woocommerce_fixtures"
+        },
+        {
+          "arity": 1,
+          "name": "decode_fixture!"
+        },
+        {
+          "arity": 1,
+          "name": "missing_order_paths"
+        },
+        {
+          "arity": 2,
+          "name": "missing_product_paths"
+        },
+        {
+          "arity": 1,
+          "name": "sensitive_findings"
+        },
+        {
+          "arity": 1,
+          "name": "format_finding"
+        },
+        {
+          "arity": 1,
+          "name": "future_placeholder_allowed?"
+        },
+        {
+          "arity": 0,
+          "name": "parser_work_blocked?"
+        },
+        {
+          "arity": 0,
+          "name": "parser_work_allowed?"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 3,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.Ingestion.MemoryWebhookBufferAdapter",
+      "parse_error": null,
+      "path": "test/support/ingestion/memory_webhook_buffer_adapter.ex",
+      "public_funs": [
+        {
+          "arity": 0,
+          "name": "force_ack_unavailable!"
+        },
+        {
+          "arity": 0,
+          "name": "clear_ack_override!"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 0,
+          "name": "claim"
+        },
+        {
+          "arity": 0,
+          "name": "depth"
+        },
+        {
+          "arity": 0,
+          "name": "processing_depth"
+        },
+        {
+          "arity": 0,
+          "name": "reset!"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.Ingestion.StubWebhookEventStore",
+      "parse_error": null,
+      "path": "test/support/ingestion/stub_webhook_event_store.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "set_persist_error"
+        },
+        {
+          "arity": 0,
+          "name": "clear!"
+        },
+        {
+          "arity": 1,
+          "name": "create_receive"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.MappingSetupHelpers",
+      "parse_error": null,
+      "path": "test/support/mapping_setup_helpers.ex",
+      "public_funs": [
+        {
+          "arity": 0,
+          "name": "completed_order_mapping_context"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.ObanHelpers",
+      "parse_error": null,
+      "path": "test/support/oban_helpers.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "perform"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        },
+        {
+          "arity": 0,
+          "name": "drain_default_queue"
+        }
+      ],
+      "specs?": true,
+      "uses": [
+        "Oban.Worker"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "TestWorker",
+      "parse_error": null,
+      "path": "test/support/oban_helpers.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "perform"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Oban.Worker"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.SalesHelpers",
+      "parse_error": null,
+      "path": "test/support/sales_helpers.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "create_source_system!"
+        },
+        {
+          "arity": 2,
+          "name": "create_event!"
+        },
+        {
+          "arity": 2,
+          "name": "create_ticket_type!"
+        },
+        {
+          "arity": 2,
+          "name": "normalized_order_attrs_from_fixture!"
+        },
+        {
+          "arity": 2,
+          "name": "create_order_from_fixture!"
+        },
+        {
+          "arity": 3,
+          "name": "create_order_item_from_line!"
+        },
+        {
+          "arity": 1,
+          "name": "create_mixed_event_order!"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.TelemetryHelpers",
+      "parse_error": null,
+      "path": "test/support/telemetry_helpers.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.TickeraSyncTestHelpers",
+      "parse_error": null,
+      "path": "test/support/tickera_sync_test_helpers.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "setup_fake_client"
+        },
+        {
+          "arity": 1,
+          "name": "setup_admin"
+        },
+        {
+          "arity": 1,
+          "name": "attendee"
+        },
+        {
+          "arity": 1,
+          "name": "page_result"
+        },
+        {
+          "arity": 0,
+          "name": "default_page_result"
+        },
+        {
+          "arity": 3,
+          "name": "queue_sync_run!"
+        },
+        {
+          "arity": 1,
+          "name": "start_sync_run!"
+        },
+        {
+          "arity": 3,
+          "name": "queue_running_sync_run!"
+        },
+        {
+          "arity": 2,
+          "name": "put_env!"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.WooCommerceWebhookHelpers",
+      "parse_error": null,
+      "path": "test/support/woocommerce_webhook_helpers.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "sign_raw_body"
+        },
+        {
+          "arity": 2,
+          "name": "when"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    }
+  ],
+  "root": ".",
+  "schema_version": 1
+}
