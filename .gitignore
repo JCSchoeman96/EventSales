@@ -22,6 +22,13 @@ erl_crash.dump
 # Temporary files, for example, from tests.
 /tmp/
 
+# Generated static assets.
+/priv/static/assets/
+/priv/static/cache_manifest.json
+/priv/static/**/*.gz
+/priv/static/favicon-*.ico
+/priv/static/images/*-*.svg
+/priv/static/robots-*.txt
+
 # Ignore package tarball (built via "mix hex.build").
 event_sales-*.tar
-

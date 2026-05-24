@@ -24,7 +24,10 @@ config :event_sales, EventSalesWeb.Endpoint,
   code_reloader: true,
   debug_errors: true,
   secret_key_base: "MkekSEyvdZgTCUyyH3zVeq4Xyf+5pd8gIu99N6nCifMQuE7a10F18zW8sp7ieEW+",
-  watchers: []
+  watchers: [
+    tailwind: {Tailwind, :install_and_run, [:event_sales, ~w(--watch)]},
+    esbuild: {Esbuild, :install_and_run, [:event_sales, ~w(--watch)]}
+  ]
 
 # ## SSL Support
 #
@@ -86,7 +89,3 @@ config :phoenix_live_view,
   debug_attributes: true,
   # Enable helpful, but potentially expensive runtime checks
   enable_expensive_runtime_checks: true
-
-# Mishka Chelekom generators expect a Tailwind v4+ version configured.
-# EventSales ships precompiled Tailwind output in priv/static/assets/default.css.
-config :tailwind, version: "4.0.9"

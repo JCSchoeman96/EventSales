@@ -64,6 +64,8 @@ defmodule EventSales.MixProject do
       {:postgrex, ">= 0.0.0"},
       {:phoenix_html, "~> 4.1"},
       {:mishka_chelekom, "~> 0.0.8", only: [:dev], runtime: false},
+      {:tailwind, "~> 0.3", runtime: Mix.env() == :dev},
+      {:esbuild, "~> 0.9", runtime: Mix.env() == :dev},
       {:phoenix_live_reload, "~> 1.2", only: :dev},
       {:phoenix_live_view, "~> 1.1.0"},
       {:lazy_html, ">= 0.1.0", only: :test},
@@ -94,9 +96,15 @@ defmodule EventSales.MixProject do
   # See the documentation for `Mix` for more info on aliases.
   defp aliases do
     [
-      setup: ["deps.get", "ecto.setup"],
+      setup: ["deps.get", "ecto.setup", "assets.build"],
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
+      "assets.build": ["tailwind event_sales", "esbuild event_sales"],
+      "assets.deploy": [
+        "tailwind event_sales --minify",
+        "esbuild event_sales --minify",
+        "phx.digest"
+      ],
       test: ["test"],
       precommit: ["quality.fast"],
       "quality.fast": [
