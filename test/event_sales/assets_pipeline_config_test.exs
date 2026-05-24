@@ -14,12 +14,12 @@ defmodule EventSales.AssetsPipelineConfigTest do
   describe "mix.exs deps" do
     test "declares tailwind dep" do
       assert @mix_exs =~
-              ~r/\{:tailwind,\s*"~> 0\.4\.1",\s*runtime:\s*Mix\.env\(\)\s*==\s*:dev\}/
+               ~r/\{:tailwind,\s*"~> 0\.4\.1",\s*runtime:\s*Mix\.env\(\)\s*==\s*:dev\}/
     end
 
     test "declares esbuild dep" do
       assert @mix_exs =~
-              ~r/\{:esbuild,\s*"~> 0\.9",\s*runtime:\s*Mix\.env\(\)\s*==\s*:dev\}/
+               ~r/\{:esbuild,\s*"~> 0\.9",\s*runtime:\s*Mix\.env\(\)\s*==\s*:dev\}/
     end
   end
 

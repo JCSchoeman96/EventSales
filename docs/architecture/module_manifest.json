@@ -136,7 +136,11 @@
     "lib/event_sales/ingestion/workers/sync_tickera_attendees_worker.ex",
     "lib/event_sales/maintenance/cache_cleanup_worker.ex",
     "lib/event_sales/maintenance/db_topology_check_worker.ex",
+    "lib/event_sales/maintenance/failed_job_alert_worker.ex",
     "lib/event_sales/maintenance/oban_topology_smoke_worker.ex",
+    "lib/event_sales/maintenance/purge_raw_payloads_worker.ex",
+    "lib/event_sales/maintenance/raw_payload_purger.ex",
+    "lib/event_sales/maintenance/stale_sync_cleanup_worker.ex",
     "lib/event_sales/release.ex",
     "lib/event_sales/repo.ex",
     "lib/event_sales/sales.ex",
@@ -2887,9 +2891,16 @@
       "name": "EventSales.Maintenance.CacheCleanupWorker",
       "parse_error": null,
       "path": "lib/event_sales/maintenance/cache_cleanup_worker.ex",
-      "public_funs": [],
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "perform"
+        }
+      ],
       "specs?": false,
-      "uses": []
+      "uses": [
+        "Oban.Worker"
+      ]
     },
     {
       "docs_count": 0,
@@ -2900,6 +2911,23 @@
       "public_funs": [],
       "specs?": false,
       "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Maintenance.FailedJobAlertWorker",
+      "parse_error": null,
+      "path": "lib/event_sales/maintenance/failed_job_alert_worker.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "perform"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Oban.Worker"
+      ]
     },
     {
       "docs_count": 0,
@@ -2918,6 +2946,55 @@
         }
       ],
       "specs?": true,
+      "uses": [
+        "Oban.Worker"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Maintenance.PurgeRawPayloadsWorker",
+      "parse_error": null,
+      "path": "lib/event_sales/maintenance/purge_raw_payloads_worker.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "perform"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Oban.Worker"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Maintenance.RawPayloadPurger",
+      "parse_error": null,
+      "path": "lib/event_sales/maintenance/raw_payload_purger.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "purge"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Maintenance.StaleSyncCleanupWorker",
+      "parse_error": null,
+      "path": "lib/event_sales/maintenance/stale_sync_cleanup_worker.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "perform"
+        }
+      ],
+      "specs?": false,
       "uses": [
         "Oban.Worker"
       ]
@@ -3154,7 +3231,7 @@
       "uses": []
     },
     {
-      "docs_count": 43,
+      "docs_count": 55,
       "moduledoc?": true,
       "name": "EventSales.Telemetry",
       "parse_error": null,
@@ -3323,6 +3400,54 @@
         {
           "arity": 0,
           "name": "csv_import_apply_exception"
+        },
+        {
+          "arity": 0,
+          "name": "maintenance_raw_payload_purge_start"
+        },
+        {
+          "arity": 0,
+          "name": "maintenance_raw_payload_purge_stop"
+        },
+        {
+          "arity": 0,
+          "name": "maintenance_raw_payload_purge_exception"
+        },
+        {
+          "arity": 0,
+          "name": "maintenance_stale_sync_cleanup_start"
+        },
+        {
+          "arity": 0,
+          "name": "maintenance_stale_sync_cleanup_stop"
+        },
+        {
+          "arity": 0,
+          "name": "maintenance_stale_sync_cleanup_exception"
+        },
+        {
+          "arity": 0,
+          "name": "maintenance_cache_cleanup_start"
+        },
+        {
+          "arity": 0,
+          "name": "maintenance_cache_cleanup_stop"
+        },
+        {
+          "arity": 0,
+          "name": "maintenance_cache_cleanup_exception"
+        },
+        {
+          "arity": 0,
+          "name": "maintenance_failed_job_alert_start"
+        },
+        {
+          "arity": 0,
+          "name": "maintenance_failed_job_alert_stop"
+        },
+        {
+          "arity": 0,
+          "name": "maintenance_failed_job_alert_exception"
         },
         {
           "arity": 1,

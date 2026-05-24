@@ -56,6 +56,33 @@ defmodule EventSales.Telemetry do
   @csv_import_apply_start [:event_sales, :csv_import, :apply, :start]
   @csv_import_apply_stop [:event_sales, :csv_import, :apply, :stop]
   @csv_import_apply_exception [:event_sales, :csv_import, :apply, :exception]
+  @maintenance_raw_payload_purge_start [:event_sales, :maintenance, :raw_payload_purge, :start]
+  @maintenance_raw_payload_purge_stop [:event_sales, :maintenance, :raw_payload_purge, :stop]
+  @maintenance_raw_payload_purge_exception [
+    :event_sales,
+    :maintenance,
+    :raw_payload_purge,
+    :exception
+  ]
+  @maintenance_stale_sync_cleanup_start [:event_sales, :maintenance, :stale_sync_cleanup, :start]
+  @maintenance_stale_sync_cleanup_stop [:event_sales, :maintenance, :stale_sync_cleanup, :stop]
+  @maintenance_stale_sync_cleanup_exception [
+    :event_sales,
+    :maintenance,
+    :stale_sync_cleanup,
+    :exception
+  ]
+  @maintenance_cache_cleanup_start [:event_sales, :maintenance, :cache_cleanup, :start]
+  @maintenance_cache_cleanup_stop [:event_sales, :maintenance, :cache_cleanup, :stop]
+  @maintenance_cache_cleanup_exception [:event_sales, :maintenance, :cache_cleanup, :exception]
+  @maintenance_failed_job_alert_start [:event_sales, :maintenance, :failed_job_alert, :start]
+  @maintenance_failed_job_alert_stop [:event_sales, :maintenance, :failed_job_alert, :stop]
+  @maintenance_failed_job_alert_exception [
+    :event_sales,
+    :maintenance,
+    :failed_job_alert,
+    :exception
+  ]
 
   @doc """
   Returns every custom EventSales telemetry event name defined in Slice 0.8.
@@ -102,7 +129,19 @@ defmodule EventSales.Telemetry do
       csv_import_dry_run_exception(),
       csv_import_apply_start(),
       csv_import_apply_stop(),
-      csv_import_apply_exception()
+      csv_import_apply_exception(),
+      maintenance_raw_payload_purge_start(),
+      maintenance_raw_payload_purge_stop(),
+      maintenance_raw_payload_purge_exception(),
+      maintenance_stale_sync_cleanup_start(),
+      maintenance_stale_sync_cleanup_stop(),
+      maintenance_stale_sync_cleanup_exception(),
+      maintenance_cache_cleanup_start(),
+      maintenance_cache_cleanup_stop(),
+      maintenance_cache_cleanup_exception(),
+      maintenance_failed_job_alert_start(),
+      maintenance_failed_job_alert_stop(),
+      maintenance_failed_job_alert_exception()
     ]
   end
 
@@ -265,6 +304,54 @@ defmodule EventSales.Telemetry do
   @doc "CSV import apply failed unexpectedly."
   @spec csv_import_apply_exception() :: event_name()
   def csv_import_apply_exception, do: @csv_import_apply_exception
+
+  @doc "Raw payload purge started."
+  @spec maintenance_raw_payload_purge_start() :: event_name()
+  def maintenance_raw_payload_purge_start, do: @maintenance_raw_payload_purge_start
+
+  @doc "Raw payload purge completed."
+  @spec maintenance_raw_payload_purge_stop() :: event_name()
+  def maintenance_raw_payload_purge_stop, do: @maintenance_raw_payload_purge_stop
+
+  @doc "Raw payload purge failed."
+  @spec maintenance_raw_payload_purge_exception() :: event_name()
+  def maintenance_raw_payload_purge_exception, do: @maintenance_raw_payload_purge_exception
+
+  @doc "Stale sync cleanup started."
+  @spec maintenance_stale_sync_cleanup_start() :: event_name()
+  def maintenance_stale_sync_cleanup_start, do: @maintenance_stale_sync_cleanup_start
+
+  @doc "Stale sync cleanup completed."
+  @spec maintenance_stale_sync_cleanup_stop() :: event_name()
+  def maintenance_stale_sync_cleanup_stop, do: @maintenance_stale_sync_cleanup_stop
+
+  @doc "Stale sync cleanup failed."
+  @spec maintenance_stale_sync_cleanup_exception() :: event_name()
+  def maintenance_stale_sync_cleanup_exception, do: @maintenance_stale_sync_cleanup_exception
+
+  @doc "Cache cleanup started."
+  @spec maintenance_cache_cleanup_start() :: event_name()
+  def maintenance_cache_cleanup_start, do: @maintenance_cache_cleanup_start
+
+  @doc "Cache cleanup completed."
+  @spec maintenance_cache_cleanup_stop() :: event_name()
+  def maintenance_cache_cleanup_stop, do: @maintenance_cache_cleanup_stop
+
+  @doc "Cache cleanup failed."
+  @spec maintenance_cache_cleanup_exception() :: event_name()
+  def maintenance_cache_cleanup_exception, do: @maintenance_cache_cleanup_exception
+
+  @doc "Failed job alert check started."
+  @spec maintenance_failed_job_alert_start() :: event_name()
+  def maintenance_failed_job_alert_start, do: @maintenance_failed_job_alert_start
+
+  @doc "Failed job alert check completed."
+  @spec maintenance_failed_job_alert_stop() :: event_name()
+  def maintenance_failed_job_alert_stop, do: @maintenance_failed_job_alert_stop
+
+  @doc "Failed job alert check failed."
+  @spec maintenance_failed_job_alert_exception() :: event_name()
+  def maintenance_failed_job_alert_exception, do: @maintenance_failed_job_alert_exception
 
   @doc "Returns the low-cardinality product metadata cache event for the cache outcome."
   @spec product_metadata_cache_event(:hit | :miss | :put) :: event_name()

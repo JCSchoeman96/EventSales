@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-242
+246
 
 ## Files
 
@@ -148,7 +148,11 @@ Project root: `.`
 - `lib/event_sales/ingestion/workers/sync_tickera_attendees_worker.ex`
 - `lib/event_sales/maintenance/cache_cleanup_worker.ex`
 - `lib/event_sales/maintenance/db_topology_check_worker.ex`
+- `lib/event_sales/maintenance/failed_job_alert_worker.ex`
 - `lib/event_sales/maintenance/oban_topology_smoke_worker.ex`
+- `lib/event_sales/maintenance/purge_raw_payloads_worker.ex`
+- `lib/event_sales/maintenance/raw_payload_purger.ex`
+- `lib/event_sales/maintenance/stale_sync_cleanup_worker.ex`
 - `lib/event_sales/release.ex`
 - `lib/event_sales/repo.ex`
 - `lib/event_sales/sales.ex`
@@ -1041,19 +1045,43 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: _none_
-  - uses: _none_
+  - public_funs: `perform/1`
+  - uses: `Oban.Worker`
 - `EventSales.Maintenance.DbTopologyCheckWorker` - `lib/event_sales/maintenance/db_topology_check_worker.ex`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
   - public_funs: _none_
   - uses: _none_
+- `EventSales.Maintenance.FailedJobAlertWorker` - `lib/event_sales/maintenance/failed_job_alert_worker.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `perform/1`
+  - uses: `Oban.Worker`
 - `EventSales.Maintenance.ObanTopologySmokeWorker` - `lib/event_sales/maintenance/oban_topology_smoke_worker.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 0
   - public_funs: `perform/1`, `backoff/1`
+  - uses: `Oban.Worker`
+- `EventSales.Maintenance.PurgeRawPayloadsWorker` - `lib/event_sales/maintenance/purge_raw_payloads_worker.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `perform/1`
+  - uses: `Oban.Worker`
+- `EventSales.Maintenance.RawPayloadPurger` - `lib/event_sales/maintenance/raw_payload_purger.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `purge/1`
+  - uses: _none_
+- `EventSales.Maintenance.StaleSyncCleanupWorker` - `lib/event_sales/maintenance/stale_sync_cleanup_worker.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `perform/1`
   - uses: `Oban.Worker`
 - `EventSales.Release` - `lib/event_sales/release.ex`
   - moduledoc?: true
@@ -1136,8 +1164,8 @@ Project root: `.`
 - `EventSales.Telemetry` - `lib/event_sales/telemetry.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 43
-  - public_funs: `event_names/0`, `webhook_accepted/0`, `webhook_rejected/0`, `webhook_backpressure/0`, `webhook_buffered/0`, `webhook_drained/0`, `webhook_replay_audit_failed/0`, `rest_request_stop/0`, `rest_request_exception/0`, `hot_state_rebuild_start/0`, `hot_state_rebuild_stop/0`, `hot_state_rebuild_exception/0`, `hot_state_event_applied/0`, `hot_state_event_ignored/0`, `hot_state_snapshot_write/0`, `snapshot_refresh_start/0`, `snapshot_refresh_stop/0`, `snapshot_refresh_exception/0`, `cache_invalidate/0`, `missing_catalog_recovery_start/0`, `missing_catalog_recovery_stop/0`, `missing_catalog_recovery_exception/0`, `product_metadata_cache_hit/0`, `product_metadata_cache_miss/0`, `product_metadata_cache_put/0`, `product_metadata_update/0`, `reconciliation_start/0`, `reconciliation_stop/0`, `reconciliation_exception/0`, `reconciliation_pause/0`, `tickera_request_stop/0`, `tickera_request_exception/0`, `tickera_sync_start/0`, `tickera_sync_stop/0`, `tickera_sync_exception/0`, `csv_import_dry_run_start/0`, `csv_import_dry_run_stop/0`, `csv_import_dry_run_exception/0`, `csv_import_apply_start/0`, `csv_import_apply_stop/0`, `csv_import_apply_exception/0`, `product_metadata_cache_event/1`, `emit/3`
+  - docs_count: 55
+  - public_funs: `event_names/0`, `webhook_accepted/0`, `webhook_rejected/0`, `webhook_backpressure/0`, `webhook_buffered/0`, `webhook_drained/0`, `webhook_replay_audit_failed/0`, `rest_request_stop/0`, `rest_request_exception/0`, `hot_state_rebuild_start/0`, `hot_state_rebuild_stop/0`, `hot_state_rebuild_exception/0`, `hot_state_event_applied/0`, `hot_state_event_ignored/0`, `hot_state_snapshot_write/0`, `snapshot_refresh_start/0`, `snapshot_refresh_stop/0`, `snapshot_refresh_exception/0`, `cache_invalidate/0`, `missing_catalog_recovery_start/0`, `missing_catalog_recovery_stop/0`, `missing_catalog_recovery_exception/0`, `product_metadata_cache_hit/0`, `product_metadata_cache_miss/0`, `product_metadata_cache_put/0`, `product_metadata_update/0`, `reconciliation_start/0`, `reconciliation_stop/0`, `reconciliation_exception/0`, `reconciliation_pause/0`, `tickera_request_stop/0`, `tickera_request_exception/0`, `tickera_sync_start/0`, `tickera_sync_stop/0`, `tickera_sync_exception/0`, `csv_import_dry_run_start/0`, `csv_import_dry_run_stop/0`, `csv_import_dry_run_exception/0`, `csv_import_apply_start/0`, `csv_import_apply_stop/0`, `csv_import_apply_exception/0`, `maintenance_raw_payload_purge_start/0`, `maintenance_raw_payload_purge_stop/0`, `maintenance_raw_payload_purge_exception/0`, `maintenance_stale_sync_cleanup_start/0`, `maintenance_stale_sync_cleanup_stop/0`, `maintenance_stale_sync_cleanup_exception/0`, `maintenance_cache_cleanup_start/0`, `maintenance_cache_cleanup_stop/0`, `maintenance_cache_cleanup_exception/0`, `maintenance_failed_job_alert_start/0`, `maintenance_failed_job_alert_stop/0`, `maintenance_failed_job_alert_exception/0`, `product_metadata_cache_event/1`, `emit/3`
   - uses: _none_
 - `EventSalesWeb` - `lib/event_sales_web.ex`
   - moduledoc?: true
@@ -1820,6 +1848,10 @@ _none_
 - `EventSales.Ingestion.Workers.ReconcileTickeraAttendeesWorker` - `lib/event_sales/ingestion/workers/reconcile_tickera_attendees_worker.ex`
 - `EventSales.Ingestion.Workers.RedisWebhookBufferDrainer` - `lib/event_sales/ingestion/workers/redis_webhook_buffer_drainer.ex`
 - `EventSales.Ingestion.Workers.SyncTickeraAttendeesWorker` - `lib/event_sales/ingestion/workers/sync_tickera_attendees_worker.ex`
+- `EventSales.Maintenance.CacheCleanupWorker` - `lib/event_sales/maintenance/cache_cleanup_worker.ex`
+- `EventSales.Maintenance.FailedJobAlertWorker` - `lib/event_sales/maintenance/failed_job_alert_worker.ex`
 - `EventSales.Maintenance.ObanTopologySmokeWorker` - `lib/event_sales/maintenance/oban_topology_smoke_worker.ex`
+- `EventSales.Maintenance.PurgeRawPayloadsWorker` - `lib/event_sales/maintenance/purge_raw_payloads_worker.ex`
+- `EventSales.Maintenance.StaleSyncCleanupWorker` - `lib/event_sales/maintenance/stale_sync_cleanup_worker.ex`
 - `EventSales.TestSupport.ObanHelpers` - `test/support/oban_helpers.ex`
 - `TestWorker` - `test/support/oban_helpers.ex`
