@@ -4956,8 +4956,21 @@
       "name": "EventSales.TestSupport.AuthHelpers",
       "parse_error": null,
       "path": "test/support/auth_helpers.ex",
-      "public_funs": [],
-      "specs?": false,
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "sign_in_as"
+        },
+        {
+          "arity": 2,
+          "name": "create_user!"
+        },
+        {
+          "arity": 2,
+          "name": "create_global_role!"
+        }
+      ],
+      "specs?": true,
       "uses": []
     },
     {
