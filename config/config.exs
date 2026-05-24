@@ -111,7 +111,7 @@ config :logger, :default_formatter,
 config :phoenix, :json_library, Jason
 
 config :tailwind,
-  version: "4.0.9",
+  version: "4.3.0",
   event_sales: [
     args: ~w(
       --input=assets/css/app.css
