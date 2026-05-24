@@ -44,6 +44,7 @@ defmodule EventSalesWeb.Live.Admin.DashboardLive do
          socket
          |> put_refresh_flash(result)
          |> load_dashboard()
+         |> assign_chart_data()
          |> maybe_subscribe_to_event_topics()}
 
       {:error, :rate_limited} ->

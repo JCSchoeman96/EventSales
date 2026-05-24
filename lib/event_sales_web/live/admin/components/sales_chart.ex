@@ -1,12 +1,8 @@
 defmodule EventSalesWeb.Live.Admin.Components.SalesChart do
   @moduledoc """
   Chart.js area chart rendered via CDN script tag.
-  No JS bundler required. Data flows server → data-* attrs → inline script.
+  Data flows server → data-* attrs → inline script.
   `phx-update="ignore"` prevents LiveView from wiping the canvas on patches.
-
-  ⚠️ LiveView client JS (LiveSocket) is not yet wired in this repo.
-     The chart renders on page load but does not receive live pushes
-     until LiveSocket is added (separate infra slice).
   """
 
   use Phoenix.LiveComponent
@@ -36,7 +32,7 @@ defmodule EventSalesWeb.Live.Admin.Components.SalesChart do
 
       <script>
         (function () {
-          var canvasId = "{@canvas_id}";
+          var canvasId = "<%= @canvas_id %>";
 
           function boot(canvas) {
             if (canvas._chart) { canvas._chart.destroy(); }
