@@ -855,6 +855,40 @@
       {
         "docs_count": 0,
         "moduledoc?": true,
+        "name": "EventSales.Maintenance.CacheCleanupWorker",
+        "parse_error": null,
+        "path": "lib/event_sales/maintenance/cache_cleanup_worker.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "perform"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Oban.Worker"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Maintenance.FailedJobAlertWorker",
+        "parse_error": null,
+        "path": "lib/event_sales/maintenance/failed_job_alert_worker.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "perform"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Oban.Worker"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
         "name": "EventSales.Maintenance.ObanTopologySmokeWorker",
         "parse_error": null,
         "path": "lib/event_sales/maintenance/oban_topology_smoke_worker.ex",
@@ -869,6 +903,40 @@
           }
         ],
         "specs?": true,
+        "uses": [
+          "Oban.Worker"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Maintenance.PurgeRawPayloadsWorker",
+        "parse_error": null,
+        "path": "lib/event_sales/maintenance/purge_raw_payloads_worker.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "perform"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Oban.Worker"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Maintenance.StaleSyncCleanupWorker",
+        "parse_error": null,
+        "path": "lib/event_sales/maintenance/stale_sync_cleanup_worker.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "perform"
+          }
+        ],
+        "specs?": false,
         "uses": [
           "Oban.Worker"
         ]

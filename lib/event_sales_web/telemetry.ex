@@ -249,6 +249,50 @@ defmodule EventSalesWeb.Telemetry do
         tags: [:error_reason, :source],
         description: "Tickera attendee sync unexpected failures"
       ),
+      summary("event_sales.maintenance.raw_payload_purge.stop.duration",
+        event_name: EventSales.Telemetry.maintenance_raw_payload_purge_stop(),
+        measurement: :duration,
+        tags: [:worker, :reason],
+        unit: {:native, :millisecond},
+        description: "Raw webhook payload purge duration"
+      ),
+      counter("event_sales.maintenance.raw_payload_purge.exception.count",
+        event_name: EventSales.Telemetry.maintenance_raw_payload_purge_exception(),
+        measurement: :count,
+        tags: [:worker, :reason],
+        description: "Raw webhook payload purge failures"
+      ),
+      summary("event_sales.maintenance.stale_sync_cleanup.stop.duration",
+        event_name: EventSales.Telemetry.maintenance_stale_sync_cleanup_stop(),
+        measurement: :duration,
+        tags: [:worker, :reason],
+        unit: {:native, :millisecond},
+        description: "Stale sync cleanup duration"
+      ),
+      counter("event_sales.maintenance.stale_sync_cleanup.exception.count",
+        event_name: EventSales.Telemetry.maintenance_stale_sync_cleanup_exception(),
+        measurement: :count,
+        tags: [:worker, :reason],
+        description: "Stale sync cleanup failures"
+      ),
+      counter("event_sales.maintenance.cache_cleanup.stop.count",
+        event_name: EventSales.Telemetry.maintenance_cache_cleanup_stop(),
+        measurement: :count,
+        tags: [:worker, :reason],
+        description: "Cache cleanup completions"
+      ),
+      counter("event_sales.maintenance.failed_job_alert.stop.count",
+        event_name: EventSales.Telemetry.maintenance_failed_job_alert_stop(),
+        measurement: :count,
+        tags: [:worker, :reason],
+        description: "Failed Oban job alert checks"
+      ),
+      counter("event_sales.maintenance.failed_job_alert.exception.count",
+        event_name: EventSales.Telemetry.maintenance_failed_job_alert_exception(),
+        measurement: :count,
+        tags: [:worker, :reason],
+        description: "Failed Oban job alert check failures"
+      ),
 
       # Oban Metrics
       last_value("oban.supervisor.init.system_time",

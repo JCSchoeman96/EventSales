@@ -36,8 +36,18 @@ config :event_sales, Oban,
     reconciliation: 1,
     tickera_sync: 1,
     tickera_reconciliation: 1,
-    csv_imports: 1
+    csv_imports: 1,
+    maintenance: 1
   ]
+
+config :event_sales, :maintenance,
+  raw_payload_retention_days: 90,
+  raw_payload_purge_batch_size: 500,
+  running_sync_stale_after_minutes: 60,
+  paused_sync_stale_after_hours: 24,
+  stale_sync_cleanup_batch_size: 100,
+  failed_job_alert_threshold: 1,
+  failed_job_alert_stale_after_minutes: 15
 
 config :event_sales, :tickera_reconciliation, stale_snapshot_after_hours: 24
 

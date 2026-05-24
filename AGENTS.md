@@ -47,6 +47,90 @@ Always open or update a PR after meaningful work.
 ```
 - Use rg for broad text search; use ast-grep run or ast-grep scan for structural code discovery.
 
+## UI, assets, and component rules
+
+EventSales uses Phoenix 1.8 LiveView with Tailwind v4, vendored DaisyUI, Mishka Chelekom, and Chart.js.
+
+Source of truth:
+
+```text
+assets/css/app.css
+assets/js/app.js
+assets/css/safelist.txt
+assets/vendor/daisyui.mjs
+assets/vendor/mishka_chelekom.css
+assets/vendor/mishka_components.js
+lib/event_sales_web/components/layouts/root.html.heex
+lib/event_sales_web/live/admin/components/sales_chart.ex
+```
+
+Rules:
+
+```text
+Do not add assets/tailwind.config.js.
+Do not reintroduce Tailwind v3 config patterns.
+Do not install DaisyUI through npm unless the asset strategy is intentionally changed.
+Do not add a second DaisyUI plugin source.
+Do not remove or reorder the Mishka CSS import before Tailwind in assets/css/app.css.
+Do not overwrite Mishka LiveView hooks in assets/js/app.js.
+Do not import Chart.js again in assets/js/app.js while it is loaded globally in root.html.heex.
+```
+
+Use this UI priority:
+
+```text
+1. Existing EventSales component
+2. DaisyUI primitive
+3. Mishka Chelekom component or hook
+4. Small local Phoenix function component
+5. Custom JavaScript only for browser-owned behavior
+```
+
+DaisyUI is preferred for generic UI primitives:
+
+```text
+btn, card, alert, badge, table, tabs, modal, dropdown, stat, skeleton, loading
+```
+
+Mishka is preferred when the component needs existing Mishka design tokens, CSS variables, or LiveView hooks.
+
+When adding LiveView hooks, always merge with Mishka hooks:
+
+```js
+hooks: { ...MishkaComponents, ...NewHooks }
+```
+
+Never replace the existing hook map with only the new hooks.
+
+Chart.js rules:
+
+```text
+Use lib/event_sales_web/live/admin/components/sales_chart.ex as the canonical pattern.
+Use a stable unique canvas id.
+Pass server data through data-* attributes as JSON.
+Use phx-update="ignore" on the chart canvas or wrapper.
+Destroy an existing chart instance before recreating it.
+Do not let LiveView patch an active Chart.js canvas.
+Use cached aggregates/read models for chart data; do not trigger large table scans from UI components.
+```
+
+Dynamic Tailwind classes:
+
+```text
+Prefer stable literal classes in HEEx.
+If a class must be generated dynamically, add it to assets/css/safelist.txt.
+```
+
+Required checks after UI or asset changes:
+
+```bash
+mix format --check-formatted
+mix compile --warnings-as-errors
+mix assets.build
+mix test test/event_sales/assets_pipeline_config_test.exs
+mix test
+```
+
 ## Repo helper scripts
 
 Use repo scripts instead of inventing ad-hoc commands.

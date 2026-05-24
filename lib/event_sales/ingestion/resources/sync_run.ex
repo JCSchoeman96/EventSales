@@ -86,6 +86,13 @@ defmodule EventSales.Ingestion.Resources.SyncRun do
       change &__MODULE__.set_finished_at/2
     end
 
+    update :fail_paused do
+      require_atomic? false
+      accept [:last_error]
+      change transition_state(:failed)
+      change &__MODULE__.set_finished_at/2
+    end
+
     update :cancel do
       require_atomic? false
       change transition_state(:cancelled)
@@ -224,6 +231,7 @@ defmodule EventSales.Ingestion.Resources.SyncRun do
       transition :pause, from: :running, to: :paused
       transition :complete, from: :running, to: :completed
       transition :fail, from: :running, to: :failed
+      transition :fail_paused, from: :paused, to: :failed
       transition :cancel, from: [:queued, :running], to: :cancelled
     end
   end

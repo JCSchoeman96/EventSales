@@ -98,6 +98,10 @@ defmodule EventSales.Ingestion.Resources.WebhookEvent do
       validate present([:ignore_reason])
       change set_attribute(:status, :ignored)
     end
+
+    update :redact_payload do
+      accept [:payload]
+    end
   end
 
   attributes do
