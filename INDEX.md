@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-224
+242
 
 ## Files
 
@@ -166,9 +166,26 @@ Project root: `.`
 - `lib/event_sales_web.ex`
 - `lib/event_sales_web/auth/hooks.ex`
 - `lib/event_sales_web/auth/routes.ex`
+- `lib/event_sales_web/components/alert.ex`
+- `lib/event_sales_web/components/badge.ex`
 - `lib/event_sales_web/components/core_components.ex`
+- `lib/event_sales_web/components/divider.ex`
+- `lib/event_sales_web/components/dropdown.ex`
+- `lib/event_sales_web/components/icon.ex`
+- `lib/event_sales_web/components/indicator.ex`
 - `lib/event_sales_web/components/layouts.ex`
 - `lib/event_sales_web/components/layouts/root.html.heex`
+- `lib/event_sales_web/components/mishka_components.ex`
+- `lib/event_sales_web/components/navbar.ex`
+- `lib/event_sales_web/components/pagination.ex`
+- `lib/event_sales_web/components/progress.ex`
+- `lib/event_sales_web/components/rating.ex`
+- `lib/event_sales_web/components/sidebar.ex`
+- `lib/event_sales_web/components/skeleton.ex`
+- `lib/event_sales_web/components/spinner.ex`
+- `lib/event_sales_web/components/tabs.ex`
+- `lib/event_sales_web/components/toast.ex`
+- `lib/event_sales_web/components/tooltip.ex`
 - `lib/event_sales_web/controllers/admin/event_export_controller.ex`
 - `lib/event_sales_web/controllers/admin/reconciliation_export_controller.ex`
 - `lib/event_sales_web/controllers/auth_controller.ex`
@@ -181,6 +198,7 @@ Project root: `.`
 - `lib/event_sales_web/controllers/page_html/home.html.heex`
 - `lib/event_sales_web/controllers/webhook_controller.ex`
 - `lib/event_sales_web/endpoint.ex`
+- `lib/event_sales_web/helpers/dashboard_helpers.ex`
 - `lib/event_sales_web/live/admin/components/order_table.ex`
 - `lib/event_sales_web/live/admin/components/sales_chart.ex`
 - `lib/event_sales_web/live/admin/components/stale_data_banner.ex`
@@ -1139,11 +1157,47 @@ Project root: `.`
   - docs_count: 0
   - public_funs: _none_
   - uses: _none_
+- `EventSalesWeb.Components.Alert` - `lib/event_sales_web/components/alert.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 8
+  - public_funs: `flash/1`, `flash_group/1`, `alert/1`, `show_alert/2`, `hide_alert/2`
+  - uses: `Gettext`, `Phoenix.Component`
+- `EventSalesWeb.Components.Badge` - `lib/event_sales_web/components/badge.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 6
+  - public_funs: `badge/1`, `show_badge/2`, `hide_badge/2`
+  - uses: `Gettext`, `Phoenix.Component`
 - `EventSalesWeb.CoreComponents` - `lib/event_sales_web/components/core_components.ex`
   - moduledoc?: true
   - specs?: false
   - docs_count: 9
   - public_funs: `flash/1`, `button/1`, `input/1`, `header/1`, `table/1`, `list/1`, `icon/1`, `show/2`, `hide/2`, `translate_error/1`, `translate_errors/2`
+  - uses: `Phoenix.Component`
+- `EventSalesWeb.Components.Divider` - `lib/event_sales_web/components/divider.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 4
+  - public_funs: `divider/1`, `hr/1`
+  - uses: `Phoenix.Component`
+- `EventSalesWeb.Components.Dropdown` - `lib/event_sales_web/components/dropdown.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 6
+  - public_funs: `dropdown/1`, `dropdown_trigger/1`, `dropdown_content/1`
+  - uses: `Phoenix.Component`
+- `EventSalesWeb.Components.Icon` - `lib/event_sales_web/components/icon.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 2
+  - public_funs: `icon/1`
+  - uses: `Phoenix.Component`
+- `EventSalesWeb.Components.Indicator` - `lib/event_sales_web/components/indicator.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 2
+  - public_funs: `indicator/1`
   - uses: `Phoenix.Component`
 - `EventSalesWeb.Layouts` - `lib/event_sales_web/components/layouts.ex`
   - moduledoc?: true
@@ -1151,6 +1205,72 @@ Project root: `.`
   - docs_count: 2
   - public_funs: `app/1`, `flash_group/1`
   - uses: `EventSalesWeb`
+- `EventSalesWeb.MishkaComponents` - `lib/event_sales_web/components/mishka_components.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSalesWeb.Components.Navbar` - `lib/event_sales_web/components/navbar.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 4
+  - public_funs: `navbar/1`, `header/1`
+  - uses: `Gettext`, `Phoenix.Component`
+- `EventSalesWeb.Components.Pagination` - `lib/event_sales_web/components/pagination.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 3
+  - public_funs: `pagination/1`
+  - uses: `Gettext`, `Phoenix.Component`
+- `EventSalesWeb.Components.Progress` - `lib/event_sales_web/components/progress.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 7
+  - public_funs: `progress/1`, `semi_circle_progress/1`, `ring_progress/1`, `progress_section/1`
+  - uses: `Phoenix.Component`
+- `EventSalesWeb.Components.Rating` - `lib/event_sales_web/components/rating.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 2
+  - public_funs: `rating/1`
+  - uses: `Gettext`, `Phoenix.Component`
+- `EventSalesWeb.Components.Sidebar` - `lib/event_sales_web/components/sidebar.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 4
+  - public_funs: `sidebar/1`, `show_sidebar/3`, `hide_sidebar/3`
+  - uses: `Gettext`, `Phoenix.Component`
+- `EventSalesWeb.Components.Skeleton` - `lib/event_sales_web/components/skeleton.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 2
+  - public_funs: `skeleton/1`
+  - uses: `Gettext`, `Phoenix.Component`
+- `EventSalesWeb.Components.Spinner` - `lib/event_sales_web/components/spinner.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 3
+  - public_funs: `spinner/1`
+  - uses: `Gettext`, `Phoenix.Component`
+- `EventSalesWeb.Components.Tabs` - `lib/event_sales_web/components/tabs.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 4
+  - public_funs: `tabs/1`, `show_tab/3`, `hide_tab/3`
+  - uses: `Phoenix.Component`
+- `EventSalesWeb.Components.Toast` - `lib/event_sales_web/components/toast.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 7
+  - public_funs: `toast/1`, `toast_group/1`, `show_toast/2`, `hide_toast/2`
+  - uses: `Gettext`, `Phoenix.Component`
+- `EventSalesWeb.Components.Tooltip` - `lib/event_sales_web/components/tooltip.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 2
+  - public_funs: `tooltip/1`
+  - uses: `Phoenix.Component`
 - `EventSalesWeb.Admin.EventExportController` - `lib/event_sales_web/controllers/admin/event_export_controller.ex`
   - moduledoc?: true
   - specs?: false
@@ -1217,6 +1337,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: _none_
   - uses: `Phoenix.Endpoint`
+- `EventSalesWeb.DashboardHelpers` - `lib/event_sales_web/helpers/dashboard_helpers.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `status_color/1`, `capacity_color/1`, `sync_color/1`, `sold_pct/1`, `format_zar/1`, `format_date/1`, `relative_time/1`, `delta_label/1`, `delta_class/1`
+  - uses: _none_
 - `EventSalesWeb.Live.Admin.Components.OrderTable` - `lib/event_sales_web/live/admin/components/order_table.ex`
   - moduledoc?: true
   - specs?: false
@@ -1227,8 +1353,8 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: _none_
-  - uses: _none_
+  - public_funs: `render/1`
+  - uses: `Phoenix.LiveComponent`
 - `EventSalesWeb.Live.Admin.Components.StaleDataBanner` - `lib/event_sales_web/live/admin/components/stale_data_banner.ex`
   - moduledoc?: true
   - specs?: false
@@ -1644,7 +1770,23 @@ _none_
 ### Components
 
 - `EventSalesWeb` - `lib/event_sales_web.ex`
+- `EventSalesWeb.Components.Alert` - `lib/event_sales_web/components/alert.ex`
+- `EventSalesWeb.Components.Badge` - `lib/event_sales_web/components/badge.ex`
 - `EventSalesWeb.CoreComponents` - `lib/event_sales_web/components/core_components.ex`
+- `EventSalesWeb.Components.Divider` - `lib/event_sales_web/components/divider.ex`
+- `EventSalesWeb.Components.Dropdown` - `lib/event_sales_web/components/dropdown.ex`
+- `EventSalesWeb.Components.Icon` - `lib/event_sales_web/components/icon.ex`
+- `EventSalesWeb.Components.Indicator` - `lib/event_sales_web/components/indicator.ex`
+- `EventSalesWeb.Components.Navbar` - `lib/event_sales_web/components/navbar.ex`
+- `EventSalesWeb.Components.Pagination` - `lib/event_sales_web/components/pagination.ex`
+- `EventSalesWeb.Components.Progress` - `lib/event_sales_web/components/progress.ex`
+- `EventSalesWeb.Components.Rating` - `lib/event_sales_web/components/rating.ex`
+- `EventSalesWeb.Components.Sidebar` - `lib/event_sales_web/components/sidebar.ex`
+- `EventSalesWeb.Components.Skeleton` - `lib/event_sales_web/components/skeleton.ex`
+- `EventSalesWeb.Components.Spinner` - `lib/event_sales_web/components/spinner.ex`
+- `EventSalesWeb.Components.Tabs` - `lib/event_sales_web/components/tabs.ex`
+- `EventSalesWeb.Components.Toast` - `lib/event_sales_web/components/toast.ex`
+- `EventSalesWeb.Components.Tooltip` - `lib/event_sales_web/components/tooltip.ex`
 - `EventSalesWeb.Live.Admin.Components.OrderTable` - `lib/event_sales_web/live/admin/components/order_table.ex`
 - `EventSalesWeb.Live.Admin.Components.StaleDataBanner` - `lib/event_sales_web/live/admin/components/stale_data_banner.ex`
 - `EventSalesWeb.Live.Admin.Components.StatCard` - `lib/event_sales_web/live/admin/components/stat_card.ex`

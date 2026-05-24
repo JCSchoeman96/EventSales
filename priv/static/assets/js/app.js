@@ -1,19 +1,21 @@
-// For Phoenix.HTML support, including form and button helpers
-// copy the following scripts into your javascript bundle:
-// * deps/phoenix_html/priv/static/phoenix_html.js
+import MishkaComponents from "../vendor/mishka_components.js";
 
-// For Phoenix.Channels support, copy the following scripts
-// into your javascript bundle:
-// * deps/phoenix/priv/static/phoenix.js
+const { Socket } = window.Phoenix;
+const { LiveSocket } = window.LiveView;
 
-// For Phoenix.LiveView support, copy the following scripts
-// into your javascript bundle:
-// * deps/phoenix_live_view/priv/static/phoenix_live_view.js
+let csrfToken = document
+  .querySelector("meta[name='csrf-token']")
+  ?.getAttribute("content");
 
-// Handle flash close
-// (you can safely remove this if you don't use the default flash component)
-document.querySelectorAll("[role=alert][data-flash]").forEach((el) => {
-  el.addEventListener("click", () => {
-    el.setAttribute("hidden", "");
-  });
+let liveSocket = new LiveSocket("/live", Socket, {
+  longPollFallbackMs: 2500,
+  params: {
+    _csrf_token: csrfToken,
+  },
+  hooks: {
+    ...MishkaComponents,
+  },
 });
+
+liveSocket.connect();
+window.liveSocket = liveSocket;
