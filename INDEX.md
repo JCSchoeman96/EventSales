@@ -1607,9 +1607,9 @@ Project root: `.`
   - uses: _none_
 - `EventSales.TestSupport.AuthHelpers` - `test/support/auth_helpers.ex`
   - moduledoc?: true
-  - specs?: false
+  - specs?: true
   - docs_count: 0
-  - public_funs: _none_
+  - public_funs: `sign_in_as/2`, `create_user!/2`, `create_global_role!/2`
   - uses: _none_
 - `EventSalesWeb.ConnCase` - `test/support/conn_case.ex`
   - moduledoc?: true
