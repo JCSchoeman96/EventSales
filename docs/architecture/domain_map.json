@@ -967,6 +967,66 @@
         ]
       },
       {
+        "docs_count": 8,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Components.Alert",
+        "parse_error": null,
+        "path": "lib/event_sales_web/components/alert.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "flash"
+          },
+          {
+            "arity": 1,
+            "name": "flash_group"
+          },
+          {
+            "arity": 1,
+            "name": "alert"
+          },
+          {
+            "arity": 2,
+            "name": "show_alert"
+          },
+          {
+            "arity": 2,
+            "name": "hide_alert"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Gettext",
+          "Phoenix.Component"
+        ]
+      },
+      {
+        "docs_count": 6,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Components.Badge",
+        "parse_error": null,
+        "path": "lib/event_sales_web/components/badge.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "badge"
+          },
+          {
+            "arity": 2,
+            "name": "show_badge"
+          },
+          {
+            "arity": 2,
+            "name": "hide_badge"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Gettext",
+          "Phoenix.Component"
+        ]
+      },
+      {
         "docs_count": 9,
         "moduledoc?": true,
         "name": "EventSalesWeb.CoreComponents",
@@ -1016,6 +1076,307 @@
           {
             "arity": 2,
             "name": "translate_errors"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Phoenix.Component"
+        ]
+      },
+      {
+        "docs_count": 4,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Components.Divider",
+        "parse_error": null,
+        "path": "lib/event_sales_web/components/divider.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "divider"
+          },
+          {
+            "arity": 1,
+            "name": "hr"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Phoenix.Component"
+        ]
+      },
+      {
+        "docs_count": 6,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Components.Dropdown",
+        "parse_error": null,
+        "path": "lib/event_sales_web/components/dropdown.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "dropdown"
+          },
+          {
+            "arity": 1,
+            "name": "dropdown_trigger"
+          },
+          {
+            "arity": 1,
+            "name": "dropdown_content"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Phoenix.Component"
+        ]
+      },
+      {
+        "docs_count": 2,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Components.Icon",
+        "parse_error": null,
+        "path": "lib/event_sales_web/components/icon.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "icon"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Phoenix.Component"
+        ]
+      },
+      {
+        "docs_count": 2,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Components.Indicator",
+        "parse_error": null,
+        "path": "lib/event_sales_web/components/indicator.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "indicator"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Phoenix.Component"
+        ]
+      },
+      {
+        "docs_count": 4,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Components.Navbar",
+        "parse_error": null,
+        "path": "lib/event_sales_web/components/navbar.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "navbar"
+          },
+          {
+            "arity": 1,
+            "name": "header"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Gettext",
+          "Phoenix.Component"
+        ]
+      },
+      {
+        "docs_count": 3,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Components.Pagination",
+        "parse_error": null,
+        "path": "lib/event_sales_web/components/pagination.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "pagination"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Gettext",
+          "Phoenix.Component"
+        ]
+      },
+      {
+        "docs_count": 7,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Components.Progress",
+        "parse_error": null,
+        "path": "lib/event_sales_web/components/progress.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "progress"
+          },
+          {
+            "arity": 1,
+            "name": "semi_circle_progress"
+          },
+          {
+            "arity": 1,
+            "name": "ring_progress"
+          },
+          {
+            "arity": 1,
+            "name": "progress_section"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Phoenix.Component"
+        ]
+      },
+      {
+        "docs_count": 2,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Components.Rating",
+        "parse_error": null,
+        "path": "lib/event_sales_web/components/rating.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "rating"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Gettext",
+          "Phoenix.Component"
+        ]
+      },
+      {
+        "docs_count": 4,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Components.Sidebar",
+        "parse_error": null,
+        "path": "lib/event_sales_web/components/sidebar.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "sidebar"
+          },
+          {
+            "arity": 3,
+            "name": "show_sidebar"
+          },
+          {
+            "arity": 3,
+            "name": "hide_sidebar"
+          }
+        ],
+        "specs?": true,
+        "uses": [
+          "Gettext",
+          "Phoenix.Component"
+        ]
+      },
+      {
+        "docs_count": 2,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Components.Skeleton",
+        "parse_error": null,
+        "path": "lib/event_sales_web/components/skeleton.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "skeleton"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Gettext",
+          "Phoenix.Component"
+        ]
+      },
+      {
+        "docs_count": 3,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Components.Spinner",
+        "parse_error": null,
+        "path": "lib/event_sales_web/components/spinner.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "spinner"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Gettext",
+          "Phoenix.Component"
+        ]
+      },
+      {
+        "docs_count": 4,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Components.Tabs",
+        "parse_error": null,
+        "path": "lib/event_sales_web/components/tabs.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "tabs"
+          },
+          {
+            "arity": 3,
+            "name": "show_tab"
+          },
+          {
+            "arity": 3,
+            "name": "hide_tab"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Phoenix.Component"
+        ]
+      },
+      {
+        "docs_count": 7,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Components.Toast",
+        "parse_error": null,
+        "path": "lib/event_sales_web/components/toast.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "toast"
+          },
+          {
+            "arity": 1,
+            "name": "toast_group"
+          },
+          {
+            "arity": 2,
+            "name": "show_toast"
+          },
+          {
+            "arity": 2,
+            "name": "hide_toast"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Gettext",
+          "Phoenix.Component"
+        ]
+      },
+      {
+        "docs_count": 2,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Components.Tooltip",
+        "parse_error": null,
+        "path": "lib/event_sales_web/components/tooltip.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "tooltip"
           }
         ],
         "specs?": false,

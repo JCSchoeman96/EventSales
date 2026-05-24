@@ -1,1 +1,5 @@
-/* This file is for your main application CSS */
+@import "../vendor/mishka_chelekom.css";
+
+/* Committed static entrypoint.
+ * EventSales does not currently run a Tailwind/DaisyUI build pipeline.
+ */

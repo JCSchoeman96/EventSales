@@ -288,6 +288,13 @@ defmodule EventSalesWeb.Live.Admin.DashboardLiveTest do
     end
   end
 
+  test "manual refresh recomputes chart assigns after loading dashboard data" do
+    source = File.read!("lib/event_sales_web/live/admin/dashboard_live.ex")
+
+    assert source =~
+             ~r/\|> put_refresh_flash\(result\)\s+\|> load_dashboard\(\)\s+\|> assign_chart_data\(\)\s+\|> maybe_subscribe_to_event_topics\(\)/
+  end
+
   defp sign_in_as(conn, user) do
     Plug.Test.init_test_session(conn, %{current_user_id: user.id})
   end

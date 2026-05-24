@@ -1,0 +1,8 @@
+@import "../vendor/mishka_chelekom.css";
+
+/* DO NOT RUN mix tailwind against this file.
+ *
+ * EventSales currently has no Tailwind/DaisyUI asset pipeline. The browser
+ * receives committed static CSS from priv/static/assets, and this source file
+ * exists only as the Mishka Chelekom generator anchor.
+ */

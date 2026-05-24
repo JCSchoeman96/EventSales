@@ -1,3 +1,5 @@
+// Source Phoenix client entrypoint for Mishka Chelekom generators.
+// EventSales serves the committed counterpart from priv/static/assets/js/app.js.
 import MishkaComponents from "../vendor/mishka_components.js";
 
 const { Socket } = window.Phoenix;
