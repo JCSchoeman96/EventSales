@@ -32,7 +32,8 @@ defmodule EventSalesWeb.Auth.AdminAccessTest do
   } do
     conn = get(%{conn | remote_ip: {127, 0, 0, 1}}, "/internal/ash-admin")
 
-    assert response(conn, 401) == "Unauthorized"
+    assert html_response(conn, 401) =~ "Admin access required"
+    assert conn.status == 401
   end
 
   test "rejects staff access to internal AshAdmin", %{conn: conn} do
@@ -45,7 +46,37 @@ defmodule EventSalesWeb.Auth.AdminAccessTest do
       |> Map.put(:remote_ip, {127, 0, 0, 1})
       |> get("/internal/ash-admin")
 
-    assert response(conn, 403) == "Forbidden"
+    assert html_response(conn, 403) =~ "Admin role required"
+    assert conn.status == 403
+  end
+
+  test "renders styled 401 page for unauthenticated admin dashboard access", %{conn: conn} do
+    conn = get(conn, "/admin/dashboard")
+    html = html_response(conn, 401)
+
+    assert conn.status == 401
+    assert html =~ "Admin access required"
+    assert html =~ "EventSales"
+    assert html =~ ~s(href="/")
+    assert html =~ ~s(href="/health")
+  end
+
+  test "renders styled 403 page for authenticated non-admin dashboard access", %{conn: conn} do
+    staff = create_user!("dashboard-forbidden@example.com")
+    create_global_role!(staff, :staff)
+
+    conn =
+      conn
+      |> sign_in_as(staff)
+      |> get("/admin/dashboard")
+
+    html = html_response(conn, 403)
+
+    assert conn.status == 403
+    assert html =~ "Admin role required"
+    assert html =~ "EventSales"
+    assert html =~ ~s(href="/")
+    assert html =~ ~s(href="/health")
   end
 
   test "allows admin access to internal AshAdmin when the internal gate passes", %{conn: conn} do
@@ -70,7 +101,8 @@ defmodule EventSalesWeb.Auth.AdminAccessTest do
       |> Map.put(:remote_ip, {127, 0, 0, 1})
       |> get("/internal/ash-admin")
 
-    assert response(conn, 403) == "Forbidden"
+    assert html_response(conn, 403) =~ "Admin role required"
+    assert conn.status == 403
   end
 
   test "keeps existing InternalOnly not-found behavior for non-loopback requests", %{conn: conn} do

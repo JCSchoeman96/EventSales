@@ -17,7 +17,8 @@ defmodule EventSalesWeb.ObanWebAccessTest do
   test "rejects unauthenticated access to admin Oban Web", %{conn: conn} do
     conn = get(conn, "/admin/oban")
 
-    assert response(conn, 401) == "Unauthorized"
+    assert html_response(conn, 401) =~ "Admin access required"
+    assert conn.status == 401
   end
 
   test "rejects staff access to admin Oban Web", %{conn: conn} do
@@ -29,7 +30,8 @@ defmodule EventSalesWeb.ObanWebAccessTest do
       |> sign_in_as(staff)
       |> get("/admin/oban")
 
-    assert response(conn, 403) == "Forbidden"
+    assert html_response(conn, 403) =~ "Admin role required"
+    assert conn.status == 403
   end
 
   test "allows admin access to admin Oban Web", %{conn: conn} do

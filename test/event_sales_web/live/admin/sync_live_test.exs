@@ -41,7 +41,8 @@ defmodule EventSalesWeb.Live.Admin.SyncLiveTest do
 
   test "rejects unauthenticated access", %{conn: conn} do
     conn = get(conn, "/admin/sync")
-    assert response(conn, 401) == "Unauthorized"
+    assert html_response(conn, 401) =~ "Admin access required"
+    assert conn.status == 401
   end
 
   test "rejects non-admin access", %{conn: conn} do
@@ -53,7 +54,8 @@ defmodule EventSalesWeb.Live.Admin.SyncLiveTest do
       |> sign_in_as(staff)
       |> get("/admin/sync")
 
-    assert response(conn, 403) == "Forbidden"
+    assert html_response(conn, 403) =~ "Admin role required"
+    assert conn.status == 403
   end
 
   test "admin sees recent runs with status counts and pause metadata", %{

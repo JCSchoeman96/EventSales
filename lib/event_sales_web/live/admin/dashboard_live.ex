@@ -8,6 +8,7 @@ defmodule EventSalesWeb.Live.Admin.DashboardLive do
   alias EventSales.Analytics.AdminDashboard
   alias EventSales.Analytics.DashboardPubSub
   alias EventSales.Analytics.HotStateAggregator
+  alias EventSalesWeb.Components.AdminShell
   alias EventSalesWeb.Live.Admin.ManualActionRateLimiter
   alias EventSalesWeb.Live.Admin.Session, as: AdminSession
 
@@ -67,21 +68,17 @@ defmodule EventSalesWeb.Live.Admin.DashboardLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <main class="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 sm:py-8">
-      <.flash kind={:info} flash={@flash} />
-      <.flash kind={:error} flash={@flash} />
-
-      <header class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 class="text-2xl font-semibold text-base-content">Admin Dashboard</h1>
-          <p class="mt-1 text-sm text-base-content/70">
-            Internal sales visibility from EventSales aggregates.
-          </p>
-        </div>
+    <AdminShell.shell
+      flash={@flash}
+      current_path="/admin/dashboard"
+      page_title="Admin Dashboard"
+      page_description="Internal sales visibility from EventSales aggregates."
+    >
+      <:actions>
         <button type="button" phx-click="manual_refresh" class="btn btn-outline btn-sm shrink-0">
           Refresh
         </button>
-      </header>
+      </:actions>
 
       <StaleDataBanner.banner hot_state={@dashboard.hot_state} />
 
@@ -197,7 +194,7 @@ defmodule EventSalesWeb.Live.Admin.DashboardLive do
         <h2 class="mb-3 text-base font-semibold text-base-content">Recent Orders</h2>
         <OrderTable.table orders={@dashboard.recent_orders} />
       </section>
-    </main>
+    </AdminShell.shell>
     """
   end
 

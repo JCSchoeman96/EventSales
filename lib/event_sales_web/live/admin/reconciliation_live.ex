@@ -9,6 +9,7 @@ defmodule EventSalesWeb.Live.Admin.ReconciliationLive do
   alias EventSales.Accounts.Resources.User
   alias EventSales.Analytics.EventDetail
   alias EventSales.Ingestion.AdminReconciliationDashboard
+  alias EventSalesWeb.Components.AdminShell
   alias EventSalesWeb.Live.Admin.ManualActionRateLimiter
 
   @empty_filters %{
@@ -204,17 +205,12 @@ defmodule EventSalesWeb.Live.Admin.ReconciliationLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <main class="mx-auto max-w-7xl px-6 py-8">
-      <.flash kind={:info} flash={@flash} />
-      <.flash kind={:error} flash={@flash} />
-
-      <div class="mb-6">
-        <h1 class="text-2xl font-semibold text-zinc-900">Reconciliation</h1>
-        <p class="text-sm text-zinc-600">
-          Review Tickera/Woo findings from durable local snapshots. No live API calls from this page.
-        </p>
-      </div>
-
+    <AdminShell.shell
+      flash={@flash}
+      current_path="/admin/reconciliation"
+      page_title="Reconciliation"
+      page_description="Review Tickera/Woo findings from durable local snapshots. No live API calls from this page."
+    >
       <section class="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div class="rounded border border-zinc-200 bg-white p-4">
           <p class="text-xs font-semibold uppercase text-zinc-500">Open findings</p>
@@ -559,7 +555,7 @@ defmodule EventSalesWeb.Live.Admin.ReconciliationLive do
           Next
         </button>
       </div>
-    </main>
+    </AdminShell.shell>
     """
   end
 

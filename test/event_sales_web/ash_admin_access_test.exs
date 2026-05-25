@@ -29,7 +29,8 @@ defmodule EventSalesWeb.AshAdminAccessTest do
 
     conn = get(%{conn | remote_ip: {127, 0, 0, 1}}, "/internal/ash-admin")
 
-    assert response(conn, 401) == "Unauthorized"
+    assert html_response(conn, 401) =~ "Admin access required"
+    assert conn.status == 401
   end
 
   test "returns not found for non-loopback requests even when enabled", %{conn: conn} do

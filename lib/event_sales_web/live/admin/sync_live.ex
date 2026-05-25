@@ -7,6 +7,7 @@ defmodule EventSalesWeb.Live.Admin.SyncLive do
 
   alias EventSales.Analytics.EventDetail
   alias EventSales.Ingestion.{ManualSync, SyncDebug}
+  alias EventSalesWeb.Components.AdminShell
   alias EventSalesWeb.Live.Admin.ManualActionRateLimiter
   alias EventSalesWeb.Live.Admin.Pagination, as: AdminPagination
   alias EventSalesWeb.Live.Admin.Session, as: AdminSession
@@ -67,84 +68,83 @@ defmodule EventSalesWeb.Live.Admin.SyncLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <main class="mx-auto max-w-7xl px-6 py-8">
-      <.flash kind={:info} flash={@flash} />
-      <.flash kind={:error} flash={@flash} />
-
-      <div class="mb-6">
-        <h1 class="text-2xl font-semibold text-zinc-900">Manual Sync</h1>
-        <p class="text-sm text-zinc-600">Scoped order reconciliation for one event.</p>
-      </div>
-
-      <section class="mb-8 rounded border border-zinc-200 bg-white p-4">
-        <h2 class="mb-4 text-base font-semibold text-zinc-900">Queue scoped sync</h2>
-        <form phx-change="update_form" id="sync-form" class="grid gap-3 md:grid-cols-2">
-          <label class="text-sm font-medium text-zinc-700 md:col-span-2">
-            Event
-            <select
-              name="sync[event_id]"
-              class="mt-1 w-full rounded border border-zinc-300 bg-white px-3 py-2 text-sm"
-            >
-              <option value="" selected={@form["event_id"] == ""}>Select event</option>
-              <option
-                :for={event <- @events}
-                value={event.event_id}
-                selected={@form["event_id"] == event.event_id}
+    <AdminShell.shell
+      flash={@flash}
+      current_path="/admin/sync"
+      page_title="Manual Sync"
+      page_description="Scoped order reconciliation for one event."
+    >
+      <section class="card mb-8 border border-base-300 bg-base-100 shadow-sm">
+        <div class="card-body">
+          <h2 class="mb-4 text-base font-semibold text-zinc-900">Queue scoped sync</h2>
+          <form phx-change="update_form" id="sync-form" class="grid gap-3 md:grid-cols-2">
+            <label class="text-sm font-medium text-zinc-700 md:col-span-2">
+              Event
+              <select
+                name="sync[event_id]"
+                class="mt-1 w-full rounded border border-zinc-300 bg-white px-3 py-2 text-sm"
               >
-                {event.event_name}
-              </option>
-            </select>
-          </label>
-          <label class="text-sm font-medium text-zinc-700">
-            Date from
-            <input
-              type="date"
-              name="sync[date_from]"
-              value={@form["date_from"]}
-              class="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-            />
-          </label>
-          <label class="text-sm font-medium text-zinc-700">
-            Date to
-            <input
-              type="date"
-              name="sync[date_to]"
-              value={@form["date_to"]}
-              class="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-            />
-          </label>
-          <label class="text-sm font-medium text-zinc-700 md:col-span-2">
-            Sync mode
-            <select
-              name="sync[sync_mode]"
-              class="mt-1 w-full rounded border border-zinc-300 bg-white px-3 py-2 text-sm"
+                <option value="" selected={@form["event_id"] == ""}>Select event</option>
+                <option
+                  :for={event <- @events}
+                  value={event.event_id}
+                  selected={@form["event_id"] == event.event_id}
+                >
+                  {event.event_name}
+                </option>
+              </select>
+            </label>
+            <label class="text-sm font-medium text-zinc-700">
+              Date from
+              <input
+                type="date"
+                name="sync[date_from]"
+                value={@form["date_from"]}
+                class="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+              />
+            </label>
+            <label class="text-sm font-medium text-zinc-700">
+              Date to
+              <input
+                type="date"
+                name="sync[date_to]"
+                value={@form["date_to"]}
+                class="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+              />
+            </label>
+            <label class="text-sm font-medium text-zinc-700 md:col-span-2">
+              Sync mode
+              <select
+                name="sync[sync_mode]"
+                class="mt-1 w-full rounded border border-zinc-300 bg-white px-3 py-2 text-sm"
+              >
+                <option value="shallow" selected={@form["sync_mode"] == "shallow"}>shallow</option>
+                <option value="deep" selected={@form["sync_mode"] == "deep"}>deep</option>
+              </select>
+            </label>
+          </form>
+          <div class="mt-4 flex flex-wrap gap-2">
+            <button
+              :if={!@confirm_sync}
+              type="button"
+              phx-click="confirm_sync"
+              class="rounded border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800"
             >
-              <option value="shallow" selected={@form["sync_mode"] == "shallow"}>shallow</option>
-              <option value="deep" selected={@form["sync_mode"] == "deep"}>deep</option>
-            </select>
-          </label>
-        </form>
-        <div class="mt-4 flex flex-wrap gap-2">
-          <button
-            :if={!@confirm_sync}
-            type="button"
-            phx-click="confirm_sync"
-            class="rounded border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800"
-          >
-            Queue sync
-          </button>
-          <button
-            :if={@confirm_sync}
-            type="button"
-            phx-click="queue_sync"
-            class="rounded border border-red-300 bg-red-50 px-3 py-2 text-sm font-medium text-red-800"
-          >
-            Confirm sync
-          </button>
+              Queue sync
+            </button>
+            <button
+              :if={@confirm_sync}
+              type="button"
+              phx-click="queue_sync"
+              class="rounded border border-red-300 bg-red-50 px-3 py-2 text-sm font-medium text-red-800"
+            >
+              Confirm sync
+            </button>
+          </div>
         </div>
       </section>
 
-      <section class="overflow-x-auto border border-zinc-200">
+      <section class="overflow-x-auto rounded-box border border-base-300 bg-base-100">
         <table class="min-w-full divide-y divide-zinc-200 text-sm">
           <thead class="bg-zinc-50 text-left text-xs font-semibold uppercase text-zinc-600">
             <tr>
@@ -207,7 +207,7 @@ defmodule EventSalesWeb.Live.Admin.SyncLive do
           Next
         </button>
       </div>
-    </main>
+    </AdminShell.shell>
     """
   end
 

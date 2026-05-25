@@ -158,6 +158,7 @@
     "lib/event_sales_web.ex",
     "lib/event_sales_web/auth/hooks.ex",
     "lib/event_sales_web/auth/routes.ex",
+    "lib/event_sales_web/components/admin_shell.ex",
     "lib/event_sales_web/components/alert.ex",
     "lib/event_sales_web/components/badge.ex",
     "lib/event_sales_web/components/core_components.ex",
@@ -180,6 +181,9 @@
     "lib/event_sales_web/components/tooltip.ex",
     "lib/event_sales_web/controllers/admin/event_export_controller.ex",
     "lib/event_sales_web/controllers/admin/reconciliation_export_controller.ex",
+    "lib/event_sales_web/controllers/admin_access_html.ex",
+    "lib/event_sales_web/controllers/admin_access_html/forbidden.html.heex",
+    "lib/event_sales_web/controllers/admin_access_html/unauthorized.html.heex",
     "lib/event_sales_web/controllers/auth_controller.ex",
     "lib/event_sales_web/controllers/error_html.ex",
     "lib/event_sales_web/controllers/error_json.ex",
@@ -3533,6 +3537,23 @@
       "uses": []
     },
     {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Components.AdminShell",
+      "parse_error": null,
+      "path": "lib/event_sales_web/components/admin_shell.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "shell"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "EventSalesWeb"
+      ]
+    },
+    {
       "docs_count": 8,
       "moduledoc?": true,
       "name": "EventSalesWeb.Components.Alert",
@@ -4014,6 +4035,18 @@
           "name": "show"
         }
       ],
+      "specs?": false,
+      "uses": [
+        "EventSalesWeb"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.AdminAccessHTML",
+      "parse_error": null,
+      "path": "lib/event_sales_web/controllers/admin_access_html.ex",
+      "public_funs": [],
       "specs?": false,
       "uses": [
         "EventSalesWeb"

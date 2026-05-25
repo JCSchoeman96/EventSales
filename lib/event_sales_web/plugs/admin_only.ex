@@ -4,8 +4,10 @@ defmodule EventSalesWeb.Plugs.AdminOnly do
   """
 
   import Plug.Conn
+  import Phoenix.Controller
 
   alias EventSales.Accounts.Policies
+  alias EventSalesWeb.AdminAccessHTML
 
   @behaviour Plug
 
@@ -15,7 +17,9 @@ defmodule EventSalesWeb.Plugs.AdminOnly do
   @impl true
   def call(%Plug.Conn{assigns: %{current_user: nil}} = conn, _opts) do
     conn
-    |> send_resp(401, "Unauthorized")
+    |> put_status(:unauthorized)
+    |> put_view(html: AdminAccessHTML)
+    |> render(:unauthorized)
     |> halt()
   end
 
@@ -24,7 +28,9 @@ defmodule EventSalesWeb.Plugs.AdminOnly do
       conn
     else
       conn
-      |> send_resp(403, "Forbidden")
+      |> put_status(:forbidden)
+      |> put_view(html: AdminAccessHTML)
+      |> render(:forbidden)
       |> halt()
     end
   end
