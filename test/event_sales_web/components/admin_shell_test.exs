@@ -29,6 +29,8 @@ defmodule EventSalesWeb.Components.AdminShellTest do
     assert html =~ ~s(href="/internal/mappings")
     assert html =~ ~s(href="/internal/ash-admin")
     assert html =~ ~s(href="/health")
+    assert html =~ ~s(href="/admin/logout")
+    assert html =~ ~s(data-method="delete")
     assert html =~ ~s(aria-current="page")
   end
 

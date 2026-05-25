@@ -44,7 +44,12 @@ defmodule EventSalesWeb.Components.AdminShell do
             </.link>
           </div>
           <div class="flex-none">
-            <.link href={~p"/health"} class="btn btn-ghost btn-sm">Health</.link>
+            <div class="flex items-center gap-2">
+              <.link href={~p"/health"} class="btn btn-ghost btn-sm">Health</.link>
+              <.link href={~p"/admin/logout"} method="delete" class="btn btn-ghost btn-sm">
+                Sign out
+              </.link>
+            </div>
           </div>
         </header>
 

@@ -13,8 +13,19 @@
       </div>
       <div class="flex flex-wrap gap-2">
         <.link href={~p"/health"} class="btn btn-outline">Health</.link>
+        <.link :if={!@admin_session?} href={~p"/admin/login"} class="btn btn-primary">
+          Admin sign in
+        </.link>
         <.link :if={@admin_session?} href={~p"/admin/dashboard"} class="btn btn-primary">
           Admin dashboard
+        </.link>
+        <.link
+          :if={@admin_session?}
+          href={~p"/admin/logout"}
+          method="delete"
+          class="btn btn-ghost"
+        >
+          Sign out
         </.link>
       </div>
     </div>
@@ -32,7 +43,11 @@
         <div class="card-body">
           <h2 class="card-title text-base">Access</h2>
           <p class="text-sm leading-6 text-base-content/70">
-            Admin routes require an authenticated account with the global admin role.
+            <%= if @signed_in? and !@admin_session? do %>
+              Admin role required. This session is signed in but cannot open admin dashboards.
+            <% else %>
+              Admin routes require an authenticated account with the global admin role.
+            <% end %>
           </p>
         </div>
       </div>
