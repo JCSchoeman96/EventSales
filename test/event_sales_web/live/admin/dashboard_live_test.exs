@@ -32,10 +32,13 @@ defmodule EventSalesWeb.Live.Admin.DashboardLiveTest do
 
   test "rejects unauthenticated access", %{conn: conn} do
     conn = get(conn, "/admin/dashboard")
-    assert response(conn, 401) == "Unauthorized"
+    assert html_response(conn, 401) =~ "Admin access required"
+    assert conn.status == 401
   end
 
-  test "admin sees empty dashboard sections and sales trend placeholder", %{conn: conn} do
+  test "admin sees shell navigation, empty dashboard sections, and sales trend placeholder", %{
+    conn: conn
+  } do
     admin = create_user!("dashboard-empty@example.com")
     create_global_role!(admin, :admin)
 
@@ -44,6 +47,17 @@ defmodule EventSalesWeb.Live.Admin.DashboardLiveTest do
       |> sign_in_as(admin)
       |> live("/admin/dashboard")
 
+    assert html =~ "EventSales"
+    assert html =~ ~s(href="/admin/dashboard")
+    assert html =~ ~s(href="/admin/events")
+    assert html =~ ~s(href="/admin/imports")
+    assert html =~ ~s(href="/admin/webhooks")
+    assert html =~ ~s(href="/admin/sync")
+    assert html =~ ~s(href="/admin/reconciliation")
+    assert html =~ ~s(href="/admin/oban")
+    assert html =~ ~s(href="/internal/mappings")
+    assert html =~ ~s(href="/internal/ash-admin")
+    assert html =~ ~s(href="/health")
     assert html =~ "Tickets Sold"
     assert html =~ "Revenue"
     assert html =~ "Today Tickets"
@@ -66,7 +80,8 @@ defmodule EventSalesWeb.Live.Admin.DashboardLiveTest do
       |> sign_in_as(staff)
       |> get("/admin/dashboard")
 
-    assert response(conn, 403) == "Forbidden"
+    assert html_response(conn, 403) =~ "Admin role required"
+    assert conn.status == 403
   end
 
   test "admin can view dashboard data without PII", %{conn: conn} do

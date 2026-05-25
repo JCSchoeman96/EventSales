@@ -33,7 +33,8 @@ defmodule EventSalesWeb.Live.Admin.WebhooksLiveTest do
 
   test "rejects unauthenticated access", %{conn: conn} do
     conn = get(conn, "/admin/webhooks")
-    assert response(conn, 401) == "Unauthorized"
+    assert html_response(conn, 401) =~ "Admin access required"
+    assert conn.status == 401
   end
 
   test "rejects non-admin access", %{conn: conn} do
@@ -45,7 +46,8 @@ defmodule EventSalesWeb.Live.Admin.WebhooksLiveTest do
       |> sign_in_as(staff)
       |> get("/admin/webhooks")
 
-    assert response(conn, 403) == "Forbidden"
+    assert html_response(conn, 403) =~ "Admin role required"
+    assert conn.status == 403
   end
 
   test "admin can view paginated log and filter rows", %{conn: conn, source: source} do

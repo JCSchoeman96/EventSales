@@ -33,7 +33,8 @@ defmodule EventSalesWeb.Live.Admin.ImportsLiveTest do
 
   test "rejects unauthenticated access", %{conn: conn} do
     conn = get(conn, "/admin/imports")
-    assert response(conn, 401) == "Unauthorized"
+    assert html_response(conn, 401) =~ "Admin access required"
+    assert conn.status == 401
   end
 
   test "rejects non-admin access", %{conn: conn, staff: staff} do
@@ -42,7 +43,8 @@ defmodule EventSalesWeb.Live.Admin.ImportsLiveTest do
       |> sign_in_as(staff)
       |> get("/admin/imports")
 
-    assert response(conn, 403) == "Forbidden"
+    assert html_response(conn, 403) =~ "Admin role required"
+    assert conn.status == 403
   end
 
   test "admin can upload a CSV for a selected event and sees dry-run rows", %{

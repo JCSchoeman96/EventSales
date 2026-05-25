@@ -6,6 +6,7 @@ defmodule EventSalesWeb.Live.Admin.WebhooksLive do
   use EventSalesWeb, :live_view
 
   alias EventSales.Ingestion.{WebhookDebug, WebhookReplay}
+  alias EventSalesWeb.Components.AdminShell
   alias EventSalesWeb.Live.Admin.ManualActionRateLimiter
   alias EventSalesWeb.Live.Admin.Pagination, as: AdminPagination
   alias EventSalesWeb.Live.Admin.Session, as: AdminSession
@@ -80,16 +81,16 @@ defmodule EventSalesWeb.Live.Admin.WebhooksLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <main class="mx-auto max-w-7xl px-6 py-8">
-      <.flash kind={:info} flash={@flash} />
-      <.flash kind={:error} flash={@flash} />
-
-      <div class="mb-6">
-        <h1 class="text-2xl font-semibold text-zinc-900">Webhook Debug</h1>
-        <p class="text-sm text-zinc-600">Internal webhook delivery log.</p>
-      </div>
-
-      <form phx-change="filter" class="mb-6 grid gap-3 md:grid-cols-4">
+    <AdminShell.shell
+      flash={@flash}
+      current_path="/admin/webhooks"
+      page_title="Webhook Debug"
+      page_description="Internal webhook delivery log."
+    >
+      <form
+        phx-change="filter"
+        class="card mb-6 grid gap-3 border border-base-300 bg-base-100 p-4 shadow-sm md:grid-cols-4"
+      >
         <label class="text-sm font-medium text-zinc-700">
           Status
           <select
@@ -132,7 +133,7 @@ defmodule EventSalesWeb.Live.Admin.WebhooksLive do
         </label>
       </form>
 
-      <section class="overflow-x-auto border border-zinc-200">
+      <section class="overflow-x-auto rounded-box border border-base-300 bg-base-100">
         <table class="min-w-full divide-y divide-zinc-200 text-sm">
           <thead class="bg-zinc-50 text-left text-xs font-semibold uppercase text-zinc-600">
             <tr>
@@ -221,20 +222,22 @@ defmodule EventSalesWeb.Live.Admin.WebhooksLive do
         </button>
       </div>
 
-      <section :if={@revealed_payload} class="mt-6 border border-zinc-200 bg-zinc-50 p-4">
-        <div class="mb-3 flex items-center justify-between">
-          <h2 class="text-base font-semibold text-zinc-900">Raw Payload</h2>
-          <button
-            type="button"
-            phx-click="hide_payload"
-            class="rounded border border-zinc-300 bg-white px-2 py-1 text-xs font-medium text-zinc-800"
-          >
-            Hide
-          </button>
+      <section :if={@revealed_payload} class="card mt-6 border border-base-300 bg-base-100 shadow-sm">
+        <div class="card-body">
+          <div class="mb-3 flex items-center justify-between">
+            <h2 class="text-base font-semibold text-zinc-900">Raw Payload</h2>
+            <button
+              type="button"
+              phx-click="hide_payload"
+              class="rounded border border-zinc-300 bg-white px-2 py-1 text-xs font-medium text-zinc-800"
+            >
+              Hide
+            </button>
+          </div>
+          <pre class="max-h-96 overflow-auto whitespace-pre-wrap text-xs text-zinc-800">{format_payload(@revealed_payload.payload)}</pre>
         </div>
-        <pre class="max-h-96 overflow-auto whitespace-pre-wrap text-xs text-zinc-800">{format_payload(@revealed_payload.payload)}</pre>
       </section>
-    </main>
+    </AdminShell.shell>
     """
   end
 

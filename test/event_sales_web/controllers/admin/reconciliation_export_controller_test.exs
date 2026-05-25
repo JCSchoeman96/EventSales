@@ -54,7 +54,8 @@ defmodule EventSalesWeb.Admin.ReconciliationExportControllerTest do
 
   test "unauthenticated export returns 401", %{conn: conn} do
     conn = get(conn, "/admin/reconciliation/export.csv")
-    assert response(conn, 401) == "Unauthorized"
+    assert html_response(conn, 401) =~ "Admin access required"
+    assert conn.status == 401
   end
 
   test "non-admin export returns 403", %{conn: conn} do
@@ -66,7 +67,8 @@ defmodule EventSalesWeb.Admin.ReconciliationExportControllerTest do
       |> sign_in_as(staff)
       |> get("/admin/reconciliation/export.csv")
 
-    assert response(conn, 403) == "Forbidden"
+    assert html_response(conn, 403) =~ "Admin role required"
+    assert conn.status == 403
   end
 
   test "admin export returns csv with headers and truncation header", %{conn: conn, admin: admin} do

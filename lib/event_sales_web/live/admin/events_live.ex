@@ -6,6 +6,7 @@ defmodule EventSalesWeb.Live.Admin.EventsLive do
   use EventSalesWeb, :live_view
 
   alias EventSales.Analytics.EventDetail
+  alias EventSalesWeb.Components.AdminShell
   alias EventSalesWeb.Live.Admin.Pagination, as: AdminPagination
   alias EventSalesWeb.Live.Admin.Session, as: AdminSession
 
@@ -32,36 +33,34 @@ defmodule EventSalesWeb.Live.Admin.EventsLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <main class="mx-auto max-w-7xl px-6 py-8">
-      <.flash kind={:info} flash={@flash} />
-      <.flash kind={:error} flash={@flash} />
-
-      <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 class="text-2xl font-semibold text-zinc-900">Events</h1>
-          <p class="text-sm text-zinc-600">Admin event sales summaries from EventSales data.</p>
-        </div>
-        <div class="flex gap-2">
+    <AdminShell.shell
+      flash={@flash}
+      current_path="/admin/events"
+      page_title="Events"
+      page_description="Admin event sales summaries from EventSales data."
+    >
+      <:actions>
+        <div class="flex flex-wrap gap-2">
           <button
             type="button"
             disabled
-            class="inline-flex items-center justify-center rounded border border-zinc-200 bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-500"
+            class="btn btn-outline btn-sm"
           >
             Export CSV
           </button>
           <.link
             navigate={~p"/admin/imports"}
-            class="inline-flex items-center justify-center rounded border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800"
+            class="btn btn-primary btn-sm"
           >
             Import CSV
           </.link>
         </div>
-      </div>
+      </:actions>
 
       <section>
-        <div class="overflow-x-auto border border-zinc-200">
-          <table class="min-w-full divide-y divide-zinc-200 text-sm">
-            <thead class="bg-zinc-50 text-left text-xs font-semibold uppercase text-zinc-600">
+        <div class="overflow-x-auto rounded-box border border-base-300 bg-base-100">
+          <table class="table table-zebra table-sm">
+            <thead>
               <tr>
                 <th class="px-3 py-2">Event</th>
                 <th class="px-3 py-2">Status</th>
@@ -71,22 +70,22 @@ defmodule EventSalesWeb.Live.Admin.EventsLive do
                 <th class="px-3 py-2">Revenue</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-zinc-100 bg-white">
+            <tbody>
               <tr :for={event <- @events}>
-                <td class="px-3 py-2 font-medium text-zinc-900">
+                <td class="px-3 py-2 font-medium text-base-content">
                   <.link navigate={~p"/admin/events/#{event.event_id}"} class="hover:underline">
                     {event.event_name}
                   </.link>
-                  <div class="text-xs font-normal text-zinc-500">{event.slug}</div>
+                  <div class="text-xs font-normal text-base-content/60">{event.slug}</div>
                 </td>
-                <td class="px-3 py-2 text-zinc-700">{event.status}</td>
-                <td class="px-3 py-2 text-zinc-700">{format_count(event.capacity)}</td>
-                <td class="px-3 py-2 text-zinc-700">{event.sold}</td>
-                <td class="px-3 py-2 text-zinc-700">{format_count(event.remaining)}</td>
-                <td class="px-3 py-2 text-zinc-700">{format_money(event.revenue)}</td>
+                <td class="px-3 py-2">{event.status}</td>
+                <td class="px-3 py-2">{format_count(event.capacity)}</td>
+                <td class="px-3 py-2">{event.sold}</td>
+                <td class="px-3 py-2">{format_count(event.remaining)}</td>
+                <td class="px-3 py-2">{format_money(event.revenue)}</td>
               </tr>
               <tr :if={@events == []}>
-                <td class="px-3 py-6 text-center text-zinc-500" colspan="6">No events yet.</td>
+                <td class="px-3 py-6 text-center text-base-content/60" colspan="6">No events yet.</td>
               </tr>
             </tbody>
           </table>
@@ -97,22 +96,22 @@ defmodule EventSalesWeb.Live.Admin.EventsLive do
             type="button"
             phx-click="previous_page"
             disabled={!@page.has_previous?}
-            class="rounded border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400"
+            class="btn btn-outline btn-sm"
           >
             Previous
           </button>
-          <span class="text-sm text-zinc-600">Page {@page.page}</span>
+          <span class="text-sm text-base-content/70">Page {@page.page}</span>
           <button
             type="button"
             phx-click="next_page"
             disabled={!@page.has_next?}
-            class="rounded border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400"
+            class="btn btn-outline btn-sm"
           >
             Next
           </button>
         </div>
       </section>
-    </main>
+    </AdminShell.shell>
     """
   end
 

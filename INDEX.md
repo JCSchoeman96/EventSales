@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-246
+250
 
 ## Files
 
@@ -170,6 +170,7 @@ Project root: `.`
 - `lib/event_sales_web.ex`
 - `lib/event_sales_web/auth/hooks.ex`
 - `lib/event_sales_web/auth/routes.ex`
+- `lib/event_sales_web/components/admin_shell.ex`
 - `lib/event_sales_web/components/alert.ex`
 - `lib/event_sales_web/components/badge.ex`
 - `lib/event_sales_web/components/core_components.ex`
@@ -192,6 +193,9 @@ Project root: `.`
 - `lib/event_sales_web/components/tooltip.ex`
 - `lib/event_sales_web/controllers/admin/event_export_controller.ex`
 - `lib/event_sales_web/controllers/admin/reconciliation_export_controller.ex`
+- `lib/event_sales_web/controllers/admin_access_html.ex`
+- `lib/event_sales_web/controllers/admin_access_html/forbidden.html.heex`
+- `lib/event_sales_web/controllers/admin_access_html/unauthorized.html.heex`
 - `lib/event_sales_web/controllers/auth_controller.ex`
 - `lib/event_sales_web/controllers/error_html.ex`
 - `lib/event_sales_web/controllers/error_json.ex`
@@ -1185,6 +1189,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: _none_
   - uses: _none_
+- `EventSalesWeb.Components.AdminShell` - `lib/event_sales_web/components/admin_shell.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `shell/1`
+  - uses: `EventSalesWeb`
 - `EventSalesWeb.Components.Alert` - `lib/event_sales_web/components/alert.ex`
   - moduledoc?: true
   - specs?: false
@@ -1310,6 +1320,12 @@ Project root: `.`
   - specs?: false
   - docs_count: 0
   - public_funs: `show/2`
+  - uses: `EventSalesWeb`
+- `EventSalesWeb.AdminAccessHTML` - `lib/event_sales_web/controllers/admin_access_html.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
   - uses: `EventSalesWeb`
 - `EventSalesWeb.Controllers.AuthController` - `lib/event_sales_web/controllers/auth_controller.ex`
   - moduledoc?: true
@@ -1789,6 +1805,7 @@ _none_
 - `EventSalesWeb` - `lib/event_sales_web.ex`
 - `EventSalesWeb.Admin.EventExportController` - `lib/event_sales_web/controllers/admin/event_export_controller.ex`
 - `EventSalesWeb.Admin.ReconciliationExportController` - `lib/event_sales_web/controllers/admin/reconciliation_export_controller.ex`
+- `EventSalesWeb.AdminAccessHTML` - `lib/event_sales_web/controllers/admin_access_html.ex`
 - `EventSalesWeb.ErrorHTML` - `lib/event_sales_web/controllers/error_html.ex`
 - `EventSalesWeb.HealthController` - `lib/event_sales_web/controllers/health_controller.ex`
 - `EventSalesWeb.PageController` - `lib/event_sales_web/controllers/page_controller.ex`

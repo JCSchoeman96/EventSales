@@ -1631,6 +1631,18 @@
       {
         "docs_count": 0,
         "moduledoc?": true,
+        "name": "EventSalesWeb.AdminAccessHTML",
+        "parse_error": null,
+        "path": "lib/event_sales_web/controllers/admin_access_html.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "EventSalesWeb"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
         "name": "EventSalesWeb.ErrorHTML",
         "parse_error": null,
         "path": "lib/event_sales_web/controllers/error_html.ex",

@@ -7,6 +7,7 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLive do
 
   alias EventSales.Accounts.PiiPolicy
   alias EventSales.Analytics.{DashboardPubSub, EventDetail}
+  alias EventSalesWeb.Components.AdminShell
   alias EventSalesWeb.Live.Admin.Pagination, as: AdminPagination
   alias EventSalesWeb.Live.Admin.Session, as: AdminSession
   alias EventSalesWeb.Presenters.CustomerPresenter
@@ -63,56 +64,58 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLive do
   @impl true
   def render(%{not_found?: true} = assigns) do
     ~H"""
-    <main class="mx-auto max-w-7xl px-6 py-8">
+    <AdminShell.shell
+      flash={@flash}
+      current_path="/admin/events"
+      page_title="Event not found"
+      page_description="The requested event is not available."
+    >
       <.link navigate={~p"/admin/events"} class="text-sm font-medium text-zinc-700 hover:underline">
         Back to events
       </.link>
-      <div class="mt-6 border border-zinc-200 bg-white p-6">
-        <h1 class="text-2xl font-semibold text-zinc-900">Event not found</h1>
-        <p class="mt-2 text-sm text-zinc-600">The requested event is not available.</p>
+      <div class="card border border-base-300 bg-base-100 shadow-sm">
+        <div class="card-body">
+          <h1 class="text-2xl font-semibold text-zinc-900">Event not found</h1>
+          <p class="mt-2 text-sm text-zinc-600">The requested event is not available.</p>
+        </div>
       </div>
-    </main>
+    </AdminShell.shell>
     """
   end
 
   def render(assigns) do
     ~H"""
-    <main class="mx-auto max-w-7xl px-6 py-8">
-      <.flash kind={:info} flash={@flash} />
-      <.flash kind={:error} flash={@flash} />
-
-      <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <.link
-            navigate={~p"/admin/events"}
-            class="text-sm font-medium text-zinc-700 hover:underline"
-          >
+    <AdminShell.shell
+      flash={@flash}
+      current_path="/admin/events"
+      page_title={@detail.event_name}
+      page_description={"#{@detail.slug} - #{@detail.status}"}
+    >
+      <:actions>
+        <div class="flex flex-wrap gap-2">
+          <.link navigate={~p"/admin/events"} class="btn btn-ghost btn-sm">
             Back to events
           </.link>
-          <h1 class="mt-2 text-2xl font-semibold text-zinc-900">{@detail.event_name}</h1>
-          <p class="text-sm text-zinc-600">{@detail.slug} - {@detail.status}</p>
-        </div>
-        <div class="flex gap-2">
           <.link
             href={~p"/admin/events/#{@event_id}/exports/summary.csv"}
-            class="inline-flex items-center justify-center rounded border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800"
+            class="btn btn-outline btn-sm"
           >
             Summary CSV
           </.link>
           <.link
             href={~p"/admin/events/#{@event_id}/exports/orders.csv"}
-            class="inline-flex items-center justify-center rounded border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800"
+            class="btn btn-outline btn-sm"
           >
             Orders CSV
           </.link>
           <.link
             navigate={~p"/admin/imports?event_id=#{@event_id}"}
-            class="inline-flex items-center justify-center rounded border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800"
+            class="btn btn-primary btn-sm"
           >
             Import CSV
           </.link>
         </div>
-      </div>
+      </:actions>
 
       <section class="mb-6 grid gap-3 sm:grid-cols-3">
         <div class="border border-zinc-200 bg-white p-4">
@@ -285,7 +288,7 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLive do
           </button>
         </div>
       </section>
-    </main>
+    </AdminShell.shell>
     """
   end
 

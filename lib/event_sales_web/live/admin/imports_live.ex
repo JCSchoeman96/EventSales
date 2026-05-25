@@ -10,6 +10,7 @@ defmodule EventSalesWeb.Live.Admin.ImportsLive do
 
   alias EventSales.Analytics.EventDetail
   alias EventSales.Ingestion.CsvImports
+  alias EventSalesWeb.Components.AdminShell
   alias EventSalesWeb.Live.Admin.Session, as: AdminSession
 
   @impl true
@@ -94,98 +95,99 @@ defmodule EventSalesWeb.Live.Admin.ImportsLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <main class="mx-auto max-w-7xl px-6 py-8">
-      <.flash kind={:info} flash={@flash} />
-      <.flash kind={:error} flash={@flash} />
-
-      <div class="mb-6">
-        <h1 class="text-2xl font-semibold text-zinc-900">CSV Imports</h1>
-        <p class="text-sm text-zinc-600">Dry-run validation for event-scoped order line CSVs.</p>
-      </div>
-
-      <section class="mb-8 border border-zinc-200 bg-white p-4">
-        <h2 class="mb-4 text-base font-semibold text-zinc-900">Run dry-run</h2>
-        <form
-          id="csv-import-form"
-          phx-change="select_event"
-          phx-submit="dry_run"
-          phx-drop-target={@uploads.csv.ref}
-          class="grid gap-4"
-        >
-          <label class="text-sm font-medium text-zinc-700">
-            Event
-            <select
-              name="import[event_id]"
-              class="mt-1 w-full rounded border border-zinc-300 bg-white px-3 py-2 text-sm"
-            >
-              <option value="" selected={@selected_event_id == ""}>Select event</option>
-              <option
-                :for={event <- @events}
-                value={event.event_id}
-                selected={@selected_event_id == event.event_id}
+    <AdminShell.shell
+      flash={@flash}
+      current_path="/admin/imports"
+      page_title="CSV Imports"
+      page_description="Dry-run validation for event-scoped order line CSVs."
+    >
+      <section class="card mb-8 border border-base-300 bg-base-100 shadow-sm">
+        <div class="card-body">
+          <h2 class="mb-4 text-base font-semibold text-zinc-900">Run dry-run</h2>
+          <form
+            id="csv-import-form"
+            phx-change="select_event"
+            phx-submit="dry_run"
+            phx-drop-target={@uploads.csv.ref}
+            class="grid gap-4"
+          >
+            <label class="text-sm font-medium text-zinc-700">
+              Event
+              <select
+                name="import[event_id]"
+                class="mt-1 w-full rounded border border-zinc-300 bg-white px-3 py-2 text-sm"
               >
-                {event.event_name}
-              </option>
-            </select>
-          </label>
+                <option value="" selected={@selected_event_id == ""}>Select event</option>
+                <option
+                  :for={event <- @events}
+                  value={event.event_id}
+                  selected={@selected_event_id == event.event_id}
+                >
+                  {event.event_name}
+                </option>
+              </select>
+            </label>
 
-          <div>
-            <.live_file_input
-              upload={@uploads.csv}
-              class="block w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-            />
-            <div class="mt-2 text-sm text-zinc-600">
-              <div :for={entry <- @uploads.csv.entries}>
-                <span>{entry.client_name}</span>
-                <span>{entry.progress}%</span>
+            <div>
+              <.live_file_input
+                upload={@uploads.csv}
+                class="block w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+              />
+              <div class="mt-2 text-sm text-zinc-600">
+                <div :for={entry <- @uploads.csv.entries}>
+                  <span>{entry.client_name}</span>
+                  <span>{entry.progress}%</span>
+                </div>
               </div>
             </div>
-          </div>
 
-          <div>
-            <button
-              type="submit"
-              class="rounded border border-zinc-900 bg-zinc-900 px-3 py-2 text-sm font-medium text-white"
-            >
-              Run dry-run
-            </button>
-          </div>
-        </form>
+            <div>
+              <button
+                type="submit"
+                class="rounded border border-zinc-900 bg-zinc-900 px-3 py-2 text-sm font-medium text-white"
+              >
+                Run dry-run
+              </button>
+            </div>
+          </form>
+        </div>
       </section>
 
-      <section :if={@latest_batch} class="mb-8 border border-zinc-200 bg-white p-4">
-        <h2 class="mb-3 text-base font-semibold text-zinc-900">Latest dry-run</h2>
-        <div class="grid gap-3 text-sm sm:grid-cols-6">
-          <div>
-            <div class="text-xs font-semibold uppercase text-zinc-500">Status</div>
-            <div class="text-zinc-900">{@latest_batch.status}</div>
-          </div>
-          <div>
-            <div class="text-xs font-semibold uppercase text-zinc-500">Rows</div>
-            <div class="text-zinc-900">{@latest_batch.row_count}</div>
-          </div>
-          <div>
-            <div class="text-xs font-semibold uppercase text-zinc-500">Valid</div>
-            <div class="text-zinc-900">{@latest_batch.valid_count}</div>
-          </div>
-          <div>
-            <div class="text-xs font-semibold uppercase text-zinc-500">Errors</div>
-            <div class="text-zinc-900">{@latest_batch.error_count}</div>
-          </div>
-          <div>
-            <div class="text-xs font-semibold uppercase text-zinc-500">Duplicates</div>
-            <div class="text-zinc-900">{@latest_batch.duplicate_count}</div>
-          </div>
-          <div :if={applyable?(@latest_batch)}>
-            <div class="text-xs font-semibold uppercase text-zinc-500">Action</div>
-            <button
-              type="button"
-              phx-click="apply"
-              phx-value-batch_id={@latest_batch.id}
-              class="mt-1 rounded border border-zinc-900 bg-zinc-900 px-3 py-2 text-sm font-medium text-white"
-            >
-              Apply import
-            </button>
+      <section :if={@latest_batch} class="card mb-8 border border-base-300 bg-base-100 shadow-sm">
+        <div class="card-body">
+          <h2 class="mb-3 text-base font-semibold text-zinc-900">Latest dry-run</h2>
+          <div class="grid gap-3 text-sm sm:grid-cols-6">
+            <div>
+              <div class="text-xs font-semibold uppercase text-zinc-500">Status</div>
+              <div class="text-zinc-900">{@latest_batch.status}</div>
+            </div>
+            <div>
+              <div class="text-xs font-semibold uppercase text-zinc-500">Rows</div>
+              <div class="text-zinc-900">{@latest_batch.row_count}</div>
+            </div>
+            <div>
+              <div class="text-xs font-semibold uppercase text-zinc-500">Valid</div>
+              <div class="text-zinc-900">{@latest_batch.valid_count}</div>
+            </div>
+            <div>
+              <div class="text-xs font-semibold uppercase text-zinc-500">Errors</div>
+              <div class="text-zinc-900">{@latest_batch.error_count}</div>
+            </div>
+            <div>
+              <div class="text-xs font-semibold uppercase text-zinc-500">Duplicates</div>
+              <div class="text-zinc-900">{@latest_batch.duplicate_count}</div>
+            </div>
+            <div :if={applyable?(@latest_batch)}>
+              <div class="text-xs font-semibold uppercase text-zinc-500">Action</div>
+              <button
+                type="button"
+                phx-click="apply"
+                phx-value-batch_id={@latest_batch.id}
+                class="mt-1 rounded border border-zinc-900 bg-zinc-900 px-3 py-2 text-sm font-medium text-white"
+              >
+                Apply import
+              </button>
+            </div>
           </div>
         </div>
       </section>
@@ -250,7 +252,7 @@ defmodule EventSalesWeb.Live.Admin.ImportsLive do
           </tbody>
         </table>
       </section>
-    </main>
+    </AdminShell.shell>
     """
   end
 

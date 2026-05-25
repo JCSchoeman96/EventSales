@@ -45,7 +45,8 @@ defmodule EventSalesWeb.Admin.EventExportControllerTest do
 
   test "unauthenticated exports return 401", %{conn: conn, event: event} do
     conn = get(conn, "/admin/events/#{event.id}/exports/summary.csv")
-    assert response(conn, 401) == "Unauthorized"
+    assert html_response(conn, 401) =~ "Admin access required"
+    assert conn.status == 401
   end
 
   test "non-admin exports return 403", %{conn: conn, event: event, staff: staff} do
@@ -54,7 +55,8 @@ defmodule EventSalesWeb.Admin.EventExportControllerTest do
       |> sign_in_as(staff)
       |> get("/admin/events/#{event.id}/exports/orders.csv")
 
-    assert response(conn, 403) == "Forbidden"
+    assert html_response(conn, 403) =~ "Admin role required"
+    assert conn.status == 403
   end
 
   test "admin exports summary csv and writes requested audit", %{
