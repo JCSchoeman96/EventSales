@@ -14,8 +14,25 @@ defmodule EventSalesWeb.Live.Admin.Components.SalesChart do
 
   @impl true
   def render(assigns) do
-    assigns = assign(assigns, :canvas_id, "sales-chart-#{assigns.id}")
+    if chart_empty?(assigns.labels, assigns.revenue, assigns.tickets) do
+      ~H"""
+      <div class="card bg-base-100 border border-base-200 shadow-sm">
+        <div class="card-body items-center justify-center py-12 text-center">
+          <p class="text-sm text-base-content/60">No sales trend data yet</p>
+        </div>
+      </div>
+      """
+    else
+      assigns = assign(assigns, :canvas_id, "sales-chart-#{assigns.id}")
+      render_chart(assigns)
+    end
+  end
 
+  defp chart_empty?(labels, revenue, tickets) do
+    labels == [] and revenue == [] and tickets == []
+  end
+
+  defp render_chart(assigns) do
     ~H"""
     <div>
       <div class="relative w-full" style="height: 260px;">

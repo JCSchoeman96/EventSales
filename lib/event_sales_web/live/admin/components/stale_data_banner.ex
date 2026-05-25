@@ -11,9 +11,10 @@ defmodule EventSalesWeb.Live.Admin.Components.StaleDataBanner do
     ~H"""
     <div
       :if={@hot_state[:state] in [:warming, :stale]}
-      class="mb-6 border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950"
+      role="alert"
+      class="alert alert-warning mb-6 shadow-sm"
     >
-      Dashboard data is {@hot_state[:state]}.
+      <span>Dashboard data is {@hot_state[:state]}.</span>
     </div>
     """
   end

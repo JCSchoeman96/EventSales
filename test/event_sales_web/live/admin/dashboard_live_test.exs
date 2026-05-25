@@ -35,6 +35,28 @@ defmodule EventSalesWeb.Live.Admin.DashboardLiveTest do
     assert response(conn, 401) == "Unauthorized"
   end
 
+  test "admin sees empty dashboard sections and sales trend placeholder", %{conn: conn} do
+    admin = create_user!("dashboard-empty@example.com")
+    create_global_role!(admin, :admin)
+
+    {:ok, _view, html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/dashboard")
+
+    assert html =~ "Tickets Sold"
+    assert html =~ "Revenue"
+    assert html =~ "Today Tickets"
+    assert html =~ "Today Revenue"
+    assert html =~ "0"
+    assert html =~ "No sales trend data yet"
+    assert html =~ "No statuses yet."
+    assert html =~ "No events yet."
+    assert html =~ "No completed mapped ticket rows yet."
+    assert html =~ "No recent orders."
+    assert html =~ "No unmapped rows need attention."
+  end
+
   test "rejects non-admin access", %{conn: conn} do
     staff = create_user!("dashboard-staff@example.com")
     create_global_role!(staff, :staff)
@@ -83,6 +105,10 @@ defmodule EventSalesWeb.Live.Admin.DashboardLiveTest do
       |> live("/admin/dashboard")
 
     assert html =~ "Admin Dashboard"
+    assert html =~ "Tickets Sold"
+    assert html =~ "Revenue"
+    assert html =~ "Today Tickets"
+    assert html =~ "Today Revenue"
     assert html =~ "2"
     assert html =~ "900.00"
     assert html =~ "completed"
@@ -90,6 +116,7 @@ defmodule EventSalesWeb.Live.Admin.DashboardLiveTest do
     assert html =~ "GA"
     assert html =~ "ES-DASH-1"
     assert html =~ "Unmapped Ticket"
+    assert html =~ "No sales trend data yet"
     refute html =~ "private@example.test"
     refute html =~ "Private Customer"
     refute html =~ "txn_private"

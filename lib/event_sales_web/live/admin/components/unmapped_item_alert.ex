@@ -12,14 +12,19 @@ defmodule EventSalesWeb.Live.Admin.Components.UnmappedItemAlert do
     <div class="space-y-2">
       <div
         :for={alert <- @alerts}
-        class="border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950"
+        role="alert"
+        class="alert alert-warning alert-soft text-sm"
       >
-        <div class="font-medium">{alert.name}</div>
-        <div class="text-amber-900">
-          {alert.order_number || "-"} - product {alert.woo_product_id} - {alert.mapping_status}
+        <div>
+          <div class="font-medium">{alert.name}</div>
+          <div class="text-sm opacity-90">
+            {alert.order_number || "-"} — product {alert.woo_product_id} — {alert.mapping_status}
+          </div>
         </div>
       </div>
-      <p :if={@alerts == []} class="text-sm text-zinc-500">No unmapped rows need attention.</p>
+      <p :if={@alerts == []} class="text-sm text-base-content/60">
+        No unmapped rows need attention.
+      </p>
     </div>
     """
   end

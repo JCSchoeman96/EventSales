@@ -10,9 +10,9 @@ defmodule EventSalesWeb.Live.Admin.Components.StatCard do
 
   def card(assigns) do
     ~H"""
-    <div class="border border-zinc-200 bg-white p-4">
-      <p class="text-xs font-semibold uppercase text-zinc-500">{@title}</p>
-      <p class="mt-2 text-2xl font-semibold text-zinc-900">{@value}</p>
+    <div class="stat rounded-box border border-base-200 bg-base-100 px-4 py-3 shadow-sm">
+      <div class="stat-title text-xs uppercase opacity-70">{@title}</div>
+      <div class="stat-value text-2xl">{@value}</div>
     </div>
     """
   end

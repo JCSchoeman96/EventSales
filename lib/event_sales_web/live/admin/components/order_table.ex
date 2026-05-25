@@ -9,35 +9,52 @@ defmodule EventSalesWeb.Live.Admin.Components.OrderTable do
 
   def table(assigns) do
     ~H"""
-    <div class="overflow-x-auto border border-zinc-200">
-      <table class="min-w-full divide-y divide-zinc-200 text-sm">
-        <thead class="bg-zinc-50 text-left text-xs font-semibold uppercase text-zinc-600">
-          <tr>
-            <th class="px-3 py-2">Order</th>
-            <th class="px-3 py-2">Status</th>
-            <th class="px-3 py-2">Total</th>
-            <th class="px-3 py-2">Completed</th>
-            <th class="px-3 py-2">Source Updated</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-zinc-100 bg-white">
-          <tr :for={order <- @orders}>
-            <td class="px-3 py-2 font-medium text-zinc-900">{order.order_number}</td>
-            <td class="px-3 py-2 text-zinc-700">{order.status}</td>
-            <td class="px-3 py-2 text-zinc-700">
-              {order.currency} {format_money(order.raw_total)}
-            </td>
-            <td class="px-3 py-2 text-zinc-700">{format_datetime(order.completed_at)}</td>
-            <td class="px-3 py-2 text-zinc-700">{format_datetime(order.updated_at_source)}</td>
-          </tr>
-          <tr :if={@orders == []}>
-            <td class="px-3 py-6 text-center text-zinc-500" colspan="5">No recent orders.</td>
-          </tr>
-        </tbody>
-      </table>
+    <div class="card bg-base-100 border border-base-200 shadow-sm">
+      <div class="card-body p-0">
+        <div class="overflow-x-auto">
+          <table class="table table-zebra table-sm">
+            <thead>
+              <tr>
+                <th>Order</th>
+                <th>Status</th>
+                <th>Total</th>
+                <th>Completed</th>
+                <th>Source Updated</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr :for={order <- @orders}>
+                <td class="font-medium">{order.order_number}</td>
+                <td>
+                  <span class={order_status_classes(to_string(order.status))}>
+                    {order.status}
+                  </span>
+                </td>
+                <td>
+                  {order.currency} {format_money(order.raw_total)}
+                </td>
+                <td>{format_datetime(order.completed_at)}</td>
+                <td>{format_datetime(order.updated_at_source)}</td>
+              </tr>
+              <tr :if={@orders == []}>
+                <td class="text-center text-base-content/60" colspan="5">No recent orders.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
     """
   end
+
+  defp order_status_classes("completed"), do: "badge badge-success badge-sm"
+  defp order_status_classes("processing"), do: "badge badge-success badge-sm"
+  defp order_status_classes("pending"), do: "badge badge-warning badge-sm"
+  defp order_status_classes("on-hold"), do: "badge badge-warning badge-sm"
+  defp order_status_classes("refunded"), do: "badge badge-error badge-sm"
+  defp order_status_classes("cancelled"), do: "badge badge-error badge-sm"
+  defp order_status_classes("failed"), do: "badge badge-error badge-sm"
+  defp order_status_classes(_), do: "badge badge-info badge-sm"
 
   defp format_datetime(nil), do: "-"
 

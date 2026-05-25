@@ -10,10 +10,19 @@ defmodule EventSalesWeb.Live.Admin.Components.StatusBadge do
 
   def badge(assigns) do
     ~H"""
-    <span class="inline-flex items-center gap-2 rounded border border-zinc-200 bg-white px-2.5 py-1 text-sm text-zinc-700">
+    <span class={badge_classes(to_string(@status))}>
       <span class="font-medium">{@status}</span>
-      <span class="text-zinc-500">{@count}</span>
+      <span class="opacity-70">{@count}</span>
     </span>
     """
   end
+
+  defp badge_classes("completed"), do: "badge badge-success badge-lg gap-2"
+  defp badge_classes("processing"), do: "badge badge-success badge-lg gap-2"
+  defp badge_classes("pending"), do: "badge badge-warning badge-lg gap-2"
+  defp badge_classes("on-hold"), do: "badge badge-warning badge-lg gap-2"
+  defp badge_classes("refunded"), do: "badge badge-error badge-lg gap-2"
+  defp badge_classes("cancelled"), do: "badge badge-error badge-lg gap-2"
+  defp badge_classes("failed"), do: "badge badge-error badge-lg gap-2"
+  defp badge_classes(_), do: "badge badge-info badge-lg gap-2"
 end
