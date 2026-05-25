@@ -67,121 +67,134 @@ defmodule EventSalesWeb.Live.Admin.DashboardLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <main class="mx-auto max-w-7xl px-6 py-8">
+    <main class="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 sm:py-8">
       <.flash kind={:info} flash={@flash} />
       <.flash kind={:error} flash={@flash} />
 
-      <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <header class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 class="text-2xl font-semibold text-zinc-900">Admin Dashboard</h1>
-          <p class="text-sm text-zinc-600">Internal sales visibility from EventSales data.</p>
+          <h1 class="text-2xl font-semibold text-base-content">Admin Dashboard</h1>
+          <p class="mt-1 text-sm text-base-content/70">
+            Internal sales visibility from EventSales aggregates.
+          </p>
         </div>
-        <button
-          type="button"
-          phx-click="manual_refresh"
-          class="inline-flex items-center justify-center rounded border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
-        >
+        <button type="button" phx-click="manual_refresh" class="btn btn-outline btn-sm shrink-0">
           Refresh
         </button>
-      </div>
+      </header>
 
       <StaleDataBanner.banner hot_state={@dashboard.hot_state} />
 
-      <section class="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard.card title="Tickets Sold" value={@dashboard.kpis.total_sold} />
-        <StatCard.card title="Revenue" value={format_money(@dashboard.kpis.total_revenue)} />
-        <StatCard.card title="Today Tickets" value={@dashboard.kpis.today_sold} />
-        <StatCard.card title="Today Revenue" value={format_money(@dashboard.kpis.today_revenue)} />
+      <section aria-labelledby="kpi-heading">
+        <h2 id="kpi-heading" class="sr-only">Key metrics</h2>
+        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCard.card title="Tickets Sold" value={@dashboard.kpis.total_sold} />
+          <StatCard.card title="Revenue" value={format_money(@dashboard.kpis.total_revenue)} />
+          <StatCard.card title="Today Tickets" value={@dashboard.kpis.today_sold} />
+          <StatCard.card title="Today Revenue" value={format_money(@dashboard.kpis.today_revenue)} />
+        </div>
       </section>
 
-      <section class="mb-6">
-        <h2 class="mb-3 text-base font-semibold text-zinc-900">Sales Trend</h2>
-        <.live_component
-          module={SalesChart}
-          id="main"
-          labels={@chart_labels}
-          revenue={@chart_revenue}
-          tickets={@chart_tickets}
-        />
+      <section class="card bg-base-100 border border-base-200 shadow-sm">
+        <div class="card-body">
+          <h2 class="card-title text-base">Sales Trend</h2>
+          <.live_component
+            module={SalesChart}
+            id="main"
+            labels={@chart_labels}
+            revenue={@chart_revenue}
+            tickets={@chart_tickets}
+          />
+        </div>
       </section>
 
-      <section class="mb-6 grid gap-6 lg:grid-cols-2">
-        <div>
-          <h2 class="mb-3 text-base font-semibold text-zinc-900">Statuses</h2>
-          <div class="flex flex-wrap gap-2">
-            <StatusBadge.badge
-              :for={{status, count} <- @dashboard.statuses}
-              status={status}
-              count={count}
-            />
-            <p :if={@dashboard.statuses == %{}} class="text-sm text-zinc-500">No statuses yet.</p>
+      <section class="grid gap-6 lg:grid-cols-2">
+        <div class="card bg-base-100 border border-base-200 shadow-sm">
+          <div class="card-body">
+            <h2 class="card-title text-base">Statuses</h2>
+            <div class="flex flex-wrap gap-2">
+              <StatusBadge.badge
+                :for={{status, count} <- Enum.sort(@dashboard.statuses)}
+                status={status}
+                count={count}
+              />
+              <p :if={@dashboard.statuses == %{}} class="text-sm text-base-content/60">
+                No statuses yet.
+              </p>
+            </div>
           </div>
         </div>
 
-        <div>
-          <h2 class="mb-3 text-base font-semibold text-zinc-900">Unmapped Alerts</h2>
-          <UnmappedItemAlert.list alerts={@dashboard.unmapped_alerts} />
+        <div class="card bg-base-100 border border-base-200 shadow-sm">
+          <div class="card-body">
+            <h2 class="card-title text-base">Unmapped Alerts</h2>
+            <UnmappedItemAlert.list alerts={@dashboard.unmapped_alerts} />
+          </div>
         </div>
       </section>
 
-      <section class="mb-6">
-        <h2 class="mb-3 text-base font-semibold text-zinc-900">By Event</h2>
-        <div class="overflow-x-auto border border-zinc-200">
-          <table class="min-w-full divide-y divide-zinc-200 text-sm">
-            <thead class="bg-zinc-50 text-left text-xs font-semibold uppercase text-zinc-600">
-              <tr>
-                <th class="px-3 py-2">Event</th>
-                <th class="px-3 py-2">Tickets</th>
-                <th class="px-3 py-2">Revenue</th>
-                <th class="px-3 py-2">Today</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-zinc-100 bg-white">
-              <tr :for={event <- @dashboard.events}>
-                <td class="px-3 py-2 font-medium text-zinc-900">{event.event_name}</td>
-                <td class="px-3 py-2 text-zinc-700">{event.total_sold}</td>
-                <td class="px-3 py-2 text-zinc-700">{format_money(event.total_revenue)}</td>
-                <td class="px-3 py-2 text-zinc-700">{event.today_sold}</td>
-              </tr>
-              <tr :if={@dashboard.events == []}>
-                <td class="px-3 py-6 text-center text-zinc-500" colspan="4">No events yet.</td>
-              </tr>
-            </tbody>
-          </table>
+      <section class="card bg-base-100 border border-base-200 shadow-sm">
+        <div class="card-body">
+          <h2 class="card-title text-base">By Event</h2>
+          <div class="overflow-x-auto">
+            <table class="table table-zebra table-sm">
+              <thead>
+                <tr>
+                  <th>Event</th>
+                  <th>Tickets</th>
+                  <th>Revenue</th>
+                  <th>Today</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr :for={event <- @dashboard.events}>
+                  <td class="font-medium">{event.event_name}</td>
+                  <td>{event.total_sold}</td>
+                  <td>{format_money(event.total_revenue)}</td>
+                  <td>{event.today_sold}</td>
+                </tr>
+                <tr :if={@dashboard.events == []}>
+                  <td class="text-center text-base-content/60" colspan="4">No events yet.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </section>
 
-      <section class="mb-6">
-        <h2 class="mb-3 text-base font-semibold text-zinc-900">By Ticket Type</h2>
-        <div class="overflow-x-auto border border-zinc-200">
-          <table class="min-w-full divide-y divide-zinc-200 text-sm">
-            <thead class="bg-zinc-50 text-left text-xs font-semibold uppercase text-zinc-600">
-              <tr>
-                <th class="px-3 py-2">Event</th>
-                <th class="px-3 py-2">Type</th>
-                <th class="px-3 py-2">Tickets</th>
-                <th class="px-3 py-2">Revenue</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-zinc-100 bg-white">
-              <tr :for={type <- @dashboard.ticket_types}>
-                <td class="px-3 py-2 text-zinc-700">{type.event_name}</td>
-                <td class="px-3 py-2 font-medium text-zinc-900">{type.ticket_type_name}</td>
-                <td class="px-3 py-2 text-zinc-700">{type.total_sold}</td>
-                <td class="px-3 py-2 text-zinc-700">{format_money(type.total_revenue)}</td>
-              </tr>
-              <tr :if={@dashboard.ticket_types == []}>
-                <td class="px-3 py-6 text-center text-zinc-500" colspan="4">
-                  No completed mapped ticket rows yet.
-                </td>
-              </tr>
-            </tbody>
-          </table>
+      <section class="card bg-base-100 border border-base-200 shadow-sm">
+        <div class="card-body">
+          <h2 class="card-title text-base">By Ticket Type</h2>
+          <div class="overflow-x-auto">
+            <table class="table table-zebra table-sm">
+              <thead>
+                <tr>
+                  <th>Event</th>
+                  <th>Type</th>
+                  <th>Tickets</th>
+                  <th>Revenue</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr :for={type <- @dashboard.ticket_types}>
+                  <td>{type.event_name}</td>
+                  <td class="font-medium">{type.ticket_type_name}</td>
+                  <td>{type.total_sold}</td>
+                  <td>{format_money(type.total_revenue)}</td>
+                </tr>
+                <tr :if={@dashboard.ticket_types == []}>
+                  <td class="text-center text-base-content/60" colspan="4">
+                    No completed mapped ticket rows yet.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </section>
 
       <section>
-        <h2 class="mb-3 text-base font-semibold text-zinc-900">Recent Orders</h2>
+        <h2 class="mb-3 text-base font-semibold text-base-content">Recent Orders</h2>
         <OrderTable.table orders={@dashboard.recent_orders} />
       </section>
     </main>
