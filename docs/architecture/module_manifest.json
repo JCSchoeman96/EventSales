@@ -184,6 +184,9 @@
     "lib/event_sales_web/controllers/admin_access_html.ex",
     "lib/event_sales_web/controllers/admin_access_html/forbidden.html.heex",
     "lib/event_sales_web/controllers/admin_access_html/unauthorized.html.heex",
+    "lib/event_sales_web/controllers/admin_session_controller.ex",
+    "lib/event_sales_web/controllers/admin_session_html.ex",
+    "lib/event_sales_web/controllers/admin_session_html/new.html.heex",
     "lib/event_sales_web/controllers/auth_controller.ex",
     "lib/event_sales_web/controllers/error_html.ex",
     "lib/event_sales_web/controllers/error_json.ex",
@@ -225,6 +228,7 @@
     "lib/event_sales_web/presenters/customer_presenter.ex",
     "lib/event_sales_web/router.ex",
     "lib/event_sales_web/telemetry.ex",
+    "lib/mix/tasks/eventsales.admin.bootstrap.ex",
     "lib/mix/tasks/project.index.ex",
     "lib/project_index/elixir_file.ex",
     "lib/project_index/render_json.ex",
@@ -4055,6 +4059,43 @@
     {
       "docs_count": 0,
       "moduledoc?": true,
+      "name": "EventSalesWeb.AdminSessionController",
+      "parse_error": null,
+      "path": "lib/event_sales_web/controllers/admin_session_controller.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "new"
+        },
+        {
+          "arity": 2,
+          "name": "create"
+        },
+        {
+          "arity": 2,
+          "name": "delete"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "EventSalesWeb"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.AdminSessionHTML",
+      "parse_error": null,
+      "path": "lib/event_sales_web/controllers/admin_session_html.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "EventSalesWeb"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
       "name": "EventSalesWeb.Controllers.AuthController",
       "parse_error": null,
       "path": "lib/event_sales_web/controllers/auth_controller.ex",
@@ -4792,6 +4833,23 @@
       "specs?": true,
       "uses": [
         "Supervisor"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "Mix.Tasks.Eventsales.Admin.Bootstrap",
+      "parse_error": null,
+      "path": "lib/mix/tasks/eventsales.admin.bootstrap.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "run"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Mix.Task"
       ]
     },
     {

@@ -57,6 +57,7 @@ defmodule EventSalesWeb.Auth.AdminAccessTest do
     assert conn.status == 401
     assert html =~ "Admin access required"
     assert html =~ "EventSales"
+    assert html =~ ~s(href="/admin/login")
     assert html =~ ~s(href="/")
     assert html =~ ~s(href="/health")
   end
@@ -75,6 +76,7 @@ defmodule EventSalesWeb.Auth.AdminAccessTest do
     assert conn.status == 403
     assert html =~ "Admin role required"
     assert html =~ "EventSales"
+    refute html =~ ~s(href="/admin/login")
     assert html =~ ~s(href="/")
     assert html =~ ~s(href="/health")
   end

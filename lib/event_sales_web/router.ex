@@ -62,6 +62,14 @@ defmodule EventSalesWeb.Router do
     get "/", PageController, :home
   end
 
+  scope "/admin", EventSalesWeb do
+    pipe_through :browser
+
+    get "/login", AdminSessionController, :new
+    post "/login", AdminSessionController, :create
+    delete "/logout", AdminSessionController, :delete
+  end
+
   scope "/" do
     pipe_through [:browser, :internal_admin_tools]
 

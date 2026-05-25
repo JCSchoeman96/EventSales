@@ -1643,6 +1643,43 @@
       {
         "docs_count": 0,
         "moduledoc?": true,
+        "name": "EventSalesWeb.AdminSessionController",
+        "parse_error": null,
+        "path": "lib/event_sales_web/controllers/admin_session_controller.ex",
+        "public_funs": [
+          {
+            "arity": 2,
+            "name": "new"
+          },
+          {
+            "arity": 2,
+            "name": "create"
+          },
+          {
+            "arity": 2,
+            "name": "delete"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "EventSalesWeb"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.AdminSessionHTML",
+        "parse_error": null,
+        "path": "lib/event_sales_web/controllers/admin_session_html.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "EventSalesWeb"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
         "name": "EventSalesWeb.ErrorHTML",
         "parse_error": null,
         "path": "lib/event_sales_web/controllers/error_html.ex",

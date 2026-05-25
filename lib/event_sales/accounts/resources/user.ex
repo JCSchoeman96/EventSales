@@ -15,6 +15,24 @@ defmodule EventSales.Accounts.Resources.User do
 
   actions do
     defaults [:read, update: [:name, :active]]
+
+    update :set_password do
+      accept []
+
+      argument :password, :string do
+        allow_nil? false
+        sensitive? true
+      end
+
+      argument :password_confirmation, :string do
+        allow_nil? false
+        sensitive? true
+      end
+
+      validate confirm(:password, :password_confirmation)
+      change set_context(%{strategy_name: :password})
+      change AshAuthentication.Strategy.Password.HashPasswordChange
+    end
   end
 
   attributes do

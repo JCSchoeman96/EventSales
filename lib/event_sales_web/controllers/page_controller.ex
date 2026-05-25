@@ -6,6 +6,11 @@ defmodule EventSalesWeb.PageController do
   plug EventSalesWeb.Plugs.LoadCurrentUser when action == :home
 
   def home(conn, _params) do
-    render(conn, :home, admin_session?: Policies.global_admin?(conn.assigns.current_user))
+    current_user = conn.assigns.current_user
+
+    render(conn, :home,
+      admin_session?: Policies.global_admin?(current_user),
+      signed_in?: not is_nil(current_user)
+    )
   end
 end

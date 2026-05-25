@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-250
+254
 
 ## Files
 
@@ -196,6 +196,9 @@ Project root: `.`
 - `lib/event_sales_web/controllers/admin_access_html.ex`
 - `lib/event_sales_web/controllers/admin_access_html/forbidden.html.heex`
 - `lib/event_sales_web/controllers/admin_access_html/unauthorized.html.heex`
+- `lib/event_sales_web/controllers/admin_session_controller.ex`
+- `lib/event_sales_web/controllers/admin_session_html.ex`
+- `lib/event_sales_web/controllers/admin_session_html/new.html.heex`
 - `lib/event_sales_web/controllers/auth_controller.ex`
 - `lib/event_sales_web/controllers/error_html.ex`
 - `lib/event_sales_web/controllers/error_json.ex`
@@ -237,6 +240,7 @@ Project root: `.`
 - `lib/event_sales_web/presenters/customer_presenter.ex`
 - `lib/event_sales_web/router.ex`
 - `lib/event_sales_web/telemetry.ex`
+- `lib/mix/tasks/eventsales.admin.bootstrap.ex`
 - `lib/mix/tasks/project.index.ex`
 - `lib/project_index/elixir_file.ex`
 - `lib/project_index/render_json.ex`
@@ -1327,6 +1331,18 @@ Project root: `.`
   - docs_count: 0
   - public_funs: _none_
   - uses: `EventSalesWeb`
+- `EventSalesWeb.AdminSessionController` - `lib/event_sales_web/controllers/admin_session_controller.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `new/2`, `create/2`, `delete/2`
+  - uses: `EventSalesWeb`
+- `EventSalesWeb.AdminSessionHTML` - `lib/event_sales_web/controllers/admin_session_html.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `EventSalesWeb`
 - `EventSalesWeb.Controllers.AuthController` - `lib/event_sales_web/controllers/auth_controller.ex`
   - moduledoc?: true
   - specs?: false
@@ -1567,6 +1583,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `start_link/1`, `init/1`, `metrics/0`
   - uses: `Supervisor`
+- `Mix.Tasks.Eventsales.Admin.Bootstrap` - `lib/mix/tasks/eventsales.admin.bootstrap.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `run/1`
+  - uses: `Mix.Task`
 - `Mix.Tasks.Project.Index` - `lib/mix/tasks/project.index.ex`
   - moduledoc?: true
   - specs?: false
@@ -1806,6 +1828,8 @@ _none_
 - `EventSalesWeb.Admin.EventExportController` - `lib/event_sales_web/controllers/admin/event_export_controller.ex`
 - `EventSalesWeb.Admin.ReconciliationExportController` - `lib/event_sales_web/controllers/admin/reconciliation_export_controller.ex`
 - `EventSalesWeb.AdminAccessHTML` - `lib/event_sales_web/controllers/admin_access_html.ex`
+- `EventSalesWeb.AdminSessionController` - `lib/event_sales_web/controllers/admin_session_controller.ex`
+- `EventSalesWeb.AdminSessionHTML` - `lib/event_sales_web/controllers/admin_session_html.ex`
 - `EventSalesWeb.ErrorHTML` - `lib/event_sales_web/controllers/error_html.ex`
 - `EventSalesWeb.HealthController` - `lib/event_sales_web/controllers/health_controller.ex`
 - `EventSalesWeb.PageController` - `lib/event_sales_web/controllers/page_controller.ex`

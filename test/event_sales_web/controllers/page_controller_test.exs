@@ -20,6 +20,7 @@ defmodule EventSalesWeb.PageControllerTest do
 
     assert html =~ "EventSales"
     assert html =~ "Internal sales intelligence"
+    assert html =~ ~s(href="/admin/login")
     assert html =~ ~s(href="/health")
     refute html =~ "Peace of mind from prototype to production"
     refute html =~ "Phoenix Framework"
@@ -42,6 +43,8 @@ defmodule EventSalesWeb.PageControllerTest do
     assert html =~ "EventSales"
     assert html =~ ~s(href="/health")
     assert html =~ ~s(href="/admin/dashboard")
+    assert html =~ ~s(href="/admin/logout")
+    assert html =~ ~s(data-method="delete")
   end
 
   test "GET / does not show dashboard entry for non-admin sessions", %{conn: conn} do
@@ -56,6 +59,8 @@ defmodule EventSalesWeb.PageControllerTest do
     html = html_response(conn, 200)
 
     assert html =~ "EventSales"
+    assert html =~ "Admin role required"
+    assert html =~ ~s(href="/admin/login")
     assert html =~ ~s(href="/health")
     refute html =~ ~s(href="/admin/dashboard")
   end
