@@ -1,12 +1,13 @@
 # Runtime Configuration
 
-## Database Paths
+## Database and Redis paths
 
-- `DATABASE_URL` is the pooled runtime path for Phoenix, Ecto, and Oban.
-- `DIRECT_DATABASE_URL` is the preferred path for release migrations and session-sensitive maintenance.
-- Slice `0.2` assumes PgBouncer session pooling. Transaction pooling is not configured here.
+- `DATABASE_URL` is the private Railway PostgreSQL URL used by Phoenix, Ecto, Ash, and Oban.
+- `DIRECT_DATABASE_URL` is the release migration path. Slice 24.0 references the same direct private PostgreSQL URL because PgBouncer is not deployed.
+- `REDIS_URL` is the managed Redis connection used by hot-state snapshots when `HOT_STATE_REDIS_SNAPSHOTS_ENABLED=true`.
+- The app must listen on Railway’s injected `PORT`.
 
-## Required Runtime Variables
+## Required production variables
 
 ```text
 DATABASE_URL
@@ -14,20 +15,35 @@ DIRECT_DATABASE_URL
 REDIS_URL
 SECRET_KEY_BASE
 PHX_HOST
-PORT
 EVENTSALES_BUSINESS_TIMEZONE=Africa/Johannesburg
 EVENTSALES_DEFAULT_CURRENCY=ZAR
-WOOCOMMERCE_BASE_URL
-WOOCOMMERCE_CONSUMER_KEY
-WOOCOMMERCE_CONSUMER_SECRET
-WOOCOMMERCE_WEBHOOK_SECRET
+HOT_STATE_REDIS_SNAPSHOTS_ENABLED=true
 WEBHOOK_PATH_TOKEN
-REST_MAX_CONCURRENCY=2
+WOOCOMMERCE_WEBHOOK_SECRET
+EVENTSALES_BOOTSTRAP_ADMIN_EMAIL
+EVENTSALES_BOOTSTRAP_ADMIN_PASSWORD
+EVENTSALES_BOOTSTRAP_ADMIN_NAME
+EVENTSALES_BOOTSTRAP_SOURCE_NAME
+EVENTSALES_BOOTSTRAP_SOURCE_BASE_URL
 ```
 
-## Local Test Requirement
+`WOOCOMMERCE_REST_BASE_URL`, `WOOCOMMERCE_CONSUMER_KEY`, and `WOOCOMMERCE_CONSUMER_SECRET` must be set before live ingestion, reconciliation, or metadata recovery is enabled. WooCommerce REST concurrency remains fixed at `2` in runtime configuration.
 
-- Postgres must be running for `mix test`.
-- The default test database name is `event_sales_test`.
-- Use `mix ecto.create` and `mix ecto.migrate`, or `mix ecto.setup`, before treating DB connection failures as code failures.
-- Slice `0.2` does not require a local Redis service for test or CI.
+Optional smoke controls:
+
+```text
+EVENTSALES_PUBLIC_BASE_URL
+EVENTSALES_SMOKE_TIMEOUT_MS=60000
+EVENTSALES_SMOKE_POLL_INTERVAL_MS=500
+RAILWAY_SERVICE=EventSales
+```
+
+`EVENTSALES_PUBLIC_BASE_URL` is only needed when the generated `RAILWAY_PUBLIC_DOMAIN` should be overridden. It must use HTTPS.
+
+## Secret handling
+
+Set secrets through Railway stdin or its secret variable UI. Never commit values, place them in command-line arguments, or print them. The release bootstrap and smoke harness print safe status labels only.
+
+## Local test requirement
+
+PostgreSQL must be running for `mix test`. Use `bash scripts/dev_postgres.sh start`, then create and migrate the test database with `MIX_ENV=test mix ecto.create` and `MIX_ENV=test mix ecto.migrate`. Local tests do not require Redis.

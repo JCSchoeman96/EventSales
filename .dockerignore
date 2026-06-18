@@ -1,0 +1,12 @@
+_build
+deps
+.git
+.github
+.worktrees
+.env
+.env.*
+test
+docs
+slices
+scripts
+README.md

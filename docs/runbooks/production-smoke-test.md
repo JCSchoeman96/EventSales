@@ -1,64 +1,86 @@
 # Production Smoke Test
 
-## Slice 0.2 Baseline Checks
+## Purpose and safety boundary
 
-Run these checks before moving on to production-like topology validation:
+This runbook proves a Slice 24.0 Railway deployment. It uses a unique PII-free signed payload with the unsupported topic `eventsales.smoke`, ensuring the webhook is durably ingested without triggering WooCommerce REST or mutating sales truth.
 
-```bash
-mix deps.get
-mix ecto.create
-mix ecto.migrate
-mix test
-mix format --check-formatted
-```
+It does not change WooCommerce or Tickera webhook destinations and does not certify flash-sale readiness.
 
-## What Slice 0.2 Proves
+## Preconditions
 
-- Repo starts in `:test`.
-- Release migration URL selection prefers `DIRECT_DATABASE_URL`.
-- Oban can enqueue and execute a test job in `:test`.
-- Local and CI test runs require Postgres but not Redis.
+- Slice 24.0 is merged to and deployed from `main`.
+- The Railway project is linked and the `EventSales` service is active.
+- PostgreSQL, Redis, runtime variables, admin bootstrap variables, and source bootstrap variables are configured.
+- `/health` is the Railway deployment healthcheck.
+- The operator is authenticated with `railway login`.
 
-## What Slice 0.2 Does Not Prove
-
-- Production-like Oban behavior behind the selected Railway/PgBouncer topology.
-- Railway deployment health, webhook reachability, or protected Oban Web behavior.
-
-Those checks remain with Slice `5.7` and Slice `24.0`.
-
-## Slice 5.7 Oban Topology Smoke
-
-Local mode may run with Mix against local Postgres:
+Confirm deployment state without printing variables:
 
 ```bash
-SMOKE_TOPOLOGY_MODE=local mix run scripts/smoke_test_oban_topology.exs
+railway status
+railway deployment list --service EventSales
+railway logs --service EventSales --deployment --lines 100
 ```
 
-Production-like mode must run with real Oban queues, not ExUnit sandbox or test helpers:
+Do not run `railway variable list --kv` in captured evidence because it may expose secret values.
+
+## Run
 
 ```bash
-SMOKE_TOPOLOGY_MODE=production_like \
-SMOKE_TIMEOUT_MS=30000 \
-SMOKE_POLL_INTERVAL_MS=500 \
-mix run scripts/smoke_test_oban_topology.exs
+bash scripts/smoke_test_railway_release.sh
 ```
 
-Expected output includes:
+The wrapper enters the running service with Railway SSH, removes `PHX_SERVER` for the short-lived release evaluator, and runs `EventSales.Maintenance.ProductionSmoke.run!/0`. Secrets remain inside the service environment and are never command-line arguments or output.
 
-- `smoke_topology_mode`
-- `runtime_db_source`
-- `migration_db_source`
-- `configured_notifier`
-- `queue_config`
-- success job ID and final state
-- fail-once job ID, final state, attempt count, and error count
+Expected safe labels:
 
-Acceptance:
+```text
+production smoke: application passed
+production smoke: migrations passed
+production smoke: postgres passed
+production smoke: redis passed
+production smoke: oban passed
+production smoke: health passed
+production smoke: oban protection passed
+production smoke: invalid webhook passed
+production smoke: valid webhook storage passed
+production smoke: admin dashboard and Oban Web passed
+production smoke: complete
+```
 
-- success job reaches `completed` within `SMOKE_TIMEOUT_MS`.
-- fail-once job reaches `completed` within `SMOKE_TIMEOUT_MS`.
-- fail-once job has `attempt > 1`.
-- fail-once job has at least one persisted error.
-- the script exits non-zero on timeout or missing real Oban queue execution.
+The script exits non-zero at the first failed check and names only the failed check. It does not print response bodies, payloads, cookies, signatures, passwords, path tokens, database URLs, Redis URLs, or secret key material.
 
-The script prints DB source names only. It must not print `DATABASE_URL`, `DIRECT_DATABASE_URL`, credentials, host passwords, webhook secrets, or raw payloads.
+## Acceptance evidence
+
+Record only:
+
+```text
+UTC timestamp:
+Git commit SHA:
+Railway project/service:
+Railway deployment ID:
+Generated HTTPS hostname:
+Build status:
+Pre-deploy migration/bootstrap status:
+Health status:
+Smoke completion status:
+Operator initials:
+```
+
+Do not record variable values, admin email, customer data, request bodies, headers, or credentials.
+
+## Failure handling
+
+1. Note the safe failed-check label and deployment ID.
+2. Inspect bounded build or deployment logs with `railway logs --lines 200`; do not paste secret-bearing output into tickets.
+3. For migration/bootstrap failure, verify required variable names and database reachability without displaying values.
+4. For Redis failure, confirm `HOT_STATE_REDIS_SNAPSHOTS_ENABLED=true` and the Redis service reference exists.
+5. For Oban failure, inspect queue configuration and PostgreSQL connectivity; do not switch notifier or add PgBouncer during incident response.
+6. For HTTP/auth/webhook failure, confirm the generated domain, `PHX_HOST`, admin bootstrap status, and source bootstrap status.
+7. Redeploy the last known-good commit or use Railway rollback only after checking migration compatibility.
+
+Do not bypass a failing pre-deploy command or healthcheck to force activation.
+
+## Completion statement
+
+A passing run proves that the Railway build, release migrations, application startup, direct PostgreSQL, managed Redis, Oban execution/retry, HTTPS health, protected admin surfaces, HMAC rejection, and durable signed webhook intake work in production. PgBouncer, live webhook cutover, load testing, and flash-sale certification remain deferred.

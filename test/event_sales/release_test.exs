@@ -123,4 +123,45 @@ defmodule EventSales.ReleaseTest do
       assert Application.fetch_env!(:event_sales, Repo) == original_config
     end
   end
+
+  describe "migrate_and_bootstrap/1" do
+    test "runs migrations before admin and source bootstraps" do
+      caller = self()
+
+      assert :ok =
+               Release.migrate_and_bootstrap(
+                 migrate: fn -> send(caller, :migrated) end,
+                 start_app: fn ->
+                   assert_received :migrated
+                   send(caller, :started)
+                   :ok
+                 end,
+                 admin_bootstrap: fn ->
+                   assert_received :started
+                   send(caller, :admin_bootstrapped)
+                   %{user_status: :existing, password_rotated?: false}
+                 end,
+                 source_bootstrap: fn ->
+                   assert_received :admin_bootstrapped
+                   send(caller, :source_bootstrapped)
+                   %{name: "Production WooCommerce", status: :existing}
+                 end,
+                 output: fn line -> send(caller, {:output, line}) end
+               )
+
+      assert_received :source_bootstrapped
+      assert_received {:output, "production bootstrap: complete"}
+    end
+
+    test "fails without running later steps when migrations fail" do
+      assert_raise RuntimeError, "migration failed", fn ->
+        Release.migrate_and_bootstrap(
+          migrate: fn -> raise "migration failed" end,
+          start_app: fn -> flunk("application must not start") end,
+          admin_bootstrap: fn -> flunk("admin bootstrap must not run") end,
+          source_bootstrap: fn -> flunk("source bootstrap must not run") end
+        )
+      end
+    end
+  end
 end

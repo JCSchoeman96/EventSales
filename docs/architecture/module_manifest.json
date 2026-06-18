@@ -134,12 +134,16 @@
     "lib/event_sales/ingestion/workers/reconcile_tickera_attendees_worker.ex",
     "lib/event_sales/ingestion/workers/redis_webhook_buffer_drainer.ex",
     "lib/event_sales/ingestion/workers/sync_tickera_attendees_worker.ex",
+    "lib/event_sales/maintenance/admin_bootstrap.ex",
     "lib/event_sales/maintenance/cache_cleanup_worker.ex",
     "lib/event_sales/maintenance/db_topology_check_worker.ex",
     "lib/event_sales/maintenance/failed_job_alert_worker.ex",
     "lib/event_sales/maintenance/oban_topology_smoke_worker.ex",
+    "lib/event_sales/maintenance/production_smoke.ex",
+    "lib/event_sales/maintenance/production_smoke/http.ex",
     "lib/event_sales/maintenance/purge_raw_payloads_worker.ex",
     "lib/event_sales/maintenance/raw_payload_purger.ex",
+    "lib/event_sales/maintenance/source_system_bootstrap.ex",
     "lib/event_sales/maintenance/stale_sync_cleanup_worker.ex",
     "lib/event_sales/release.ex",
     "lib/event_sales/repo.ex",
@@ -229,6 +233,7 @@
     "lib/event_sales_web/router.ex",
     "lib/event_sales_web/telemetry.ex",
     "lib/mix/tasks/eventsales.admin.bootstrap.ex",
+    "lib/mix/tasks/eventsales.source_system.bootstrap.ex",
     "lib/mix/tasks/project.index.ex",
     "lib/project_index/elixir_file.ex",
     "lib/project_index/render_json.ex",
@@ -2896,6 +2901,21 @@
     {
       "docs_count": 0,
       "moduledoc?": true,
+      "name": "EventSales.Maintenance.AdminBootstrap",
+      "parse_error": null,
+      "path": "lib/event_sales/maintenance/admin_bootstrap.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "run!"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
       "name": "EventSales.Maintenance.CacheCleanupWorker",
       "parse_error": null,
       "path": "lib/event_sales/maintenance/cache_cleanup_worker.ex",
@@ -2961,6 +2981,62 @@
     {
       "docs_count": 0,
       "moduledoc?": true,
+      "name": "Error",
+      "parse_error": null,
+      "path": "lib/event_sales/maintenance/production_smoke.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Maintenance.ProductionSmoke",
+      "parse_error": null,
+      "path": "lib/event_sales/maintenance/production_smoke.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "config!"
+        },
+        {
+          "arity": 1,
+          "name": "run!"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Maintenance.ProductionSmoke.Http",
+      "parse_error": null,
+      "path": "lib/event_sales/maintenance/production_smoke/http.ex",
+      "public_funs": [
+        {
+          "arity": 5,
+          "name": "request"
+        },
+        {
+          "arity": 1,
+          "name": "csrf_token!"
+        },
+        {
+          "arity": 2,
+          "name": "merge_cookies"
+        },
+        {
+          "arity": 1,
+          "name": "cookie_header"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
       "name": "EventSales.Maintenance.PurgeRawPayloadsWorker",
       "parse_error": null,
       "path": "lib/event_sales/maintenance/purge_raw_payloads_worker.ex",
@@ -2993,6 +3069,21 @@
     {
       "docs_count": 0,
       "moduledoc?": true,
+      "name": "EventSales.Maintenance.SourceSystemBootstrap",
+      "parse_error": null,
+      "path": "lib/event_sales/maintenance/source_system_bootstrap.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "run!"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
       "name": "EventSales.Maintenance.StaleSyncCleanupWorker",
       "parse_error": null,
       "path": "lib/event_sales/maintenance/stale_sync_cleanup_worker.ex",
@@ -3014,6 +3105,10 @@
       "parse_error": null,
       "path": "lib/event_sales/release.ex",
       "public_funs": [
+        {
+          "arity": 1,
+          "name": "migrate_and_bootstrap"
+        },
         {
           "arity": 1,
           "name": "migrate"
@@ -4841,6 +4936,23 @@
       "name": "Mix.Tasks.Eventsales.Admin.Bootstrap",
       "parse_error": null,
       "path": "lib/mix/tasks/eventsales.admin.bootstrap.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "run"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Mix.Task"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "Mix.Tasks.Eventsales.SourceSystem.Bootstrap",
+      "parse_error": null,
+      "path": "lib/mix/tasks/eventsales.source_system.bootstrap.ex",
       "public_funs": [
         {
           "arity": 1,
