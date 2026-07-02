@@ -78,7 +78,7 @@ defmodule EventSales.Maintenance.ProductionSmoke.Http do
       method,
       request,
       http_options(),
-      [body_format: :binary, autoredirect: false]
+      [body_format: :binary]
     ])
   end
 
@@ -97,6 +97,7 @@ defmodule EventSales.Maintenance.ProductionSmoke.Http do
     [
       timeout: @timeout_ms,
       connect_timeout: @timeout_ms,
+      autoredirect: false,
       ssl: ssl_options()
     ]
   end
