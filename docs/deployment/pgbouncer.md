@@ -1,14 +1,20 @@
 # PgBouncer Strategy
 
-## Slice 0.2 Baseline
+## Slice 24.0 production topology
 
-- Use PgBouncer session pooling for normal runtime traffic.
-- Keep `DIRECT_DATABASE_URL` for migrations and other session-sensitive maintenance.
-- Do not add transaction-pooling-specific repo settings in this slice.
-- Do not add `prepare: :unnamed` unless a verified compatibility need appears.
+PgBouncer is intentionally not deployed in Slice 24.0. EventSales, release migrations, and Oban connect directly to Railway’s private managed PostgreSQL endpoint.
 
-## Deferred Compatibility Work
+This topology preserves PostgreSQL session behavior and `LISTEN/NOTIFY`, allowing the existing `Oban.Notifiers.Postgres` configuration to be tested without transaction-pooling ambiguity. `DATABASE_URL` and `DIRECT_DATABASE_URL` therefore reference the same direct private URL for this slice.
 
-- Transaction pooling is a future optimization, not the Slice `0.2` baseline.
-- If transaction pooling is evaluated later, it must come with explicit Ecto/Postgrex and Oban compatibility testing.
-- Slice `5.7` is the first place that should prove Oban behavior under the chosen production topology.
+## Deferred flash-sale topology
+
+Direct PostgreSQL is sufficient to prove deployment and production behavior, but it is not final flash-sale certification. Before introducing PgBouncer:
+
+- Choose session or transaction pooling explicitly.
+- Keep a direct migration/session-sensitive URL.
+- Validate Ecto prepared statements and connection settings.
+- Re-run the real Oban success/retry smoke under the selected notifier topology.
+- Measure pool saturation and connection demand rather than assuming a pooler is required.
+- Document rollback to the direct topology.
+
+Do not add `prepare: :unnamed`, polling notifiers, or transaction-pooling settings without a verified compatibility requirement and tests.

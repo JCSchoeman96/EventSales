@@ -41,7 +41,8 @@ defmodule Mix.Tasks.Eventsales.Admin.BootstrapTest do
     assert role_by_name!(:admin)
     assert user_role(user, role_by_name!(:admin))
     assert authenticate(@email, @password)
-    assert output =~ @email
+    refute output =~ @email
+    assert output =~ "admin user: created"
     assert output =~ "role: ensured"
     refute output =~ @password
   end

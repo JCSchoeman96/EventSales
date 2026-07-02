@@ -12,6 +12,11 @@ defmodule EventSales.RuntimeConfigTest do
     "SECRET_KEY_BASE",
     "WEBHOOK_PATH_TOKEN",
     "WOOCOMMERCE_WEBHOOK_SECRET",
+    "EVENTSALES_BOOTSTRAP_SOURCE_NAME",
+    "EVENTSALES_BOOTSTRAP_SOURCE_BASE_URL",
+    "HOT_STATE_REDIS_SNAPSHOTS_ENABLED",
+    "HOT_STATE_REDIS_URL",
+    "REDIS_URL",
     "TICKERA_DEFAULT_SITE_URL",
     "TICKERA_TIMEOUT_MS",
     "TICKERA_CONNECT_TIMEOUT_MS",
@@ -78,6 +83,25 @@ defmodule EventSales.RuntimeConfigTest do
     assert Keyword.get(webhook_intake, :secret) == "prod-webhook-secret"
   end
 
+  test "prod runtime config enables hot-state Redis from the managed REDIS_URL" do
+    put_required_prod_env()
+    System.put_env("REDIS_URL", "redis://default:secret@redis.internal:6379")
+    System.put_env("HOT_STATE_REDIS_SNAPSHOTS_ENABLED", "true")
+
+    app_config =
+      @runtime_config_path
+      |> Config.Reader.read!(env: :prod)
+      |> Keyword.get(:event_sales, [])
+
+    hot_state = Keyword.fetch!(app_config, :hot_state_aggregator)
+
+    assert Keyword.fetch!(hot_state, :redis_enabled)
+    assert Keyword.fetch!(hot_state, :redis_url) == "redis://default:secret@redis.internal:6379"
+
+    assert Keyword.fetch!(hot_state, :snapshot_adapter) ==
+             EventSales.Analytics.SnapshotStore.RedixAdapter
+  end
+
   test "prod runtime config reads Tickera API settings from env without a global API key" do
     System.put_env("DATABASE_URL", "ecto://pooled-user:pooled-pass@db.internal/event_sales")
     System.put_env("SECRET_KEY_BASE", String.duplicate("a", 64))
@@ -110,4 +134,12 @@ defmodule EventSales.RuntimeConfigTest do
 
   defp restore_env(key, nil), do: System.delete_env(key)
   defp restore_env(key, value), do: System.put_env(key, value)
+
+  defp put_required_prod_env do
+    System.put_env("DATABASE_URL", "ecto://user:pass@db.internal/event_sales")
+    System.put_env("SECRET_KEY_BASE", String.duplicate("a", 64))
+    System.put_env("PHX_HOST", "eventsales.example.com")
+    System.put_env("WEBHOOK_PATH_TOKEN", "prod-webhook-token")
+    System.put_env("WOOCOMMERCE_WEBHOOK_SECRET", "prod-webhook-secret")
+  end
 end

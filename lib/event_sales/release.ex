@@ -14,6 +14,27 @@ defmodule EventSales.Release do
              (module(), (module() -> term()) -> {:ok, term(), [atom()]} | {:error, term()})}
           | {:migrator_run, (module(), :up | :down, keyword() -> term())}
 
+  @spec migrate_and_bootstrap(keyword()) :: :ok
+  def migrate_and_bootstrap(opts \\ []) do
+    migrate_fun = Keyword.get(opts, :migrate, &migrate/0)
+    start_app = Keyword.get(opts, :start_app, &start_app!/0)
+
+    admin_bootstrap =
+      Keyword.get(opts, :admin_bootstrap, &EventSales.Maintenance.AdminBootstrap.run!/0)
+
+    source_bootstrap =
+      Keyword.get(opts, :source_bootstrap, &EventSales.Maintenance.SourceSystemBootstrap.run!/0)
+
+    output = Keyword.get(opts, :output, &IO.puts/1)
+
+    migrate_fun.()
+    start_app.()
+    admin_bootstrap.()
+    source_bootstrap.()
+    output.("production bootstrap: complete")
+    :ok
+  end
+
   @spec migrate([release_option()]) :: [term()]
   def migrate(opts \\ []) do
     load_app()
@@ -94,6 +115,16 @@ defmodule EventSales.Release do
   end
 
   defp load_app, do: Application.load(@app)
+
+  defp start_app! do
+    case Application.ensure_all_started(@app) do
+      {:ok, _apps} ->
+        :ok
+
+      {:error, reason} ->
+        raise "failed to start EventSales for production bootstrap: #{inspect(reason)}"
+    end
+  end
 
   defp repos, do: Application.fetch_env!(@app, :ecto_repos)
 

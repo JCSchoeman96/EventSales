@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-254
+259
 
 ## Files
 
@@ -146,12 +146,16 @@ Project root: `.`
 - `lib/event_sales/ingestion/workers/reconcile_tickera_attendees_worker.ex`
 - `lib/event_sales/ingestion/workers/redis_webhook_buffer_drainer.ex`
 - `lib/event_sales/ingestion/workers/sync_tickera_attendees_worker.ex`
+- `lib/event_sales/maintenance/admin_bootstrap.ex`
 - `lib/event_sales/maintenance/cache_cleanup_worker.ex`
 - `lib/event_sales/maintenance/db_topology_check_worker.ex`
 - `lib/event_sales/maintenance/failed_job_alert_worker.ex`
 - `lib/event_sales/maintenance/oban_topology_smoke_worker.ex`
+- `lib/event_sales/maintenance/production_smoke.ex`
+- `lib/event_sales/maintenance/production_smoke/http.ex`
 - `lib/event_sales/maintenance/purge_raw_payloads_worker.ex`
 - `lib/event_sales/maintenance/raw_payload_purger.ex`
+- `lib/event_sales/maintenance/source_system_bootstrap.ex`
 - `lib/event_sales/maintenance/stale_sync_cleanup_worker.ex`
 - `lib/event_sales/release.ex`
 - `lib/event_sales/repo.ex`
@@ -241,6 +245,7 @@ Project root: `.`
 - `lib/event_sales_web/router.ex`
 - `lib/event_sales_web/telemetry.ex`
 - `lib/mix/tasks/eventsales.admin.bootstrap.ex`
+- `lib/mix/tasks/eventsales.source_system.bootstrap.ex`
 - `lib/mix/tasks/project.index.ex`
 - `lib/project_index/elixir_file.ex`
 - `lib/project_index/render_json.ex`
@@ -1049,6 +1054,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `perform/1`
   - uses: `Oban.Worker`
+- `EventSales.Maintenance.AdminBootstrap` - `lib/event_sales/maintenance/admin_bootstrap.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `run!/1`
+  - uses: _none_
 - `EventSales.Maintenance.CacheCleanupWorker` - `lib/event_sales/maintenance/cache_cleanup_worker.ex`
   - moduledoc?: true
   - specs?: false
@@ -1073,6 +1084,24 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `perform/1`, `backoff/1`
   - uses: `Oban.Worker`
+- `Error` - `lib/event_sales/maintenance/production_smoke.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSales.Maintenance.ProductionSmoke` - `lib/event_sales/maintenance/production_smoke.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `config!/1`, `run!/1`
+  - uses: _none_
+- `EventSales.Maintenance.ProductionSmoke.Http` - `lib/event_sales/maintenance/production_smoke/http.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `request/5`, `csrf_token!/1`, `merge_cookies/2`, `cookie_header/1`
+  - uses: _none_
 - `EventSales.Maintenance.PurgeRawPayloadsWorker` - `lib/event_sales/maintenance/purge_raw_payloads_worker.ex`
   - moduledoc?: true
   - specs?: false
@@ -1085,6 +1114,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `purge/1`
   - uses: _none_
+- `EventSales.Maintenance.SourceSystemBootstrap` - `lib/event_sales/maintenance/source_system_bootstrap.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `run!/1`
+  - uses: _none_
 - `EventSales.Maintenance.StaleSyncCleanupWorker` - `lib/event_sales/maintenance/stale_sync_cleanup_worker.ex`
   - moduledoc?: true
   - specs?: false
@@ -1095,7 +1130,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: true
   - docs_count: 0
-  - public_funs: `migrate/1`, `rollback/3`, `migration_database_url/1`
+  - public_funs: `migrate_and_bootstrap/1`, `migrate/1`, `rollback/3`, `migration_database_url/1`
   - uses: _none_
 - `EventSales.Repo` - `lib/event_sales/repo.ex`
   - moduledoc?: false
@@ -1584,6 +1619,12 @@ Project root: `.`
   - public_funs: `start_link/1`, `init/1`, `metrics/0`
   - uses: `Supervisor`
 - `Mix.Tasks.Eventsales.Admin.Bootstrap` - `lib/mix/tasks/eventsales.admin.bootstrap.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `run/1`
+  - uses: `Mix.Task`
+- `Mix.Tasks.Eventsales.SourceSystem.Bootstrap` - `lib/mix/tasks/eventsales.source_system.bootstrap.ex`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0

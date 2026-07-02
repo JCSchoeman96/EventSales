@@ -54,7 +54,7 @@ defmodule EventSales.MixProject do
     [
       {:ash, "~> 3.24"},
       {:ash_postgres, "~> 2.9"},
-      {:ash_authentication, "~> 4.13"},
+      {:ash_authentication, "~> 4.14"},
       {:ash_admin, "~> 1.1"},
       {:ash_state_machine, "~> 0.2.13"},
       {:ash_paper_trail, "~> 0.5.7"},
@@ -74,7 +74,7 @@ defmodule EventSales.MixProject do
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.11.1"},
-      {:oban, "~> 2.22"},
+      {:oban, "~> 2.22.1"},
       {:oban_web, "~> 2.12"},
       {:nimble_csv, "~> 1.3"},
       {:redix, "~> 1.5"},
