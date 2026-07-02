@@ -7,6 +7,8 @@ defmodule EventSales.Application do
 
   @impl true
   def start(_type, _args) do
+    maybe_validate_live_cutover!()
+
     children =
       [
         EventSalesWeb.Telemetry,
@@ -16,6 +18,7 @@ defmodule EventSales.Application do
         EventSales.Catalog.ProductMetadataCache,
         oban_child(),
         redis_child(),
+        rate_limit_redis_child(),
         {DNSCluster, query: Application.get_env(:event_sales, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: EventSales.PubSub},
         analytics_redis_child(),
@@ -72,5 +75,26 @@ defmodule EventSales.Application do
     else
       _ -> nil
     end
+  end
+
+  defp rate_limit_redis_child do
+    cfg = Application.get_env(:event_sales, :webhook_intake_rate_limit, [])
+
+    with true <- Keyword.get(cfg, :enabled, false),
+         adapter when adapter == EventSales.Ingestion.RedisRateLimiter.RedixAdapter <-
+           Keyword.get(cfg, :adapter),
+         url when is_binary(url) and url != "" <- Keyword.get(cfg, :redis_url) do
+      {Redix, {url, name: EventSales.Ingestion.RedisRateLimiter.redix_name()}}
+    else
+      _ -> nil
+    end
+  end
+
+  defp maybe_validate_live_cutover! do
+    if System.get_env("EVENTSALES_LIVE_CUTOVER_ENABLED") in ~w(true 1) do
+      EventSales.Ingestion.WooCommerceRestConfig.validate_for_live_cutover!()
+    end
+
+    :ok
   end
 end

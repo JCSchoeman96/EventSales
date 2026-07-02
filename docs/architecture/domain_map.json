@@ -889,6 +889,23 @@
       {
         "docs_count": 0,
         "moduledoc?": true,
+        "name": "EventSales.Maintenance.ObanQueueSnapshotWorker",
+        "parse_error": null,
+        "path": "lib/event_sales/maintenance/oban_queue_snapshot_worker.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "perform"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Oban.Worker"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
         "name": "EventSales.Maintenance.ObanTopologySmokeWorker",
         "parse_error": null,
         "path": "lib/event_sales/maintenance/oban_topology_smoke_worker.ex",
@@ -2083,7 +2100,16 @@
         "name": "EventSalesWeb.Plugs.RateLimitManualActions",
         "parse_error": null,
         "path": "lib/event_sales_web/plugs/rate_limit_manual_actions.ex",
-        "public_funs": [],
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "init"
+          },
+          {
+            "arity": 2,
+            "name": "call"
+          }
+        ],
         "specs?": false,
         "uses": []
       },
@@ -2093,7 +2119,16 @@
         "name": "EventSalesWeb.Plugs.RateLimitWebhookIntake",
         "parse_error": null,
         "path": "lib/event_sales_web/plugs/rate_limit_webhook_intake.ex",
-        "public_funs": [],
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "init"
+          },
+          {
+            "arity": 2,
+            "name": "call"
+          }
+        ],
         "specs?": false,
         "uses": []
       },
@@ -2114,6 +2149,25 @@
           }
         ],
         "specs?": true,
+        "uses": []
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Plugs.WebhookIntakePreParserGuard",
+        "parse_error": null,
+        "path": "lib/event_sales_web/plugs/webhook_intake_pre_parser_guard.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "init"
+          },
+          {
+            "arity": 2,
+            "name": "call"
+          }
+        ],
+        "specs?": false,
         "uses": []
       }
     ],

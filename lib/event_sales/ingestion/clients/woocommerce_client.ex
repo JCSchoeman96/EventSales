@@ -57,6 +57,17 @@ defmodule EventSales.Ingestion.Clients.WooCommerceClient do
     end
   end
 
+  @doc """
+  Validates WooCommerce REST runtime configuration without performing a network request.
+  """
+  @spec validate_configuration(keyword()) :: :ok | {:error, WooCommerceError.t()}
+  def validate_configuration(opts \\ []) do
+    case config(:validate_configuration, opts) do
+      {:ok, _config} -> :ok
+      {:error, %WooCommerceError{} = error} -> {:error, error}
+    end
+  end
+
   defp request_one(operation, config, path) do
     guarded_request(operation, config, url(config, path, []))
   end

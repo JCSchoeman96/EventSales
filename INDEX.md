@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-259
+269
 
 ## Files
 
@@ -99,6 +99,9 @@ Project root: `.`
 - `lib/event_sales/ingestion/order_reconciliation.ex`
 - `lib/event_sales/ingestion/parsers/woocommerce_order_parser.ex`
 - `lib/event_sales/ingestion/reconciliation_peak_guard.ex`
+- `lib/event_sales/ingestion/redis_rate_limiter.ex`
+- `lib/event_sales/ingestion/redis_rate_limiter/adapter.ex`
+- `lib/event_sales/ingestion/redis_rate_limiter/redix_adapter.ex`
 - `lib/event_sales/ingestion/redis_webhook_buffer.ex`
 - `lib/event_sales/ingestion/redis_webhook_buffer/adapter.ex`
 - `lib/event_sales/ingestion/redis_webhook_buffer/redix_adapter.ex`
@@ -115,6 +118,7 @@ Project root: `.`
 - `lib/event_sales/ingestion/resources/webhook_event.ex`
 - `lib/event_sales/ingestion/rest_circuit_breaker.ex`
 - `lib/event_sales/ingestion/rest_rate_limiter.ex`
+- `lib/event_sales/ingestion/security/low_cardinality_key.ex`
 - `lib/event_sales/ingestion/security/raw_body_reader.ex`
 - `lib/event_sales/ingestion/security/webhook_replay_guard.ex`
 - `lib/event_sales/ingestion/security/webhook_signature.ex`
@@ -137,6 +141,7 @@ Project root: `.`
 - `lib/event_sales/ingestion/webhook_intake.ex`
 - `lib/event_sales/ingestion/webhook_processor.ex`
 - `lib/event_sales/ingestion/webhook_replay.ex`
+- `lib/event_sales/ingestion/woocommerce_rest_config.ex`
 - `lib/event_sales/ingestion/workers/backfill_orders_worker.ex`
 - `lib/event_sales/ingestion/workers/missing_catalog_resolution_worker.ex`
 - `lib/event_sales/ingestion/workers/process_csv_import_worker.ex`
@@ -148,8 +153,10 @@ Project root: `.`
 - `lib/event_sales/ingestion/workers/sync_tickera_attendees_worker.ex`
 - `lib/event_sales/maintenance/admin_bootstrap.ex`
 - `lib/event_sales/maintenance/cache_cleanup_worker.ex`
+- `lib/event_sales/maintenance/cutover_dry_run.ex`
 - `lib/event_sales/maintenance/db_topology_check_worker.ex`
 - `lib/event_sales/maintenance/failed_job_alert_worker.ex`
+- `lib/event_sales/maintenance/oban_queue_snapshot_worker.ex`
 - `lib/event_sales/maintenance/oban_topology_smoke_worker.ex`
 - `lib/event_sales/maintenance/production_smoke.ex`
 - `lib/event_sales/maintenance/production_smoke/http.ex`
@@ -241,7 +248,9 @@ Project root: `.`
 - `lib/event_sales_web/plugs/rate_limit_manual_actions.ex`
 - `lib/event_sales_web/plugs/rate_limit_webhook_intake.ex`
 - `lib/event_sales_web/plugs/raw_body_reader.ex`
+- `lib/event_sales_web/plugs/webhook_intake_pre_parser_guard.ex`
 - `lib/event_sales_web/presenters/customer_presenter.ex`
+- `lib/event_sales_web/rate_limiting/ets_sliding_window.ex`
 - `lib/event_sales_web/router.ex`
 - `lib/event_sales_web/telemetry.ex`
 - `lib/mix/tasks/eventsales.admin.bootstrap.ex`
@@ -263,6 +272,7 @@ Project root: `.`
 - `test/support/fakes/fake_tickera_attendee_client.ex`
 - `test/support/fixture_helpers.ex`
 - `test/support/fixture_verification_helpers.ex`
+- `test/support/ingestion/memory_rate_limiter_adapter.ex`
 - `test/support/ingestion/memory_webhook_buffer_adapter.ex`
 - `test/support/ingestion/stub_webhook_event_store.ex`
 - `test/support/mapping_setup_helpers.ex`
@@ -685,8 +695,8 @@ Project root: `.`
 - `EventSales.Ingestion.Clients.WooCommerceClient` - `lib/event_sales/ingestion/clients/woocommerce_client.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 4
-  - public_funs: `fetch_order/2`, `fetch_product/2`, `list_orders/2`, `list_products/2`
+  - docs_count: 5
+  - public_funs: `fetch_order/2`, `fetch_product/2`, `list_orders/2`, `list_products/2`, `validate_configuration/1`
   - uses: _none_
 - `EventSales.Ingestion.Clients.WooCommerceError` - `lib/event_sales/ingestion/clients/woocommerce_error.ex`
   - moduledoc?: true
@@ -765,6 +775,24 @@ Project root: `.`
   - specs?: true
   - docs_count: 0
   - public_funs: `validate/4`
+  - uses: _none_
+- `EventSales.Ingestion.RedisRateLimiter` - `lib/event_sales/ingestion/redis_rate_limiter.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 5
+  - public_funs: `redix_name/0`, `allow?/2`, `webhook_key/3`, `reset_for_test!/0`, `saturate_for_test!/2`
+  - uses: _none_
+- `EventSales.Ingestion.RedisRateLimiter.Adapter` - `lib/event_sales/ingestion/redis_rate_limiter/adapter.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSales.Ingestion.RedisRateLimiter.RedixAdapter` - `lib/event_sales/ingestion/redis_rate_limiter/redix_adapter.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `allow?/2`, `reset_for_test!/0`, `saturate_for_test!/2`
   - uses: _none_
 - `EventSales.Ingestion.RedisWebhookBuffer` - `lib/event_sales/ingestion/redis_webhook_buffer.ex`
   - moduledoc?: true
@@ -862,6 +890,12 @@ Project root: `.`
   - docs_count: 3
   - public_funs: `start_link/1`, `checkout/2`, `snapshot/0`, `reset_for_test!/1`, `init/1`, `handle_call/3`, `handle_cast/2`, `handle_info/2`
   - uses: `GenServer`
+- `EventSales.Ingestion.Security.LowCardinalityKey` - `lib/event_sales/ingestion/security/low_cardinality_key.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `hash_term/1`, `hash_binary/1`, `hash_remote_ip/1`, `token_presence/1`, `token_presence_from_path_token/1`
+  - uses: _none_
 - `EventSales.Ingestion.Security.RawBodyReader` - `lib/event_sales/ingestion/security/raw_body_reader.ex`
   - moduledoc?: true
   - specs?: true
@@ -1000,6 +1034,12 @@ Project root: `.`
   - docs_count: 1
   - public_funs: `replay_failed/2`
   - uses: _none_
+- `EventSales.Ingestion.WooCommerceRestConfig` - `lib/event_sales/ingestion/woocommerce_rest_config.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `configured?/0`, `validate_for_live_cutover!/0`, `validate_for_live_cutover/0`
+  - uses: _none_
 - `EventSales.Ingestion.Workers.BackfillOrdersWorker` - `lib/event_sales/ingestion/workers/backfill_orders_worker.ex`
   - moduledoc?: true
   - specs?: false
@@ -1066,6 +1106,18 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `perform/1`
   - uses: `Oban.Worker`
+- `Error` - `lib/event_sales/maintenance/cutover_dry_run.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSales.Maintenance.CutoverDryRun` - `lib/event_sales/maintenance/cutover_dry_run.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `run!/1`
+  - uses: _none_
 - `EventSales.Maintenance.DbTopologyCheckWorker` - `lib/event_sales/maintenance/db_topology_check_worker.ex`
   - moduledoc?: true
   - specs?: false
@@ -1073,6 +1125,12 @@ Project root: `.`
   - public_funs: _none_
   - uses: _none_
 - `EventSales.Maintenance.FailedJobAlertWorker` - `lib/event_sales/maintenance/failed_job_alert_worker.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `perform/1`
+  - uses: `Oban.Worker`
+- `EventSales.Maintenance.ObanQueueSnapshotWorker` - `lib/event_sales/maintenance/oban_queue_snapshot_worker.ex`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
@@ -1207,8 +1265,8 @@ Project root: `.`
 - `EventSales.Telemetry` - `lib/event_sales/telemetry.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 55
-  - public_funs: `event_names/0`, `webhook_accepted/0`, `webhook_rejected/0`, `webhook_backpressure/0`, `webhook_buffered/0`, `webhook_drained/0`, `webhook_replay_audit_failed/0`, `rest_request_stop/0`, `rest_request_exception/0`, `hot_state_rebuild_start/0`, `hot_state_rebuild_stop/0`, `hot_state_rebuild_exception/0`, `hot_state_event_applied/0`, `hot_state_event_ignored/0`, `hot_state_snapshot_write/0`, `snapshot_refresh_start/0`, `snapshot_refresh_stop/0`, `snapshot_refresh_exception/0`, `cache_invalidate/0`, `missing_catalog_recovery_start/0`, `missing_catalog_recovery_stop/0`, `missing_catalog_recovery_exception/0`, `product_metadata_cache_hit/0`, `product_metadata_cache_miss/0`, `product_metadata_cache_put/0`, `product_metadata_update/0`, `reconciliation_start/0`, `reconciliation_stop/0`, `reconciliation_exception/0`, `reconciliation_pause/0`, `tickera_request_stop/0`, `tickera_request_exception/0`, `tickera_sync_start/0`, `tickera_sync_stop/0`, `tickera_sync_exception/0`, `csv_import_dry_run_start/0`, `csv_import_dry_run_stop/0`, `csv_import_dry_run_exception/0`, `csv_import_apply_start/0`, `csv_import_apply_stop/0`, `csv_import_apply_exception/0`, `maintenance_raw_payload_purge_start/0`, `maintenance_raw_payload_purge_stop/0`, `maintenance_raw_payload_purge_exception/0`, `maintenance_stale_sync_cleanup_start/0`, `maintenance_stale_sync_cleanup_stop/0`, `maintenance_stale_sync_cleanup_exception/0`, `maintenance_cache_cleanup_start/0`, `maintenance_cache_cleanup_stop/0`, `maintenance_cache_cleanup_exception/0`, `maintenance_failed_job_alert_start/0`, `maintenance_failed_job_alert_stop/0`, `maintenance_failed_job_alert_exception/0`, `product_metadata_cache_event/1`, `emit/3`
+  - docs_count: 57
+  - public_funs: `event_names/0`, `webhook_accepted/0`, `webhook_rejected/0`, `webhook_backpressure/0`, `webhook_buffered/0`, `webhook_drained/0`, `webhook_rate_limited/0`, `webhook_replay_audit_failed/0`, `rest_request_stop/0`, `rest_request_exception/0`, `hot_state_rebuild_start/0`, `hot_state_rebuild_stop/0`, `hot_state_rebuild_exception/0`, `hot_state_event_applied/0`, `hot_state_event_ignored/0`, `hot_state_snapshot_write/0`, `snapshot_refresh_start/0`, `snapshot_refresh_stop/0`, `snapshot_refresh_exception/0`, `cache_invalidate/0`, `missing_catalog_recovery_start/0`, `missing_catalog_recovery_stop/0`, `missing_catalog_recovery_exception/0`, `product_metadata_cache_hit/0`, `product_metadata_cache_miss/0`, `product_metadata_cache_put/0`, `product_metadata_update/0`, `reconciliation_start/0`, `reconciliation_stop/0`, `reconciliation_exception/0`, `reconciliation_pause/0`, `tickera_request_stop/0`, `tickera_request_exception/0`, `tickera_sync_start/0`, `tickera_sync_stop/0`, `tickera_sync_exception/0`, `csv_import_dry_run_start/0`, `csv_import_dry_run_stop/0`, `csv_import_dry_run_exception/0`, `csv_import_apply_start/0`, `csv_import_apply_stop/0`, `csv_import_apply_exception/0`, `maintenance_raw_payload_purge_start/0`, `maintenance_raw_payload_purge_stop/0`, `maintenance_raw_payload_purge_exception/0`, `maintenance_stale_sync_cleanup_start/0`, `maintenance_stale_sync_cleanup_stop/0`, `maintenance_stale_sync_cleanup_exception/0`, `maintenance_cache_cleanup_start/0`, `maintenance_cache_cleanup_stop/0`, `maintenance_cache_cleanup_exception/0`, `maintenance_failed_job_alert_start/0`, `maintenance_failed_job_alert_stop/0`, `maintenance_failed_job_alert_exception/0`, `oban_queue_snapshot/0`, `product_metadata_cache_event/1`, `emit/3`
   - uses: _none_
 - `EventSalesWeb` - `lib/event_sales_web.ex`
   - moduledoc?: true
@@ -1586,13 +1644,13 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: _none_
+  - public_funs: `init/1`, `call/2`
   - uses: _none_
 - `EventSalesWeb.Plugs.RateLimitWebhookIntake` - `lib/event_sales_web/plugs/rate_limit_webhook_intake.ex`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: _none_
+  - public_funs: `init/1`, `call/2`
   - uses: _none_
 - `EventSalesWeb.Plugs.RawBodyReader` - `lib/event_sales_web/plugs/raw_body_reader.ex`
   - moduledoc?: true
@@ -1600,11 +1658,23 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `read_body/2`, `fetch_raw_body/1`
   - uses: _none_
+- `EventSalesWeb.Plugs.WebhookIntakePreParserGuard` - `lib/event_sales_web/plugs/webhook_intake_pre_parser_guard.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `init/1`, `call/2`
+  - uses: _none_
 - `EventSalesWeb.Presenters.CustomerPresenter` - `lib/event_sales_web/presenters/customer_presenter.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 0
   - public_funs: `present/2`
+  - uses: _none_
+- `EventSalesWeb.RateLimiting.EtsSlidingWindow` - `lib/event_sales_web/rate_limiting/ets_sliding_window.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `allow?/2`, `reset_for_test!/0`
   - uses: _none_
 - `EventSalesWeb.Router` - `lib/event_sales_web/router.ex`
   - moduledoc?: false
@@ -1725,6 +1795,12 @@ Project root: `.`
   - specs?: true
   - docs_count: 0
   - public_funs: `required_fixtures/0`, `required_fixtures/1`, `required_fixture!/1`, `committed_woocommerce_fixtures/0`, `decode_fixture!/1`, `missing_order_paths/1`, `missing_product_paths/2`, `sensitive_findings/1`, `format_finding/1`, `future_placeholder_allowed?/1`, `parser_work_blocked?/0`, `parser_work_allowed?/0`
+  - uses: _none_
+- `EventSales.TestSupport.Ingestion.MemoryRateLimiterAdapter` - `test/support/ingestion/memory_rate_limiter_adapter.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `allow?/2`, `reset_for_test!/0`, `saturate_for_test!/2`
   - uses: _none_
 - `EventSales.TestSupport.Ingestion.MemoryWebhookBufferAdapter` - `test/support/ingestion/memory_webhook_buffer_adapter.ex`
   - moduledoc?: true
@@ -1915,6 +1991,7 @@ _none_
 - `EventSalesWeb.Plugs.RateLimitManualActions` - `lib/event_sales_web/plugs/rate_limit_manual_actions.ex`
 - `EventSalesWeb.Plugs.RateLimitWebhookIntake` - `lib/event_sales_web/plugs/rate_limit_webhook_intake.ex`
 - `EventSalesWeb.Plugs.RawBodyReader` - `lib/event_sales_web/plugs/raw_body_reader.ex`
+- `EventSalesWeb.Plugs.WebhookIntakePreParserGuard` - `lib/event_sales_web/plugs/webhook_intake_pre_parser_guard.ex`
 
 ## Oban
 
@@ -1932,6 +2009,7 @@ _none_
 - `EventSales.Ingestion.Workers.SyncTickeraAttendeesWorker` - `lib/event_sales/ingestion/workers/sync_tickera_attendees_worker.ex`
 - `EventSales.Maintenance.CacheCleanupWorker` - `lib/event_sales/maintenance/cache_cleanup_worker.ex`
 - `EventSales.Maintenance.FailedJobAlertWorker` - `lib/event_sales/maintenance/failed_job_alert_worker.ex`
+- `EventSales.Maintenance.ObanQueueSnapshotWorker` - `lib/event_sales/maintenance/oban_queue_snapshot_worker.ex`
 - `EventSales.Maintenance.ObanTopologySmokeWorker` - `lib/event_sales/maintenance/oban_topology_smoke_worker.ex`
 - `EventSales.Maintenance.PurgeRawPayloadsWorker` - `lib/event_sales/maintenance/purge_raw_payloads_worker.ex`
 - `EventSales.Maintenance.StaleSyncCleanupWorker` - `lib/event_sales/maintenance/stale_sync_cleanup_worker.ex`

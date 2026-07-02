@@ -221,7 +221,8 @@ defmodule EventSales.DomainBoundariesTest do
     allowed_files = [
       "lib/event_sales/ingestion/workers/missing_catalog_resolution_worker.ex",
       "lib/event_sales/ingestion/workers/reconcile_orders_worker.ex",
-      "lib/event_sales/ingestion/order_reconciliation.ex"
+      "lib/event_sales/ingestion/order_reconciliation.ex",
+      "lib/event_sales/ingestion/woocommerce_rest_config.ex"
     ]
 
     matches =

@@ -32,6 +32,8 @@ defmodule EventSalesWeb.ConnCase do
   end
 
   setup _tags do
+    EventSales.TestSupport.Ingestion.MemoryRateLimiterAdapter.reset_for_test!()
+    EventSalesWeb.RateLimiting.EtsSlidingWindow.reset_for_test!()
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
 end

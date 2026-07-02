@@ -47,7 +47,9 @@ config :event_sales, :maintenance,
   paused_sync_stale_after_hours: 24,
   stale_sync_cleanup_batch_size: 100,
   failed_job_alert_threshold: 1,
-  failed_job_alert_stale_after_minutes: 15
+  failed_job_alert_stale_after_minutes: 15,
+  webhook_queue_backlog_threshold: 100,
+  oban_queue_snapshot_interval_seconds: 60
 
 config :event_sales, :tickera_reconciliation, stale_snapshot_after_hours: 24
 
@@ -83,6 +85,18 @@ config :event_sales, :woocommerce_rest,
   max_pages: 50,
   max_concurrency: 2,
   transport: EventSales.Ingestion.Clients.HttpcTransport
+
+config :event_sales, :webhook_intake_rate_limit,
+  enabled: true,
+  window_ms: 60_000,
+  max_requests: 120,
+  key_prefix: "eventsales:webhook_rate_limit:v1",
+  adapter: EventSales.Ingestion.RedisRateLimiter.RedixAdapter,
+  redis_url: nil
+
+config :event_sales, :admin_http_rate_limit,
+  window_ms: 30_000,
+  max_requests: 10
 
 config :event_sales, :tickera_api,
   default_site_url: "https://voelgoed.co.za",

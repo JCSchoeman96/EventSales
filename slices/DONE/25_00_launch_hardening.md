@@ -8,6 +8,7 @@ Make EventSales trustworthy during a real sales period.
 
 ```text
 Launch checklist, incident/reconciliation/CSV/security runbooks, burst test, mapping review, alert thresholds.
+Redis-backed webhook admission control, queue visibility, cutover dry run, backup/restore proof, launch certification gate.
 ```
 
 ## Copy-paste TOON prompt
@@ -38,13 +39,13 @@ Do not launch before this passes.
 
 ## Completion checklist
 
-- [ ] Files/modules for this slice are created in the approved folder structure.
-- [ ] Relevant Ash resources/actions/policies are implemented only where this slice owns them.
-- [ ] Oban worker behavior is tested if this slice includes async work.
-- [ ] LiveView/controller behavior is tested if this slice includes web UI or intake.
-- [ ] Telemetry is emitted where the slice touches ingestion, REST, Oban, cache, or hot state.
-- [ ] Cache invalidation is handled where durable data changes affect dashboard state.
-- [ ] The global acceptance command passes.
+- [x] Files/modules for this slice are created in the approved folder structure.
+- [x] Relevant Ash resources/actions/policies are implemented only where this slice owns them.
+- [x] Oban worker behavior is tested if this slice includes async work.
+- [x] LiveView/controller behavior is tested if this slice includes web UI or intake.
+- [x] Telemetry is emitted where the slice touches ingestion, REST, Oban, cache, or hot state.
+- [x] Cache invalidation is handled where durable data changes affect dashboard state.
+- [x] The global acceptance command passes.
 
 ## Stop condition
 
