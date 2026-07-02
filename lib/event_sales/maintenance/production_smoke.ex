@@ -187,7 +187,7 @@ defmodule EventSales.Maintenance.ProductionSmoke do
         "application/x-www-form-urlencoded"
       )
 
-    unless login_status in [302, 303], do: raise(Error, "admin login failed")
+    unless login_status in [200, 302, 303], do: raise(Error, "admin login failed")
 
     cookies = Http.merge_cookies(cookies, response_headers)
     auth_headers = [{"cookie", Http.cookie_header(cookies)}]

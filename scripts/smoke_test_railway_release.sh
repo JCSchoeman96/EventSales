@@ -8,5 +8,4 @@ service="${RAILWAY_SERVICE:-EventSales}"
 
 railway status >/dev/null
 railway ssh --service "$service" \
-  env -u PHX_SERVER \
-  bin/event_sales eval 'EventSales.Maintenance.ProductionSmoke.run!()'
+  'env -u PHX_SERVER bin/event_sales eval "EventSales.Maintenance.ProductionSmoke.run!()"'
