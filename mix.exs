@@ -54,7 +54,7 @@ defmodule EventSales.MixProject do
     [
       {:ash, "~> 3.24"},
       {:ash_postgres, "~> 2.9"},
-      {:ash_authentication, "~> 4.13"},
+      {:ash_authentication, "~> 4.14"},
       {:ash_admin, "~> 1.1"},
       {:ash_state_machine, "~> 0.2.13"},
       {:ash_paper_trail, "~> 0.5.7"},
