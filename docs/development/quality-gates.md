@@ -94,6 +94,12 @@ Slice `0.4` adds proof-only Ash verification on top of the existing local comman
 
 These checks prove ecosystem readiness only. They do not mean the real Accounts, Catalog, Sales, Ingestion, or Audit resources have shipped.
 
+Pre-launch certification gate:
+
+```bash
+mix test --only launch_certification
+```
+
 Because the app now starts `EventSales.Repo` and Oban in `:test`, any command that runs `mix test`, `mix ash.codegen --dry-run`, or a test-only smoke check requires a reachable Postgres instance.
 
 `mix sobelow` currently runs without a custom Sobelow config file. Add a config later only if the project needs one.

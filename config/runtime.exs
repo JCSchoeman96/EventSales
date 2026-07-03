@@ -159,6 +159,35 @@ if config_env() == :prod do
       redis_url: nil
   end
 
+  rate_limit_redis_url =
+    System.get_env("WEBHOOK_RATE_LIMIT_REDIS_URL") || System.get_env("REDIS_URL")
+
+  if System.get_env("WEBHOOK_RATE_LIMIT_ENABLED", "true") in ~w(true 1) and
+       rate_limit_redis_url in [nil, ""] do
+    raise """
+    REDIS_URL is required in production for shared webhook rate limiting.
+    Set WEBHOOK_RATE_LIMIT_REDIS_URL to override the Redis connection used by intake rate limits.
+    """
+  end
+
+  config :event_sales, :webhook_intake_rate_limit,
+    enabled: System.get_env("WEBHOOK_RATE_LIMIT_ENABLED", "true") in ~w(true 1),
+    window_ms: String.to_integer(System.get_env("WEBHOOK_RATE_LIMIT_WINDOW_MS", "60000")),
+    max_requests: String.to_integer(System.get_env("WEBHOOK_RATE_LIMIT_MAX_REQUESTS", "120")),
+    key_prefix:
+      System.get_env("WEBHOOK_RATE_LIMIT_KEY_PREFIX", "eventsales:webhook_rate_limit:v1"),
+    adapter: EventSales.Ingestion.RedisRateLimiter.RedixAdapter,
+    redis_url: rate_limit_redis_url
+
+  config :event_sales, Oban,
+    plugins: [
+      {Oban.Plugins.Cron,
+       crontab: [
+         {"* * * * *", EventSales.Maintenance.ObanQueueSnapshotWorker},
+         {"*/5 * * * *", EventSales.Maintenance.FailedJobAlertWorker}
+       ]}
+    ]
+
   # ## SSL Support
   #
   # To get SSL working, you will need to add the `https` key

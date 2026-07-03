@@ -40,6 +40,8 @@ bin/event_sales eval 'EventSales.Release.rollback(EventSales.Repo, 2026051312200
 
 Do not run rollback during an incident without confirming data compatibility and taking a current backup.
 
+See also [`docs/runbooks/database-backup-restore.md`](../runbooks/database-backup-restore.md).
+
 ## Bootstrap behavior
 
 `mix eventsales.admin.bootstrap` and `mix eventsales.source_system.bootstrap` remain available in a Mix environment. Production releases use `migrate_and_bootstrap/0` because Mix tasks are not included in an OTP runtime release.

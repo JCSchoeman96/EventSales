@@ -18,6 +18,7 @@ defmodule EventSalesWeb.Router do
 
   pipeline :browser do
     plug :accepts, ["html"]
+    plug EventSalesWeb.Plugs.RateLimitManualActions
     plug :fetch_session
     plug :fetch_live_flash
     plug :put_root_layout, html: {EventSalesWeb.Layouts, :root}
@@ -31,8 +32,7 @@ defmodule EventSalesWeb.Router do
   end
 
   pipeline :webhook_intake do
-    # Plug.Parsers already ran at Endpoint (with RawBodyReader body_reader).
-    # Do not call :fetch_session, :protect_from_forgery, or browser plugs.
+    plug EventSalesWeb.Plugs.RateLimitWebhookIntake
   end
 
   pipeline :internal_admin_tools do

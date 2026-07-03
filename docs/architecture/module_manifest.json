@@ -87,6 +87,9 @@
     "lib/event_sales/ingestion/order_reconciliation.ex",
     "lib/event_sales/ingestion/parsers/woocommerce_order_parser.ex",
     "lib/event_sales/ingestion/reconciliation_peak_guard.ex",
+    "lib/event_sales/ingestion/redis_rate_limiter.ex",
+    "lib/event_sales/ingestion/redis_rate_limiter/adapter.ex",
+    "lib/event_sales/ingestion/redis_rate_limiter/redix_adapter.ex",
     "lib/event_sales/ingestion/redis_webhook_buffer.ex",
     "lib/event_sales/ingestion/redis_webhook_buffer/adapter.ex",
     "lib/event_sales/ingestion/redis_webhook_buffer/redix_adapter.ex",
@@ -103,6 +106,7 @@
     "lib/event_sales/ingestion/resources/webhook_event.ex",
     "lib/event_sales/ingestion/rest_circuit_breaker.ex",
     "lib/event_sales/ingestion/rest_rate_limiter.ex",
+    "lib/event_sales/ingestion/security/low_cardinality_key.ex",
     "lib/event_sales/ingestion/security/raw_body_reader.ex",
     "lib/event_sales/ingestion/security/webhook_replay_guard.ex",
     "lib/event_sales/ingestion/security/webhook_signature.ex",
@@ -125,6 +129,7 @@
     "lib/event_sales/ingestion/webhook_intake.ex",
     "lib/event_sales/ingestion/webhook_processor.ex",
     "lib/event_sales/ingestion/webhook_replay.ex",
+    "lib/event_sales/ingestion/woocommerce_rest_config.ex",
     "lib/event_sales/ingestion/workers/backfill_orders_worker.ex",
     "lib/event_sales/ingestion/workers/missing_catalog_resolution_worker.ex",
     "lib/event_sales/ingestion/workers/process_csv_import_worker.ex",
@@ -136,8 +141,10 @@
     "lib/event_sales/ingestion/workers/sync_tickera_attendees_worker.ex",
     "lib/event_sales/maintenance/admin_bootstrap.ex",
     "lib/event_sales/maintenance/cache_cleanup_worker.ex",
+    "lib/event_sales/maintenance/cutover_dry_run.ex",
     "lib/event_sales/maintenance/db_topology_check_worker.ex",
     "lib/event_sales/maintenance/failed_job_alert_worker.ex",
+    "lib/event_sales/maintenance/oban_queue_snapshot_worker.ex",
     "lib/event_sales/maintenance/oban_topology_smoke_worker.ex",
     "lib/event_sales/maintenance/production_smoke.ex",
     "lib/event_sales/maintenance/production_smoke/http.ex",
@@ -229,7 +236,9 @@
     "lib/event_sales_web/plugs/rate_limit_manual_actions.ex",
     "lib/event_sales_web/plugs/rate_limit_webhook_intake.ex",
     "lib/event_sales_web/plugs/raw_body_reader.ex",
+    "lib/event_sales_web/plugs/webhook_intake_pre_parser_guard.ex",
     "lib/event_sales_web/presenters/customer_presenter.ex",
+    "lib/event_sales_web/rate_limiting/ets_sliding_window.ex",
     "lib/event_sales_web/router.ex",
     "lib/event_sales_web/telemetry.ex",
     "lib/mix/tasks/eventsales.admin.bootstrap.ex",
@@ -251,6 +260,7 @@
     "test/support/fakes/fake_tickera_attendee_client.ex",
     "test/support/fixture_helpers.ex",
     "test/support/fixture_verification_helpers.ex",
+    "test/support/ingestion/memory_rate_limiter_adapter.ex",
     "test/support/ingestion/memory_webhook_buffer_adapter.ex",
     "test/support/ingestion/stub_webhook_event_store.ex",
     "test/support/mapping_setup_helpers.ex",
@@ -1576,7 +1586,7 @@
       "uses": []
     },
     {
-      "docs_count": 4,
+      "docs_count": 5,
       "moduledoc?": true,
       "name": "EventSales.Ingestion.Clients.WooCommerceClient",
       "parse_error": null,
@@ -1597,6 +1607,10 @@
         {
           "arity": 2,
           "name": "list_products"
+        },
+        {
+          "arity": 1,
+          "name": "validate_configuration"
         }
       ],
       "specs?": true,
@@ -1838,6 +1852,70 @@
         }
       ],
       "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 5,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.RedisRateLimiter",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/redis_rate_limiter.ex",
+      "public_funs": [
+        {
+          "arity": 0,
+          "name": "redix_name"
+        },
+        {
+          "arity": 2,
+          "name": "allow?"
+        },
+        {
+          "arity": 3,
+          "name": "webhook_key"
+        },
+        {
+          "arity": 0,
+          "name": "reset_for_test!"
+        },
+        {
+          "arity": 2,
+          "name": "saturate_for_test!"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.RedisRateLimiter.Adapter",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/redis_rate_limiter/adapter.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.RedisRateLimiter.RedixAdapter",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/redis_rate_limiter/redix_adapter.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "allow?"
+        },
+        {
+          "arity": 0,
+          "name": "reset_for_test!"
+        },
+        {
+          "arity": 2,
+          "name": "saturate_for_test!"
+        }
+      ],
+      "specs?": false,
       "uses": []
     },
     {
@@ -2203,6 +2281,37 @@
       "uses": [
         "GenServer"
       ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Security.LowCardinalityKey",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/security/low_cardinality_key.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "hash_term"
+        },
+        {
+          "arity": 1,
+          "name": "hash_binary"
+        },
+        {
+          "arity": 1,
+          "name": "hash_remote_ip"
+        },
+        {
+          "arity": 1,
+          "name": "token_presence"
+        },
+        {
+          "arity": 1,
+          "name": "token_presence_from_path_token"
+        }
+      ],
+      "specs?": true,
+      "uses": []
     },
     {
       "docs_count": 0,
@@ -2754,6 +2863,29 @@
     {
       "docs_count": 0,
       "moduledoc?": true,
+      "name": "EventSales.Ingestion.WooCommerceRestConfig",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/woocommerce_rest_config.ex",
+      "public_funs": [
+        {
+          "arity": 0,
+          "name": "configured?"
+        },
+        {
+          "arity": 0,
+          "name": "validate_for_live_cutover!"
+        },
+        {
+          "arity": 0,
+          "name": "validate_for_live_cutover"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
       "name": "EventSales.Ingestion.Workers.BackfillOrdersWorker",
       "parse_error": null,
       "path": "lib/event_sales/ingestion/workers/backfill_orders_worker.ex",
@@ -2933,6 +3065,31 @@
     {
       "docs_count": 0,
       "moduledoc?": true,
+      "name": "Error",
+      "parse_error": null,
+      "path": "lib/event_sales/maintenance/cutover_dry_run.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Maintenance.CutoverDryRun",
+      "parse_error": null,
+      "path": "lib/event_sales/maintenance/cutover_dry_run.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "run!"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
       "name": "EventSales.Maintenance.DbTopologyCheckWorker",
       "parse_error": null,
       "path": "lib/event_sales/maintenance/db_topology_check_worker.ex",
@@ -2946,6 +3103,23 @@
       "name": "EventSales.Maintenance.FailedJobAlertWorker",
       "parse_error": null,
       "path": "lib/event_sales/maintenance/failed_job_alert_worker.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "perform"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Oban.Worker"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Maintenance.ObanQueueSnapshotWorker",
+      "parse_error": null,
+      "path": "lib/event_sales/maintenance/oban_queue_snapshot_worker.ex",
       "public_funs": [
         {
           "arity": 1,
@@ -3334,7 +3508,7 @@
       "uses": []
     },
     {
-      "docs_count": 55,
+      "docs_count": 57,
       "moduledoc?": true,
       "name": "EventSales.Telemetry",
       "parse_error": null,
@@ -3363,6 +3537,10 @@
         {
           "arity": 0,
           "name": "webhook_drained"
+        },
+        {
+          "arity": 0,
+          "name": "webhook_rate_limited"
         },
         {
           "arity": 0,
@@ -3551,6 +3729,10 @@
         {
           "arity": 0,
           "name": "maintenance_failed_job_alert_exception"
+        },
+        {
+          "arity": 0,
+          "name": "oban_queue_snapshot"
         },
         {
           "arity": 1,
@@ -4845,7 +5027,16 @@
       "name": "EventSalesWeb.Plugs.RateLimitManualActions",
       "parse_error": null,
       "path": "lib/event_sales_web/plugs/rate_limit_manual_actions.ex",
-      "public_funs": [],
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "init"
+        },
+        {
+          "arity": 2,
+          "name": "call"
+        }
+      ],
       "specs?": false,
       "uses": []
     },
@@ -4855,7 +5046,16 @@
       "name": "EventSalesWeb.Plugs.RateLimitWebhookIntake",
       "parse_error": null,
       "path": "lib/event_sales_web/plugs/rate_limit_webhook_intake.ex",
-      "public_funs": [],
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "init"
+        },
+        {
+          "arity": 2,
+          "name": "call"
+        }
+      ],
       "specs?": false,
       "uses": []
     },
@@ -4881,6 +5081,25 @@
     {
       "docs_count": 0,
       "moduledoc?": true,
+      "name": "EventSalesWeb.Plugs.WebhookIntakePreParserGuard",
+      "parse_error": null,
+      "path": "lib/event_sales_web/plugs/webhook_intake_pre_parser_guard.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "init"
+        },
+        {
+          "arity": 2,
+          "name": "call"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
       "name": "EventSalesWeb.Presenters.CustomerPresenter",
       "parse_error": null,
       "path": "lib/event_sales_web/presenters/customer_presenter.ex",
@@ -4888,6 +5107,25 @@
         {
           "arity": 2,
           "name": "present"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.RateLimiting.EtsSlidingWindow",
+      "parse_error": null,
+      "path": "lib/event_sales_web/rate_limiting/ets_sliding_window.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "allow?"
+        },
+        {
+          "arity": 0,
+          "name": "reset_for_test!"
         }
       ],
       "specs?": true,
@@ -5331,6 +5569,29 @@
         }
       ],
       "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.Ingestion.MemoryRateLimiterAdapter",
+      "parse_error": null,
+      "path": "test/support/ingestion/memory_rate_limiter_adapter.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "allow?"
+        },
+        {
+          "arity": 0,
+          "name": "reset_for_test!"
+        },
+        {
+          "arity": 2,
+          "name": "saturate_for_test!"
+        }
+      ],
+      "specs?": false,
       "uses": []
     },
     {

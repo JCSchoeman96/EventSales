@@ -63,6 +63,7 @@ defmodule EventSales.RuntimeConfigTest do
     System.put_env("PHX_HOST", "eventsales.example.com")
     System.put_env("WEBHOOK_PATH_TOKEN", "prod-webhook-token")
     System.put_env("WOOCOMMERCE_WEBHOOK_SECRET", "prod-webhook-secret")
+    System.put_env("REDIS_URL", "redis://default:secret@redis.internal:6379")
 
     app_config =
       @runtime_config_path
@@ -108,6 +109,7 @@ defmodule EventSales.RuntimeConfigTest do
     System.put_env("PHX_HOST", "eventsales.example.com")
     System.put_env("WEBHOOK_PATH_TOKEN", "prod-webhook-token")
     System.put_env("WOOCOMMERCE_WEBHOOK_SECRET", "prod-webhook-secret")
+    System.put_env("REDIS_URL", "redis://default:secret@redis.internal:6379")
     System.put_env("TICKERA_DEFAULT_SITE_URL", "https://tickera.example.test")
     System.put_env("TICKERA_TIMEOUT_MS", "31000")
     System.put_env("TICKERA_CONNECT_TIMEOUT_MS", "6000")
@@ -141,5 +143,6 @@ defmodule EventSales.RuntimeConfigTest do
     System.put_env("PHX_HOST", "eventsales.example.com")
     System.put_env("WEBHOOK_PATH_TOKEN", "prod-webhook-token")
     System.put_env("WOOCOMMERCE_WEBHOOK_SECRET", "prod-webhook-secret")
+    System.put_env("REDIS_URL", "redis://default:secret@redis.internal:6379")
   end
 end

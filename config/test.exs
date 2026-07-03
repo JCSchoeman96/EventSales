@@ -42,6 +42,14 @@ config :event_sales, :redis_webhook_buffer,
   max_entry_bytes: 256_000,
   adapter: EventSales.TestSupport.Ingestion.MemoryWebhookBufferAdapter
 
+config :event_sales, :webhook_intake_rate_limit,
+  enabled: true,
+  window_ms: 60_000,
+  max_requests: 10_000,
+  key_prefix: "eventsales:webhook_rate_limit:test",
+  adapter: EventSales.TestSupport.Ingestion.MemoryRateLimiterAdapter,
+  redis_url: nil
+
 config :event_sales, :hot_state_aggregator,
   snapshot_adapter: EventSales.TestSupport.Analytics.MemorySnapshotStoreAdapter,
   snapshot_ttl_ms: 3_600_000,

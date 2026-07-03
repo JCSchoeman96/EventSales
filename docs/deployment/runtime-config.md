@@ -29,6 +29,18 @@ EVENTSALES_BOOTSTRAP_SOURCE_BASE_URL
 
 `WOOCOMMERCE_REST_BASE_URL`, `WOOCOMMERCE_CONSUMER_KEY`, and `WOOCOMMERCE_CONSUMER_SECRET` must be set before live ingestion, reconciliation, or metadata recovery is enabled. WooCommerce REST concurrency remains fixed at `2` in runtime configuration.
 
+Live cutover controls:
+
+```text
+EVENTSALES_LIVE_CUTOVER_ENABLED=true
+WEBHOOK_RATE_LIMIT_ENABLED=true
+WEBHOOK_RATE_LIMIT_WINDOW_MS=60000
+WEBHOOK_RATE_LIMIT_MAX_REQUESTS=120
+WEBHOOK_RATE_LIMIT_REDIS_URL=<optional override; defaults to REDIS_URL>
+```
+
+When `EVENTSALES_LIVE_CUTOVER_ENABLED=true`, boot fails unless `WooCommerceRestConfig.validate_for_live_cutover!/0` passes.
+
 Optional smoke controls:
 
 ```text

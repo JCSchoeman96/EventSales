@@ -113,6 +113,12 @@ defmodule EventSalesWeb.Telemetry do
         tags: [:adapter, :accepted_via],
         description: "Buffered webhooks drained to Postgres"
       ),
+      counter("event_sales.webhook.rate_limited.count",
+        event_name: EventSales.Telemetry.webhook_rate_limited(),
+        measurement: :count,
+        tags: [:layer, :token_presence],
+        description: "Webhook intake HTTP rate limit rejections"
+      ),
       summary("event_sales.rest.request.stop.duration",
         event_name: EventSales.Telemetry.rest_request_stop(),
         measurement: :duration,
@@ -292,6 +298,12 @@ defmodule EventSalesWeb.Telemetry do
         measurement: :count,
         tags: [:worker, :reason],
         description: "Failed Oban job alert check failures"
+      ),
+      last_value("event_sales.oban.queue_snapshot.count",
+        event_name: EventSales.Telemetry.oban_queue_snapshot(),
+        measurement: :count,
+        tags: [:queue, :state],
+        description: "Grouped Oban queue depth snapshots"
       ),
 
       # Oban Metrics

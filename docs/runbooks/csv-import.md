@@ -1,8 +1,8 @@
 # CSV Import Runbook
 
-Slice 16.0 supports dry-run validation only. Apply remains unavailable until Slice 17.0.
+EventSales supports CSV dry-run validation and apply through `/admin/imports`.
 
-Required columns:
+## Required columns
 
 ```text
 woo_order_id
@@ -19,7 +19,7 @@ created_at_source
 updated_at_source
 ```
 
-Optional columns:
+## Optional columns
 
 ```text
 woo_variation_id
@@ -35,12 +35,22 @@ payment_method_title
 payment_gateway_transaction_id
 ```
 
-Process:
+## Operator process
 
 1. Open `/admin/imports`.
 2. Select the event scope outside the CSV.
 3. Upload a `.csv` file and run dry-run.
 4. Review row errors and duplicate previews.
 5. Fix missing product mappings in the mappings UI, then rerun dry-run.
+6. Apply only after dry-run passes and mappings are complete.
 
-Do not use `raw_total`, `raw_discount_total`, `raw_tax_total`, or `discount_total` as CSV headers. Use the explicit `order_*` and `line_*` names above.
+## Launch guardrails
+
+- Large imports run on the `csv_imports` queue; monitor backlog in Oban Web.
+- CSV apply is audited and must not be used as a substitute for fixing webhook intake during live sales unless intake is confirmed down.
+- Do not use `raw_total`, `raw_discount_total`, `raw_tax_total`, or `discount_total` as CSV headers. Use the explicit `order_*` and `line_*` names above.
+
+## Related docs
+
+- [`reconciliation.md`](reconciliation.md)
+- [`mapping-review.md`](mapping-review.md)

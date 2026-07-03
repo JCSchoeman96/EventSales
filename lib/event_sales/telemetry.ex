@@ -15,6 +15,7 @@ defmodule EventSales.Telemetry do
   @webhook_backpressure [:event_sales, :webhook, :backpressure]
   @webhook_buffered [:event_sales, :webhook, :buffered]
   @webhook_drained [:event_sales, :webhook, :drained]
+  @webhook_rate_limited [:event_sales, :webhook, :rate_limited]
   @webhook_replay_audit_failed [:event_sales, :webhook, :replay, :audit_failed]
   @rest_request_stop [:event_sales, :rest, :request, :stop]
   @rest_request_exception [:event_sales, :rest, :request, :exception]
@@ -83,6 +84,7 @@ defmodule EventSales.Telemetry do
     :failed_job_alert,
     :exception
   ]
+  @oban_queue_snapshot [:event_sales, :oban, :queue_snapshot]
 
   @doc """
   Returns every custom EventSales telemetry event name defined in Slice 0.8.
@@ -95,6 +97,7 @@ defmodule EventSales.Telemetry do
       webhook_backpressure(),
       webhook_buffered(),
       webhook_drained(),
+      webhook_rate_limited(),
       webhook_replay_audit_failed(),
       rest_request_stop(),
       rest_request_exception(),
@@ -141,7 +144,8 @@ defmodule EventSales.Telemetry do
       maintenance_cache_cleanup_exception(),
       maintenance_failed_job_alert_start(),
       maintenance_failed_job_alert_stop(),
-      maintenance_failed_job_alert_exception()
+      maintenance_failed_job_alert_exception(),
+      oban_queue_snapshot()
     ]
   end
 
@@ -164,6 +168,10 @@ defmodule EventSales.Telemetry do
   @doc "Buffered webhooks drained to Postgres."
   @spec webhook_drained() :: event_name()
   def webhook_drained, do: @webhook_drained
+
+  @doc "Webhook intake HTTP rate limit rejected a request."
+  @spec webhook_rate_limited() :: event_name()
+  def webhook_rate_limited, do: @webhook_rate_limited
 
   @doc "Webhook replay was queued but replay audit logging failed."
   @spec webhook_replay_audit_failed() :: event_name()
@@ -352,6 +360,10 @@ defmodule EventSales.Telemetry do
   @doc "Failed job alert check failed."
   @spec maintenance_failed_job_alert_exception() :: event_name()
   def maintenance_failed_job_alert_exception, do: @maintenance_failed_job_alert_exception
+
+  @doc "Grouped Oban queue depth snapshot."
+  @spec oban_queue_snapshot() :: event_name()
+  def oban_queue_snapshot, do: @oban_queue_snapshot
 
   @doc "Returns the low-cardinality product metadata cache event for the cache outcome."
   @spec product_metadata_cache_event(:hit | :miss | :put) :: event_name()

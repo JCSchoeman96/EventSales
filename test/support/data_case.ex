@@ -29,6 +29,8 @@ defmodule EventSales.DataCase do
 
   setup tags do
     EventSales.DataCase.setup_sandbox(tags)
+    EventSales.TestSupport.Ingestion.MemoryRateLimiterAdapter.reset_for_test!()
+    EventSalesWeb.RateLimiting.EtsSlidingWindow.reset_for_test!()
     :ok
   end
 
