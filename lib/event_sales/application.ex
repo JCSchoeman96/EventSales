@@ -60,7 +60,10 @@ defmodule EventSales.Application do
     with true <- Keyword.get(cfg, :enabled, false),
          true <- Keyword.get(cfg, :durability_accepted, false),
          url when is_binary(url) and url != "" <- Keyword.get(cfg, :redis_url) do
-      {Redix, {url, name: EventSales.Ingestion.RedisWebhookBuffer.redix_name()}}
+      Supervisor.child_spec(
+        {Redix, {url, name: EventSales.Ingestion.RedisWebhookBuffer.redix_name()}},
+        id: :event_sales_webhook_buffer_redix
+      )
     else
       _ -> nil
     end
@@ -71,7 +74,10 @@ defmodule EventSales.Application do
 
     with true <- Keyword.get(cfg, :redis_enabled, false),
          url when is_binary(url) and url != "" <- Keyword.get(cfg, :redis_url) do
-      {Redix, {url, name: EventSales.Analytics.SnapshotStore.RedixAdapter.redix_name()}}
+      Supervisor.child_spec(
+        {Redix, {url, name: EventSales.Analytics.SnapshotStore.RedixAdapter.redix_name()}},
+        id: :event_sales_analytics_redis
+      )
     else
       _ -> nil
     end
@@ -79,15 +85,27 @@ defmodule EventSales.Application do
 
   defp rate_limit_redis_child do
     cfg = Application.get_env(:event_sales, :webhook_intake_rate_limit, [])
+    buffer_cfg = Application.get_env(:event_sales, :redis_webhook_buffer, [])
 
     with true <- Keyword.get(cfg, :enabled, false),
          adapter when adapter == EventSales.Ingestion.RedisRateLimiter.RedixAdapter <-
            Keyword.get(cfg, :adapter),
-         url when is_binary(url) and url != "" <- Keyword.get(cfg, :redis_url) do
-      {Redix, {url, name: EventSales.Ingestion.RedisRateLimiter.redix_name()}}
+         rate_limit_url when is_binary(rate_limit_url) and rate_limit_url != "" <-
+           Keyword.get(cfg, :redis_url),
+         false <- shared_webhook_buffer_redis?(buffer_cfg, rate_limit_url) do
+      Supervisor.child_spec(
+        {Redix, {rate_limit_url, name: EventSales.Ingestion.RedisRateLimiter.redix_name()}},
+        id: :event_sales_rate_limit_redix
+      )
     else
       _ -> nil
     end
+  end
+
+  defp shared_webhook_buffer_redis?(buffer_cfg, rate_limit_url) do
+    Keyword.get(buffer_cfg, :enabled, false) &&
+      Keyword.get(buffer_cfg, :durability_accepted, false) &&
+      Keyword.get(buffer_cfg, :redis_url) == rate_limit_url
   end
 
   defp maybe_validate_live_cutover! do
