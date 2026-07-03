@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-269
+289
 
 ## Files
 
@@ -77,6 +77,19 @@ Project root: `.`
 - `lib/event_sales/catalog/resources/product_mapping.ex`
 - `lib/event_sales/catalog/resources/source_system.ex`
 - `lib/event_sales/catalog/resources/ticket_type.ex`
+- `lib/event_sales/catalog/tickera_catalog/applier.ex`
+- `lib/event_sales/catalog/tickera_catalog/cache.ex`
+- `lib/event_sales/catalog/tickera_catalog/cache/postgres_only_adapter.ex`
+- `lib/event_sales/catalog/tickera_catalog/catalog_row.ex`
+- `lib/event_sales/catalog/tickera_catalog/configured_discovery_source.ex`
+- `lib/event_sales/catalog/tickera_catalog/discovery_result.ex`
+- `lib/event_sales/catalog/tickera_catalog/discovery_source.ex`
+- `lib/event_sales/catalog/tickera_catalog/finding.ex`
+- `lib/event_sales/catalog/tickera_catalog/manual_rows_discovery_source.ex`
+- `lib/event_sales/catalog/tickera_catalog/normalizer.ex`
+- `lib/event_sales/catalog/tickera_catalog/plan.ex`
+- `lib/event_sales/catalog/tickera_catalog/planner.ex`
+- `lib/event_sales/catalog/tickera_catalog/pub_sub.ex`
 - `lib/event_sales/catalog/workers/mapping_changed_worker.ex`
 - `lib/event_sales/exports/csv_stream.ex`
 - `lib/event_sales/exports/event_sales_csv.ex`
@@ -111,6 +124,8 @@ Project root: `.`
 - `lib/event_sales/ingestion/resources/sync_run.ex`
 - `lib/event_sales/ingestion/resources/tickera_attendee_snapshot.ex`
 - `lib/event_sales/ingestion/resources/tickera_attendee_sync_run.ex`
+- `lib/event_sales/ingestion/resources/tickera_catalog_sync_finding.ex`
+- `lib/event_sales/ingestion/resources/tickera_catalog_sync_run.ex`
 - `lib/event_sales/ingestion/resources/tickera_event_source.ex`
 - `lib/event_sales/ingestion/resources/tickera_reconciliation_finding.ex`
 - `lib/event_sales/ingestion/resources/tickera_reconciliation_run.ex`
@@ -128,6 +143,7 @@ Project root: `.`
 - `lib/event_sales/ingestion/tickera_attendee_sync.ex`
 - `lib/event_sales/ingestion/tickera_attendee_sync_queue.ex`
 - `lib/event_sales/ingestion/tickera_attendee_sync_runs.ex`
+- `lib/event_sales/ingestion/tickera_catalog_sync.ex`
 - `lib/event_sales/ingestion/tickera_event_sources.ex`
 - `lib/event_sales/ingestion/tickera_reconciliation.ex`
 - `lib/event_sales/ingestion/tickera_reconciliation_findings.ex`
@@ -142,7 +158,9 @@ Project root: `.`
 - `lib/event_sales/ingestion/webhook_processor.ex`
 - `lib/event_sales/ingestion/webhook_replay.ex`
 - `lib/event_sales/ingestion/woocommerce_rest_config.ex`
+- `lib/event_sales/ingestion/workers/apply_tickera_catalog_worker.ex`
 - `lib/event_sales/ingestion/workers/backfill_orders_worker.ex`
+- `lib/event_sales/ingestion/workers/discover_tickera_catalog_worker.ex`
 - `lib/event_sales/ingestion/workers/missing_catalog_resolution_worker.ex`
 - `lib/event_sales/ingestion/workers/process_csv_import_worker.ex`
 - `lib/event_sales/ingestion/workers/process_webhook_worker.ex`
@@ -221,6 +239,7 @@ Project root: `.`
 - `lib/event_sales_web/controllers/webhook_controller.ex`
 - `lib/event_sales_web/endpoint.ex`
 - `lib/event_sales_web/helpers/dashboard_helpers.ex`
+- `lib/event_sales_web/live/admin/catalog_sync_live.ex`
 - `lib/event_sales_web/live/admin/components/order_table.ex`
 - `lib/event_sales_web/live/admin/components/sales_chart.ex`
 - `lib/event_sales_web/live/admin/components/stale_data_banner.ex`
@@ -279,6 +298,7 @@ Project root: `.`
 - `test/support/oban_helpers.ex`
 - `test/support/sales_helpers.ex`
 - `test/support/telemetry_helpers.ex`
+- `test/support/tickera_catalog_fixtures.ex`
 - `test/support/tickera_sync_test_helpers.ex`
 - `test/support/woocommerce_webhook_helpers.ex`
 
@@ -644,6 +664,84 @@ Project root: `.`
   - docs_count: 0
   - public_funs: _none_
   - uses: `Ash.Resource`
+- `EventSales.Catalog.TickeraCatalog.Applier` - `lib/event_sales/catalog/tickera_catalog/applier.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `apply/3`
+  - uses: _none_
+- `EventSales.Catalog.TickeraCatalog.Cache` - `lib/event_sales/catalog/tickera_catalog/cache.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `put_preview/3`, `get_preview/1`, `delete_preview/1`
+  - uses: _none_
+- `EventSales.Catalog.TickeraCatalog.Cache.PostgresOnlyAdapter` - `lib/event_sales/catalog/tickera_catalog/cache/postgres_only_adapter.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `put_preview/3`, `get_preview/1`, `delete_preview/1`
+  - uses: _none_
+- `EventSales.Catalog.TickeraCatalog.CatalogRow` - `lib/event_sales/catalog/tickera_catalog/catalog_row.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSales.Catalog.TickeraCatalog.ConfiguredDiscoverySource` - `lib/event_sales/catalog/tickera_catalog/configured_discovery_source.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `discover/2`
+  - uses: _none_
+- `EventSales.Catalog.TickeraCatalog.DiscoveryResult` - `lib/event_sales/catalog/tickera_catalog/discovery_result.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSales.Catalog.TickeraCatalog.DiscoverySource` - `lib/event_sales/catalog/tickera_catalog/discovery_source.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSales.Catalog.TickeraCatalog.Finding` - `lib/event_sales/catalog/tickera_catalog/finding.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSales.Catalog.TickeraCatalog.ManualRowsDiscoverySource` - `lib/event_sales/catalog/tickera_catalog/manual_rows_discovery_source.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `discover/2`
+  - uses: _none_
+- `EventSales.Catalog.TickeraCatalog.Normalizer` - `lib/event_sales/catalog/tickera_catalog/normalizer.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `normalize/1`
+  - uses: _none_
+- `EventSales.Catalog.TickeraCatalog.Plan` - `lib/event_sales/catalog/tickera_catalog/plan.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSales.Catalog.TickeraCatalog.Planner` - `lib/event_sales/catalog/tickera_catalog/planner.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `plan/3`
+  - uses: _none_
+- `EventSales.Catalog.TickeraCatalog.PubSub` - `lib/event_sales/catalog/tickera_catalog/pub_sub.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `topic/1`, `subscribe/1`, `broadcast/3`
+  - uses: _none_
 - `EventSales.Catalog.Workers.MappingChangedWorker` - `lib/event_sales/catalog/workers/mapping_changed_worker.ex`
   - moduledoc?: true
   - specs?: false
@@ -848,6 +946,18 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `set_started_at/2`, `set_finished_at/2`
   - uses: `Ash.Resource`
+- `EventSales.Ingestion.Resources.TickeraCatalogSyncFinding` - `lib/event_sales/ingestion/resources/tickera_catalog_sync_finding.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
+- `EventSales.Ingestion.Resources.TickeraCatalogSyncRun` - `lib/event_sales/ingestion/resources/tickera_catalog_sync_run.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `set_started_at/2`, `set_finished_at/2`
+  - uses: `Ash.Resource`
 - `EventSales.Ingestion.Resources.TickeraEventSource` - `lib/event_sales/ingestion/resources/tickera_event_source.ex`
   - moduledoc?: true
   - specs?: false
@@ -950,6 +1060,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `list_runs/1`, `get_run/2`, `queue_manual/3`, `mark_started/2`, `mark_resumed/2`, `mark_completed/2`, `cancel/2`, `mark_paused/3`, `mark_failed/3`, `record_page/3`, `record_counts/3`
   - uses: _none_
+- `EventSales.Ingestion.TickeraCatalogSync` - `lib/event_sales/ingestion/tickera_catalog_sync.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `queue_dry_run/2`, `queue_apply/3`, `list_runs/1`, `get_run_preview/2`, `list_source_systems/1`
+  - uses: _none_
 - `EventSales.Ingestion.TickeraEventSources` - `lib/event_sales/ingestion/tickera_event_sources.ex`
   - moduledoc?: true
   - specs?: false
@@ -1040,12 +1156,24 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `configured?/0`, `validate_for_live_cutover!/0`, `validate_for_live_cutover/0`
   - uses: _none_
+- `EventSales.Ingestion.Workers.ApplyTickeraCatalogWorker` - `lib/event_sales/ingestion/workers/apply_tickera_catalog_worker.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `perform/1`
+  - uses: `Oban.Worker`
 - `EventSales.Ingestion.Workers.BackfillOrdersWorker` - `lib/event_sales/ingestion/workers/backfill_orders_worker.ex`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
   - public_funs: _none_
   - uses: _none_
+- `EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker` - `lib/event_sales/ingestion/workers/discover_tickera_catalog_worker.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `perform/1`
+  - uses: `Oban.Worker`
 - `EventSales.Ingestion.Workers.MissingCatalogResolutionWorker` - `lib/event_sales/ingestion/workers/missing_catalog_resolution_worker.ex`
   - moduledoc?: true
   - specs?: false
@@ -1496,6 +1624,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `status_color/1`, `capacity_color/1`, `sync_color/1`, `sold_pct/1`, `format_zar/1`, `format_date/1`, `relative_time/1`, `delta_label/1`, `delta_class/1`
   - uses: _none_
+- `EventSalesWeb.Live.Admin.CatalogSyncLive` - `lib/event_sales_web/live/admin/catalog_sync_live.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `mount/3`, `handle_event/3`, `handle_info/2`, `render/1`
+  - uses: `EventSalesWeb`
 - `EventSalesWeb.Live.Admin.Components.OrderTable` - `lib/event_sales_web/live/admin/components/order_table.ex`
   - moduledoc?: true
   - specs?: false
@@ -1844,6 +1978,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: _none_
   - uses: _none_
+- `EventSales.TestSupport.TickeraCatalogFixtures` - `test/support/tickera_catalog_fixtures.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `vwg_event/0`, `vwg_row/0`, `private_event_row/0`, `zero_product_event/0`, `variation_rows/0`
+  - uses: _none_
 - `EventSales.TestSupport.TickeraSyncTestHelpers` - `test/support/tickera_sync_test_helpers.ex`
   - moduledoc?: true
   - specs?: false
@@ -1882,6 +2022,8 @@ Project root: `.`
 - `EventSales.Ingestion.Resources.SyncRun` - `lib/event_sales/ingestion/resources/sync_run.ex`
 - `EventSales.Ingestion.Resources.TickeraAttendeeSnapshot` - `lib/event_sales/ingestion/resources/tickera_attendee_snapshot.ex`
 - `EventSales.Ingestion.Resources.TickeraAttendeeSyncRun` - `lib/event_sales/ingestion/resources/tickera_attendee_sync_run.ex`
+- `EventSales.Ingestion.Resources.TickeraCatalogSyncFinding` - `lib/event_sales/ingestion/resources/tickera_catalog_sync_finding.ex`
+- `EventSales.Ingestion.Resources.TickeraCatalogSyncRun` - `lib/event_sales/ingestion/resources/tickera_catalog_sync_run.ex`
 - `EventSales.Ingestion.Resources.TickeraEventSource` - `lib/event_sales/ingestion/resources/tickera_event_source.ex`
 - `EventSales.Ingestion.Resources.TickeraReconciliationFinding` - `lib/event_sales/ingestion/resources/tickera_reconciliation_finding.ex`
 - `EventSales.Ingestion.Resources.TickeraReconciliationRun` - `lib/event_sales/ingestion/resources/tickera_reconciliation_run.ex`
@@ -1930,6 +2072,7 @@ _none_
 ### LiveViews
 
 - `EventSalesWeb` - `lib/event_sales_web.ex`
+- `EventSalesWeb.Live.Admin.CatalogSyncLive` - `lib/event_sales_web/live/admin/catalog_sync_live.ex`
 - `EventSalesWeb.Live.Admin.DashboardLive` - `lib/event_sales_web/live/admin/dashboard_live.ex`
 - `EventSalesWeb.Live.Admin.EventDetailLive` - `lib/event_sales_web/live/admin/event_detail_live.ex`
 - `EventSalesWeb.Live.Admin.EventsLive` - `lib/event_sales_web/live/admin/events_live.ex`
@@ -2000,6 +2143,8 @@ _none_
 - `EventSales.Analytics.Workers.RebuildHotStateWorker` - `lib/event_sales/analytics/workers/rebuild_hot_state_worker.ex`
 - `EventSales.Analytics.Workers.RefreshSnapshotWorker` - `lib/event_sales/analytics/workers/refresh_snapshot_worker.ex`
 - `EventSales.Catalog.Workers.MappingChangedWorker` - `lib/event_sales/catalog/workers/mapping_changed_worker.ex`
+- `EventSales.Ingestion.Workers.ApplyTickeraCatalogWorker` - `lib/event_sales/ingestion/workers/apply_tickera_catalog_worker.ex`
+- `EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker` - `lib/event_sales/ingestion/workers/discover_tickera_catalog_worker.ex`
 - `EventSales.Ingestion.Workers.MissingCatalogResolutionWorker` - `lib/event_sales/ingestion/workers/missing_catalog_resolution_worker.ex`
 - `EventSales.Ingestion.Workers.ProcessCsvImportWorker` - `lib/event_sales/ingestion/workers/process_csv_import_worker.ex`
 - `EventSales.Ingestion.Workers.ProcessWebhookWorker` - `lib/event_sales/ingestion/workers/process_webhook_worker.ex`
