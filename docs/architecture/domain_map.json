@@ -1910,6 +1910,10 @@
             "name": "handle_event"
           },
           {
+            "arity": 2,
+            "name": "handle_info"
+          },
+          {
             "arity": 1,
             "name": "render"
           }

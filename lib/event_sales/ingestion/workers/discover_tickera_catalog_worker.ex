@@ -90,6 +90,12 @@ defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker do
   end
 
   defp sanitize_error(reason) do
-    reason |> inspect() |> String.slice(0, 255)
+    case reason do
+      :not_configured -> "discovery_source_not_configured"
+      :invalid_manual_rows -> "invalid_manual_rows"
+      :missing_manual_rows -> "missing_manual_rows"
+      {:enqueue_failed, _reason} -> "enqueue_failed"
+      _reason -> "catalog_sync_discovery_failed"
+    end
   end
 end

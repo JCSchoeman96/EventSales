@@ -8,7 +8,9 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
 
   alias EventSales.Accounts
   alias EventSales.Accounts.Resources.{Role, User, UserRole}
-  alias EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker
+  alias EventSales.Ingestion
+  alias EventSales.Ingestion.Resources.TickeraCatalogSyncRun
+  alias EventSales.Ingestion.Workers.{ApplyTickeraCatalogWorker, DiscoverTickeraCatalogWorker}
   alias EventSales.TestSupport.{SalesHelpers, TickeraCatalogFixtures}
 
   setup do
@@ -68,6 +70,74 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
     assert_enqueued(
       worker: DiscoverTickeraCatalogWorker,
       queue: :tickera_sync
+    )
+  end
+
+  test "admin sees preview findings and queues apply for ready run", %{
+    conn: conn,
+    admin: admin,
+    source: source
+  } do
+    snapshot = %{
+      "dry_run_hash" => "ready-hash",
+      "event_changes" => [
+        %{
+          "action" => "adopt_existing",
+          "external_event_id" => 109_316,
+          "name" => "Vroue wat Glo-retreat - PTA"
+        }
+      ],
+      "ticket_type_changes" => [
+        %{"action" => "adopt_existing", "name" => "Toegang", "external_ticket_type_id" => 109_740}
+      ],
+      "product_mapping_changes" => [],
+      "findings" => [
+        %{
+          "severity" => "info",
+          "code" => "vwg_pretoria_preserved",
+          "message" => "VWG Pretoria existing product-level mapping will be preserved.",
+          "tickera_event_id" => 109_316,
+          "woo_product_id" => 109_740
+        }
+      ],
+      "touched_event_ids" => [],
+      "touched_product_keys" => [[109_740, nil]]
+    }
+
+    run =
+      Ash.create!(
+        TickeraCatalogSyncRun,
+        %{
+          source_system_id: source.id,
+          scope: %{"kind" => "manual_rows"},
+          status: :dry_run_ready,
+          dry_run_hash: "ready-hash",
+          summary: %{"finding_count" => 1},
+          plan_snapshot: snapshot
+        },
+        action: :create_dry_run,
+        domain: Ingestion
+      )
+
+    {:ok, view, html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/catalog-sync")
+
+    assert html =~ "vwg_pretoria_preserved"
+    assert html =~ "VWG Pretoria existing product-level mapping will be preserved."
+    assert html =~ "Tickera event 109316"
+    assert html =~ "Apply"
+
+    html =
+      render_click(view, "queue_apply", %{"run_id" => run.id, "dry_run_hash" => "ready-hash"})
+
+    assert html =~ "Catalog apply queued"
+
+    assert_enqueued(
+      worker: ApplyTickeraCatalogWorker,
+      queue: :tickera_sync,
+      args: %{"run_id" => run.id, "dry_run_hash" => "ready-hash"}
     )
   end
 

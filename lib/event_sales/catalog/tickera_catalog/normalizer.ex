@@ -18,6 +18,7 @@ defmodule EventSales.Catalog.TickeraCatalog.Normalizer do
       |> Enum.filter(&published_row?/1)
       |> Enum.map(&to_catalog_row/1)
       |> dedupe_rows()
+      |> drop_parent_rows_when_variations_exist()
 
     findings =
       []
@@ -72,6 +73,19 @@ defmodule EventSales.Catalog.TickeraCatalog.Normalizer do
       Map.put_new(acc, identity(row), row)
     end)
     |> Map.values()
+    |> Enum.sort_by(&{&1.tickera_event_id, &1.woo_product_id, &1.woo_variation_id || 0})
+  end
+
+  defp drop_parent_rows_when_variations_exist(rows) do
+    rows
+    |> Enum.group_by(&{&1.tickera_event_id, &1.woo_product_id})
+    |> Enum.flat_map(fn {_identity, grouped_rows} ->
+      if Enum.any?(grouped_rows, & &1.woo_variation_id) do
+        Enum.reject(grouped_rows, &is_nil(&1.woo_variation_id))
+      else
+        grouped_rows
+      end
+    end)
     |> Enum.sort_by(&{&1.tickera_event_id, &1.woo_product_id, &1.woo_variation_id || 0})
   end
 

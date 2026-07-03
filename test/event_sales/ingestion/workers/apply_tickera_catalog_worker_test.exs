@@ -63,4 +63,40 @@ defmodule EventSales.Ingestion.Workers.ApplyTickeraCatalogWorkerTest do
     assert_receive {:catalog_sync_applied, %{run_id: run_id}}
     assert run_id == run.id
   end
+
+  test "stale hash fails without leaving run in applying status" do
+    source = SalesHelpers.create_source_system!()
+
+    run =
+      Ash.create!(
+        TickeraCatalogSyncRun,
+        %{
+          source_system_id: source.id,
+          scope: %{"kind" => "manual_rows"},
+          status: :dry_run_ready,
+          dry_run_hash: "current-hash",
+          summary: %{},
+          plan_snapshot: %{
+            "dry_run_hash" => "current-hash",
+            "event_changes" => [],
+            "ticket_type_changes" => [],
+            "product_mapping_changes" => [],
+            "findings" => [],
+            "touched_event_ids" => [],
+            "touched_product_keys" => []
+          }
+        },
+        action: :create_dry_run,
+        domain: Ingestion
+      )
+
+    assert {:error, :stale_dry_run_hash} =
+             ApplyTickeraCatalogWorker.perform(%Oban.Job{
+               args: %{"run_id" => run.id, "dry_run_hash" => "stale-hash"}
+             })
+
+    updated = Ash.get!(TickeraCatalogSyncRun, run.id, domain: Ingestion)
+    assert updated.status == :failed
+    assert updated.last_error == "stale_dry_run_hash"
+  end
 end

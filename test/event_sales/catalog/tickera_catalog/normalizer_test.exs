@@ -63,6 +63,15 @@ defmodule EventSales.Catalog.TickeraCatalog.NormalizerTest do
   end
 
   test "variation products emit variation-level candidates only and warning" do
+    [first_variation | _rest] = variation_rows = TickeraCatalogFixtures.variation_rows()
+
+    parent_row =
+      first_variation
+      |> Map.put("woo_variation_id", nil)
+      |> Map.put("variation_title", nil)
+      |> Map.put("variation_status", nil)
+      |> Map.put("variation_source_updated_at", nil)
+
     result = %DiscoveryResult{
       events: [
         %{
@@ -72,7 +81,7 @@ defmodule EventSales.Catalog.TickeraCatalog.NormalizerTest do
           "event_status" => "publish"
         }
       ],
-      catalog_rows: TickeraCatalogFixtures.variation_rows()
+      catalog_rows: [parent_row | variation_rows]
     }
 
     assert {:ok, %{rows: rows, findings: findings}} = Normalizer.normalize(result)

@@ -1628,7 +1628,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: `mount/3`, `handle_event/3`, `render/1`
+  - public_funs: `mount/3`, `handle_event/3`, `handle_info/2`, `render/1`
   - uses: `EventSalesWeb`
 - `EventSalesWeb.Live.Admin.Components.OrderTable` - `lib/event_sales_web/live/admin/components/order_table.ex`
   - moduledoc?: true

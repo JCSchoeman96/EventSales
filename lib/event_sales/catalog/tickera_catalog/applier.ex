@@ -9,6 +9,7 @@ defmodule EventSales.Catalog.TickeraCatalog.Applier do
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.TickeraCatalogSyncRun
   alias EventSales.Ingestion.Workers.MissingCatalogResolutionWorker
+  alias EventSales.Repo
 
   @spec apply(Ecto.UUID.t(), String.t(), keyword()) ::
           {:ok, TickeraCatalogSyncRun.t()} | {:error, term()}
@@ -16,11 +17,12 @@ defmodule EventSales.Catalog.TickeraCatalog.Applier do
       when is_binary(run_id) and is_binary(expected_dry_run_hash) do
     with {:ok, %TickeraCatalogSyncRun{} = run} <-
            Ash.get(TickeraCatalogSyncRun, run_id, domain: Ingestion),
+         :ok <- validate_status(run),
          :ok <- validate_hash(run, expected_dry_run_hash),
          {:ok, snapshot} <- fetch_snapshot(run),
          :ok <- validate_no_blocking(snapshot),
-         {:ok, touched} <- apply_snapshot(run, snapshot),
-         {:ok, applied} <- mark_applied(run) do
+         {:ok, {applied, touched, notifications}} <- apply_transaction(run, snapshot) do
+      Ash.Notifier.notify(notifications)
       after_apply(run.source_system_id, touched)
       {:ok, applied}
     else
@@ -28,6 +30,9 @@ defmodule EventSales.Catalog.TickeraCatalog.Applier do
       {:error, reason} -> {:error, reason}
     end
   end
+
+  defp validate_status(%{status: :dry_run_ready}), do: :ok
+  defp validate_status(_run), do: {:error, :run_not_ready}
 
   defp validate_hash(%{dry_run_hash: hash}, expected) when hash == expected, do: :ok
   defp validate_hash(_run, _expected), do: {:error, :stale_dry_run_hash}
@@ -43,7 +48,28 @@ defmodule EventSales.Catalog.TickeraCatalog.Applier do
     end
   end
 
-  defp apply_snapshot(_run, snapshot) do
+  defp apply_transaction(run, snapshot) do
+    Repo.transaction(fn ->
+      case do_apply_transaction(run, snapshot) do
+        {:ok, result} -> result
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+  rescue
+    error -> {:error, error}
+  end
+
+  defp do_apply_transaction(run, snapshot) do
+    with {:ok, applying, applying_notifications} <- mark_applying(run),
+         {:ok, touched, snapshot_notifications} <- apply_snapshot(snapshot),
+         {:ok, applied, applied_notifications} <- mark_applied(applying) do
+      {:ok,
+       {applied, touched,
+        applying_notifications ++ snapshot_notifications ++ applied_notifications}}
+    end
+  end
+
+  defp apply_snapshot(snapshot) do
     refs =
       %{}
       |> apply_events(list(snapshot, "event_changes"))
@@ -55,7 +81,7 @@ defmodule EventSales.Catalog.TickeraCatalog.Applier do
        event_ids:
          Enum.uniq(list(snapshot, "touched_event_ids") ++ Map.get(refs, :created_event_ids, [])),
        product_keys: list(snapshot, "touched_product_keys")
-     }}
+     }, Map.get(refs, :notifications, [])}
   rescue
     error -> {:error, error}
   end
@@ -63,26 +89,32 @@ defmodule EventSales.Catalog.TickeraCatalog.Applier do
   defp apply_events(refs, changes) do
     Enum.reduce(changes, refs, fn change, refs ->
       case value(change, "action") do
+        action when action in [:reuse, "reuse"] ->
+          Map.put(refs, {:event_ref, value(change, "ref")}, value(change, "event_id"))
+
         action when action in [:adopt_existing, "adopt_existing"] ->
           event = Ash.get!(Event, value(change, "event_id"), domain: Catalog)
 
-          Ash.update!(
-            event,
-            %{
-              external_event_id: value(change, "external_event_id"),
-              external_event_kind: atom(value(change, "external_event_kind")),
-              source_status: value(change, "source_status"),
-              source_updated_at: parse_datetime(value(change, "source_updated_at")),
-              last_synced_at: DateTime.utc_now()
-            },
-            action: :update,
-            domain: Catalog
-          )
+          {_event, notifications} =
+            Ash.update!(
+              event,
+              %{
+                external_event_id: value(change, "external_event_id"),
+                external_event_kind: atom(value(change, "external_event_kind")),
+                source_status: value(change, "source_status"),
+                source_updated_at: parse_datetime(value(change, "source_updated_at")),
+                last_synced_at: DateTime.utc_now()
+              },
+              action: :update,
+              domain: Catalog,
+              context: %{warn_on_transaction_hooks?: false},
+              return_notifications?: true
+            )
 
-          refs
+          append_notifications(refs, notifications)
 
         action when action in [:create, "create"] ->
-          event =
+          {event, notifications} =
             Ash.create!(
               Event,
               %{
@@ -97,12 +129,15 @@ defmodule EventSales.Catalog.TickeraCatalog.Applier do
                 last_synced_at: DateTime.utc_now()
               },
               action: :create,
-              domain: Catalog
+              domain: Catalog,
+              context: %{warn_on_transaction_hooks?: false},
+              return_notifications?: true
             )
 
           refs
           |> Map.put({:event_ref, value(change, "ref")}, event.id)
           |> Map.update(:created_event_ids, [event.id], &[event.id | &1])
+          |> append_notifications(notifications)
       end
     end)
   end
@@ -110,30 +145,36 @@ defmodule EventSales.Catalog.TickeraCatalog.Applier do
   defp apply_ticket_types(refs, changes) do
     Enum.reduce(changes, refs, fn change, refs ->
       case value(change, "action") do
+        action when action in [:reuse, "reuse"] ->
+          Map.put(refs, {:ticket_ref, value(change, "ref")}, value(change, "ticket_type_id"))
+
         action when action in [:adopt_existing, "adopt_existing"] ->
           ticket = Ash.get!(TicketType, value(change, "ticket_type_id"), domain: Catalog)
 
-          Ash.update!(
-            ticket,
-            %{
-              external_ticket_type_id: value(change, "external_ticket_type_id"),
-              external_ticket_type_kind: atom(value(change, "external_ticket_type_kind")),
-              external_product_id: value(change, "external_product_id"),
-              external_variation_id: value(change, "external_variation_id"),
-              source_status: value(change, "source_status"),
-              source_updated_at: parse_datetime(value(change, "source_updated_at")),
-              last_synced_at: DateTime.utc_now()
-            },
-            action: :update,
-            domain: Catalog
-          )
+          {_ticket, notifications} =
+            Ash.update!(
+              ticket,
+              %{
+                external_ticket_type_id: value(change, "external_ticket_type_id"),
+                external_ticket_type_kind: atom(value(change, "external_ticket_type_kind")),
+                external_product_id: value(change, "external_product_id"),
+                external_variation_id: value(change, "external_variation_id"),
+                source_status: value(change, "source_status"),
+                source_updated_at: parse_datetime(value(change, "source_updated_at")),
+                last_synced_at: DateTime.utc_now()
+              },
+              action: :update,
+              domain: Catalog,
+              context: %{warn_on_transaction_hooks?: false},
+              return_notifications?: true
+            )
 
-          refs
+          append_notifications(refs, notifications)
 
         action when action in [:create, "create"] ->
           event_id = Map.fetch!(refs, {:event_ref, value(change, "event_ref")})
 
-          ticket =
+          {ticket, notifications} =
             Ash.create!(
               TicketType,
               %{
@@ -149,10 +190,14 @@ defmodule EventSales.Catalog.TickeraCatalog.Applier do
                 last_synced_at: DateTime.utc_now()
               },
               action: :create,
-              domain: Catalog
+              domain: Catalog,
+              context: %{warn_on_transaction_hooks?: false},
+              return_notifications?: true
             )
 
-          Map.put(refs, {:ticket_ref, value(change, "ref")}, ticket.id)
+          refs
+          |> Map.put({:ticket_ref, value(change, "ref")}, ticket.id)
+          |> append_notifications(notifications)
       end
     end)
   end
@@ -162,30 +207,57 @@ defmodule EventSales.Catalog.TickeraCatalog.Applier do
       event_id = Map.fetch!(refs, {:event_ref, value(change, "event_ref")})
       ticket_type_id = Map.fetch!(refs, {:ticket_ref, value(change, "ticket_type_ref")})
 
-      Ash.create!(
-        ProductMapping,
-        %{
-          source_system_id: value(change, "source_system_id"),
-          event_id: event_id,
-          ticket_type_id: ticket_type_id,
-          woo_product_id: value(change, "woo_product_id"),
-          woo_variation_id: value(change, "woo_variation_id"),
-          original_label: value(change, "original_label"),
-          current_label: value(change, "current_label"),
-          active: true
-        },
-        action: :create,
-        domain: Catalog
-      )
+      {_mapping, notifications} =
+        Ash.create!(
+          ProductMapping,
+          %{
+            source_system_id: value(change, "source_system_id"),
+            event_id: event_id,
+            ticket_type_id: ticket_type_id,
+            woo_product_id: value(change, "woo_product_id"),
+            woo_variation_id: value(change, "woo_variation_id"),
+            original_label: value(change, "original_label"),
+            current_label: value(change, "current_label"),
+            active: true
+          },
+          action: :create,
+          domain: Catalog,
+          context: %{warn_on_transaction_hooks?: false},
+          return_notifications?: true
+        )
 
-      refs
+      append_notifications(refs, notifications)
     end)
   end
 
+  defp mark_applying(run) do
+    case run
+         |> Ash.Changeset.for_update(:mark_applying, %{})
+         |> Ash.update(
+           domain: Ingestion,
+           context: %{warn_on_transaction_hooks?: false},
+           return_notifications?: true
+         ) do
+      {:ok, applying, notifications} -> {:ok, applying, notifications}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   defp mark_applied(run) do
-    run
-    |> Ash.Changeset.for_update(:mark_applied, %{})
-    |> Ash.update(domain: Ingestion)
+    case run
+         |> Ash.Changeset.for_update(:mark_applied, %{})
+         |> Ash.update(
+           domain: Ingestion,
+           context: %{warn_on_transaction_hooks?: false},
+           return_notifications?: true
+         ) do
+      {:ok, applied, notifications} -> {:ok, applied, notifications}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp append_notifications(refs, notifications) do
+    Map.update(refs, :notifications, notifications, &(&1 ++ notifications))
   end
 
   defp after_apply(source_system_id, touched) do

@@ -6,7 +6,7 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
   require Ash.Query
 
   alias EventSales.Catalog
-  alias EventSales.Catalog.Resources.ProductMapping
+  alias EventSales.Catalog.Resources.{Event, ProductMapping, TicketType}
   alias EventSales.Catalog.TickeraCatalog.{CatalogRow, DiscoveryResult, Finding, Normalizer, Plan}
 
   @spec plan(Ecto.UUID.t(), DiscoveryResult.t(), keyword()) :: {:ok, Plan.t()} | {:error, term()}
@@ -134,7 +134,50 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
     event_ref = "tickera_event:#{row.tickera_event_id}"
     ticket_ref = "#{row.ticket_type_kind}:#{ticket_external_id(row)}"
 
-    event_change = %{
+    with {:ok, event} <- existing_source_event(source_system_id, row),
+         {:ok, ticket_type} <- existing_source_ticket_type(event, row) do
+      event_change = event_change(source_system_id, row, event_ref, event)
+      ticket_change = ticket_change(row, event_ref, ticket_ref, ticket_type)
+
+      mapping_change = %{
+        action: :create,
+        event_ref: event_ref,
+        ticket_type_ref: ticket_ref,
+        source_system_id: source_system_id,
+        woo_product_id: row.woo_product_id,
+        woo_variation_id: row.woo_variation_id,
+        original_label: row.ticket_type_name,
+        current_label: row.ticket_type_name,
+        active: true
+      }
+
+      acc =
+        acc
+        |> add_event_change(event_change)
+        |> add_ticket_change(ticket_change)
+        |> add_mapping_change(mapping_change)
+        |> touch_product(row)
+
+      acc =
+        case event do
+          %Event{id: event_id} -> touch_event(acc, event_id)
+          nil -> acc
+        end
+
+      {:ok, acc}
+    end
+  end
+
+  defp event_change(_source_system_id, _row, event_ref, %Event{} = event) do
+    %{
+      action: :reuse,
+      ref: event_ref,
+      event_id: event.id
+    }
+  end
+
+  defp event_change(source_system_id, row, event_ref, nil) do
+    %{
       action: :create,
       ref: event_ref,
       source_system_id: source_system_id,
@@ -146,8 +189,18 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
       source_status: row.event_status,
       source_updated_at: row.event_source_updated_at
     }
+  end
 
-    ticket_change = %{
+  defp ticket_change(_row, _event_ref, ticket_ref, %TicketType{} = ticket_type) do
+    %{
+      action: :reuse,
+      ref: ticket_ref,
+      ticket_type_id: ticket_type.id
+    }
+  end
+
+  defp ticket_change(row, event_ref, ticket_ref, nil) do
+    %{
       action: :create,
       ref: ticket_ref,
       event_ref: event_ref,
@@ -160,25 +213,6 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
       source_status: row.product_status,
       source_updated_at: ticket_source_updated_at(row)
     }
-
-    mapping_change = %{
-      action: :create,
-      event_ref: event_ref,
-      ticket_type_ref: ticket_ref,
-      source_system_id: source_system_id,
-      woo_product_id: row.woo_product_id,
-      woo_variation_id: row.woo_variation_id,
-      original_label: row.ticket_type_name,
-      current_label: row.ticket_type_name,
-      active: true
-    }
-
-    {:ok,
-     acc
-     |> add_event_change(event_change)
-     |> add_ticket_change(ticket_change)
-     |> add_mapping_change(mapping_change)
-     |> touch_product(row)}
   end
 
   defp existing_active_mapping(source_system_id, woo_product_id, nil) do
@@ -196,6 +230,30 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
     |> Ash.Query.filter(
       source_system_id == ^source_system_id and woo_product_id == ^woo_product_id and
         woo_variation_id == ^woo_variation_id and active == true
+    )
+    |> Ash.Query.limit(1)
+    |> Ash.read_one(domain: Catalog)
+  end
+
+  defp existing_source_event(source_system_id, row) do
+    Event
+    |> Ash.Query.filter(
+      source_system_id == ^source_system_id and external_event_kind == :tickera_event and
+        external_event_id == ^row.tickera_event_id
+    )
+    |> Ash.Query.limit(1)
+    |> Ash.read_one(domain: Catalog)
+  end
+
+  defp existing_source_ticket_type(nil, _row), do: {:ok, nil}
+
+  defp existing_source_ticket_type(%Event{} = event, row) do
+    external_ticket_type_id = ticket_external_id(row)
+
+    TicketType
+    |> Ash.Query.filter(
+      event_id == ^event.id and external_ticket_type_kind == ^row.ticket_type_kind and
+        external_ticket_type_id == ^external_ticket_type_id
     )
     |> Ash.Query.limit(1)
     |> Ash.read_one(domain: Catalog)
