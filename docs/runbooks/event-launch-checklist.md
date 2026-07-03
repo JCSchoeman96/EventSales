@@ -21,6 +21,7 @@ Use this ordered gate before enabling live WooCommerce webhook cutover.
 - [ ] Oban backlog thresholds reviewed: [`oban-queue-backlog.md`](oban-queue-backlog.md)
 - [ ] Reconciliation operator steps reviewed: [`reconciliation.md`](reconciliation.md)
 - [ ] Incident and security runbooks reviewed
+- [ ] Railway proxy/IP behavior reviewed; webhook rate-limit thresholds tuned for `conn.remote_ip` behavior on the deployed service
 
 ## 4. Cutover
 

@@ -13,6 +13,7 @@ Controlled cutover of WooCommerce webhook delivery to EventSales with an explici
 5. `WOOCOMMERCE_REST_*` credentials configured and `WooCommerceRestConfig.validate_for_live_cutover!/0` passes
 6. `WEBHOOK_PATH_TOKEN` and `WOOCOMMERCE_WEBHOOK_SECRET` configured
 7. Oban queue backlog within thresholds: [`oban-queue-backlog.md`](oban-queue-backlog.md)
+8. Railway proxy/IP behavior reviewed: webhook rate limiters key from `conn.remote_ip`. On Railway this may reflect a proxy hop rather than WooCommerce's origin IP, making the limiter behave closer to a shared webhook cap. Review `WEBHOOK_RATE_LIMIT_MAX_REQUESTS` and `WEBHOOK_RATE_LIMIT_WINDOW_MS` before switching the WooCommerce webhook URL.
 
 ## Cutover steps
 
