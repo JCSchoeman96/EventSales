@@ -41,6 +41,8 @@ defmodule EventSales.AshResourceSmokeTest do
       EventSales.Ingestion.Resources.TickeraAttendeeSnapshot,
       EventSales.Ingestion.Resources.TickeraReconciliationRun,
       EventSales.Ingestion.Resources.TickeraReconciliationFinding,
+      EventSales.Ingestion.Resources.TickeraCatalogSyncRun,
+      EventSales.Ingestion.Resources.TickeraCatalogSyncFinding,
       EventSales.Ingestion.Resources.CsvImportBatch,
       EventSales.Ingestion.Resources.CsvImportRow
     ],

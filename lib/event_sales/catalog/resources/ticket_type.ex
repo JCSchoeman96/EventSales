@@ -20,11 +20,35 @@ defmodule EventSales.Catalog.Resources.TicketType do
     defaults [:read]
 
     create :create do
-      accept [:event_id, :name, :capacity, :active]
+      accept [
+        :event_id,
+        :name,
+        :capacity,
+        :active,
+        :external_ticket_type_id,
+        :external_ticket_type_kind,
+        :external_product_id,
+        :external_variation_id,
+        :source_status,
+        :source_updated_at,
+        :last_synced_at
+      ]
     end
 
     update :update do
-      accept [:name, :capacity, :active]
+      accept [
+        :name,
+        :capacity,
+        :active,
+        :external_ticket_type_id,
+        :external_ticket_type_kind,
+        :external_product_id,
+        :external_variation_id,
+        :source_status,
+        :source_updated_at,
+        :last_synced_at
+      ]
+
       require_atomic? false
     end
 
@@ -51,6 +75,35 @@ defmodule EventSales.Catalog.Resources.TicketType do
     attribute :active, :boolean do
       allow_nil? false
       default true
+      public? true
+    end
+
+    attribute :external_ticket_type_id, :integer do
+      public? true
+    end
+
+    attribute :external_ticket_type_kind, :atom do
+      constraints one_of: [:woo_product, :woo_variation]
+      public? true
+    end
+
+    attribute :external_product_id, :integer do
+      public? true
+    end
+
+    attribute :external_variation_id, :integer do
+      public? true
+    end
+
+    attribute :source_status, :string do
+      public? true
+    end
+
+    attribute :source_updated_at, :utc_datetime_usec do
+      public? true
+    end
+
+    attribute :last_synced_at, :utc_datetime_usec do
       public? true
     end
 

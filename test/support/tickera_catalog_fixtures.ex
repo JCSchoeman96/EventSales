@@ -1,0 +1,84 @@
+defmodule EventSales.TestSupport.TickeraCatalogFixtures do
+  @moduledoc """
+  Sanitized Tickera Bridge catalog rows for VS-26A tests.
+  """
+
+  @vwg_event %{
+    "tickera_event_id" => 109_316,
+    "event_title" => "Vroue wat Glo-retreat - PTA",
+    "event_slug" => "vroue-wat-glo-retreat-pta",
+    "event_status" => "publish",
+    "event_source_updated_at" => "2026-06-01T10:00:00Z"
+  }
+
+  @vwg_row Map.merge(@vwg_event, %{
+             "woo_product_id" => 109_740,
+             "product_title" => "VWG - Pretoria",
+             "product_slug" => "vwg-pretoria",
+             "product_status" => "publish",
+             "product_source_updated_at" => "2026-06-01T10:05:00Z",
+             "ticket_display_name" => "Toegang",
+             "price" => "199",
+             "regular_price" => "199",
+             "ticket_template_id" => "100",
+             "woo_variation_id" => nil,
+             "variation_title" => nil,
+             "variation_status" => nil,
+             "variation_source_updated_at" => nil
+           })
+
+  def vwg_event, do: Map.new(@vwg_event)
+  def vwg_row, do: Map.new(@vwg_row)
+
+  def private_event_row do
+    @vwg_row
+    |> Map.merge(%{
+      "tickera_event_id" => 200_001,
+      "event_title" => "Private Retreat",
+      "event_slug" => "private-retreat",
+      "event_status" => "private",
+      "woo_product_id" => 200_740,
+      "product_title" => "Private Ticket",
+      "product_slug" => "private-ticket"
+    })
+  end
+
+  def zero_product_event do
+    %{
+      "tickera_event_id" => 300_001,
+      "event_title" => "Published Empty Event",
+      "event_slug" => "published-empty-event",
+      "event_status" => "publish",
+      "event_source_updated_at" => "2026-06-02T10:00:00Z"
+    }
+  end
+
+  def variation_rows do
+    base =
+      @vwg_row
+      |> Map.merge(%{
+        "tickera_event_id" => 400_001,
+        "event_title" => "Variation Event",
+        "event_slug" => "variation-event",
+        "woo_product_id" => 400_740,
+        "product_title" => "Variation Product",
+        "product_slug" => "variation-product",
+        "ticket_display_name" => nil
+      })
+
+    [
+      Map.merge(base, %{
+        "woo_variation_id" => 400_741,
+        "variation_title" => "Early Bird",
+        "variation_status" => "publish",
+        "variation_source_updated_at" => "2026-06-03T11:00:00Z"
+      }),
+      Map.merge(base, %{
+        "woo_variation_id" => 400_742,
+        "variation_title" => "General",
+        "variation_status" => "publish",
+        "variation_source_updated_at" => "2026-06-03T11:05:00Z"
+      })
+    ]
+  end
+end

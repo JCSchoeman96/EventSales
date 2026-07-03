@@ -488,6 +488,39 @@
       {
         "docs_count": 0,
         "moduledoc?": true,
+        "name": "EventSales.Ingestion.Resources.TickeraCatalogSyncFinding",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/resources/tickera_catalog_sync_finding.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Ingestion.Resources.TickeraCatalogSyncRun",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/resources/tickera_catalog_sync_run.ex",
+        "public_funs": [
+          {
+            "arity": 2,
+            "name": "set_started_at"
+          },
+          {
+            "arity": 2,
+            "name": "set_finished_at"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
         "name": "EventSales.Ingestion.Resources.TickeraEventSource",
         "parse_error": null,
         "path": "lib/event_sales/ingestion/resources/tickera_event_source.ex",
@@ -714,6 +747,40 @@
         "name": "EventSales.Catalog.Workers.MappingChangedWorker",
         "parse_error": null,
         "path": "lib/event_sales/catalog/workers/mapping_changed_worker.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "perform"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Oban.Worker"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Ingestion.Workers.ApplyTickeraCatalogWorker",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/workers/apply_tickera_catalog_worker.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "perform"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Oban.Worker"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/workers/discover_tickera_catalog_worker.ex",
         "public_funs": [
           {
             "arity": 1,
@@ -1825,6 +1892,31 @@
           "Phoenix.LiveView",
           "Phoenix.Router",
           "Phoenix.VerifiedRoutes"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Live.Admin.CatalogSyncLive",
+        "parse_error": null,
+        "path": "lib/event_sales_web/live/admin/catalog_sync_live.ex",
+        "public_funs": [
+          {
+            "arity": 3,
+            "name": "mount"
+          },
+          {
+            "arity": 3,
+            "name": "handle_event"
+          },
+          {
+            "arity": 1,
+            "name": "render"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "EventSalesWeb"
         ]
       },
       {

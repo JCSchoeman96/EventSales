@@ -89,6 +89,7 @@ defmodule EventSalesWeb.Router do
     live "/imports", Live.Admin.ImportsLive
     live "/webhooks", Live.Admin.WebhooksLive
     live "/sync", Live.Admin.SyncLive
+    live "/catalog-sync", Live.Admin.CatalogSyncLive
     live "/reconciliation", Live.Admin.ReconciliationLive
     get "/reconciliation/export.csv", Admin.ReconciliationExportController, :show
 

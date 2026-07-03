@@ -22,12 +22,39 @@ defmodule EventSales.Catalog.Resources.Event do
     defaults [:read]
 
     create :create do
-      accept [:source_system_id, :name, :slug, :starts_at, :ends_at, :capacity, :status]
+      accept [
+        :source_system_id,
+        :name,
+        :slug,
+        :starts_at,
+        :ends_at,
+        :capacity,
+        :status,
+        :external_event_id,
+        :external_event_kind,
+        :source_status,
+        :source_updated_at,
+        :last_synced_at
+      ]
+
       change ValidateEventDates
     end
 
     update :update do
-      accept [:name, :slug, :starts_at, :ends_at, :capacity, :status]
+      accept [
+        :name,
+        :slug,
+        :starts_at,
+        :ends_at,
+        :capacity,
+        :status,
+        :external_event_id,
+        :external_event_kind,
+        :source_status,
+        :source_updated_at,
+        :last_synced_at
+      ]
+
       require_atomic? false
       change ValidateEventDates
     end
@@ -69,6 +96,27 @@ defmodule EventSales.Catalog.Resources.Event do
       allow_nil? false
       default :draft
       constraints one_of: [:draft, :active, :archived, :cancelled]
+      public? true
+    end
+
+    attribute :external_event_id, :integer do
+      public? true
+    end
+
+    attribute :external_event_kind, :atom do
+      constraints one_of: [:tickera_event]
+      public? true
+    end
+
+    attribute :source_status, :string do
+      public? true
+    end
+
+    attribute :source_updated_at, :utc_datetime_usec do
+      public? true
+    end
+
+    attribute :last_synced_at, :utc_datetime_usec do
       public? true
     end
 
