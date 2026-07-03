@@ -9,7 +9,12 @@ defmodule EventSales.Ingestion.RedisRateLimiter do
 
   @doc false
   @spec redix_name() :: atom()
-  def redix_name, do: @redix_name
+  def redix_name do
+    case shared_webhook_buffer_redix_name() do
+      nil -> @redix_name
+      name -> name
+    end
+  end
 
   @doc """
   Returns `:ok` when the request is within the configured window, otherwise
@@ -81,5 +86,20 @@ defmodule EventSales.Ingestion.RedisRateLimiter do
 
   defp adapter_module do
     config() |> Keyword.get(:adapter, EventSales.Ingestion.RedisRateLimiter.RedixAdapter)
+  end
+
+  defp shared_webhook_buffer_redix_name do
+    rate_cfg = config()
+    buffer_cfg = Application.get_env(:event_sales, :redis_webhook_buffer, [])
+
+    with true <- Keyword.get(rate_cfg, :enabled, false),
+         rate_url when is_binary(rate_url) and rate_url != "" <- Keyword.get(rate_cfg, :redis_url),
+         true <- Keyword.get(buffer_cfg, :enabled, false),
+         true <- Keyword.get(buffer_cfg, :durability_accepted, false),
+         ^rate_url <- Keyword.get(buffer_cfg, :redis_url) do
+      EventSales.Ingestion.RedisWebhookBuffer.redix_name()
+    else
+      _ -> nil
+    end
   end
 end
