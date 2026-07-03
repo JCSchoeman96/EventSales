@@ -3073,7 +3073,7 @@
       "uses": []
     },
     {
-      "docs_count": 0,
+      "docs_count": 1,
       "moduledoc?": true,
       "name": "EventSales.Maintenance.CutoverDryRun",
       "parse_error": null,
@@ -3082,6 +3082,10 @@
         {
           "arity": 1,
           "name": "run!"
+        },
+        {
+          "arity": 0,
+          "name": "default_check_labels"
         }
       ],
       "specs?": true,
