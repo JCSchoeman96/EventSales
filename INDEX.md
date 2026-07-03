@@ -1115,8 +1115,8 @@ Project root: `.`
 - `EventSales.Maintenance.CutoverDryRun` - `lib/event_sales/maintenance/cutover_dry_run.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 0
-  - public_funs: `run!/1`
+  - docs_count: 1
+  - public_funs: `run!/1`, `default_check_labels/0`
   - uses: _none_
 - `EventSales.Maintenance.DbTopologyCheckWorker` - `lib/event_sales/maintenance/db_topology_check_worker.ex`
   - moduledoc?: true

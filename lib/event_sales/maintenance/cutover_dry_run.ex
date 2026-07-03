@@ -53,14 +53,26 @@ defmodule EventSales.Maintenance.CutoverDryRun do
     :ok
   end
 
+  @doc false
+  @spec default_check_labels() :: [String.t()]
+  def default_check_labels, do: Enum.map(default_checks(), &elem(&1, 0))
+
   defp default_checks do
     [
+      {"application", &check_application/1},
       {"woocommerce rest configuration", &check_rest_configuration/1},
       {"rollback runbook present", &check_rollback_runbook/1},
       {"synthetic webhook intake only", &check_synthetic_webhook_intake/1},
       {"admin reconciliation surfaces", &check_admin_reconciliation_surfaces/1},
       {"oban webhooks queue execution", &check_oban_execution/1}
     ]
+  end
+
+  defp check_application(_config) do
+    case Application.ensure_all_started(:event_sales) do
+      {:ok, _apps} -> :ok
+      {:error, _reason} -> raise Error, "application startup failed"
+    end
   end
 
   defp check_rest_configuration(_config) do
