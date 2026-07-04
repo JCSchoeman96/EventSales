@@ -82,12 +82,37 @@ defmodule EventSales.Audit.PaperTrailOperationalAuditSplitTest do
                metadata: %{delivery_id: "delivery-123", raw_body: "{\"secret\":true}"}
              })
 
+    assert {:ok, manual_mapping} =
+             AuditLogger.manual_mapping_created(%{
+               actor_type: :user,
+               actor_user_id: user.id,
+               actor_role: :admin,
+               source: :admin,
+               subject_type: "product_mapping",
+               subject_id: "mapping-123",
+               event_id: @event_id,
+               metadata: %{
+                 source_system_id: "source-123",
+                 woo_product_id: 104_324,
+                 woo_variation_id: nil,
+                 label: "VIP Comp",
+                 source_status: "private",
+                 reason: "Manual exception",
+                 email: "private@example.test",
+                 raw_payload: %{"secret" => true}
+               }
+             })
+
     assert manual_sync.event_type == :manual_sync_requested
     assert manual_sync.metadata == %{"scope" => "event"}
     assert csv_apply.event_type == :csv_apply_requested
     assert csv_apply.metadata == %{"rows_applied" => 10}
     assert replay.event_type == :webhook_replay_requested
     refute Map.has_key?(replay.metadata, "raw_body")
+    assert manual_mapping.event_type == :manual_mapping_created
+    assert manual_mapping.metadata["woo_product_id"] == 104_324
+    refute Map.has_key?(manual_mapping.metadata, "email")
+    refute Map.has_key?(manual_mapping.metadata, "raw_payload")
   end
 
   test "webhook operational logger APIs write audit logs" do
