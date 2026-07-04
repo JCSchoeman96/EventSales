@@ -9,12 +9,12 @@ defmodule EventSalesWeb.Components.AdminShell do
     {"Dashboard", "/admin/dashboard", "Main", :prefix},
     {"Events", "/admin/events", "Sales", :prefix},
     {"Imports", "/admin/imports", "Ops", :exact},
+    {"Catalog Sync", "/admin/catalog-sync", "Ops", :exact},
     {"Webhooks", "/admin/webhooks", "Ops", :exact},
     {"Sync", "/admin/sync", "Ops", :exact},
     {"Reconciliation", "/admin/reconciliation", "Ops", :exact},
+    {"Mappings", "/admin/mappings", "Ops", :exact},
     {"Oban", "/admin/oban", "Tools", :exact},
-    {"Mappings", "/internal/mappings", "Tools", :exact},
-    {"Ash Admin", "/internal/ash-admin", "Tools", :exact},
     {"Health", "/health", "Status", :exact}
   ]
 

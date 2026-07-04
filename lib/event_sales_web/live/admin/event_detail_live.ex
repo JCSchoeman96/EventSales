@@ -70,13 +70,16 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLive do
       page_title="Event not found"
       page_description="The requested event is not available."
     >
-      <.link navigate={~p"/admin/events"} class="text-sm font-medium text-zinc-700 hover:underline">
+      <.link
+        navigate={~p"/admin/events"}
+        class="text-sm font-medium text-base-content/80 hover:underline"
+      >
         Back to events
       </.link>
       <div class="card border border-base-300 bg-base-100 shadow-sm">
         <div class="card-body">
-          <h1 class="text-2xl font-semibold text-zinc-900">Event not found</h1>
-          <p class="mt-2 text-sm text-zinc-600">The requested event is not available.</p>
+          <h1 class="text-2xl font-semibold text-base-content">Event not found</h1>
+          <p class="mt-2 text-sm text-base-content/70">The requested event is not available.</p>
         </div>
       </div>
     </AdminShell.shell>
@@ -118,19 +121,19 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLive do
       </:actions>
 
       <section class="mb-6 grid gap-3 sm:grid-cols-3">
-        <div class="border border-zinc-200 bg-white p-4">
-          <div class="text-xs font-semibold uppercase text-zinc-500">Capacity</div>
-          <div class="mt-1 text-2xl font-semibold text-zinc-900">
+        <div class="border border-base-300 bg-base-100 p-4">
+          <div class="text-xs font-semibold uppercase text-base-content/60">Capacity</div>
+          <div class="mt-1 text-2xl font-semibold text-base-content">
             {format_count(@detail.capacity)}
           </div>
         </div>
-        <div class="border border-zinc-200 bg-white p-4">
-          <div class="text-xs font-semibold uppercase text-zinc-500">Sold</div>
-          <div class="mt-1 text-2xl font-semibold text-zinc-900">{@detail.sold}</div>
+        <div class="border border-base-300 bg-base-100 p-4">
+          <div class="text-xs font-semibold uppercase text-base-content/60">Sold</div>
+          <div class="mt-1 text-2xl font-semibold text-base-content">{@detail.sold}</div>
         </div>
-        <div class="border border-zinc-200 bg-white p-4">
-          <div class="text-xs font-semibold uppercase text-zinc-500">Remaining</div>
-          <div class="mt-1 text-2xl font-semibold text-zinc-900">
+        <div class="border border-base-300 bg-base-100 p-4">
+          <div class="text-xs font-semibold uppercase text-base-content/60">Remaining</div>
+          <div class="mt-1 text-2xl font-semibold text-base-content">
             {format_count(@detail.remaining)}
           </div>
         </div>
@@ -138,31 +141,31 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLive do
 
       <section class="mb-6 grid gap-6 lg:grid-cols-2">
         <div>
-          <h2 class="mb-3 text-base font-semibold text-zinc-900">Statuses</h2>
+          <h2 class="mb-3 text-base font-semibold text-base-content">Statuses</h2>
           <div class="flex flex-wrap gap-2">
             <span
               :for={{status, count} <- @detail.status_breakdown}
-              class="inline-flex items-center gap-2 rounded border border-zinc-200 bg-zinc-50 px-2 py-1 text-sm text-zinc-800"
+              class="inline-flex items-center gap-2 rounded border border-base-300 bg-base-200 px-2 py-1 text-sm text-base-content"
             >
               <span>{status}</span>
               <span class="font-semibold">{count}</span>
             </span>
-            <p :if={@detail.status_breakdown == %{}} class="text-sm text-zinc-500">
+            <p :if={@detail.status_breakdown == %{}} class="text-sm text-base-content/60">
               No statuses yet.
             </p>
           </div>
         </div>
         <div>
-          <h2 class="mb-3 text-base font-semibold text-zinc-900">Revenue</h2>
-          <div class="text-2xl font-semibold text-zinc-900">{format_money(@detail.revenue)}</div>
+          <h2 class="mb-3 text-base font-semibold text-base-content">Revenue</h2>
+          <div class="text-2xl font-semibold text-base-content">{format_money(@detail.revenue)}</div>
         </div>
       </section>
 
       <section class="mb-6">
-        <h2 class="mb-3 text-base font-semibold text-zinc-900">Ticket Types</h2>
-        <div class="overflow-x-auto border border-zinc-200">
-          <table class="min-w-full divide-y divide-zinc-200 text-sm">
-            <thead class="bg-zinc-50 text-left text-xs font-semibold uppercase text-zinc-600">
+        <h2 class="mb-3 text-base font-semibold text-base-content">Ticket Types</h2>
+        <div class="overflow-x-auto border border-base-300">
+          <table class="table table-zebra table-sm">
+            <thead>
               <tr>
                 <th class="px-3 py-2">Type</th>
                 <th class="px-3 py-2">Capacity</th>
@@ -171,16 +174,16 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLive do
                 <th class="px-3 py-2">Revenue</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-zinc-100 bg-white">
+            <tbody class="">
               <tr :for={type <- @detail.ticket_types}>
-                <td class="px-3 py-2 font-medium text-zinc-900">{type.ticket_type_name}</td>
-                <td class="px-3 py-2 text-zinc-700">{format_count(type.capacity)}</td>
-                <td class="px-3 py-2 text-zinc-700">{type.sold}</td>
-                <td class="px-3 py-2 text-zinc-700">{format_count(type.remaining)}</td>
-                <td class="px-3 py-2 text-zinc-700">{format_money(type.revenue)}</td>
+                <td class="px-3 py-2 font-medium text-base-content">{type.ticket_type_name}</td>
+                <td class="px-3 py-2 text-base-content/80">{format_count(type.capacity)}</td>
+                <td class="px-3 py-2 text-base-content/80">{type.sold}</td>
+                <td class="px-3 py-2 text-base-content/80">{format_count(type.remaining)}</td>
+                <td class="px-3 py-2 text-base-content/80">{format_money(type.revenue)}</td>
               </tr>
               <tr :if={@detail.ticket_types == []}>
-                <td class="px-3 py-6 text-center text-zinc-500" colspan="5">
+                <td class="px-3 py-6 text-center text-base-content/60" colspan="5">
                   No ticket types yet.
                 </td>
               </tr>
@@ -191,12 +194,12 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLive do
 
       <section class="mb-6">
         <div class="mb-3 flex items-center justify-between">
-          <h2 class="text-base font-semibold text-zinc-900">Recent Orders</h2>
-          <span class="text-sm text-zinc-600">Page {@recent_orders_page.page}</span>
+          <h2 class="text-base font-semibold text-base-content">Recent Orders</h2>
+          <span class="text-sm text-base-content/70">Page {@recent_orders_page.page}</span>
         </div>
-        <div class="overflow-x-auto border border-zinc-200">
-          <table class="min-w-full divide-y divide-zinc-200 text-sm">
-            <thead class="bg-zinc-50 text-left text-xs font-semibold uppercase text-zinc-600">
+        <div class="overflow-x-auto border border-base-300">
+          <table class="table table-zebra table-sm">
+            <thead>
               <tr>
                 <th class="px-3 py-2">Order</th>
                 <th class="px-3 py-2">Customer</th>
@@ -207,15 +210,17 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLive do
                 <th class="px-3 py-2">Source Updated</th>
               </tr>
             </thead>
-            <tbody id="recent-orders" phx-update="stream" class="divide-y divide-zinc-100 bg-white">
+            <tbody id="recent-orders" phx-update="stream" class="">
               <tr :for={{dom_id, order} <- @streams.recent_orders} id={dom_id}>
-                <td class="px-3 py-2 font-medium text-zinc-900">{order.order_number}</td>
-                <td class="px-3 py-2 text-zinc-700">{order.customer_name || "-"}</td>
-                <td class="px-3 py-2 text-zinc-700">{order.customer_email || "-"}</td>
-                <td class="px-3 py-2 text-zinc-700">{order.status}</td>
-                <td class="px-3 py-2 text-zinc-700">{format_money(order.raw_total)}</td>
-                <td class="px-3 py-2 text-zinc-700">{format_datetime(order.completed_at)}</td>
-                <td class="px-3 py-2 text-zinc-700">{format_datetime(order.updated_at_source)}</td>
+                <td class="px-3 py-2 font-medium text-base-content">{order.order_number}</td>
+                <td class="px-3 py-2 text-base-content/80">{order.customer_name || "-"}</td>
+                <td class="px-3 py-2 text-base-content/80">{order.customer_email || "-"}</td>
+                <td class="px-3 py-2 text-base-content/80">{order.status}</td>
+                <td class="px-3 py-2 text-base-content/80">{format_money(order.raw_total)}</td>
+                <td class="px-3 py-2 text-base-content/80">{format_datetime(order.completed_at)}</td>
+                <td class="px-3 py-2 text-base-content/80">
+                  {format_datetime(order.updated_at_source)}
+                </td>
               </tr>
             </tbody>
           </table>
@@ -225,7 +230,7 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLive do
             type="button"
             phx-click="previous_recent_orders_page"
             disabled={!@recent_orders_page.has_previous?}
-            class="rounded border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400"
+            class="rounded border border-base-300 bg-base-100 px-3 py-2 text-sm font-medium text-base-content disabled:cursor-not-allowed disabled:bg-base-200 disabled:text-base-content/50"
           >
             Previous
           </button>
@@ -233,7 +238,7 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLive do
             type="button"
             phx-click="next_recent_orders_page"
             disabled={!@recent_orders_page.has_next?}
-            class="rounded border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400"
+            class="rounded border border-base-300 bg-base-100 px-3 py-2 text-sm font-medium text-base-content disabled:cursor-not-allowed disabled:bg-base-200 disabled:text-base-content/50"
           >
             Next
           </button>
@@ -242,12 +247,12 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLive do
 
       <section>
         <div class="mb-3 flex items-center justify-between">
-          <h2 class="text-base font-semibold text-zinc-900">Unmapped Items</h2>
-          <span class="text-sm text-zinc-600">Page {@unmapped_items_page.page}</span>
+          <h2 class="text-base font-semibold text-base-content">Unmapped Items</h2>
+          <span class="text-sm text-base-content/70">Page {@unmapped_items_page.page}</span>
         </div>
-        <div class="overflow-x-auto border border-zinc-200">
-          <table class="min-w-full divide-y divide-zinc-200 text-sm">
-            <thead class="bg-zinc-50 text-left text-xs font-semibold uppercase text-zinc-600">
+        <div class="overflow-x-auto border border-base-300">
+          <table class="table table-zebra table-sm">
+            <thead>
               <tr>
                 <th class="px-3 py-2">Item</th>
                 <th class="px-3 py-2">Order</th>
@@ -256,15 +261,15 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLive do
                 <th class="px-3 py-2">Status</th>
               </tr>
             </thead>
-            <tbody id="unmapped-items" phx-update="stream" class="divide-y divide-zinc-100 bg-white">
+            <tbody id="unmapped-items" phx-update="stream" class="">
               <tr :for={{dom_id, item} <- @streams.unmapped_items} id={dom_id}>
-                <td class="px-3 py-2 font-medium text-zinc-900">{item.name}</td>
-                <td class="px-3 py-2 text-zinc-700">{item.order_number}</td>
-                <td class="px-3 py-2 text-zinc-700">
+                <td class="px-3 py-2 font-medium text-base-content">{item.name}</td>
+                <td class="px-3 py-2 text-base-content/80">{item.order_number}</td>
+                <td class="px-3 py-2 text-base-content/80">
                   {item.woo_product_id}/{item.woo_variation_id || "-"}
                 </td>
-                <td class="px-3 py-2 text-zinc-700">{item.quantity}</td>
-                <td class="px-3 py-2 text-zinc-700">{item.mapping_status}</td>
+                <td class="px-3 py-2 text-base-content/80">{item.quantity}</td>
+                <td class="px-3 py-2 text-base-content/80">{item.mapping_status}</td>
               </tr>
             </tbody>
           </table>
@@ -274,7 +279,7 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLive do
             type="button"
             phx-click="previous_unmapped_items_page"
             disabled={!@unmapped_items_page.has_previous?}
-            class="rounded border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400"
+            class="rounded border border-base-300 bg-base-100 px-3 py-2 text-sm font-medium text-base-content disabled:cursor-not-allowed disabled:bg-base-200 disabled:text-base-content/50"
           >
             Previous
           </button>
@@ -282,7 +287,7 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLive do
             type="button"
             phx-click="next_unmapped_items_page"
             disabled={!@unmapped_items_page.has_next?}
-            class="rounded border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400"
+            class="rounded border border-base-300 bg-base-100 px-3 py-2 text-sm font-medium text-base-content disabled:cursor-not-allowed disabled:bg-base-200 disabled:text-base-content/50"
           >
             Next
           </button>

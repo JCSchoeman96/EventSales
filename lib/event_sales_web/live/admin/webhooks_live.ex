@@ -91,11 +91,11 @@ defmodule EventSalesWeb.Live.Admin.WebhooksLive do
         phx-change="filter"
         class="card mb-6 grid gap-3 border border-base-300 bg-base-100 p-4 shadow-sm md:grid-cols-4"
       >
-        <label class="text-sm font-medium text-zinc-700">
+        <label class="text-sm font-medium text-base-content/80">
           Status
           <select
             name="filters[status]"
-            class="mt-1 w-full rounded border border-zinc-300 bg-white px-3 py-2 text-sm"
+            class="select select-bordered mt-1 w-full bg-base-200 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60"
           >
             <option value="" selected={@filters["status"] == ""}>All</option>
             <option
@@ -107,35 +107,35 @@ defmodule EventSalesWeb.Live.Admin.WebhooksLive do
             </option>
           </select>
         </label>
-        <label class="text-sm font-medium text-zinc-700">
+        <label class="text-sm font-medium text-base-content/80">
           Topic
           <input
             name="filters[topic]"
             value={@filters["topic"]}
-            class="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+            class="input input-bordered mt-1 w-full bg-base-200 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60"
           />
         </label>
-        <label class="text-sm font-medium text-zinc-700">
+        <label class="text-sm font-medium text-base-content/80">
           Delivery
           <input
             name="filters[delivery_id]"
             value={@filters["delivery_id"]}
-            class="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+            class="input input-bordered mt-1 w-full bg-base-200 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60"
           />
         </label>
-        <label class="text-sm font-medium text-zinc-700">
+        <label class="text-sm font-medium text-base-content/80">
           Resource
           <input
             name="filters[resource_id]"
             value={@filters["resource_id"]}
-            class="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+            class="input input-bordered mt-1 w-full bg-base-200 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60"
           />
         </label>
       </form>
 
       <section class="overflow-x-auto rounded-box border border-base-300 bg-base-100">
-        <table class="min-w-full divide-y divide-zinc-200 text-sm">
-          <thead class="bg-zinc-50 text-left text-xs font-semibold uppercase text-zinc-600">
+        <table class="table table-zebra table-sm">
+          <thead>
             <tr>
               <th class="px-3 py-2">Received</th>
               <th class="px-3 py-2">Topic</th>
@@ -147,27 +147,27 @@ defmodule EventSalesWeb.Live.Admin.WebhooksLive do
               <th class="px-3 py-2">Actions</th>
             </tr>
           </thead>
-          <tbody id="webhook-events" phx-update="stream" class="divide-y divide-zinc-100 bg-white">
+          <tbody id="webhook-events" phx-update="stream" class="">
             <tr :for={{dom_id, webhook} <- @streams.webhook_events} id={dom_id}>
-              <td class="whitespace-nowrap px-3 py-2 text-zinc-700">
+              <td class="whitespace-nowrap px-3 py-2 text-base-content/80">
                 {format_datetime(webhook.received_at)}
               </td>
-              <td class="px-3 py-2 text-zinc-700">{webhook.topic}</td>
-              <td class="px-3 py-2 text-zinc-700">
+              <td class="px-3 py-2 text-base-content/80">{webhook.topic}</td>
+              <td class="px-3 py-2 text-base-content/80">
                 <div>{webhook.resource_type}</div>
-                <div class="text-xs text-zinc-500">{webhook.resource_id}</div>
+                <div class="text-xs text-base-content/60">{webhook.resource_id}</div>
               </td>
-              <td class="px-3 py-2 text-zinc-700">{webhook.delivery_id}</td>
-              <td class="px-3 py-2 text-zinc-700">{webhook.status}</td>
-              <td class="px-3 py-2 text-zinc-700">{webhook.processing_attempt_count}</td>
-              <td class="px-3 py-2 text-zinc-700">{webhook.raw_body_size} bytes</td>
+              <td class="px-3 py-2 text-base-content/80">{webhook.delivery_id}</td>
+              <td class="px-3 py-2 text-base-content/80">{webhook.status}</td>
+              <td class="px-3 py-2 text-base-content/80">{webhook.processing_attempt_count}</td>
+              <td class="px-3 py-2 text-base-content/80">{webhook.raw_body_size} bytes</td>
               <td class="px-3 py-2">
                 <div class="flex flex-wrap gap-2">
                   <button
                     type="button"
                     phx-click="show_payload"
                     phx-value-id={webhook.id}
-                    class="rounded border border-zinc-300 bg-white px-2 py-1 text-xs font-medium text-zinc-800"
+                    class="btn btn-outline btn-xs"
                   >
                     Show raw payload
                   </button>
@@ -176,7 +176,7 @@ defmodule EventSalesWeb.Live.Admin.WebhooksLive do
                     type="button"
                     phx-click="confirm_replay"
                     phx-value-id={webhook.id}
-                    class="rounded border border-zinc-300 bg-white px-2 py-1 text-xs font-medium text-zinc-800"
+                    class="btn btn-outline btn-xs"
                   >
                     Replay
                   </button>
@@ -185,7 +185,7 @@ defmodule EventSalesWeb.Live.Admin.WebhooksLive do
                     type="button"
                     phx-click="replay"
                     phx-value-id={webhook.id}
-                    class="rounded border border-red-300 bg-red-50 px-2 py-1 text-xs font-medium text-red-800"
+                    class="btn btn-error btn-outline btn-xs"
                   >
                     Confirm replay
                   </button>
@@ -193,7 +193,7 @@ defmodule EventSalesWeb.Live.Admin.WebhooksLive do
                 <div :if={webhook.error_message} class="mt-1 max-w-xs truncate text-xs text-red-700">
                   {webhook.error_message}
                 </div>
-                <div :if={webhook.ignore_reason} class="mt-1 text-xs text-zinc-500">
+                <div :if={webhook.ignore_reason} class="mt-1 text-xs text-base-content/60">
                   {webhook.ignore_reason}
                 </div>
               </td>
@@ -207,16 +207,16 @@ defmodule EventSalesWeb.Live.Admin.WebhooksLive do
           type="button"
           phx-click="previous_page"
           disabled={!@page.has_previous?}
-          class="rounded border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400"
+          class="rounded border border-base-300 bg-base-100 px-3 py-2 text-sm font-medium text-base-content disabled:cursor-not-allowed disabled:bg-base-200 disabled:text-base-content/50"
         >
           Previous
         </button>
-        <span class="text-sm text-zinc-600">Page {@page.page}</span>
+        <span class="text-sm text-base-content/70">Page {@page.page}</span>
         <button
           type="button"
           phx-click="next_page"
           disabled={!@page.has_next?}
-          class="rounded border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400"
+          class="rounded border border-base-300 bg-base-100 px-3 py-2 text-sm font-medium text-base-content disabled:cursor-not-allowed disabled:bg-base-200 disabled:text-base-content/50"
         >
           Next
         </button>
@@ -225,16 +225,16 @@ defmodule EventSalesWeb.Live.Admin.WebhooksLive do
       <section :if={@revealed_payload} class="card mt-6 border border-base-300 bg-base-100 shadow-sm">
         <div class="card-body">
           <div class="mb-3 flex items-center justify-between">
-            <h2 class="text-base font-semibold text-zinc-900">Raw Payload</h2>
+            <h2 class="text-base font-semibold text-base-content">Raw Payload</h2>
             <button
               type="button"
               phx-click="hide_payload"
-              class="rounded border border-zinc-300 bg-white px-2 py-1 text-xs font-medium text-zinc-800"
+              class="btn btn-outline btn-xs"
             >
               Hide
             </button>
           </div>
-          <pre class="max-h-96 overflow-auto whitespace-pre-wrap text-xs text-zinc-800">{format_payload(@revealed_payload.payload)}</pre>
+          <pre class="max-h-96 overflow-auto whitespace-pre-wrap text-xs text-base-content">{format_payload(@revealed_payload.payload)}</pre>
         </div>
       </section>
     </AdminShell.shell>

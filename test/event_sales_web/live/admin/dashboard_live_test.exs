@@ -54,10 +54,15 @@ defmodule EventSalesWeb.Live.Admin.DashboardLiveTest do
     assert html =~ ~s(href="/admin/webhooks")
     assert html =~ ~s(href="/admin/sync")
     assert html =~ ~s(href="/admin/reconciliation")
+    assert html =~ ~s(href="/admin/catalog-sync")
+    assert html =~ ~s(href="/admin/mappings")
     assert html =~ ~s(href="/admin/oban")
-    assert html =~ ~s(href="/internal/mappings")
-    assert html =~ ~s(href="/internal/ash-admin")
     assert html =~ ~s(href="/health")
+    assert html =~ "Operations"
+    assert html =~ "CSV Imports"
+    assert html =~ "Catalog Sync"
+    refute html =~ ~s(href="/internal/mappings")
+    refute html =~ ~s(href="/internal/ash-admin")
     assert html =~ "Tickets Sold"
     assert html =~ "Revenue"
     assert html =~ "Today Tickets"
