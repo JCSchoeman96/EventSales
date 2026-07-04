@@ -10,37 +10,42 @@
           Sign in with an approved EventSales admin account.
         </p>
 
-        <form action={~p"/admin/login"} method="post" class="mt-4 grid gap-4">
+        <form action={~p"/admin/login"} method="post" class="mt-4 grid gap-4 text-left">
           <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
 
-          <label class="form-control">
+          <label class="form-control w-full items-stretch">
             <span class="label">
-              <span class="label-text">Email</span>
+              <span class="label-text text-left font-medium text-base-content">Email</span>
             </span>
             <input
               type="email"
               name="admin_session[email]"
               value={@email}
               autocomplete="username"
-              class="input input-bordered"
+              class="input input-bordered w-full bg-base-200 text-base-content placeholder:text-base-content/50 focus:outline-none focus:ring-2 focus:ring-primary/60"
               required
             />
           </label>
 
-          <label class="form-control">
+          <label class="form-control w-full items-stretch">
             <span class="label">
-              <span class="label-text">Password</span>
+              <span class="label-text text-left font-medium text-base-content">Password</span>
             </span>
             <input
               type="password"
               name="admin_session[password]"
               autocomplete="current-password"
-              class="input input-bordered"
+              class="input input-bordered w-full bg-base-200 text-base-content placeholder:text-base-content/50 focus:outline-none focus:ring-2 focus:ring-primary/60"
               required
             />
           </label>
 
-          <button type="submit" class="btn btn-primary">Sign in</button>
+          <button
+            type="submit"
+            class="btn btn-primary w-full cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-base-100"
+          >
+            Sign in
+          </button>
         </form>
 
         <div class="divider"></div>

@@ -73,6 +73,66 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
     )
   end
 
+  test "queue button is disabled until source and valid manual JSON are present", %{
+    conn: conn,
+    admin: admin,
+    source: source
+  } do
+    {:ok, view, html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/catalog-sync")
+
+    assert html =~ "Paste sanitized manual export JSON"
+    assert has_element?(view, ~s(button[disabled]), "Queue dry-run")
+
+    html =
+      render_change(view, "update_form", %{
+        "catalog_sync" => %{
+          "source_system_id" => source.id,
+          "scope_kind" => "woo_product",
+          "manual_rows" => "{not-json"
+        }
+      })
+
+    assert html =~ "Invalid JSON"
+    assert has_element?(view, ~s(button[disabled]), "Queue dry-run")
+
+    html =
+      render_change(view, "update_form", %{
+        "catalog_sync" => %{
+          "source_system_id" => source.id,
+          "scope_kind" => "woo_product",
+          "manual_rows" => Jason.encode!(%{"events" => [], "catalog_rows" => []})
+        }
+      })
+
+    assert html =~ "Valid JSON"
+    refute has_element?(view, ~s(button[disabled]), "Queue dry-run")
+  end
+
+  test "submit failures show sanitized visible feedback", %{
+    conn: conn,
+    admin: admin
+  } do
+    {:ok, view, _html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/catalog-sync")
+
+    html =
+      render_submit(view, "queue_dry_run", %{
+        "catalog_sync" => %{
+          "source_system_id" => "",
+          "scope_kind" => "woo_product",
+          "manual_rows" => Jason.encode!(%{"events" => [], "catalog_rows" => []})
+        }
+      })
+
+    assert html =~ "Select a source system before queueing"
+    refute_enqueued(worker: DiscoverTickeraCatalogWorker)
+  end
+
   test "admin sees preview findings and queues apply for ready run", %{
     conn: conn,
     admin: admin,
@@ -139,6 +199,52 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
       queue: :tickera_sync,
       args: %{"run_id" => run.id, "dry_run_hash" => "ready-hash"}
     )
+  end
+
+  test "apply stays disabled when preview has blocking findings", %{
+    conn: conn,
+    admin: admin,
+    source: source
+  } do
+    snapshot = %{
+      "dry_run_hash" => "blocked-hash",
+      "event_changes" => [
+        %{"action" => "create", "external_event_id" => 109_316, "ref" => "event:109316"}
+      ],
+      "ticket_type_changes" => [],
+      "product_mapping_changes" => [],
+      "findings" => [
+        %{
+          "severity" => "blocking",
+          "code" => "existing_mapping_conflict",
+          "message" => "Existing mapping conflict requires admin review."
+        }
+      ],
+      "touched_event_ids" => [],
+      "touched_product_keys" => []
+    }
+
+    Ash.create!(
+      TickeraCatalogSyncRun,
+      %{
+        source_system_id: source.id,
+        scope: %{"kind" => "manual_rows"},
+        status: :dry_run_ready,
+        dry_run_hash: "blocked-hash",
+        summary: %{"finding_count" => 1},
+        plan_snapshot: snapshot
+      },
+      action: :create_dry_run,
+      domain: Ingestion
+    )
+
+    {:ok, view, html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/catalog-sync")
+
+    assert html =~ "existing_mapping_conflict"
+    assert has_element?(view, ~s(button[disabled]), "Apply")
   end
 
   test "CatalogSyncLive source stays inside approved boundaries" do

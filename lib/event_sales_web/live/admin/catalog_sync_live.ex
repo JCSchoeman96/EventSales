@@ -23,6 +23,8 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
       |> assign(:page_title, "Catalog Sync")
       |> assign(:current_user, AdminSession.current_user(session))
       |> assign(:form, @empty_form)
+      |> assign(:form_state, validate_form(@empty_form))
+      |> assign(:queue_notice, nil)
       |> assign(:source_systems, [])
       |> assign(:runs, [])
       |> assign(:previews, %{})
@@ -34,13 +36,21 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
 
   @impl true
   def handle_event("update_form", %{"catalog_sync" => form}, socket) do
-    {:noreply, assign(socket, :form, normalize_form(form))}
+    form = normalize_form(form)
+
+    {:noreply,
+     socket
+     |> assign(:form, form)
+     |> assign(:form_state, validate_form(form))
+     |> assign(:queue_notice, nil)}
   end
 
   def handle_event("queue_dry_run", %{"catalog_sync" => form}, socket) do
     form = normalize_form(form)
+    form_state = validate_form(form)
 
-    with {:ok, scope} <- build_scope(form),
+    with :ok <- validate_queue_ready(form_state),
+         {:ok, scope} <- build_scope(form),
          {:ok, %{run: _run}} <-
            TickeraCatalogSync.queue_dry_run(
              %{source_system_id: form["source_system_id"], scope: scope},
@@ -50,16 +60,37 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
        socket
        |> put_flash(:info, "Catalog dry-run queued")
        |> assign(:form, form)
+       |> assign(:form_state, form_state)
+       |> assign(:queue_notice, {:success, "Catalog dry-run queued"})
        |> load_runs()}
     else
+      {:error, :source_required} ->
+        {:noreply,
+         socket
+         |> assign(:form, form)
+         |> assign(:form_state, form_state)
+         |> assign(:queue_notice, {:error, "Select a source system before queueing"})
+         |> put_flash(:error, "Select a source system before queueing")}
+
       {:error, :invalid_manual_rows} ->
-        {:noreply, put_flash(socket, :error, "Manual rows must be valid JSON")}
+        {:noreply,
+         socket
+         |> assign(:form, form)
+         |> assign(:form_state, form_state)
+         |> assign(:queue_notice, {:error, "Manual rows must be valid JSON"})
+         |> put_flash(:error, "Manual rows must be valid JSON")}
 
       {:error, :forbidden} ->
-        {:noreply, put_flash(socket, :error, "You are not allowed to run catalog sync")}
+        {:noreply,
+         socket
+         |> assign(:queue_notice, {:error, "You are not allowed to run catalog sync"})
+         |> put_flash(:error, "You are not allowed to run catalog sync")}
 
       {:error, _reason} ->
-        {:noreply, put_flash(socket, :error, "Catalog dry-run could not be queued")}
+        {:noreply,
+         socket
+         |> assign(:queue_notice, {:error, "Catalog dry-run could not be queued"})
+         |> put_flash(:error, "Catalog dry-run could not be queued")}
     end
   end
 
@@ -101,18 +132,35 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
     >
       <section class="card mb-8 border border-base-300 bg-base-100 shadow-sm">
         <div class="card-body">
-          <h2 class="mb-4 text-base font-semibold text-zinc-900">Run Tickera catalog dry-run</h2>
+          <h2 class="mb-4 text-base font-semibold text-base-content">
+            Run Tickera catalog dry-run
+          </h2>
           <form
             id="catalog-sync-form"
             phx-change="update_form"
             phx-submit="queue_dry_run"
             class="grid gap-4"
           >
-            <label class="text-sm font-medium text-zinc-700">
-              Source system
+            <div
+              :if={@queue_notice}
+              class={[
+                "alert py-3 text-sm",
+                queue_notice_class(@queue_notice)
+              ]}
+            >
+              {elem(@queue_notice, 1)}
+            </div>
+
+            <label class="form-control w-full">
+              <span class="label">
+                <span class="label-text font-medium text-base-content">Source system</span>
+                <span :if={!@form_state.source_selected?} class="label-text-alt text-warning">
+                  Needed
+                </span>
+              </span>
               <select
                 name="catalog_sync[source_system_id]"
-                class="mt-1 w-full rounded border border-zinc-300 bg-white px-3 py-2 text-sm"
+                class="select select-bordered w-full bg-base-200 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60"
               >
                 <option value="" selected={@form["source_system_id"] == ""}>Select source</option>
                 <option
@@ -125,11 +173,13 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
               </select>
             </label>
 
-            <label class="text-sm font-medium text-zinc-700">
-              Scope
+            <label class="form-control w-full">
+              <span class="label">
+                <span class="label-text font-medium text-base-content">Scope</span>
+              </span>
               <select
                 name="catalog_sync[scope_kind]"
-                class="mt-1 w-full rounded border border-zinc-300 bg-white px-3 py-2 text-sm"
+                class="select select-bordered w-full bg-base-200 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60"
               >
                 <option value="woo_product" selected={@form["scope_kind"] == "woo_product"}>
                   VWG Pretoria pilot product 109740
@@ -146,18 +196,33 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
               </select>
             </label>
 
-            <label class="text-sm font-medium text-zinc-700">
-              Sanitized manual export rows JSON <textarea
+            <label class="form-control w-full">
+              <span class="label">
+                <span class="label-text font-medium text-base-content">
+                  Sanitized manual export rows JSON
+                </span>
+                <span class={json_status_class(@form_state)}>
+                  {json_status_text(@form_state)}
+                </span>
+              </span>
+              <textarea
                 name="catalog_sync[manual_rows]"
                 rows="8"
-                class="mt-1 w-full rounded border border-zinc-300 px-3 py-2 font-mono text-xs"
+                spellcheck="false"
+                class="textarea textarea-bordered min-h-48 w-full bg-base-200 font-mono text-xs leading-5 text-base-content placeholder:text-base-content/50 focus:outline-none focus:ring-2 focus:ring-primary/60"
+                placeholder="Paste sanitized manual export JSON"
               >{@form["manual_rows"]}</textarea>
+              <span :if={@form_state.manual_json_error} class="label pt-1">
+                <span class="label-text-alt text-error">{@form_state.manual_json_error}</span>
+              </span>
             </label>
 
             <div>
               <button
                 type="submit"
-                class="rounded border border-zinc-900 bg-zinc-900 px-3 py-2 text-sm font-medium text-white"
+                disabled={!@form_state.queue_enabled?}
+                phx-disable-with="Queueing dry-run..."
+                class="btn btn-primary cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-base-100 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Queue dry-run
               </button>
@@ -166,9 +231,9 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
         </div>
       </section>
 
-      <section class="overflow-x-auto border border-zinc-200 bg-white">
-        <table class="min-w-full divide-y divide-zinc-200 text-sm">
-          <thead class="bg-zinc-50 text-left text-xs font-semibold uppercase text-zinc-600">
+      <section class="overflow-x-auto rounded-lg border border-base-300 bg-base-100">
+        <table class="table table-zebra min-w-full text-sm">
+          <thead class="bg-base-200 text-left text-xs font-semibold uppercase text-base-content/70">
             <tr>
               <th class="px-3 py-2">Queued</th>
               <th class="px-3 py-2">Status</th>
@@ -177,12 +242,14 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
               <th class="px-3 py-2">Action</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-zinc-100 bg-white">
+          <tbody>
             <tr :for={run <- @runs}>
-              <td class="px-3 py-2 text-zinc-700">{format_datetime(run.inserted_at)}</td>
-              <td class="px-3 py-2 text-zinc-700">{run.status}</td>
-              <td class="px-3 py-2 font-mono text-xs text-zinc-700">{run.dry_run_hash || "-"}</td>
-              <td class="px-3 py-2 text-xs text-zinc-700">{summary_text(run.summary)}</td>
+              <td class="px-3 py-2 text-base-content/80">{format_datetime(run.inserted_at)}</td>
+              <td class="px-3 py-2 text-base-content/80">{run.status}</td>
+              <td class="px-3 py-2 font-mono text-xs text-base-content/80">
+                {run.dry_run_hash || "-"}
+              </td>
+              <td class="px-3 py-2 text-xs text-base-content/80">{summary_text(run.summary)}</td>
               <td class="px-3 py-2">
                 <button
                   type="button"
@@ -190,7 +257,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
                   phx-value-run_id={run.id}
                   phx-value-dry_run_hash={run.dry_run_hash}
                   disabled={!apply_enabled?(run, preview(@previews, run.id))}
-                  class="rounded border border-zinc-900 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:border-zinc-300 disabled:bg-zinc-200 disabled:text-zinc-500"
+                  class="btn btn-primary btn-xs cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-base-100 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Apply
                 </button>
@@ -200,11 +267,13 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
               <td class="px-3 py-4" colspan="5">
                 <div class="space-y-4">
                   <div :if={findings(preview(@previews, run.id)) != []}>
-                    <h3 class="mb-2 text-xs font-semibold uppercase text-zinc-600">Findings</h3>
+                    <h3 class="mb-2 text-xs font-semibold uppercase text-base-content/70">
+                      Findings
+                    </h3>
                     <ul class="space-y-2">
                       <li
                         :for={finding <- findings(preview(@previews, run.id))}
-                        class="rounded border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700"
+                        class="rounded border border-base-300 bg-base-200 px-3 py-2 text-xs text-base-content/80"
                       >
                         <span class="font-semibold">{value(finding, "severity")}</span>
                         <span class="font-mono">{value(finding, "code")}</span>
@@ -214,18 +283,18 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
                   </div>
 
                   <div :if={preview_event_groups(preview(@previews, run.id)) != []}>
-                    <h3 class="mb-2 text-xs font-semibold uppercase text-zinc-600">
+                    <h3 class="mb-2 text-xs font-semibold uppercase text-base-content/70">
                       Proposed Catalog Changes
                     </h3>
                     <div class="space-y-3">
                       <div
                         :for={group <- preview_event_groups(preview(@previews, run.id))}
-                        class="rounded border border-zinc-200 px-3 py-2"
+                        class="rounded border border-base-300 bg-base-100 px-3 py-2"
                       >
-                        <div class="text-sm font-medium text-zinc-900">{group.event_label}</div>
-                        <div class="mt-2 grid gap-2 text-xs text-zinc-700 md:grid-cols-3">
+                        <div class="text-sm font-medium text-base-content">{group.event_label}</div>
+                        <div class="mt-2 grid gap-2 text-xs text-base-content/80 md:grid-cols-3">
                           <div>
-                            <div class="font-semibold uppercase text-zinc-500">Event</div>
+                            <div class="font-semibold uppercase text-base-content/60">Event</div>
                             <div :for={change <- group.event_changes}>
                               {value(change, "action")} Tickera event {value(
                                 change,
@@ -235,14 +304,16 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
                             </div>
                           </div>
                           <div>
-                            <div class="font-semibold uppercase text-zinc-500">Ticket Types</div>
+                            <div class="font-semibold uppercase text-base-content/60">
+                              Ticket Types
+                            </div>
                             <div :for={change <- group.ticket_type_changes}>
                               {value(change, "action")} {value(change, "name") ||
                                 value(change, "external_ticket_type_id")}
                             </div>
                           </div>
                           <div>
-                            <div class="font-semibold uppercase text-zinc-500">Mappings</div>
+                            <div class="font-semibold uppercase text-base-content/60">Mappings</div>
                             <div :for={change <- group.product_mapping_changes}>
                               {value(change, "action")} product {value(change, "woo_product_id")}
                               <span :if={value(change, "woo_variation_id")}>
@@ -258,7 +329,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
               </td>
             </tr>
             <tr :if={@runs == []}>
-              <td class="px-3 py-6 text-center text-zinc-500" colspan="5">
+              <td class="px-3 py-6 text-center text-base-content/60" colspan="5">
                 No catalog sync runs yet.
               </td>
             </tr>
@@ -298,6 +369,55 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
   defp pilot_scope(_kind), do: %{"kind" => "woo_product", "woo_product_id" => 109_740}
 
   defp normalize_form(form), do: Map.merge(@empty_form, Map.take(form, Map.keys(@empty_form)))
+
+  defp validate_form(form) do
+    source_selected? = form["source_system_id"] |> to_string() |> String.trim() != ""
+
+    {manual_json_present?, manual_json_valid?, manual_json_error} =
+      validate_manual_json(form["manual_rows"])
+
+    %{
+      source_selected?: source_selected?,
+      manual_json_present?: manual_json_present?,
+      manual_json_valid?: manual_json_valid?,
+      manual_json_error: manual_json_error,
+      queue_enabled?: source_selected? and manual_json_present? and manual_json_valid?
+    }
+  end
+
+  defp validate_manual_json(value) when is_binary(value) do
+    value = String.trim(value)
+
+    if value == "" do
+      {false, true, nil}
+    else
+      case Jason.decode(value) do
+        {:ok, %{}} -> {true, true, nil}
+        {:ok, _other} -> {true, false, "Manual rows JSON must be an object"}
+        {:error, _reason} -> {true, false, "Invalid JSON"}
+      end
+    end
+  end
+
+  defp validate_manual_json(_value), do: {false, true, nil}
+
+  defp validate_queue_ready(%{source_selected?: false}), do: {:error, :source_required}
+  defp validate_queue_ready(%{manual_json_present?: false}), do: {:error, :invalid_manual_rows}
+  defp validate_queue_ready(%{manual_json_valid?: false}), do: {:error, :invalid_manual_rows}
+  defp validate_queue_ready(_form_state), do: :ok
+
+  defp json_status_text(%{manual_json_present?: false}), do: "Paste sanitized manual export JSON"
+  defp json_status_text(%{manual_json_valid?: true}), do: "Valid JSON"
+  defp json_status_text(_form_state), do: "Invalid JSON"
+
+  defp json_status_class(%{manual_json_present?: false}),
+    do: "label-text-alt text-base-content/60"
+
+  defp json_status_class(%{manual_json_valid?: true}), do: "label-text-alt text-success"
+  defp json_status_class(_form_state), do: "label-text-alt text-error"
+
+  defp queue_notice_class({:success, _message}), do: "alert-success"
+  defp queue_notice_class({:error, _message}), do: "alert-error"
 
   defp load_source_systems(socket) do
     case TickeraCatalogSync.list_source_systems(actor: socket.assigns.current_user) do

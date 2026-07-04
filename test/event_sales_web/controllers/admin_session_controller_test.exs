@@ -24,6 +24,9 @@ defmodule EventSalesWeb.Controllers.AdminSessionControllerTest do
     assert html =~ "Sign in"
     assert html =~ ~s(href="/")
     assert html =~ ~s(href="/health")
+    assert html =~ ~s(class="mt-4 grid gap-4 text-left")
+    assert html =~ ~s(class="input input-bordered w-full bg-base-200 text-base-content)
+    assert html =~ ~s(class="btn btn-primary w-full cursor-pointer)
   end
 
   test "GET /admin/login redirects an existing admin session to dashboard", %{conn: conn} do
