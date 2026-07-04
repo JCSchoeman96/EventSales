@@ -76,13 +76,13 @@ defmodule EventSalesWeb.Live.Admin.SyncLive do
     >
       <section class="card mb-8 border border-base-300 bg-base-100 shadow-sm">
         <div class="card-body">
-          <h2 class="mb-4 text-base font-semibold text-zinc-900">Queue scoped sync</h2>
+          <h2 class="mb-4 text-base font-semibold text-base-content">Queue scoped sync</h2>
           <form phx-change="update_form" id="sync-form" class="grid gap-3 md:grid-cols-2">
-            <label class="text-sm font-medium text-zinc-700 md:col-span-2">
+            <label class="text-sm font-medium text-base-content/80 md:col-span-2">
               Event
               <select
                 name="sync[event_id]"
-                class="mt-1 w-full rounded border border-zinc-300 bg-white px-3 py-2 text-sm"
+                class="select select-bordered mt-1 w-full bg-base-200 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60"
               >
                 <option value="" selected={@form["event_id"] == ""}>Select event</option>
                 <option
@@ -94,29 +94,29 @@ defmodule EventSalesWeb.Live.Admin.SyncLive do
                 </option>
               </select>
             </label>
-            <label class="text-sm font-medium text-zinc-700">
+            <label class="text-sm font-medium text-base-content/80">
               Date from
               <input
                 type="date"
                 name="sync[date_from]"
                 value={@form["date_from"]}
-                class="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                class="input input-bordered mt-1 w-full bg-base-200 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60"
               />
             </label>
-            <label class="text-sm font-medium text-zinc-700">
+            <label class="text-sm font-medium text-base-content/80">
               Date to
               <input
                 type="date"
                 name="sync[date_to]"
                 value={@form["date_to"]}
-                class="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                class="input input-bordered mt-1 w-full bg-base-200 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60"
               />
             </label>
-            <label class="text-sm font-medium text-zinc-700 md:col-span-2">
+            <label class="text-sm font-medium text-base-content/80 md:col-span-2">
               Sync mode
               <select
                 name="sync[sync_mode]"
-                class="mt-1 w-full rounded border border-zinc-300 bg-white px-3 py-2 text-sm"
+                class="select select-bordered mt-1 w-full bg-base-200 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60"
               >
                 <option value="shallow" selected={@form["sync_mode"] == "shallow"}>shallow</option>
                 <option value="deep" selected={@form["sync_mode"] == "deep"}>deep</option>
@@ -128,7 +128,7 @@ defmodule EventSalesWeb.Live.Admin.SyncLive do
               :if={!@confirm_sync}
               type="button"
               phx-click="confirm_sync"
-              class="rounded border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800"
+              class="btn btn-outline btn-sm"
             >
               Queue sync
             </button>
@@ -136,7 +136,7 @@ defmodule EventSalesWeb.Live.Admin.SyncLive do
               :if={@confirm_sync}
               type="button"
               phx-click="queue_sync"
-              class="rounded border border-red-300 bg-red-50 px-3 py-2 text-sm font-medium text-red-800"
+              class="btn btn-error btn-outline btn-sm"
             >
               Confirm sync
             </button>
@@ -145,8 +145,8 @@ defmodule EventSalesWeb.Live.Admin.SyncLive do
       </section>
 
       <section class="overflow-x-auto rounded-box border border-base-300 bg-base-100">
-        <table class="min-w-full divide-y divide-zinc-200 text-sm">
-          <thead class="bg-zinc-50 text-left text-xs font-semibold uppercase text-zinc-600">
+        <table class="table table-zebra table-sm">
+          <thead>
             <tr>
               <th class="px-3 py-2">Queued</th>
               <th class="px-3 py-2">Via</th>
@@ -157,28 +157,30 @@ defmodule EventSalesWeb.Live.Admin.SyncLive do
               <th class="px-3 py-2">Paused</th>
             </tr>
           </thead>
-          <tbody id="sync-runs" phx-update="stream" class="divide-y divide-zinc-100 bg-white">
+          <tbody id="sync-runs" phx-update="stream" class="">
             <tr :for={{dom_id, run} <- @streams.sync_runs} id={dom_id}>
-              <td class="whitespace-nowrap px-3 py-2 text-zinc-700">
+              <td class="whitespace-nowrap px-3 py-2 text-base-content/80">
                 {format_datetime(run.inserted_at)}
               </td>
-              <td class="px-3 py-2 text-zinc-700">{run.requested_via}</td>
-              <td class="px-3 py-2 text-zinc-700">{run.sync_mode}</td>
-              <td class="px-3 py-2 text-zinc-700">{run.status}</td>
-              <td class="px-3 py-2 text-zinc-700">
+              <td class="px-3 py-2 text-base-content/80">{run.requested_via}</td>
+              <td class="px-3 py-2 text-base-content/80">{run.sync_mode}</td>
+              <td class="px-3 py-2 text-base-content/80">{run.status}</td>
+              <td class="px-3 py-2 text-base-content/80">
                 <div>{format_datetime(run.date_from)}</div>
-                <div class="text-xs text-zinc-500">{format_datetime(run.date_to)}</div>
+                <div class="text-xs text-base-content/60">{format_datetime(run.date_to)}</div>
               </td>
-              <td class="px-3 py-2 text-xs text-zinc-700">
+              <td class="px-3 py-2 text-xs text-base-content/80">
                 <div>seen {run.orders_seen_count}</div>
                 <div>matched {run.orders_matched_count}</div>
                 <div>upserted {run.orders_upserted_count}</div>
                 <div>failed {run.orders_failed_count}</div>
                 <div>errors {run.errors_count}</div>
               </td>
-              <td class="px-3 py-2 text-zinc-700">
+              <td class="px-3 py-2 text-base-content/80">
                 <div :if={run.paused_until}>{format_datetime(run.paused_until)}</div>
-                <div :if={run.pause_reason} class="text-xs text-zinc-500">{run.pause_reason}</div>
+                <div :if={run.pause_reason} class="text-xs text-base-content/60">
+                  {run.pause_reason}
+                </div>
                 <div :if={run.last_error} class="mt-1 max-w-xs truncate text-xs text-red-700">
                   {run.last_error}
                 </div>
@@ -193,16 +195,16 @@ defmodule EventSalesWeb.Live.Admin.SyncLive do
           type="button"
           phx-click="previous_page"
           disabled={!@page.has_previous?}
-          class="rounded border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400"
+          class="rounded border border-base-300 bg-base-100 px-3 py-2 text-sm font-medium text-base-content disabled:cursor-not-allowed disabled:bg-base-200 disabled:text-base-content/50"
         >
           Previous
         </button>
-        <span class="text-sm text-zinc-600">Page {@page.page}</span>
+        <span class="text-sm text-base-content/70">Page {@page.page}</span>
         <button
           type="button"
           phx-click="next_page"
           disabled={!@page.has_next?}
-          class="rounded border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400"
+          class="rounded border border-base-300 bg-base-100 px-3 py-2 text-sm font-medium text-base-content disabled:cursor-not-allowed disabled:bg-base-200 disabled:text-base-content/50"
         >
           Next
         </button>

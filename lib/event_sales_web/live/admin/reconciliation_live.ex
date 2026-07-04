@@ -212,9 +212,9 @@ defmodule EventSalesWeb.Live.Admin.ReconciliationLive do
       page_description="Review Tickera/Woo findings from durable local snapshots. No live API calls from this page."
     >
       <section class="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div class="rounded border border-zinc-200 bg-white p-4">
-          <p class="text-xs font-semibold uppercase text-zinc-500">Open findings</p>
-          <p class="mt-1 text-2xl font-semibold text-zinc-900">{@snapshot.open_count}</p>
+        <div class="rounded border border-base-300 bg-base-100 p-4">
+          <p class="text-xs font-semibold uppercase text-base-content/60">Open findings</p>
+          <p class="mt-1 text-2xl font-semibold text-base-content">{@snapshot.open_count}</p>
         </div>
         <div class="rounded border border-red-200 bg-red-50 p-4">
           <p class="text-xs font-semibold uppercase text-red-700">Critical</p>
@@ -231,43 +231,43 @@ defmodule EventSalesWeb.Live.Admin.ReconciliationLive do
       </section>
 
       <section class="mb-6 grid gap-4 md:grid-cols-2">
-        <div class="rounded border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
-          <h2 class="mb-2 font-semibold text-zinc-900">Latest reconciliation run</h2>
+        <div class="rounded border border-base-300 bg-base-100 p-4 text-sm text-base-content/80">
+          <h2 class="mb-2 font-semibold text-base-content">Latest reconciliation run</h2>
           <%= if @snapshot.latest_reconciliation_run do %>
             <p>Status: {@snapshot.latest_reconciliation_run.status}</p>
-            <p class="text-xs text-zinc-500">Run {@snapshot.latest_reconciliation_run.id}</p>
-            <p class="text-xs text-zinc-500">
+            <p class="text-xs text-base-content/60">Run {@snapshot.latest_reconciliation_run.id}</p>
+            <p class="text-xs text-base-content/60">
               {format_datetime(@snapshot.latest_reconciliation_run.inserted_at)}
             </p>
           <% else %>
-            <p class="text-zinc-500">No runs yet</p>
+            <p class="text-base-content/60">No runs yet</p>
           <% end %>
         </div>
-        <div class="rounded border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
-          <h2 class="mb-2 font-semibold text-zinc-900">Latest Tickera attendee sync</h2>
+        <div class="rounded border border-base-300 bg-base-100 p-4 text-sm text-base-content/80">
+          <h2 class="mb-2 font-semibold text-base-content">Latest Tickera attendee sync</h2>
           <%= if @snapshot.latest_attendee_sync_run do %>
             <p>Status: {@snapshot.latest_attendee_sync_run.status}</p>
-            <p class="text-xs text-zinc-500">Run {@snapshot.latest_attendee_sync_run.id}</p>
-            <p class="text-xs text-zinc-500">
+            <p class="text-xs text-base-content/60">Run {@snapshot.latest_attendee_sync_run.id}</p>
+            <p class="text-xs text-base-content/60">
               {format_datetime(@snapshot.latest_attendee_sync_run.inserted_at)}
             </p>
           <% else %>
-            <p class="text-zinc-500">No sync runs yet</p>
+            <p class="text-base-content/60">No sync runs yet</p>
           <% end %>
         </div>
       </section>
 
-      <section class="mb-8 rounded border border-zinc-200 bg-white p-4">
-        <h2 class="mb-3 text-base font-semibold text-zinc-900">Manual actions</h2>
-        <p class="mb-3 text-sm text-zinc-600">
+      <section class="mb-8 rounded border border-base-300 bg-base-100 p-4">
+        <h2 class="mb-3 text-base font-semibold text-base-content">Manual actions</h2>
+        <p class="mb-3 text-sm text-base-content/70">
           Sync refreshes local Tickera snapshots. Reconciliation compares those snapshots to Woo/EventSales data.
         </p>
         <form phx-change="update_action_event" id="reconciliation-actions" class="mb-4 max-w-md">
-          <label class="text-sm font-medium text-zinc-700">
+          <label class="text-sm font-medium text-base-content/80">
             Event
             <select
               name="action[event_id]"
-              class="mt-1 w-full rounded border border-zinc-300 bg-white px-3 py-2 text-sm"
+              class="select select-bordered mt-1 w-full bg-base-200 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60"
             >
               <option value="" selected={@action_event_id == ""}>Select event</option>
               <option
@@ -285,7 +285,7 @@ defmodule EventSalesWeb.Live.Admin.ReconciliationLive do
             :if={!@confirm_attendee_sync}
             type="button"
             phx-click="confirm_attendee_sync"
-            class="rounded border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800"
+            class="btn btn-outline btn-sm"
           >
             Sync Tickera attendees
           </button>
@@ -301,7 +301,7 @@ defmodule EventSalesWeb.Live.Admin.ReconciliationLive do
             :if={!@confirm_reconciliation}
             type="button"
             phx-click="confirm_reconciliation"
-            class="rounded border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800"
+            class="btn btn-outline btn-sm"
           >
             Run reconciliation
           </button>
@@ -309,21 +309,21 @@ defmodule EventSalesWeb.Live.Admin.ReconciliationLive do
             :if={@confirm_reconciliation}
             type="button"
             phx-click="queue_reconciliation"
-            class="rounded border border-red-300 bg-red-50 px-3 py-2 text-sm font-medium text-red-800"
+            class="btn btn-error btn-outline btn-sm"
           >
             Confirm reconciliation
           </button>
           <a
             href={export_href(@filters)}
-            class="rounded border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800"
+            class="btn btn-outline btn-sm"
           >
             Export CSV
           </a>
         </div>
       </section>
 
-      <section class="mb-6 rounded border border-zinc-200 bg-white p-4">
-        <h2 class="mb-3 text-base font-semibold text-zinc-900">Filters</h2>
+      <section class="mb-6 rounded border border-base-300 bg-base-100 p-4">
+        <h2 class="mb-3 text-base font-semibold text-base-content">Filters</h2>
         <.form
           for={%{}}
           as={:filters}
@@ -332,11 +332,11 @@ defmodule EventSalesWeb.Live.Admin.ReconciliationLive do
           id="finding-filters"
         >
           <div class="grid gap-3 md:grid-cols-3">
-            <label class="text-sm font-medium text-zinc-700">
+            <label class="text-sm font-medium text-base-content/80">
               Event
               <select
                 name="filters[event_id]"
-                class="mt-1 w-full rounded border border-zinc-300 bg-white px-3 py-2 text-sm"
+                class="select select-bordered mt-1 w-full bg-base-200 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60"
               >
                 <option value="" selected={@filters["event_id"] == ""}>All</option>
                 <option
@@ -348,11 +348,11 @@ defmodule EventSalesWeb.Live.Admin.ReconciliationLive do
                 </option>
               </select>
             </label>
-            <label class="text-sm font-medium text-zinc-700">
+            <label class="text-sm font-medium text-base-content/80">
               Status
               <select
                 name="filters[status]"
-                class="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                class="input input-bordered mt-1 w-full bg-base-200 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60"
               >
                 <option value="" selected={@filters["status"] == ""}>All</option>
                 <option value="open" selected={@filters["status"] == "open"}>open</option>
@@ -360,11 +360,11 @@ defmodule EventSalesWeb.Live.Admin.ReconciliationLive do
                 <option value="ignored" selected={@filters["status"] == "ignored"}>ignored</option>
               </select>
             </label>
-            <label class="text-sm font-medium text-zinc-700">
+            <label class="text-sm font-medium text-base-content/80">
               Severity
               <select
                 name="filters[severity]"
-                class="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                class="input input-bordered mt-1 w-full bg-base-200 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60"
               >
                 <option value="" selected={@filters["severity"] == ""}>All</option>
                 <option value="critical" selected={@filters["severity"] == "critical"}>
@@ -374,50 +374,50 @@ defmodule EventSalesWeb.Live.Admin.ReconciliationLive do
                 <option value="info" selected={@filters["severity"] == "info"}>info</option>
               </select>
             </label>
-            <label class="text-sm font-medium text-zinc-700 md:col-span-2">
+            <label class="text-sm font-medium text-base-content/80 md:col-span-2">
               Finding type
               <input
                 name="filters[finding_type]"
                 value={@filters["finding_type"]}
                 placeholder="e.g. woo_paid_missing_tickera"
-                class="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                class="input input-bordered mt-1 w-full bg-base-200 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60"
               />
             </label>
-            <label class="text-sm font-medium text-zinc-700">
+            <label class="text-sm font-medium text-base-content/80">
               Run ID
               <input
                 name="filters[tickera_reconciliation_run_id]"
                 value={@filters["tickera_reconciliation_run_id"]}
-                class="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                class="input input-bordered mt-1 w-full bg-base-200 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60"
               />
             </label>
-            <label class="text-sm font-medium text-zinc-700">
+            <label class="text-sm font-medium text-base-content/80">
               Last seen from
               <input
                 type="date"
                 name="filters[last_seen_from]"
                 value={@filters["last_seen_from"]}
-                class="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                class="input input-bordered mt-1 w-full bg-base-200 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60"
               />
             </label>
-            <label class="text-sm font-medium text-zinc-700">
+            <label class="text-sm font-medium text-base-content/80">
               Last seen to
               <input
                 type="date"
                 name="filters[last_seen_to]"
                 value={@filters["last_seen_to"]}
-                class="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                class="input input-bordered mt-1 w-full bg-base-200 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60"
               />
             </label>
           </div>
           <div class="mt-4 flex gap-2">
-            <button type="submit" class="rounded bg-zinc-900 px-3 py-2 text-sm font-medium text-white">
+            <button type="submit" class="btn btn-primary btn-sm">
               Apply filters
             </button>
             <button
               type="button"
               phx-click="clear_filters"
-              class="rounded border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800"
+              class="btn btn-outline btn-sm"
             >
               Clear
             </button>
@@ -425,9 +425,9 @@ defmodule EventSalesWeb.Live.Admin.ReconciliationLive do
         </.form>
       </section>
 
-      <section class="mb-8 overflow-x-auto border border-zinc-200">
-        <table class="min-w-full divide-y divide-zinc-200 text-sm">
-          <thead class="bg-zinc-50 text-left text-xs font-semibold uppercase text-zinc-600">
+      <section class="mb-8 overflow-x-auto border border-base-300">
+        <table class="table table-zebra table-sm">
+          <thead>
             <tr>
               <th class="px-3 py-2">Severity</th>
               <th class="px-3 py-2">Type</th>
@@ -439,25 +439,27 @@ defmodule EventSalesWeb.Live.Admin.ReconciliationLive do
               <th class="px-3 py-2"></th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-zinc-100 bg-white" id="findings-table">
+          <tbody class="" id="findings-table">
             <%= for row <- @findings do %>
               <tr id={"finding-#{row.id}"}>
                 <td class="px-3 py-2">
                   <span class={severity_class(row.severity)}>{row.severity}</span>
                 </td>
-                <td class="px-3 py-2 text-zinc-700">{row.finding_type_label}</td>
-                <td class="px-3 py-2 text-zinc-700">{row.event_name || row.event_id}</td>
-                <td class="px-3 py-2 text-xs text-zinc-700">
+                <td class="px-3 py-2 text-base-content/80">{row.finding_type_label}</td>
+                <td class="px-3 py-2 text-base-content/80">{row.event_name || row.event_id}</td>
+                <td class="px-3 py-2 text-xs text-base-content/80">
                   <div>{row.woo_quantity}</div>
-                  <div class="text-zinc-500">{row.woo_order_status}</div>
-                  <div :if={row.woo_order_id} class="text-zinc-500">Order #{row.woo_order_id}</div>
+                  <div class="text-base-content/60">{row.woo_order_status}</div>
+                  <div :if={row.woo_order_id} class="text-base-content/60">
+                    Order #{row.woo_order_id}
+                  </div>
                 </td>
-                <td class="px-3 py-2 text-xs text-zinc-700">
+                <td class="px-3 py-2 text-xs text-base-content/80">
                   <div>{row.tickera_quantity}</div>
-                  <div class="text-zinc-500">{row.tickera_payment_status}</div>
-                  <div :if={row.ticket_code} class="text-zinc-500">{row.ticket_code}</div>
+                  <div class="text-base-content/60">{row.tickera_payment_status}</div>
+                  <div :if={row.ticket_code} class="text-base-content/60">{row.ticket_code}</div>
                 </td>
-                <td class="whitespace-nowrap px-3 py-2 text-zinc-700">
+                <td class="whitespace-nowrap px-3 py-2 text-base-content/80">
                   {format_datetime(row.last_seen_at)}
                 </td>
                 <td class="px-3 py-2">
@@ -476,14 +478,16 @@ defmodule EventSalesWeb.Live.Admin.ReconciliationLive do
               </tr>
               <%= if @expanded_finding_id == row.id && @expanded_finding do %>
                 <tr id={"finding-expanded-#{row.id}"}>
-                  <td colspan="8" class="bg-zinc-50 px-4 py-4 text-sm text-zinc-700">
-                    <p class="font-medium text-zinc-900">{@expanded_finding.recommended_action}</p>
-                    <p class="mt-2 text-xs text-zinc-500">
+                  <td colspan="8" class="bg-base-200 px-4 py-4 text-sm text-base-content/80">
+                    <p class="font-medium text-base-content">
+                      {@expanded_finding.recommended_action}
+                    </p>
+                    <p class="mt-2 text-xs text-base-content/60">
                       Run {@expanded_finding.tickera_reconciliation_run_id}
                     </p>
                     <pre
                       :if={map_size(@expanded_finding.details) > 0}
-                      class="mt-2 overflow-x-auto rounded bg-white p-2 text-xs"
+                      class="mt-2 overflow-x-auto rounded bg-base-100 p-2 text-xs"
                     >{Jason.encode!(@expanded_finding.details, pretty: true)}</pre>
                     <.form
                       for={%{}}
@@ -492,13 +496,13 @@ defmodule EventSalesWeb.Live.Admin.ReconciliationLive do
                       id={"resolution-form-#{row.id}"}
                       class="mt-3"
                     >
-                      <label class="block text-sm font-medium text-zinc-700">
+                      <label class="block text-sm font-medium text-base-content/80">
                         Resolution note
                         <input
                           type="text"
                           name="resolution[note]"
                           value={@resolution_note}
-                          class="mt-1 w-full max-w-xl rounded border border-zinc-300 px-3 py-2 text-sm"
+                          class="mt-1 w-full max-w-xl rounded border border-base-300 px-3 py-2 text-sm"
                         />
                       </label>
                     </.form>
@@ -515,7 +519,7 @@ defmodule EventSalesWeb.Live.Admin.ReconciliationLive do
                         type="button"
                         phx-click="ignore_finding"
                         phx-value-id={@expanded_finding.id}
-                        class="rounded border border-zinc-300 bg-white px-3 py-1 text-sm text-zinc-800"
+                        class="rounded border border-base-300 bg-base-100 px-3 py-1 text-sm text-base-content"
                       >
                         Mark ignored
                       </button>
@@ -541,16 +545,16 @@ defmodule EventSalesWeb.Live.Admin.ReconciliationLive do
           type="button"
           phx-click="findings_previous_page"
           disabled={!@findings_page.has_previous?}
-          class="rounded border border-zinc-300 bg-white px-3 py-2 text-sm disabled:opacity-40"
+          class="rounded border border-base-300 bg-base-100 px-3 py-2 text-sm disabled:opacity-40"
         >
           Previous
         </button>
-        <span class="text-sm text-zinc-600">Page {@findings_page.page}</span>
+        <span class="text-sm text-base-content/70">Page {@findings_page.page}</span>
         <button
           type="button"
           phx-click="findings_next_page"
           disabled={!@findings_page.has_next?}
-          class="rounded border border-zinc-300 bg-white px-3 py-2 text-sm disabled:opacity-40"
+          class="rounded border border-base-300 bg-base-100 px-3 py-2 text-sm disabled:opacity-40"
         >
           Next
         </button>
@@ -752,18 +756,19 @@ defmodule EventSalesWeb.Live.Admin.ReconciliationLive do
   defp severity_class(:info),
     do: "rounded bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-800"
 
-  defp severity_class(_), do: "rounded bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700"
+  defp severity_class(_),
+    do: "rounded bg-base-200 px-2 py-0.5 text-xs font-medium text-base-content/80"
 
   defp status_class(:open),
-    do: "rounded bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-800"
+    do: "rounded bg-base-200 px-2 py-0.5 text-xs font-medium text-base-content"
 
   defp status_class(:resolved),
     do: "rounded bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800"
 
   defp status_class(:ignored),
-    do: "rounded bg-zinc-200 px-2 py-0.5 text-xs font-medium text-zinc-600"
+    do: "rounded bg-base-200 px-2 py-0.5 text-xs font-medium text-base-content/70"
 
-  defp status_class(_), do: "rounded bg-zinc-100 px-2 py-0.5 text-xs text-zinc-700"
+  defp status_class(_), do: "rounded bg-base-200 px-2 py-0.5 text-xs text-base-content/80"
 
   defp current_user(%{"current_user_id" => user_id}) when is_binary(user_id) do
     case Ash.get(User, user_id, domain: Accounts) do

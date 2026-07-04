@@ -58,6 +58,10 @@ defmodule EventSalesWeb.Live.Admin.ImportsLiveTest do
       |> live("/admin/imports?event_id=#{event.id}")
 
     assert html =~ "CSV Imports"
+    assert html =~ "text-base-content"
+    assert html =~ "bg-base-100"
+    refute html =~ "text-zinc-900"
+    refute html =~ "bg-white"
     assert html =~ "Imports Live Event"
     refute html =~ "Apply import"
 

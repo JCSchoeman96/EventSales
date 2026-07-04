@@ -103,7 +103,7 @@ defmodule EventSalesWeb.Live.Admin.ImportsLive do
     >
       <section class="card mb-8 border border-base-300 bg-base-100 shadow-sm">
         <div class="card-body">
-          <h2 class="mb-4 text-base font-semibold text-zinc-900">Run dry-run</h2>
+          <h2 class="mb-4 text-base font-semibold text-base-content">Run dry-run</h2>
           <form
             id="csv-import-form"
             phx-change="select_event"
@@ -111,11 +111,13 @@ defmodule EventSalesWeb.Live.Admin.ImportsLive do
             phx-drop-target={@uploads.csv.ref}
             class="grid gap-4"
           >
-            <label class="text-sm font-medium text-zinc-700">
-              Event
+            <label class="form-control w-full">
+              <span class="label">
+                <span class="label-text font-medium text-base-content">Event</span>
+              </span>
               <select
                 name="import[event_id]"
-                class="mt-1 w-full rounded border border-zinc-300 bg-white px-3 py-2 text-sm"
+                class="select select-bordered w-full bg-base-200 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60"
               >
                 <option value="" selected={@selected_event_id == ""}>Select event</option>
                 <option
@@ -128,23 +130,28 @@ defmodule EventSalesWeb.Live.Admin.ImportsLive do
               </select>
             </label>
 
-            <div>
+            <label class="form-control w-full">
+              <span class="label">
+                <span class="label-text font-medium text-base-content">CSV file</span>
+              </span>
               <.live_file_input
                 upload={@uploads.csv}
-                class="block w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                class="file-input file-input-bordered w-full bg-base-200 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60"
               />
-              <div class="mt-2 text-sm text-zinc-600">
+              <div class="mt-2 text-sm text-base-content/70">
                 <div :for={entry <- @uploads.csv.entries}>
                   <span>{entry.client_name}</span>
                   <span>{entry.progress}%</span>
                 </div>
               </div>
-            </div>
+            </label>
 
             <div>
               <button
                 type="submit"
-                class="rounded border border-zinc-900 bg-zinc-900 px-3 py-2 text-sm font-medium text-white"
+                phx-disable-with="Running dry-run..."
+                disabled={@selected_event_id == "" or @uploads.csv.entries == []}
+                class="btn btn-primary disabled:btn-disabled"
               >
                 Run dry-run
               </button>
@@ -155,35 +162,36 @@ defmodule EventSalesWeb.Live.Admin.ImportsLive do
 
       <section :if={@latest_batch} class="card mb-8 border border-base-300 bg-base-100 shadow-sm">
         <div class="card-body">
-          <h2 class="mb-3 text-base font-semibold text-zinc-900">Latest dry-run</h2>
+          <h2 class="mb-3 text-base font-semibold text-base-content">Latest dry-run</h2>
           <div class="grid gap-3 text-sm sm:grid-cols-6">
             <div>
-              <div class="text-xs font-semibold uppercase text-zinc-500">Status</div>
-              <div class="text-zinc-900">{@latest_batch.status}</div>
+              <div class="text-xs font-semibold uppercase text-base-content/60">Status</div>
+              <div class="text-base-content">{@latest_batch.status}</div>
             </div>
             <div>
-              <div class="text-xs font-semibold uppercase text-zinc-500">Rows</div>
-              <div class="text-zinc-900">{@latest_batch.row_count}</div>
+              <div class="text-xs font-semibold uppercase text-base-content/60">Rows</div>
+              <div class="text-base-content">{@latest_batch.row_count}</div>
             </div>
             <div>
-              <div class="text-xs font-semibold uppercase text-zinc-500">Valid</div>
-              <div class="text-zinc-900">{@latest_batch.valid_count}</div>
+              <div class="text-xs font-semibold uppercase text-base-content/60">Valid</div>
+              <div class="text-base-content">{@latest_batch.valid_count}</div>
             </div>
             <div>
-              <div class="text-xs font-semibold uppercase text-zinc-500">Errors</div>
-              <div class="text-zinc-900">{@latest_batch.error_count}</div>
+              <div class="text-xs font-semibold uppercase text-base-content/60">Errors</div>
+              <div class="text-base-content">{@latest_batch.error_count}</div>
             </div>
             <div>
-              <div class="text-xs font-semibold uppercase text-zinc-500">Duplicates</div>
-              <div class="text-zinc-900">{@latest_batch.duplicate_count}</div>
+              <div class="text-xs font-semibold uppercase text-base-content/60">Duplicates</div>
+              <div class="text-base-content">{@latest_batch.duplicate_count}</div>
             </div>
             <div :if={applyable?(@latest_batch)}>
-              <div class="text-xs font-semibold uppercase text-zinc-500">Action</div>
+              <div class="text-xs font-semibold uppercase text-base-content/60">Action</div>
               <button
                 type="button"
                 phx-click="apply"
                 phx-value-batch_id={@latest_batch.id}
-                class="mt-1 rounded border border-zinc-900 bg-zinc-900 px-3 py-2 text-sm font-medium text-white"
+                phx-disable-with="Queuing apply..."
+                class="btn btn-primary btn-sm mt-1"
               >
                 Apply import
               </button>
@@ -192,62 +200,66 @@ defmodule EventSalesWeb.Live.Admin.ImportsLive do
         </div>
       </section>
 
-      <section :if={@rows != []} class="mb-8 overflow-x-auto border border-zinc-200">
-        <table class="min-w-full divide-y divide-zinc-200 text-sm">
-          <thead class="bg-zinc-50 text-left text-xs font-semibold uppercase text-zinc-600">
+      <section
+        :if={@rows != []}
+        class="mb-8 overflow-x-auto rounded-box border border-base-300 bg-base-100"
+      >
+        <table class="table table-zebra table-sm">
+          <thead>
             <tr>
-              <th class="px-3 py-2">Row</th>
-              <th class="px-3 py-2">Status</th>
-              <th class="px-3 py-2">Order</th>
-              <th class="px-3 py-2">Line</th>
-              <th class="px-3 py-2">Errors</th>
+              <th>Row</th>
+              <th>Status</th>
+              <th>Order</th>
+              <th>Line</th>
+              <th>Errors</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-zinc-100 bg-white">
+          <tbody>
             <tr :for={row <- @rows}>
-              <td class="px-3 py-2 text-zinc-700">{row.row_number}</td>
-              <td class="px-3 py-2 text-zinc-700">{row.status}</td>
-              <td class="px-3 py-2 text-zinc-700">{row.external_order_number}</td>
-              <td class="px-3 py-2 text-zinc-700">{line_id(row)}</td>
-              <td class="px-3 py-2 text-red-700">{Enum.join(row.error_messages, ", ")}</td>
+              <td class="text-base-content/80">{row.row_number}</td>
+              <td class="text-base-content/80">{row.status}</td>
+              <td class="text-base-content/80">{row.external_order_number}</td>
+              <td class="text-base-content/80">{line_id(row)}</td>
+              <td class="text-error">{Enum.join(row.error_messages, ", ")}</td>
             </tr>
           </tbody>
         </table>
       </section>
 
-      <section class="overflow-x-auto border border-zinc-200">
-        <table class="min-w-full divide-y divide-zinc-200 text-sm">
-          <thead class="bg-zinc-50 text-left text-xs font-semibold uppercase text-zinc-600">
+      <section class="overflow-x-auto rounded-box border border-base-300 bg-base-100">
+        <table class="table table-zebra table-sm">
+          <thead>
             <tr>
-              <th class="px-3 py-2">Uploaded</th>
-              <th class="px-3 py-2">File</th>
-              <th class="px-3 py-2">Status</th>
-              <th class="px-3 py-2">Rows</th>
-              <th class="px-3 py-2">Errors</th>
-              <th class="px-3 py-2">Actions</th>
+              <th>Uploaded</th>
+              <th>File</th>
+              <th>Status</th>
+              <th>Rows</th>
+              <th>Errors</th>
+              <th>Actions</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-zinc-100 bg-white">
+          <tbody>
             <tr :for={batch <- @batches}>
-              <td class="px-3 py-2 text-zinc-700">{format_datetime(batch.inserted_at)}</td>
-              <td class="px-3 py-2 text-zinc-700">{batch.source_filename}</td>
-              <td class="px-3 py-2 text-zinc-700">{batch.status}</td>
-              <td class="px-3 py-2 text-zinc-700">{batch.row_count}</td>
-              <td class="px-3 py-2 text-zinc-700">{batch.error_count}</td>
-              <td class="px-3 py-2 text-zinc-700">
+              <td class="text-base-content/80">{format_datetime(batch.inserted_at)}</td>
+              <td class="text-base-content/80">{batch.source_filename}</td>
+              <td class="text-base-content/80">{batch.status}</td>
+              <td class="text-base-content/80">{batch.row_count}</td>
+              <td class="text-base-content/80">{batch.error_count}</td>
+              <td class="text-base-content/80">
                 <button
                   :if={applyable?(batch)}
                   type="button"
                   phx-click="apply"
                   phx-value-batch_id={batch.id}
-                  class="rounded border border-zinc-900 bg-zinc-900 px-3 py-1 text-xs font-medium text-white"
+                  phx-disable-with="Queuing apply..."
+                  class="btn btn-primary btn-xs"
                 >
                   Apply import
                 </button>
               </td>
             </tr>
             <tr :if={@batches == []}>
-              <td class="px-3 py-6 text-center text-zinc-500" colspan="6">No imports yet.</td>
+              <td class="px-3 py-6 text-center text-base-content/60" colspan="6">No imports yet.</td>
             </tr>
           </tbody>
         </table>

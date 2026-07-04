@@ -82,6 +82,38 @@ defmodule EventSalesWeb.Live.Admin.DashboardLive do
 
       <StaleDataBanner.banner hot_state={@dashboard.hot_state} />
 
+      <section class="card bg-base-100 border border-base-300 shadow-sm">
+        <div class="card-body">
+          <h2 class="card-title text-base">Operations</h2>
+          <p class="text-sm text-base-content/70">
+            Quick links to admin tools for imports, catalog sync, and reconciliation.
+          </p>
+          <div class="mt-2 flex flex-wrap gap-2">
+            <.link navigate={~p"/admin/events"} class="btn btn-outline btn-sm">
+              Events
+            </.link>
+            <.link navigate={~p"/admin/imports"} class="btn btn-outline btn-sm">
+              CSV Imports
+            </.link>
+            <.link navigate={~p"/admin/catalog-sync"} class="btn btn-outline btn-sm">
+              Catalog Sync
+            </.link>
+            <.link navigate={~p"/admin/mappings"} class="btn btn-outline btn-sm">
+              Mappings
+            </.link>
+            <.link navigate={~p"/admin/reconciliation"} class="btn btn-outline btn-sm">
+              Reconciliation
+            </.link>
+            <.link navigate={~p"/admin/webhooks"} class="btn btn-outline btn-sm">
+              Webhooks
+            </.link>
+            <.link navigate={~p"/admin/oban"} class="btn btn-outline btn-sm">
+              Oban
+            </.link>
+          </div>
+        </div>
+      </section>
+
       <section aria-labelledby="kpi-heading">
         <h2 id="kpi-heading" class="sr-only">Key metrics</h2>
         <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

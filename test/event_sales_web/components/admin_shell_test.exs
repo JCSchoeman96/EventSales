@@ -25,13 +25,30 @@ defmodule EventSalesWeb.Components.AdminShellTest do
     assert html =~ ~s(href="/admin/webhooks")
     assert html =~ ~s(href="/admin/sync")
     assert html =~ ~s(href="/admin/reconciliation")
+    assert html =~ ~s(href="/admin/catalog-sync")
+    assert html =~ ~s(href="/admin/mappings")
     assert html =~ ~s(href="/admin/oban")
-    assert html =~ ~s(href="/internal/mappings")
-    assert html =~ ~s(href="/internal/ash-admin")
     assert html =~ ~s(href="/health")
     assert html =~ ~s(href="/admin/logout")
     assert html =~ ~s(data-method="delete")
     assert html =~ ~s(aria-current="page")
+    refute html =~ ~s(href="/internal/mappings")
+    refute html =~ ~s(href="/internal/ash-admin")
+  end
+
+  test "marks catalog sync as active when current path matches" do
+    html =
+      render_component(&AdminShell.shell/1,
+        flash: %{},
+        current_path: "/admin/catalog-sync",
+        page_title: "Catalog Sync",
+        page_description: "Tickera catalog sync",
+        inner_block: [%{inner_block: fn _, _ -> "Catalog body" end}]
+      )
+
+    assert html =~ ~s(href="/admin/catalog-sync")
+    assert html =~ ~s(aria-current="page")
+    assert html =~ "Current"
   end
 
   test "does not render known PII strings" do
