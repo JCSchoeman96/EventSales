@@ -13,6 +13,8 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLive do
   alias EventSalesWeb.Components.AdminShell
   alias EventSalesWeb.Live.Admin.Session, as: AdminSession
 
+  @mapping_list_limit 200
+
   @impl true
   def mount(_params, session, socket) do
     filters = %{"event_id" => "", "woo_product_id" => ""}
@@ -135,10 +137,11 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLive do
       ProductMapping
       |> Ash.Query.load([:event, :ticket_type, :source_system])
       |> Ash.Query.sort(woo_product_id: :asc, woo_variation_id: :asc)
+      |> Ash.Query.limit(@mapping_list_limit)
       |> maybe_filter_event(socket.assigns.filters["event_id"])
       |> maybe_filter_product(socket.assigns.filters["woo_product_id"])
 
-    case Ash.read(query, domain: Catalog) do
+    case Ash.read(query, domain: Catalog, actor: socket.assigns.current_user) do
       {:ok, mappings} -> assign(socket, :mappings, mappings)
       {:error, _reason} -> assign(socket, :mappings, [])
     end
