@@ -7,9 +7,9 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLiveTest do
 
   alias EventSales.Accounts
   alias EventSales.Accounts.Resources.{Role, User, UserRole}
-  alias EventSales.Catalog
   alias EventSales.Audit
   alias EventSales.Audit.Resources.AuditLog
+  alias EventSales.Catalog
   alias EventSales.Catalog.Resources.{ProductMapping, TicketType}
   alias EventSales.TestSupport.SalesHelpers
 

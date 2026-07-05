@@ -35,12 +35,7 @@ defmodule EventSales.Catalog.ManualMappingCreator do
          {:ok, source} <- fetch_source_system(normalized.source_system_id),
          {:ok, event} <- fetch_event(normalized.event_id, source),
          :ok <- reject_duplicate(normalized) do
-      Repo.transaction(fn ->
-        case create_in_transaction(normalized, event, actor) do
-          {:ok, result} -> result
-          {:error, reason} -> Repo.rollback(reason)
-        end
-      end)
+      create_transaction(normalized, event, actor)
     end
   end
 
@@ -51,6 +46,15 @@ defmodule EventSales.Catalog.ManualMappingCreator do
 
   defp authorize(actor) do
     if Policies.global_admin?(actor), do: :ok, else: {:error, :forbidden}
+  end
+
+  defp create_transaction(normalized, event, actor) do
+    Repo.transaction(fn ->
+      case create_in_transaction(normalized, event, actor) do
+        {:ok, result} -> result
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
   end
 
   defp normalize(params) do
