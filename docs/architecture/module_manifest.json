@@ -55,6 +55,7 @@
     "lib/event_sales/catalog/changes/normalize_base_url.ex",
     "lib/event_sales/catalog/changes/validate_event_dates.ex",
     "lib/event_sales/catalog/changes/validate_ticket_type_event.ex",
+    "lib/event_sales/catalog/manual_mapping_creator.ex",
     "lib/event_sales/catalog/mapping_resolver.ex",
     "lib/event_sales/catalog/mapping_side_effects.ex",
     "lib/event_sales/catalog/missing_catalog_resolver.ex",
@@ -242,6 +243,7 @@
     "lib/event_sales_web/live/admin/mappings_live.ex",
     "lib/event_sales_web/live/admin/orders_live.ex",
     "lib/event_sales_web/live/admin/pagination.ex",
+    "lib/event_sales_web/live/admin/product_mappings_live.ex",
     "lib/event_sales_web/live/admin/reconciliation_live.ex",
     "lib/event_sales_web/live/admin/session.ex",
     "lib/event_sales_web/live/admin/sync_live.ex",
@@ -249,6 +251,7 @@
     "lib/event_sales_web/live/auth/reset_password_live.ex",
     "lib/event_sales_web/live/auth/sign_in_live.ex",
     "lib/event_sales_web/oban_web_resolver.ex",
+    "lib/event_sales_web/origin_config.ex",
     "lib/event_sales_web/plugs/admin_only.ex",
     "lib/event_sales_web/plugs/internal_only.ex",
     "lib/event_sales_web/plugs/load_current_user.ex",
@@ -1071,7 +1074,7 @@
       ]
     },
     {
-      "docs_count": 10,
+      "docs_count": 11,
       "moduledoc?": true,
       "name": "EventSales.Audit.Logger",
       "parse_error": null,
@@ -1092,6 +1095,10 @@
         {
           "arity": 1,
           "name": "csv_apply_requested"
+        },
+        {
+          "arity": 1,
+          "name": "manual_mapping_created"
         },
         {
           "arity": 1,
@@ -1256,6 +1263,25 @@
       "uses": [
         "Ash.Resource.Change"
       ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.ManualMappingCreator",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/manual_mapping_creator.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "create"
+        },
+        {
+          "arity": 0,
+          "name": "source_statuses"
+        }
+      ],
+      "specs?": true,
+      "uses": []
     },
     {
       "docs_count": 1,
@@ -5167,6 +5193,31 @@
     {
       "docs_count": 0,
       "moduledoc?": true,
+      "name": "EventSalesWeb.Live.Admin.ProductMappingsLive",
+      "parse_error": null,
+      "path": "lib/event_sales_web/live/admin/product_mappings_live.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "mount"
+        },
+        {
+          "arity": 3,
+          "name": "handle_event"
+        },
+        {
+          "arity": 1,
+          "name": "render"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "EventSalesWeb"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
       "name": "EventSalesWeb.Live.Admin.ReconciliationLive",
       "parse_error": null,
       "path": "lib/event_sales_web/live/admin/reconciliation_live.ex",
@@ -5307,6 +5358,21 @@
         }
       ],
       "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.OriginConfig",
+      "parse_error": null,
+      "path": "lib/event_sales_web/origin_config.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "check_origin"
+        }
+      ],
+      "specs?": true,
       "uses": []
     },
     {

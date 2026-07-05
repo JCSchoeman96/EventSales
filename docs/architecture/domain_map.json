@@ -2055,6 +2055,31 @@
       {
         "docs_count": 0,
         "moduledoc?": true,
+        "name": "EventSalesWeb.Live.Admin.ProductMappingsLive",
+        "parse_error": null,
+        "path": "lib/event_sales_web/live/admin/product_mappings_live.ex",
+        "public_funs": [
+          {
+            "arity": 3,
+            "name": "mount"
+          },
+          {
+            "arity": 3,
+            "name": "handle_event"
+          },
+          {
+            "arity": 1,
+            "name": "render"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "EventSalesWeb"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
         "name": "EventSalesWeb.Live.Admin.ReconciliationLive",
         "parse_error": null,
         "path": "lib/event_sales_web/live/admin/reconciliation_live.ex",
