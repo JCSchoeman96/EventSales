@@ -63,6 +63,7 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLiveTest do
       |> live("/admin/mappings")
 
     assert html =~ "Product Mappings"
+    assert html =~ "Catalog mapping visibility and controlled manual mapping creation."
     assert html =~ "Create manual mapping"
     assert html =~ "Mappings Live Event"
     assert html =~ "GA"

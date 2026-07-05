@@ -1,6 +1,6 @@
 defmodule EventSalesWeb.Live.Admin.ProductMappingsLive do
   @moduledoc """
-  Read-only admin view of catalog product mappings.
+  Admin view for catalog product mappings and controlled manual mapping creation.
   """
 
   use EventSalesWeb, :live_view
@@ -100,7 +100,7 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLive do
       flash={@flash}
       current_path="/admin/mappings"
       page_title="Product Mappings"
-      page_description="Read-only catalog mapping visibility for WooCommerce products and ticket types."
+      page_description="Catalog mapping visibility and controlled manual mapping creation."
     >
       <section class="card mb-6 border border-base-300 bg-base-100 shadow-sm">
         <div class="card-body">
@@ -510,6 +510,7 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLive do
     do: "Selected ticket type does not belong to the event."
 
   defp error_message(:ticket_type_create_failed), do: "Ticket type could not be created."
+  defp error_message(:mapping_create_failed), do: "Manual mapping could not be created."
   defp error_message(:audit_failed), do: "Manual mapping audit could not be written."
   defp error_message(_reason), do: "Manual mapping could not be created."
 

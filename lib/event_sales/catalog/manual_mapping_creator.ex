@@ -278,8 +278,18 @@ defmodule EventSales.Catalog.ManualMappingCreator do
       {:ok, %ProductMapping{} = mapping} -> {:ok, mapping}
       {:ok, %ProductMapping{} = mapping, _notifications} -> {:ok, mapping}
       {:ok, {%ProductMapping{} = mapping, _notifications}} -> {:ok, mapping}
-      {:error, _reason} -> {:error, :duplicate_mapping}
+      {:error, reason} -> {:error, mapping_create_error(reason)}
     end
+  end
+
+  defp mapping_create_error(reason) do
+    if duplicate_mapping_error?(reason), do: :duplicate_mapping, else: :mapping_create_failed
+  end
+
+  defp duplicate_mapping_error?(reason) do
+    reason
+    |> inspect()
+    |> String.contains?("catalog_mappings_unique_active_")
   end
 
   defp ticket_type_kind(nil), do: :woo_product
