@@ -12,11 +12,11 @@ defmodule EventSales.Catalog.TickeraCatalog.ConfiguredDiscoverySource do
     adapter = Application.get_env(:event_sales, :tickera_catalog_discovery_source)
 
     cond do
-      adapter ->
-        adapter.discover(source_system_id, scope)
-
       manual_rows_scope?(scope) ->
         ManualRowsDiscoverySource.discover(source_system_id, scope)
+
+      adapter ->
+        adapter.discover(source_system_id, scope)
 
       true ->
         {:error, :not_configured}

@@ -13,7 +13,11 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
   @empty_form %{
     "source_system_id" => "",
     "scope_kind" => "woo_product",
-    "manual_rows" => ""
+    "manual_rows" => "",
+    "product_id" => "",
+    "variation_id" => "",
+    "event_id" => "",
+    "updated_since" => ""
   }
 
   @impl true
@@ -79,6 +83,14 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
          |> assign(:form_state, form_state)
          |> assign(:queue_notice, {:error, "Manual rows must be valid JSON"})
          |> put_flash(:error, "Manual rows must be valid JSON")}
+
+      {:error, :invalid_feed_scope} ->
+        {:noreply,
+         socket
+         |> assign(:form, form)
+         |> assign(:form_state, form_state)
+         |> assign(:queue_notice, {:error, "WordPress feed scope is invalid"})
+         |> put_flash(:error, "WordPress feed scope is invalid")}
 
       {:error, :forbidden} ->
         {:noreply,
@@ -193,10 +205,110 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
                 >
                   All published Tickera events
                 </option>
+                <option
+                  value="wordpress_feed_full"
+                  selected={@form["scope_kind"] == "wordpress_feed_full"}
+                >
+                  WordPress feed full catalog
+                </option>
+                <option
+                  value="wordpress_feed_product"
+                  selected={@form["scope_kind"] == "wordpress_feed_product"}
+                >
+                  WordPress feed Woo product ID
+                </option>
+                <option
+                  value="wordpress_feed_variation"
+                  selected={@form["scope_kind"] == "wordpress_feed_variation"}
+                >
+                  WordPress feed Woo variation ID
+                </option>
+                <option
+                  value="wordpress_feed_event"
+                  selected={@form["scope_kind"] == "wordpress_feed_event"}
+                >
+                  WordPress feed Tickera event ID
+                </option>
+                <option
+                  value="wordpress_feed_updated_since"
+                  selected={@form["scope_kind"] == "wordpress_feed_updated_since"}
+                >
+                  WordPress feed updated since
+                </option>
               </select>
             </label>
 
-            <label class="form-control w-full">
+            <label :if={@form["scope_kind"] == "wordpress_feed_product"} class="form-control w-full">
+              <span class="label">
+                <span class="label-text font-medium text-base-content">Woo product ID</span>
+              </span>
+              <input
+                type="number"
+                min="1"
+                name="catalog_sync[product_id]"
+                value={@form["product_id"]}
+                class="input input-bordered w-full bg-base-200 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60"
+              />
+              <span :if={@form_state.scope_error} class="label pt-1">
+                <span class="label-text-alt text-error">{@form_state.scope_error}</span>
+              </span>
+            </label>
+
+            <label
+              :if={@form["scope_kind"] == "wordpress_feed_variation"}
+              class="form-control w-full"
+            >
+              <span class="label">
+                <span class="label-text font-medium text-base-content">Woo variation ID</span>
+              </span>
+              <input
+                type="number"
+                min="1"
+                name="catalog_sync[variation_id]"
+                value={@form["variation_id"]}
+                class="input input-bordered w-full bg-base-200 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60"
+              />
+              <span :if={@form_state.scope_error} class="label pt-1">
+                <span class="label-text-alt text-error">{@form_state.scope_error}</span>
+              </span>
+            </label>
+
+            <label :if={@form["scope_kind"] == "wordpress_feed_event"} class="form-control w-full">
+              <span class="label">
+                <span class="label-text font-medium text-base-content">Tickera event ID</span>
+              </span>
+              <input
+                type="number"
+                min="1"
+                name="catalog_sync[event_id]"
+                value={@form["event_id"]}
+                class="input input-bordered w-full bg-base-200 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60"
+              />
+              <span :if={@form_state.scope_error} class="label pt-1">
+                <span class="label-text-alt text-error">{@form_state.scope_error}</span>
+              </span>
+            </label>
+
+            <label
+              :if={@form["scope_kind"] == "wordpress_feed_updated_since"}
+              class="form-control w-full"
+            >
+              <span class="label">
+                <span class="label-text font-medium text-base-content">Updated since</span>
+              </span>
+              <input
+                type="text"
+                name="catalog_sync[updated_since]"
+                value={@form["updated_since"]}
+                placeholder="2026-07-05T10:00:00Z"
+                class="input input-bordered w-full bg-base-200 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60"
+              />
+              <span :if={@form_state.scope_error} class="label pt-1">
+                <span class="label-text-alt text-error">{@form_state.scope_error}</span>
+              </span>
+            </label>
+
+            <label :if={!feed_scope?(@form["scope_kind"])} class="form-control w-full">
               <span class="label">
                 <span class="label-text font-medium text-base-content">
                   Sanitized manual export rows JSON
@@ -340,6 +452,37 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
     """
   end
 
+  defp build_scope(%{"scope_kind" => "wordpress_feed_full"}) do
+    {:ok, %{"kind" => "wordpress_feed", "mode" => "full"}}
+  end
+
+  defp build_scope(%{"scope_kind" => "wordpress_feed_product", "product_id" => product_id}) do
+    with {:ok, id} <- positive_id(product_id) do
+      {:ok, %{"kind" => "wordpress_feed", "product_id" => id}}
+    end
+  end
+
+  defp build_scope(%{"scope_kind" => "wordpress_feed_variation", "variation_id" => variation_id}) do
+    with {:ok, id} <- positive_id(variation_id) do
+      {:ok, %{"kind" => "wordpress_feed", "variation_id" => id}}
+    end
+  end
+
+  defp build_scope(%{"scope_kind" => "wordpress_feed_event", "event_id" => event_id}) do
+    with {:ok, id} <- positive_id(event_id) do
+      {:ok, %{"kind" => "wordpress_feed", "event_id" => id}}
+    end
+  end
+
+  defp build_scope(%{
+         "scope_kind" => "wordpress_feed_updated_since",
+         "updated_since" => updated_since
+       }) do
+    with :ok <- validate_rfc3339(updated_since) do
+      {:ok, %{"kind" => "wordpress_feed", "updated_since" => String.trim(updated_since)}}
+    end
+  end
+
   defp build_scope(%{"manual_rows" => manual_rows, "scope_kind" => kind}) do
     with {:ok, decoded} <- decode_manual_rows(manual_rows) do
       {:ok,
@@ -372,16 +515,23 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
 
   defp validate_form(form) do
     source_selected? = form["source_system_id"] |> to_string() |> String.trim() != ""
+    scope_error = scope_error(form)
 
     {manual_json_present?, manual_json_valid?, manual_json_error} =
       validate_manual_json(form["manual_rows"])
+
+    feed_scope? = feed_scope?(form["scope_kind"])
 
     %{
       source_selected?: source_selected?,
       manual_json_present?: manual_json_present?,
       manual_json_valid?: manual_json_valid?,
       manual_json_error: manual_json_error,
-      queue_enabled?: source_selected? and manual_json_present? and manual_json_valid?
+      scope_error: scope_error,
+      feed_scope?: feed_scope?,
+      queue_enabled?:
+        source_selected? and is_nil(scope_error) and
+          (feed_scope? or (manual_json_present? and manual_json_valid?))
     }
   end
 
@@ -402,9 +552,80 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
   defp validate_manual_json(_value), do: {false, true, nil}
 
   defp validate_queue_ready(%{source_selected?: false}), do: {:error, :source_required}
+
+  defp validate_queue_ready(%{scope_error: error}) when is_binary(error),
+    do: {:error, :invalid_feed_scope}
+
+  defp validate_queue_ready(%{feed_scope?: true}), do: :ok
   defp validate_queue_ready(%{manual_json_present?: false}), do: {:error, :invalid_manual_rows}
   defp validate_queue_ready(%{manual_json_valid?: false}), do: {:error, :invalid_manual_rows}
   defp validate_queue_ready(_form_state), do: :ok
+
+  defp scope_error(%{"scope_kind" => "wordpress_feed_product", "product_id" => product_id}) do
+    case positive_id(product_id) do
+      {:ok, _id} -> nil
+      {:error, _reason} -> "Enter a positive Woo product ID"
+    end
+  end
+
+  defp scope_error(%{"scope_kind" => "wordpress_feed_variation", "variation_id" => variation_id}) do
+    case positive_id(variation_id) do
+      {:ok, _id} -> nil
+      {:error, _reason} -> "Enter a positive Woo variation ID"
+    end
+  end
+
+  defp scope_error(%{"scope_kind" => "wordpress_feed_event", "event_id" => event_id}) do
+    case positive_id(event_id) do
+      {:ok, _id} -> nil
+      {:error, _reason} -> "Enter a positive Tickera event ID"
+    end
+  end
+
+  defp scope_error(%{
+         "scope_kind" => "wordpress_feed_updated_since",
+         "updated_since" => updated_since
+       }) do
+    case validate_rfc3339(updated_since) do
+      :ok -> nil
+      {:error, _reason} -> "Enter updated_since as RFC3339"
+    end
+  end
+
+  defp scope_error(_form), do: nil
+
+  defp positive_id(value) when is_binary(value) do
+    case Integer.parse(String.trim(value)) do
+      {id, ""} when id > 0 -> {:ok, id}
+      _other -> {:error, :invalid}
+    end
+  end
+
+  defp positive_id(_value), do: {:error, :invalid}
+
+  defp validate_rfc3339(value) when is_binary(value) do
+    value = String.trim(value)
+
+    with true <-
+           Regex.match?(
+             ~r/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/,
+             value
+           ),
+         {:ok, _datetime, _offset} <- DateTime.from_iso8601(value) do
+      :ok
+    else
+      _error -> {:error, :invalid}
+    end
+  end
+
+  defp validate_rfc3339(_value), do: {:error, :invalid}
+
+  defp feed_scope?("wordpress_feed_full"), do: true
+  defp feed_scope?("wordpress_feed_product"), do: true
+  defp feed_scope?("wordpress_feed_variation"), do: true
+  defp feed_scope?("wordpress_feed_event"), do: true
+  defp feed_scope?("wordpress_feed_updated_since"), do: true
+  defp feed_scope?(_scope_kind), do: false
 
   defp json_status_text(%{manual_json_present?: false}), do: "Paste sanitized manual export JSON"
   defp json_status_text(%{manual_json_valid?: true}), do: "Valid JSON"

@@ -17,6 +17,22 @@ defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker do
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.{TickeraCatalogSyncFinding, TickeraCatalogSyncRun}
 
+  @safe_error_strings %{
+    not_configured: "discovery_source_not_configured",
+    invalid_manual_rows: "invalid_manual_rows",
+    missing_manual_rows: "missing_manual_rows",
+    misconfigured: "catalog_feed_misconfigured",
+    unauthorized: "catalog_feed_unauthorized",
+    forbidden: "catalog_feed_forbidden",
+    timeout: "catalog_feed_timeout",
+    pagination_limit: "catalog_feed_pagination_limit",
+    invalid_feed_response: "invalid_catalog_feed_response",
+    invalid_json: "invalid_catalog_feed_response",
+    rate_limited: "catalog_feed_rate_limited",
+    server_error: "catalog_feed_server_error",
+    transport_error: "catalog_feed_transport_error"
+  }
+
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"run_id" => run_id}}) when is_binary(run_id) do
     with {:ok, %TickeraCatalogSyncRun{} = run} <-
@@ -91,11 +107,14 @@ defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker do
 
   defp sanitize_error(reason) do
     case reason do
-      :not_configured -> "discovery_source_not_configured"
-      :invalid_manual_rows -> "invalid_manual_rows"
-      :missing_manual_rows -> "missing_manual_rows"
-      {:enqueue_failed, _reason} -> "enqueue_failed"
-      _reason -> "catalog_sync_discovery_failed"
+      {:enqueue_failed, _reason} ->
+        "enqueue_failed"
+
+      reason when is_atom(reason) ->
+        Map.get(@safe_error_strings, reason, "catalog_sync_discovery_failed")
+
+      _reason ->
+        "catalog_sync_discovery_failed"
     end
   end
 end

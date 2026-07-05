@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-292
+297
 
 ## Files
 
@@ -91,6 +91,11 @@ Project root: `.`
 - `lib/event_sales/catalog/tickera_catalog/plan.ex`
 - `lib/event_sales/catalog/tickera_catalog/planner.ex`
 - `lib/event_sales/catalog/tickera_catalog/pub_sub.ex`
+- `lib/event_sales/catalog/tickera_catalog/wordpress_feed_client.ex`
+- `lib/event_sales/catalog/tickera_catalog/wordpress_feed_discovery_source.ex`
+- `lib/event_sales/catalog/tickera_catalog/wordpress_feed_error.ex`
+- `lib/event_sales/catalog/tickera_catalog/wordpress_feed_response.ex`
+- `lib/event_sales/catalog/tickera_catalog/wordpress_feed_signature.ex`
 - `lib/event_sales/catalog/workers/mapping_changed_worker.ex`
 - `lib/event_sales/exports/csv_stream.ex`
 - `lib/event_sales/exports/event_sales_csv.ex`
@@ -750,6 +755,36 @@ Project root: `.`
   - specs?: true
   - docs_count: 0
   - public_funs: `topic/1`, `subscribe/1`, `broadcast/3`
+  - uses: _none_
+- `EventSales.Catalog.TickeraCatalog.WordPressFeedClient` - `lib/event_sales/catalog/tickera_catalog/wordpress_feed_client.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `fetch/2`, `fetch_page/3`
+  - uses: _none_
+- `EventSales.Catalog.TickeraCatalog.WordPressFeedDiscoverySource` - `lib/event_sales/catalog/tickera_catalog/wordpress_feed_discovery_source.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `discover/2`
+  - uses: _none_
+- `EventSales.Catalog.TickeraCatalog.WordPressFeedError` - `lib/event_sales/catalog/tickera_catalog/wordpress_feed_error.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `message/1`
+  - uses: _none_
+- `EventSales.Catalog.TickeraCatalog.WordPressFeedResponse` - `lib/event_sales/catalog/tickera_catalog/wordpress_feed_response.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `parse_page/1`, `aggregate_pages/1`
+  - uses: _none_
+- `EventSales.Catalog.TickeraCatalog.WordPressFeedSignature` - `lib/event_sales/catalog/tickera_catalog/wordpress_feed_signature.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `headers/5`, `canonical_query/1`
   - uses: _none_
 - `EventSales.Catalog.Workers.MappingChangedWorker` - `lib/event_sales/catalog/workers/mapping_changed_worker.ex`
   - moduledoc?: true
