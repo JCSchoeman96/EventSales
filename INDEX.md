@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-289
+292
 
 ## Files
 
@@ -67,6 +67,7 @@ Project root: `.`
 - `lib/event_sales/catalog/changes/normalize_base_url.ex`
 - `lib/event_sales/catalog/changes/validate_event_dates.ex`
 - `lib/event_sales/catalog/changes/validate_ticket_type_event.ex`
+- `lib/event_sales/catalog/manual_mapping_creator.ex`
 - `lib/event_sales/catalog/mapping_resolver.ex`
 - `lib/event_sales/catalog/mapping_side_effects.ex`
 - `lib/event_sales/catalog/missing_catalog_resolver.ex`
@@ -254,6 +255,7 @@ Project root: `.`
 - `lib/event_sales_web/live/admin/mappings_live.ex`
 - `lib/event_sales_web/live/admin/orders_live.ex`
 - `lib/event_sales_web/live/admin/pagination.ex`
+- `lib/event_sales_web/live/admin/product_mappings_live.ex`
 - `lib/event_sales_web/live/admin/reconciliation_live.ex`
 - `lib/event_sales_web/live/admin/session.ex`
 - `lib/event_sales_web/live/admin/sync_live.ex`
@@ -261,6 +263,7 @@ Project root: `.`
 - `lib/event_sales_web/live/auth/reset_password_live.ex`
 - `lib/event_sales_web/live/auth/sign_in_live.ex`
 - `lib/event_sales_web/oban_web_resolver.ex`
+- `lib/event_sales_web/origin_config.ex`
 - `lib/event_sales_web/plugs/admin_only.ex`
 - `lib/event_sales_web/plugs/internal_only.ex`
 - `lib/event_sales_web/plugs/load_current_user.ex`
@@ -547,8 +550,8 @@ Project root: `.`
 - `EventSales.Audit.Logger` - `lib/event_sales/audit/logger.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 10
-  - public_funs: `manual_sync_requested/1`, `tickera_attendee_sync_requested/1`, `tickera_reconciliation_run_requested/1`, `csv_apply_requested/1`, `event_sales_export_requested/1`, `webhook_replay_requested/1`, `log_webhook_replay_ignored/1`, `log_webhook_duplicate_payload_mismatch/1`, `log_webhook_stale_replay/1`, `log/2`
+  - docs_count: 11
+  - public_funs: `manual_sync_requested/1`, `tickera_attendee_sync_requested/1`, `tickera_reconciliation_run_requested/1`, `csv_apply_requested/1`, `manual_mapping_created/1`, `event_sales_export_requested/1`, `webhook_replay_requested/1`, `log_webhook_replay_ignored/1`, `log_webhook_duplicate_payload_mismatch/1`, `log_webhook_stale_replay/1`, `log/2`
   - uses: _none_
 - `EventSales.Audit.MetadataSanitizer` - `lib/event_sales/audit/metadata_sanitizer.ex`
   - moduledoc?: true
@@ -604,6 +607,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `change/3`
   - uses: `Ash.Resource.Change`
+- `EventSales.Catalog.ManualMappingCreator` - `lib/event_sales/catalog/manual_mapping_creator.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `create/2`, `source_statuses/0`
+  - uses: _none_
 - `EventSales.Catalog.MappingResolver` - `lib/event_sales/catalog/mapping_resolver.ex`
   - moduledoc?: true
   - specs?: true
@@ -1714,6 +1723,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `empty_page/0`
   - uses: _none_
+- `EventSalesWeb.Live.Admin.ProductMappingsLive` - `lib/event_sales_web/live/admin/product_mappings_live.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `mount/3`, `handle_event/3`, `render/1`
+  - uses: `EventSalesWeb`
 - `EventSalesWeb.Live.Admin.ReconciliationLive` - `lib/event_sales_web/live/admin/reconciliation_live.ex`
   - moduledoc?: true
   - specs?: false
@@ -1755,6 +1770,12 @@ Project root: `.`
   - specs?: false
   - docs_count: 0
   - public_funs: `resolve_user/1`, `resolve_access/1`, `resolve_instances/1`, `resolve_refresh/1`
+  - uses: _none_
+- `EventSalesWeb.OriginConfig` - `lib/event_sales_web/origin_config.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `check_origin/2`
   - uses: _none_
 - `EventSalesWeb.Plugs.AdminOnly` - `lib/event_sales_web/plugs/admin_only.ex`
   - moduledoc?: true
@@ -2078,6 +2099,7 @@ _none_
 - `EventSalesWeb.Live.Admin.EventsLive` - `lib/event_sales_web/live/admin/events_live.ex`
 - `EventSalesWeb.Live.Admin.ImportsLive` - `lib/event_sales_web/live/admin/imports_live.ex`
 - `EventSalesWeb.Live.Admin.MappingsLive` - `lib/event_sales_web/live/admin/mappings_live.ex`
+- `EventSalesWeb.Live.Admin.ProductMappingsLive` - `lib/event_sales_web/live/admin/product_mappings_live.ex`
 - `EventSalesWeb.Live.Admin.ReconciliationLive` - `lib/event_sales_web/live/admin/reconciliation_live.ex`
 - `EventSalesWeb.Live.Admin.SyncLive` - `lib/event_sales_web/live/admin/sync_live.ex`
 - `EventSalesWeb.Live.Admin.WebhooksLive` - `lib/event_sales_web/live/admin/webhooks_live.ex`
