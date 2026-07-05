@@ -7,8 +7,10 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLiveTest do
 
   alias EventSales.Accounts
   alias EventSales.Accounts.Resources.{Role, User, UserRole}
+  alias EventSales.Audit
+  alias EventSales.Audit.Resources.AuditLog
   alias EventSales.Catalog
-  alias EventSales.Catalog.Resources.ProductMapping
+  alias EventSales.Catalog.Resources.{ProductMapping, TicketType}
   alias EventSales.TestSupport.SalesHelpers
 
   setup do
@@ -30,7 +32,8 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLiveTest do
         current_label: "GA Ticket"
       })
 
-    {:ok, admin: admin, staff: staff, event: event, mapping: mapping}
+    {:ok,
+     admin: admin, staff: staff, source: source, event: event, ticket: ticket, mapping: mapping}
   end
 
   test "rejects unauthenticated access", %{conn: conn} do
@@ -60,6 +63,8 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLiveTest do
       |> live("/admin/mappings")
 
     assert html =~ "Product Mappings"
+    assert html =~ "Catalog mapping visibility and controlled manual mapping creation."
+    assert html =~ "Create manual mapping"
     assert html =~ "Mappings Live Event"
     assert html =~ "GA"
     assert html =~ Integer.to_string(mapping.woo_product_id)
@@ -71,6 +76,123 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLiveTest do
     refute html =~ "payment_gateway_transaction_id"
     refute html =~ "raw_payload"
     refute html =~ "private@example.test"
+  end
+
+  test "admin creates mapping with existing ticket type", %{
+    conn: conn,
+    admin: admin,
+    source: source,
+    event: event,
+    ticket: ticket
+  } do
+    {:ok, view, _html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/mappings")
+
+    html =
+      render_submit(view, "create_manual_mapping", %{
+        "manual_mapping" => %{
+          "source_system_id" => source.id,
+          "event_id" => event.id,
+          "ticket_type_mode" => "existing",
+          "ticket_type_id" => ticket.id,
+          "ticket_type_name" => "",
+          "woo_product_id" => "104324",
+          "woo_variation_id" => "",
+          "label" => "VIP Comp",
+          "source_status" => "private",
+          "reason" => "VIP exception"
+        }
+      })
+
+    assert html =~ "Manual mapping created"
+    assert html =~ "104324"
+    assert html =~ "VIP Comp"
+
+    assert [mapping] =
+             ProductMapping
+             |> Ash.Query.filter(woo_product_id == 104_324)
+             |> Ash.read!(domain: Catalog)
+
+    assert mapping.ticket_type_id == ticket.id
+    assert [audit] = audit_logs(:manual_mapping_created)
+    assert audit.metadata["reason"] == "VIP exception"
+  end
+
+  test "admin creates new ticket type and mapping", %{
+    conn: conn,
+    admin: admin,
+    source: source,
+    event: event
+  } do
+    {:ok, view, _html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/mappings")
+
+    html =
+      render_submit(view, "create_manual_mapping", %{
+        "manual_mapping" => %{
+          "source_system_id" => source.id,
+          "event_id" => event.id,
+          "ticket_type_mode" => "new",
+          "ticket_type_id" => "",
+          "ticket_type_name" => "Pre-sale",
+          "woo_product_id" => "104325",
+          "woo_variation_id" => "501",
+          "label" => "Pre-sale Batch A",
+          "source_status" => "pre_sale",
+          "reason" => "Pre-sale exception"
+        }
+      })
+
+    assert html =~ "Manual mapping created"
+    assert html =~ "104325"
+    assert html =~ "Pre-sale Batch A"
+
+    ticket =
+      TicketType
+      |> Ash.Query.filter(event_id == ^event.id and name == "Pre-sale")
+      |> Ash.read_one!(domain: Catalog)
+
+    assert ticket.external_ticket_type_kind == :woo_variation
+    assert ticket.external_variation_id == 501
+  end
+
+  test "duplicate active mapping shows a safe error", %{
+    conn: conn,
+    admin: admin,
+    source: source,
+    event: event,
+    ticket: ticket
+  } do
+    create_mapping!(source, event, ticket, %{woo_product_id: 104_324, current_label: "Existing"})
+
+    {:ok, view, _html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/mappings")
+
+    html =
+      render_submit(view, "create_manual_mapping", %{
+        "manual_mapping" => %{
+          "source_system_id" => source.id,
+          "event_id" => event.id,
+          "ticket_type_mode" => "existing",
+          "ticket_type_id" => ticket.id,
+          "ticket_type_name" => "",
+          "woo_product_id" => "104324",
+          "woo_variation_id" => "",
+          "label" => "VIP Comp",
+          "source_status" => "private",
+          "reason" => "VIP exception"
+        }
+      })
+
+    assert html =~ "An active mapping already exists for that Woo product"
+    refute html =~ "Ash.Error"
+    refute html =~ "Postgrex"
   end
 
   test "admin can filter mappings by event and product id", %{
@@ -111,12 +233,25 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLiveTest do
           "Req",
           "Finch",
           "Tesla",
-          "Ash.create",
+          "Ash.create(",
           "Ash.update",
-          "Ash.destroy"
+          "Ash.destroy",
+          "Repo.insert",
+          "Repo.update",
+          "Repo.delete"
         ] do
       refute source =~ forbidden
     end
+
+    assert source =~ "ManualMappingCreator.create"
+  end
+
+  test "internal mappings route remains read-only and internal-only" do
+    source = File.read!("lib/event_sales_web/live/admin/mappings_live.ex")
+
+    refute source =~ "create_manual_mapping"
+    refute source =~ "ManualMappingCreator"
+    refute source =~ "Ash.create("
   end
 
   defp sign_in_as(conn, user) do
@@ -161,5 +296,11 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLiveTest do
     }
 
     Ash.create!(ProductMapping, Map.merge(defaults, attrs), action: :create, domain: Catalog)
+  end
+
+  defp audit_logs(event_type) do
+    AuditLog
+    |> Ash.Query.filter(event_type == ^event_type)
+    |> Ash.read!(domain: Audit)
   end
 end

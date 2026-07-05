@@ -20,6 +20,7 @@ defmodule EventSales.Audit.Resources.AuditLog do
     :webhook_stale_replay,
     :tickera_attendee_sync_requested,
     :tickera_reconciliation_run_requested,
+    :manual_mapping_created,
     :event_sales_export_requested
   ]
 
