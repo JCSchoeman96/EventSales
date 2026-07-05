@@ -74,6 +74,15 @@ config :event_sales, :woocommerce_rest,
   max_concurrency: 2,
   transport: EventSales.Ingestion.Clients.HttpcTransport
 
+config :event_sales, :tickera_catalog_feed,
+  base_url: "https://wordpress.example.test",
+  secret: "test-feed-secret",
+  timeout_ms: 1_000,
+  per_page: 2,
+  max_pages: 3,
+  path: "/wp-json/eventsales/v1/tickera-catalog",
+  transport: EventSales.Ingestion.Clients.HttpcTransport
+
 config :event_sales, :rest_circuit_breaker,
   failure_threshold: 3,
   cooldown_ms: 30_000

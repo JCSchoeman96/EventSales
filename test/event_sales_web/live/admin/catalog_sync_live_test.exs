@@ -111,6 +111,107 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
     refute has_element?(view, ~s(button[disabled]), "Queue dry-run")
   end
 
+  test "admin queues WordPress feed dry-runs without manual JSON", %{
+    conn: conn,
+    admin: admin,
+    source: source
+  } do
+    {:ok, view, _html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/catalog-sync")
+
+    feed_scopes = [
+      {"wordpress_feed_full", %{}, %{"kind" => "wordpress_feed", "mode" => "full"}},
+      {"wordpress_feed_product", %{"product_id" => "109740"},
+       %{"kind" => "wordpress_feed", "product_id" => 109_740}},
+      {"wordpress_feed_variation", %{"variation_id" => "109741"},
+       %{"kind" => "wordpress_feed", "variation_id" => 109_741}},
+      {"wordpress_feed_event", %{"event_id" => "109316"},
+       %{"kind" => "wordpress_feed", "event_id" => 109_316}},
+      {"wordpress_feed_updated_since", %{"updated_since" => "2026-07-05T10:00:00Z"},
+       %{"kind" => "wordpress_feed", "updated_since" => "2026-07-05T10:00:00Z"}}
+    ]
+
+    for {scope_kind, extra_form, expected_scope} <- feed_scopes do
+      html =
+        render_change(view, "update_form", %{
+          "catalog_sync" =>
+            Map.merge(
+              %{
+                "source_system_id" => source.id,
+                "scope_kind" => scope_kind,
+                "manual_rows" => ""
+              },
+              extra_form
+            )
+        })
+
+      refute html =~ "Manual rows must be valid JSON"
+      refute has_element?(view, ~s(button[disabled]), "Queue dry-run")
+
+      html =
+        render_submit(view, "queue_dry_run", %{
+          "catalog_sync" =>
+            Map.merge(
+              %{
+                "source_system_id" => source.id,
+                "scope_kind" => scope_kind,
+                "manual_rows" => ""
+              },
+              extra_form
+            )
+        })
+
+      assert html =~ "Catalog dry-run queued"
+
+      assert_enqueued(
+        worker: DiscoverTickeraCatalogWorker,
+        queue: :tickera_sync
+      )
+
+      assert catalog_sync_run_queued?(source.id, expected_scope)
+    end
+  end
+
+  test "WordPress feed ID and updated-since scopes validate inputs", %{
+    conn: conn,
+    admin: admin,
+    source: source
+  } do
+    {:ok, view, _html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/catalog-sync")
+
+    invalid_forms = [
+      {"wordpress_feed_product", %{"product_id" => "0"}, "Enter a positive Woo product ID"},
+      {"wordpress_feed_variation", %{"variation_id" => "-1"},
+       "Enter a positive Woo variation ID"},
+      {"wordpress_feed_event", %{"event_id" => "abc"}, "Enter a positive Tickera event ID"},
+      {"wordpress_feed_updated_since", %{"updated_since" => "yesterday"},
+       "Enter updated_since as RFC3339"}
+    ]
+
+    for {scope_kind, extra_form, message} <- invalid_forms do
+      html =
+        render_change(view, "update_form", %{
+          "catalog_sync" =>
+            Map.merge(
+              %{
+                "source_system_id" => source.id,
+                "scope_kind" => scope_kind,
+                "manual_rows" => ""
+              },
+              extra_form
+            )
+        })
+
+      assert html =~ message
+      assert has_element?(view, ~s(button[disabled]), "Queue dry-run")
+    end
+  end
+
   test "submit failures show sanitized visible feedback", %{
     conn: conn,
     admin: admin
@@ -252,6 +353,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
 
     for forbidden <- [
           "WooCommerceClient",
+          "WordPressFeedClient",
           "MappingResolver",
           "OrderUpserter",
           "Req",
@@ -262,6 +364,13 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
         ] do
       refute source =~ forbidden
     end
+  end
+
+  defp catalog_sync_run_queued?(source_system_id, expected_scope) do
+    TickeraCatalogSyncRun
+    |> Ash.Query.filter(source_system_id == ^source_system_id)
+    |> Ash.read!(domain: Ingestion)
+    |> Enum.any?(fn run -> run.scope == expected_scope end)
   end
 
   defp sign_in_as(conn, user), do: Plug.Test.init_test_session(conn, %{current_user_id: user.id})

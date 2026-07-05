@@ -79,6 +79,11 @@
     "lib/event_sales/catalog/tickera_catalog/plan.ex",
     "lib/event_sales/catalog/tickera_catalog/planner.ex",
     "lib/event_sales/catalog/tickera_catalog/pub_sub.ex",
+    "lib/event_sales/catalog/tickera_catalog/wordpress_feed_client.ex",
+    "lib/event_sales/catalog/tickera_catalog/wordpress_feed_discovery_source.ex",
+    "lib/event_sales/catalog/tickera_catalog/wordpress_feed_error.ex",
+    "lib/event_sales/catalog/tickera_catalog/wordpress_feed_response.ex",
+    "lib/event_sales/catalog/tickera_catalog/wordpress_feed_signature.ex",
     "lib/event_sales/catalog/workers/mapping_changed_worker.ex",
     "lib/event_sales/exports/csv_stream.ex",
     "lib/event_sales/exports/event_sales_csv.ex",
@@ -1637,6 +1642,93 @@
         {
           "arity": 3,
           "name": "broadcast"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.TickeraCatalog.WordPressFeedClient",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/tickera_catalog/wordpress_feed_client.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "fetch"
+        },
+        {
+          "arity": 3,
+          "name": "fetch_page"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.TickeraCatalog.WordPressFeedDiscoverySource",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/tickera_catalog/wordpress_feed_discovery_source.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "discover"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.TickeraCatalog.WordPressFeedError",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/tickera_catalog/wordpress_feed_error.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "message"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.TickeraCatalog.WordPressFeedResponse",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/tickera_catalog/wordpress_feed_response.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "parse_page"
+        },
+        {
+          "arity": 1,
+          "name": "aggregate_pages"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.TickeraCatalog.WordPressFeedSignature",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/tickera_catalog/wordpress_feed_signature.ex",
+      "public_funs": [
+        {
+          "arity": 5,
+          "name": "headers"
+        },
+        {
+          "arity": 1,
+          "name": "canonical_query"
         }
       ],
       "specs?": true,
