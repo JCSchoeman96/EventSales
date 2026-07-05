@@ -244,7 +244,6 @@ defmodule EventSales.Catalog.ManualMappingCreator do
            ) do
         {:ok, %TicketType{} = ticket_type} -> {:ok, ticket_type}
         {:ok, %TicketType{} = ticket_type, _notifications} -> {:ok, ticket_type}
-        {:ok, {%TicketType{} = ticket_type, _notifications}} -> {:ok, ticket_type}
         {:error, _reason} -> {:error, :ticket_type_create_failed}
       end
     end
@@ -281,7 +280,6 @@ defmodule EventSales.Catalog.ManualMappingCreator do
          ) do
       {:ok, %ProductMapping{} = mapping} -> {:ok, mapping}
       {:ok, %ProductMapping{} = mapping, _notifications} -> {:ok, mapping}
-      {:ok, {%ProductMapping{} = mapping, _notifications}} -> {:ok, mapping}
       {:error, reason} -> {:error, mapping_create_error(reason)}
     end
   end

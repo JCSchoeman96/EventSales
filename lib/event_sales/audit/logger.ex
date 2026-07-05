@@ -115,7 +115,6 @@ defmodule EventSales.Audit.Logger do
   end
 
   defp normalize_result({:ok, %AuditLog{} = audit_log, _notifications}), do: {:ok, audit_log}
-  defp normalize_result({:ok, {%AuditLog{} = audit_log, _notifications}}), do: {:ok, audit_log}
   defp normalize_result(result), do: result
 
   defp put_context_hashes(audit_attrs, source_attrs) do
