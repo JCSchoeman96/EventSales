@@ -389,6 +389,98 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
     assert has_element?(view, ~s(button[phx-click="queue_apply"][disabled]), "Apply")
   end
 
+  test "preview findings render safe review identifiers and allowlisted metadata only", %{
+    conn: conn,
+    admin: admin,
+    source: source
+  } do
+    snapshot = %{
+      "dry_run_hash" => "review-hash",
+      "event_changes" => [
+        %{"action" => "create", "external_event_id" => 108_000, "ref" => "event:108000"}
+      ],
+      "ticket_type_changes" => [],
+      "product_mapping_changes" => [],
+      "findings" => [
+        %{
+          "severity" => "blocking",
+          "code" => "ambiguous_variation_ticket_type_name",
+          "message" =>
+            "Published product variation could not produce a distinct TicketType name.",
+          "tickera_event_id" => 108_000,
+          "woo_product_id" => 108_657,
+          "woo_variation_id" => 109_159,
+          "metadata" => %{
+            "reason" => "missing_variation_title",
+            "raw_payload" => "must-not-render",
+            "headers" => "authorization: secret",
+            "signed_url" => "https://example.test?sig=secret",
+            "customer_email" => "private@example.test",
+            "payment_token" => "tok_private",
+            "delivery_token" => "delivery_private"
+          }
+        },
+        %{
+          "severity" => "blocking",
+          "code" => "duplicate_ticket_type_name",
+          "message" => "Multiple catalog rows normalize to the same TicketType name.",
+          "tickera_event_id" => nil,
+          "woo_product_id" => nil,
+          "woo_variation_id" => nil,
+          "metadata" => %{"ticket_type_name" => "LBL – Nelspruit [Kaartjie]"}
+        }
+      ],
+      "touched_event_ids" => [],
+      "touched_product_keys" => []
+    }
+
+    Ash.create!(
+      TickeraCatalogSyncRun,
+      %{
+        source_system_id: source.id,
+        scope: %{"kind" => "wordpress_feed", "mode" => "full"},
+        status: :dry_run_ready,
+        dry_run_hash: "review-hash",
+        summary: %{"finding_count" => 2},
+        plan_snapshot: snapshot
+      },
+      action: :create_dry_run,
+      domain: Ingestion
+    )
+
+    {:ok, view, html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/catalog-sync")
+
+    assert html =~ "Finding review report"
+    assert html =~ "Tickera event ID"
+    assert html =~ "Woo product ID"
+    assert html =~ "Woo variation ID"
+    assert html =~ "ambiguous_variation_ticket_type_name"
+    assert html =~ "Published product variation could not produce a distinct TicketType name."
+    assert html =~ "108000"
+    assert html =~ "108657"
+    assert html =~ "109159"
+    assert html =~ "missing_variation_title"
+    assert html =~ "duplicate_ticket_type_name"
+    assert html =~ "LBL – Nelspruit [Kaartjie]"
+
+    assert html =~
+             "blocking | ambiguous_variation_ticket_type_name | 108000 | 108657 | 109159 | missing_variation_title | -"
+
+    assert html =~
+             "blocking | duplicate_ticket_type_name | - | - | - | - | LBL – Nelspruit [Kaartjie]"
+
+    refute html =~ "must-not-render"
+    refute html =~ "authorization: secret"
+    refute html =~ "https://example.test"
+    refute html =~ "private@example.test"
+    refute html =~ "tok_private"
+    refute html =~ "delivery_private"
+    assert has_element?(view, ~s(button[phx-click="queue_apply"][disabled]), "Apply")
+  end
+
   test "apply stays disabled when dry-run preview is missing", %{
     conn: conn,
     admin: admin,
