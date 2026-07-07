@@ -15,9 +15,22 @@ defmodule EventSales.Catalog.TickeraCatalog.NormalizerTest do
     assert row.tickera_event_id == 109_316
     assert row.woo_product_id == 109_740
     assert row.woo_variation_id == nil
-    assert row.ticket_type_name == "Toegang"
+    assert row.ticket_type_name == "VWG - Pretoria"
     assert row.ticket_type_kind == :woo_product
     assert findings == []
+  end
+
+  test "simple product falls back to ticket display name only when product title is missing" do
+    row = Map.put(TickeraCatalogFixtures.vwg_row(), "product_title", nil)
+
+    result = %DiscoveryResult{
+      events: [TickeraCatalogFixtures.vwg_event()],
+      catalog_rows: [row]
+    }
+
+    assert {:ok, %{rows: [normalized], findings: []}} = Normalizer.normalize(result)
+
+    assert normalized.ticket_type_name == "Toegang"
   end
 
   test "collapses duplicate meta rows without using price as identity" do
@@ -90,5 +103,175 @@ defmodule EventSales.Catalog.TickeraCatalog.NormalizerTest do
     assert Enum.all?(rows, &(&1.ticket_type_kind == :woo_variation))
     assert Enum.any?(findings, &(&1.code == :variation_mapping_required))
     refute Enum.any?(rows, &is_nil(&1.woo_variation_id))
+  end
+
+  test "variation products use product title with prefixed variation option labels" do
+    result = %DiscoveryResult{
+      events: [TickeraCatalogFixtures.lbl_event()],
+      catalog_rows: TickeraCatalogFixtures.lbl_variation_rows()
+    }
+
+    assert {:ok, %{rows: rows, findings: findings}} = Normalizer.normalize(result)
+
+    assert Enum.map(rows, & &1.ticket_type_name) == [
+             "LBL – Nelspruit [Kaartjie]",
+             "LBL – Nelspruit [Kaartjie + 1 x Verloor gewig op jóú manier]"
+           ]
+
+    assert Enum.all?(rows, &(&1.ticket_display_name == "Toegang"))
+    assert Enum.any?(findings, &(&1.code == :variation_mapping_required))
+    refute Enum.any?(findings, &(&1.severity == :blocking))
+  end
+
+  test "variation product uses variation title directly when it is already an option label" do
+    [row | _rest] = TickeraCatalogFixtures.lbl_variation_rows()
+    row = Map.put(row, "variation_title", "Kaartjie")
+
+    result = %DiscoveryResult{
+      events: [TickeraCatalogFixtures.lbl_event()],
+      catalog_rows: [row]
+    }
+
+    assert {:ok, %{rows: [normalized], findings: findings}} = Normalizer.normalize(result)
+
+    assert normalized.ticket_type_name == "LBL – Nelspruit [Kaartjie]"
+    refute Enum.any?(findings, &(&1.severity == :blocking))
+  end
+
+  test "variation product strips supported product-title separators" do
+    for {separator, option_label} <- [
+          {" – ", "Kaartjie"},
+          {" — ", "Kaartjie"},
+          {": ", "Kaartjie"}
+        ] do
+      [row | _rest] = TickeraCatalogFixtures.lbl_variation_rows()
+      row = Map.put(row, "variation_title", "LBL – Nelspruit#{separator}#{option_label}")
+
+      result = %DiscoveryResult{
+        events: [TickeraCatalogFixtures.lbl_event()],
+        catalog_rows: [row]
+      }
+
+      assert {:ok, %{rows: [normalized], findings: findings}} = Normalizer.normalize(result)
+
+      assert normalized.ticket_type_name == "LBL – Nelspruit [Kaartjie]"
+      refute Enum.any?(findings, &(&1.severity == :blocking))
+    end
+  end
+
+  test "variation product collapses repeated whitespace after prefix stripping" do
+    [row | _rest] = TickeraCatalogFixtures.lbl_variation_rows()
+    row = Map.put(row, "variation_title", "LBL – Nelspruit -   Kaartjie   VIP")
+
+    result = %DiscoveryResult{
+      events: [TickeraCatalogFixtures.lbl_event()],
+      catalog_rows: [row]
+    }
+
+    assert {:ok, %{rows: [normalized], findings: findings}} = Normalizer.normalize(result)
+
+    assert normalized.ticket_type_name == "LBL – Nelspruit [Kaartjie VIP]"
+    refute Enum.any?(findings, &(&1.severity == :blocking))
+  end
+
+  test "variation product with missing variation title creates a blocking finding" do
+    [row | _rest] = TickeraCatalogFixtures.lbl_variation_rows()
+    row = Map.put(row, "variation_title", " ")
+
+    result = %DiscoveryResult{
+      events: [TickeraCatalogFixtures.lbl_event()],
+      catalog_rows: [row]
+    }
+
+    assert {:ok, %{rows: [_normalized], findings: findings}} = Normalizer.normalize(result)
+
+    assert Enum.any?(
+             findings,
+             &(&1.code == :ambiguous_variation_ticket_type_name and &1.severity == :blocking and
+                 &1.woo_variation_id == 108_658)
+           )
+  end
+
+  test "variation product with missing product title creates a blocking finding" do
+    [row | _rest] = TickeraCatalogFixtures.lbl_variation_rows()
+    row = Map.put(row, "product_title", nil)
+
+    result = %DiscoveryResult{
+      events: [TickeraCatalogFixtures.lbl_event()],
+      catalog_rows: [row]
+    }
+
+    assert {:ok, %{rows: [normalized], findings: findings}} = Normalizer.normalize(result)
+
+    assert normalized.ticket_type_name == nil
+
+    assert Enum.any?(
+             findings,
+             &(&1.code == :ambiguous_variation_ticket_type_name and &1.severity == :blocking and
+                 &1.woo_variation_id == 108_658)
+           )
+  end
+
+  test "variation title equal to product title creates a blocking finding" do
+    [row | _rest] = TickeraCatalogFixtures.lbl_variation_rows()
+    row = Map.put(row, "variation_title", "LBL – Nelspruit")
+
+    result = %DiscoveryResult{
+      events: [TickeraCatalogFixtures.lbl_event()],
+      catalog_rows: [row]
+    }
+
+    assert {:ok, %{findings: findings}} = Normalizer.normalize(result)
+
+    assert Enum.any?(
+             findings,
+             &(&1.code == :ambiguous_variation_ticket_type_name and &1.severity == :blocking)
+           )
+  end
+
+  test "duplicate variation ticket type names block within the same Tickera event" do
+    [first, second] = TickeraCatalogFixtures.lbl_variation_rows()
+    second = Map.put(second, "variation_title", "Kaartjie")
+
+    result = %DiscoveryResult{
+      events: [TickeraCatalogFixtures.lbl_event()],
+      catalog_rows: [first, second]
+    }
+
+    assert {:ok, %{findings: findings}} = Normalizer.normalize(result)
+
+    duplicate_findings =
+      Enum.filter(
+        findings,
+        &(&1.code == :duplicate_ticket_type_name and &1.severity == :blocking)
+      )
+
+    assert Enum.map(duplicate_findings, & &1.woo_variation_id) == [108_658, 108_659]
+  end
+
+  test "duplicate ticket type names across different Tickera events do not block" do
+    [first | _rest] = TickeraCatalogFixtures.lbl_variation_rows()
+
+    second =
+      first
+      |> Map.put("tickera_event_id", 108_001)
+      |> Map.put("event_title", "Lynette Beer LIVE - GP")
+      |> Map.put("event_slug", "lynette-beer-live-gp")
+      |> Map.put("woo_variation_id", 108_660)
+
+    result = %DiscoveryResult{
+      events: [
+        TickeraCatalogFixtures.lbl_event(),
+        TickeraCatalogFixtures.lbl_event()
+        |> Map.put("tickera_event_id", 108_001)
+        |> Map.put("event_title", "Lynette Beer LIVE - GP")
+        |> Map.put("event_slug", "lynette-beer-live-gp")
+      ],
+      catalog_rows: [first, second]
+    }
+
+    assert {:ok, %{findings: findings}} = Normalizer.normalize(result)
+
+    refute Enum.any?(findings, &(&1.code == :duplicate_ticket_type_name))
   end
 end

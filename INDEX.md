@@ -2038,7 +2038,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: `vwg_event/0`, `vwg_row/0`, `private_event_row/0`, `zero_product_event/0`, `variation_rows/0`
+  - public_funs: `vwg_event/0`, `vwg_row/0`, `lbl_event/0`, `lbl_variation_rows/0`, `private_event_row/0`, `zero_product_event/0`, `variation_rows/0`
   - uses: _none_
 - `EventSales.TestSupport.TickeraSyncTestHelpers` - `test/support/tickera_sync_test_helpers.ex`
   - moduledoc?: true
