@@ -47,23 +47,23 @@ defmodule EventSales.Catalog.TickeraCatalog.Normalizer do
 
     %CatalogRow{
       tickera_event_id: int(row["tickera_event_id"]),
-      event_title: clean(row["event_title"]),
+      event_title: source_display_text(row["event_title"]),
       event_slug: clean(row["event_slug"]),
       event_status: clean(row["event_status"]),
       event_source_updated_at: parse_datetime(row["event_source_updated_at"]),
       woo_product_id: int(row["woo_product_id"]),
-      product_title: clean(row["product_title"]),
+      product_title: source_display_text(row["product_title"]),
       product_slug: clean(row["product_slug"]),
       product_status: clean(row["product_status"]),
       product_source_updated_at: parse_datetime(row["product_source_updated_at"]),
-      ticket_display_name: clean(row["ticket_display_name"]),
+      ticket_display_name: source_display_text(row["ticket_display_name"]),
       ticket_type_name: ticket_type_name(row, variation_id),
       ticket_type_kind: if(is_nil(variation_id), do: :woo_product, else: :woo_variation),
       price: clean(row["price"]),
       regular_price: clean(row["regular_price"]),
       ticket_template_id: clean(row["ticket_template_id"]),
       woo_variation_id: variation_id,
-      variation_title: clean(row["variation_title"]),
+      variation_title: source_display_text(row["variation_title"]),
       variation_status: clean(row["variation_status"]),
       variation_source_updated_at: parse_datetime(row["variation_source_updated_at"])
     }
@@ -216,11 +216,11 @@ defmodule EventSales.Catalog.TickeraCatalog.Normalizer do
   defp ticket_type_name(row, _variation_id), do: variation_ticket_type_name(row)
 
   defp simple_ticket_type_name(row) do
-    clean(row["product_title"]) || clean(row["ticket_display_name"])
+    source_display_text(row["product_title"]) || source_display_text(row["ticket_display_name"])
   end
 
   defp variation_ticket_type_name(row) do
-    product_title = clean(row["product_title"])
+    product_title = source_display_text(row["product_title"])
     option_label = variation_option_label(product_title, row["variation_title"])
 
     if meaningful_variation_option_label?(product_title, option_label) do
@@ -231,7 +231,7 @@ defmodule EventSales.Catalog.TickeraCatalog.Normalizer do
   defp variation_option_label(nil, _variation_title), do: nil
 
   defp variation_option_label(product_title, variation_title) do
-    variation_title = clean(variation_title)
+    variation_title = source_display_text(variation_title)
 
     if variation_title do
       prefixed_variation_option_label(product_title, variation_title) || variation_title
@@ -262,8 +262,8 @@ defmodule EventSales.Catalog.TickeraCatalog.Normalizer do
   defp meaningful_variation_option_label?(_product_title, _option_label), do: false
 
   defp variation_name_ambiguity_reason(row) do
-    product_title = clean(row.product_title)
-    variation_title = clean(row.variation_title)
+    product_title = source_display_text(row.product_title)
+    variation_title = source_display_text(row.variation_title)
     option_label = variation_option_label(product_title, variation_title)
 
     cond do
@@ -309,6 +309,28 @@ defmodule EventSales.Catalog.TickeraCatalog.Normalizer do
   end
 
   defp clean(value), do: value
+
+  defp source_display_text(value) when is_binary(value) do
+    value
+    |> decode_html_entities()
+    |> String.replace(~r/<[^>]*>/, " ")
+    |> normalize_label_whitespace()
+  end
+
+  defp source_display_text(value), do: clean(value)
+
+  defp decode_html_entities(value) do
+    value
+    |> String.replace(~r/&ndash;|&#8211;|&#x2013;/i, " – ")
+    |> String.replace(~r/&mdash;|&#8212;|&#x2014;/i, " — ")
+    |> String.replace(~r/&nbsp;|&#160;|&#xa0;/i, " ")
+    |> String.replace("&amp;", "&")
+    |> String.replace("&lt;", "<")
+    |> String.replace("&gt;", ">")
+    |> String.replace("&quot;", "\"")
+    |> String.replace("&#39;", "'")
+    |> String.replace("&#x27;", "'")
+  end
 
   defp normalize_label_whitespace(value) when is_binary(value) do
     value

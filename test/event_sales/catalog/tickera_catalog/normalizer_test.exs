@@ -123,6 +123,74 @@ defmodule EventSales.Catalog.TickeraCatalog.NormalizerTest do
     refute Enum.any?(findings, &(&1.severity == :blocking))
   end
 
+  test "variation product strips HTML separator span before prefix parsing" do
+    [row | _rest] = TickeraCatalogFixtures.lbl_variation_rows()
+    row = Map.put(row, "variation_title", "LBL – Nelspruit<span> - </span>Kaartjie")
+
+    result = %DiscoveryResult{
+      events: [TickeraCatalogFixtures.lbl_event()],
+      catalog_rows: [row]
+    }
+
+    assert {:ok, %{rows: [normalized], findings: findings}} = Normalizer.normalize(result)
+
+    assert normalized.ticket_type_name == "LBL – Nelspruit [Kaartjie]"
+    assert normalized.ticket_display_name == "Toegang"
+    refute Enum.any?(findings, &(&1.severity == :blocking))
+  end
+
+  test "variation product strips HTML separator span for long option labels" do
+    [_first, row] = TickeraCatalogFixtures.lbl_variation_rows()
+
+    row =
+      Map.put(
+        row,
+        "variation_title",
+        "LBL – Nelspruit<span> - </span>Kaartjie + 1 x Verloor gewig op jóú manier"
+      )
+
+    result = %DiscoveryResult{
+      events: [TickeraCatalogFixtures.lbl_event()],
+      catalog_rows: [row]
+    }
+
+    assert {:ok, %{rows: [normalized], findings: findings}} = Normalizer.normalize(result)
+
+    assert normalized.ticket_type_name ==
+             "LBL – Nelspruit [Kaartjie + 1 x Verloor gewig op jóú manier]"
+
+    assert normalized.ticket_display_name == "Toegang"
+    refute Enum.any?(findings, &(&1.severity == :blocking))
+  end
+
+  test "variation product decodes HTML entities before prefix parsing" do
+    [row | _rest] = TickeraCatalogFixtures.lbl_variation_rows()
+    row = Map.put(row, "variation_title", "LBL – Nelspruit&ndash;Kaartjie")
+
+    result = %DiscoveryResult{
+      events: [TickeraCatalogFixtures.lbl_event()],
+      catalog_rows: [row]
+    }
+
+    assert {:ok, %{rows: [normalized], findings: findings}} = Normalizer.normalize(result)
+
+    assert normalized.ticket_type_name == "LBL – Nelspruit [Kaartjie]"
+    refute Enum.any?(findings, &(&1.severity == :blocking))
+  end
+
+  test "HTML stripping does not affect simple product naming" do
+    row = Map.put(TickeraCatalogFixtures.vwg_row(), "product_title", "VWG - Pretoria")
+
+    result = %DiscoveryResult{
+      events: [TickeraCatalogFixtures.vwg_event()],
+      catalog_rows: [row]
+    }
+
+    assert {:ok, %{rows: [normalized], findings: []}} = Normalizer.normalize(result)
+
+    assert normalized.ticket_type_name == "VWG - Pretoria"
+  end
+
   test "variation product uses variation title directly when it is already an option label" do
     [row | _rest] = TickeraCatalogFixtures.lbl_variation_rows()
     row = Map.put(row, "variation_title", "Kaartjie")
