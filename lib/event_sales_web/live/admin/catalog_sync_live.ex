@@ -410,16 +410,51 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
                     <h3 class="mb-2 text-xs font-semibold uppercase text-base-content/70">
                       Findings
                     </h3>
-                    <ul class="space-y-2">
-                      <li
-                        :for={finding <- findings(preview(@previews, run.id))}
-                        class="rounded border border-base-300 bg-base-200 px-3 py-2 text-xs text-base-content/80"
-                      >
-                        <span class="font-semibold">{value(finding, "severity")}</span>
-                        <span class="font-mono">{value(finding, "code")}</span>
-                        <span>{value(finding, "message")}</span>
-                      </li>
-                    </ul>
+                    <div class="overflow-x-auto rounded border border-base-300 bg-base-100">
+                      <table class="table table-zebra min-w-full text-xs">
+                        <thead class="bg-base-200 text-left text-[0.65rem] font-semibold uppercase text-base-content/70">
+                          <tr>
+                            <th class="px-2 py-2">Severity</th>
+                            <th class="px-2 py-2">Code</th>
+                            <th class="px-2 py-2">Message</th>
+                            <th class="px-2 py-2">Tickera event ID</th>
+                            <th class="px-2 py-2">Woo product ID</th>
+                            <th class="px-2 py-2">Woo variation ID</th>
+                            <th class="px-2 py-2">Reason</th>
+                            <th class="px-2 py-2">TicketType name</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr
+                            :for={finding <- finding_detail_rows(preview(@previews, run.id))}
+                            class={[
+                              "text-base-content/80",
+                              blocking_finding?(finding) && "border-l-4 border-error"
+                            ]}
+                          >
+                            <td class={[
+                              "px-2 py-2 font-semibold",
+                              blocking_finding?(finding) && "text-error"
+                            ]}>
+                              {finding.severity}
+                            </td>
+                            <td class="px-2 py-2 font-mono">{finding.code}</td>
+                            <td class="px-2 py-2">{finding.message}</td>
+                            <td class="px-2 py-2 font-mono">{finding.tickera_event_id}</td>
+                            <td class="px-2 py-2 font-mono">{finding.woo_product_id}</td>
+                            <td class="px-2 py-2 font-mono">{finding.woo_variation_id}</td>
+                            <td class="px-2 py-2 font-mono">{finding.reason}</td>
+                            <td class="px-2 py-2 font-mono">{finding.ticket_type_name}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                    <div class="mt-3">
+                      <h4 class="mb-2 text-xs font-semibold uppercase text-base-content/70">
+                        Finding review report
+                      </h4>
+                      <pre class="overflow-x-auto rounded bg-base-200 p-3 text-xs leading-5 text-base-content/80">{finding_report(preview(@previews, run.id))}</pre>
+                    </div>
                   </div>
 
                   <div :if={preview_event_groups(preview(@previews, run.id)) != []}>
@@ -722,11 +757,60 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
 
   defp preview_ready?(_run, _preview), do: false
 
-  defp blocking_findings?(preview) do
-    Enum.any?(findings(preview), &(value(&1, "severity") in [:blocking, "blocking"]))
-  end
+  defp blocking_findings?(preview), do: Enum.any?(findings(preview), &blocking_finding?/1)
+
+  defp blocking_finding?(finding), do: value(finding, "severity") in [:blocking, "blocking"]
 
   defp findings(preview), do: list(preview, "findings")
+
+  defp finding_detail_rows(preview), do: Enum.map(findings(preview), &finding_detail_row/1)
+
+  defp finding_detail_row(finding) do
+    %{
+      severity: display_value(value(finding, "severity")),
+      code: display_value(value(finding, "code")),
+      message: display_value(value(finding, "message")),
+      tickera_event_id: display_value(value(finding, "tickera_event_id")),
+      woo_product_id: display_value(value(finding, "woo_product_id")),
+      woo_variation_id: display_value(value(finding, "woo_variation_id")),
+      reason: display_value(finding_metadata_value(finding, "reason")),
+      ticket_type_name: display_value(finding_metadata_value(finding, "ticket_type_name"))
+    }
+  end
+
+  defp finding_metadata_value(finding, key) when key in ["reason", "ticket_type_name"] do
+    case value(finding, "metadata") do
+      metadata when is_map(metadata) -> value(metadata, key)
+      _metadata -> nil
+    end
+  end
+
+  defp finding_metadata_value(_finding, _key), do: nil
+
+  defp finding_report(preview) do
+    rows =
+      preview
+      |> finding_detail_rows()
+      |> Enum.map_join("\n", fn finding ->
+        [
+          finding.severity,
+          finding.code,
+          finding.tickera_event_id,
+          finding.woo_product_id,
+          finding.woo_variation_id,
+          finding.reason,
+          finding.ticket_type_name
+        ]
+        |> Enum.join(" | ")
+      end)
+
+    [
+      "severity | code | tickera_event_id | woo_product_id | woo_variation_id | reason | ticket_type_name",
+      rows
+    ]
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("\n")
+  end
 
   defp preview_event_groups(preview) do
     event_changes = list(preview, "event_changes")
@@ -765,6 +849,17 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
   rescue
     ArgumentError -> Map.get(map, key)
   end
+
+  defp display_value(nil), do: "-"
+  defp display_value(""), do: "-"
+
+  defp display_value(value) when is_binary(value) do
+    value = String.trim(value)
+    if value == "", do: "-", else: value
+  end
+
+  defp display_value(value) when is_atom(value), do: Atom.to_string(value)
+  defp display_value(value), do: to_string(value)
 
   defp summary_text(summary) when is_map(summary) and map_size(summary) > 0 do
     Enum.map_join(summary, ", ", fn {key, value} -> "#{key}=#{value}" end)
