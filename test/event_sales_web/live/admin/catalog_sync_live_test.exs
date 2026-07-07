@@ -302,6 +302,47 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
     )
   end
 
+  test "failed runs show bounded last_error in the runs table", %{
+    conn: conn,
+    admin: admin,
+    source: source
+  } do
+    Ash.create!(
+      TickeraCatalogSyncRun,
+      %{
+        source_system_id: source.id,
+        scope: %{"kind" => "wordpress_feed", "product_id" => 109_740},
+        status: :failed,
+        last_error: "catalog_feed_forbidden"
+      },
+      action: :create_dry_run,
+      domain: Ingestion
+    )
+
+    Ash.create!(
+      TickeraCatalogSyncRun,
+      %{
+        source_system_id: source.id,
+        scope: %{"kind" => "wordpress_feed", "product_id" => 109_741},
+        status: :failed,
+        last_error: "secret=leaked https://example.test?sig=abc raw body"
+      },
+      action: :create_dry_run,
+      domain: Ingestion
+    )
+
+    {:ok, _view, html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/catalog-sync")
+
+    assert html =~ "Failure reason"
+    assert html =~ "catalog_feed_forbidden"
+    assert html =~ "catalog_sync_failed"
+    refute html =~ "secret=leaked"
+    refute html =~ "https://example.test"
+  end
+
   test "apply stays disabled when preview has blocking findings", %{
     conn: conn,
     admin: admin,
