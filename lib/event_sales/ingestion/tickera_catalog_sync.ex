@@ -28,6 +28,7 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
     with :ok <- authorize_admin(opts),
          {:ok, %TickeraCatalogSyncRun{} = run} <-
            Ash.get(TickeraCatalogSyncRun, run_id, domain: Ingestion),
+         :ok <- validate_apply_ready(run, dry_run_hash),
          {:ok, job} <- enqueue_apply(run, dry_run_hash, opts) do
       {:ok, %{run: run, job: job}}
     else
@@ -103,6 +104,34 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
     end
   end
 
+  defp validate_apply_ready(run, dry_run_hash) do
+    with :ok <- validate_apply_status(run),
+         :ok <- validate_apply_hash(run, dry_run_hash),
+         {:ok, snapshot} <- fetch_plan_snapshot(run) do
+      validate_no_blocking_findings(snapshot)
+    end
+  end
+
+  defp validate_apply_status(%{status: :dry_run_ready}), do: :ok
+  defp validate_apply_status(_run), do: {:error, :run_not_ready}
+
+  defp validate_apply_hash(%{dry_run_hash: hash}, expected)
+       when is_binary(hash) and hash == expected,
+       do: :ok
+
+  defp validate_apply_hash(_run, _expected), do: {:error, :stale_dry_run_hash}
+
+  defp fetch_plan_snapshot(%{plan_snapshot: snapshot}) when is_map(snapshot), do: {:ok, snapshot}
+  defp fetch_plan_snapshot(_run), do: {:error, :missing_plan_snapshot}
+
+  defp validate_no_blocking_findings(snapshot) do
+    if Enum.any?(list(snapshot, "findings"), &(value(&1, "severity") in [:blocking, "blocking"])) do
+      {:error, :blocking_findings}
+    else
+      :ok
+    end
+  end
+
   defp authorize_admin(opts) do
     if opts |> Keyword.get(:actor) |> Policies.global_admin?() do
       :ok
@@ -126,6 +155,10 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
   end
 
   defp sanitize_error(:forbidden), do: :forbidden
+  defp sanitize_error(:run_not_ready), do: :run_not_ready
+  defp sanitize_error(:stale_dry_run_hash), do: :stale_dry_run_hash
+  defp sanitize_error(:missing_plan_snapshot), do: :missing_plan_snapshot
+  defp sanitize_error(:blocking_findings), do: :blocking_findings
   defp sanitize_error({:enqueue_failed, _reason}), do: :enqueue_failed
   defp sanitize_error(_reason), do: :failed
 
@@ -136,4 +169,17 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
 
   defp json_safe(values) when is_list(values), do: Enum.map(values, &json_safe/1)
   defp json_safe(value), do: value
+
+  defp list(map, key) do
+    case value(map, key) do
+      values when is_list(values) -> values
+      _other -> []
+    end
+  end
+
+  defp value(map, key) when is_map(map) do
+    Map.get(map, key) || Map.get(map, String.to_existing_atom(key))
+  rescue
+    ArgumentError -> Map.get(map, key)
+  end
 end
