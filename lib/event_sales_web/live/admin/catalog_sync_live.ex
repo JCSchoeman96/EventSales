@@ -712,8 +712,15 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
 
   defp apply_enabled?(run, preview) do
     run.status == :dry_run_ready and is_binary(run.dry_run_hash) and
+      preview_ready?(run, preview) and
       not blocking_findings?(preview)
   end
+
+  defp preview_ready?(run, preview) when is_map(preview) do
+    value(preview, "dry_run_hash") == run.dry_run_hash
+  end
+
+  defp preview_ready?(_run, _preview), do: false
 
   defp blocking_findings?(preview) do
     Enum.any?(findings(preview), &(value(&1, "severity") in [:blocking, "blocking"]))

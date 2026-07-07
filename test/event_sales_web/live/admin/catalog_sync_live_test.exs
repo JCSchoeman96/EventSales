@@ -386,7 +386,35 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
       |> live("/admin/catalog-sync")
 
     assert html =~ "existing_mapping_conflict"
-    assert has_element?(view, ~s(button[disabled]), "Apply")
+    assert has_element?(view, ~s(button[phx-click="queue_apply"][disabled]), "Apply")
+  end
+
+  test "apply stays disabled when dry-run preview is missing", %{
+    conn: conn,
+    admin: admin,
+    source: source
+  } do
+    Ash.create!(
+      TickeraCatalogSyncRun,
+      %{
+        source_system_id: source.id,
+        scope: %{"kind" => "wordpress_feed", "mode" => "full"},
+        status: :dry_run_ready,
+        dry_run_hash: "missing-preview-hash",
+        summary: %{"finding_count" => 4},
+        plan_snapshot: nil
+      },
+      action: :create_dry_run,
+      domain: Ingestion
+    )
+
+    {:ok, view, html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/catalog-sync")
+
+    assert html =~ "missing-preview-hash"
+    assert has_element?(view, ~s(button[phx-click="queue_apply"][disabled]), "Apply")
   end
 
   test "CatalogSyncLive source stays inside approved boundaries" do

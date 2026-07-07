@@ -9,7 +9,7 @@ defmodule EventSales.Ingestion.TickeraCatalogSyncTest do
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.TickeraCatalogSyncRun
   alias EventSales.Ingestion.TickeraCatalogSync
-  alias EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker
+  alias EventSales.Ingestion.Workers.{ApplyTickeraCatalogWorker, DiscoverTickeraCatalogWorker}
   alias EventSales.TestSupport.{SalesHelpers, TickeraCatalogFixtures}
 
   setup do
@@ -69,12 +69,75 @@ defmodule EventSales.Ingestion.TickeraCatalogSyncTest do
     assert loaded_run.id == run.id
   end
 
+  test "queue_apply rejects blocking findings before enqueue", %{admin: admin, source: source} do
+    run =
+      create_dry_run!(source.id, %{
+        "dry_run_hash" => "blocked-hash",
+        "event_changes" => [],
+        "ticket_type_changes" => [],
+        "product_mapping_changes" => [],
+        "findings" => [
+          %{
+            "severity" => "blocking",
+            "code" => "ambiguous_variation_ticket_type_name",
+            "message" =>
+              "Published product variation could not produce a distinct TicketType name."
+          }
+        ],
+        "touched_event_ids" => [],
+        "touched_product_keys" => []
+      })
+
+    assert {:error, :blocking_findings} =
+             TickeraCatalogSync.queue_apply(run.id, "blocked-hash", actor: admin)
+
+    refute_enqueued(worker: ApplyTickeraCatalogWorker)
+  end
+
+  test "queue_apply rejects missing previews before enqueue", %{admin: admin, source: source} do
+    run =
+      Ash.create!(
+        TickeraCatalogSyncRun,
+        %{
+          source_system_id: source.id,
+          scope: %{"kind" => "wordpress_feed", "mode" => "full"},
+          status: :dry_run_ready,
+          dry_run_hash: "missing-preview-hash",
+          summary: %{"finding_count" => 4},
+          plan_snapshot: nil
+        },
+        action: :create_dry_run,
+        domain: Ingestion
+      )
+
+    assert {:error, :missing_plan_snapshot} =
+             TickeraCatalogSync.queue_apply(run.id, "missing-preview-hash", actor: admin)
+
+    refute_enqueued(worker: ApplyTickeraCatalogWorker)
+  end
+
   defp manual_scope do
     %{
       "kind" => "manual_rows",
       "events" => [TickeraCatalogFixtures.zero_product_event()],
       "catalog_rows" => [TickeraCatalogFixtures.vwg_row()]
     }
+  end
+
+  defp create_dry_run!(source_system_id, snapshot) do
+    Ash.create!(
+      TickeraCatalogSyncRun,
+      %{
+        source_system_id: source_system_id,
+        scope: %{"kind" => "wordpress_feed", "mode" => "full"},
+        status: :dry_run_ready,
+        dry_run_hash: snapshot["dry_run_hash"],
+        summary: %{"finding_count" => length(snapshot["findings"])},
+        plan_snapshot: snapshot
+      },
+      action: :create_dry_run,
+      domain: Ingestion
+    )
   end
 
   defp create_user!(email, password \\ "valid-pass-123") do
