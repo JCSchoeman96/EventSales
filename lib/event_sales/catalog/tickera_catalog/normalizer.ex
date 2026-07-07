@@ -26,6 +26,8 @@ defmodule EventSales.Catalog.TickeraCatalog.Normalizer do
       |> Enum.concat(zero_product_findings(events, normalized_rows))
       |> Enum.concat(duplicate_findings(rows))
       |> Enum.concat(variation_findings(normalized_rows))
+      |> Enum.concat(variation_name_findings(normalized_rows))
+      |> Enum.concat(duplicate_ticket_type_name_findings(normalized_rows))
 
     {:ok, %{rows: normalized_rows, findings: findings}}
   end
@@ -120,6 +122,66 @@ defmodule EventSales.Catalog.TickeraCatalog.Normalizer do
     end)
   end
 
+  defp variation_name_findings(rows) do
+    rows
+    |> Enum.reject(&is_nil(&1.woo_variation_id))
+    |> Enum.flat_map(fn row ->
+      case variation_name_ambiguity_reason(row) do
+        nil ->
+          []
+
+        reason ->
+          [
+            finding(
+              :blocking,
+              :ambiguous_variation_ticket_type_name,
+              "Published product variation could not produce a distinct TicketType name.",
+              tickera_event_id: row.tickera_event_id,
+              woo_product_id: row.woo_product_id,
+              woo_variation_id: row.woo_variation_id,
+              metadata: %{"reason" => reason}
+            )
+          ]
+      end
+    end)
+  end
+
+  defp duplicate_ticket_type_name_findings(rows) do
+    rows
+    |> Enum.reject(&is_nil(&1.ticket_type_name))
+    |> Enum.group_by(&{&1.tickera_event_id, &1.ticket_type_name})
+    |> Enum.flat_map(&duplicate_ticket_type_name_group_findings/1)
+  end
+
+  defp duplicate_ticket_type_name_group_findings({{_event_id, ticket_type_name}, grouped_rows}) do
+    identities =
+      grouped_rows
+      |> Enum.map(&identity/1)
+      |> Enum.uniq()
+
+    if length(identities) > 1 and Enum.any?(grouped_rows, & &1.woo_variation_id) do
+      duplicate_ticket_type_name_row_findings(grouped_rows, ticket_type_name)
+    else
+      []
+    end
+  end
+
+  defp duplicate_ticket_type_name_row_findings(grouped_rows, ticket_type_name) do
+    grouped_rows
+    |> Enum.uniq_by(&identity/1)
+    |> Enum.map(fn row ->
+      finding(
+        :blocking,
+        :duplicate_ticket_type_name,
+        "Multiple catalog rows normalize to the same TicketType name for one Tickera event.",
+        tickera_event_id: row.tickera_event_id,
+        woo_product_id: row.woo_product_id,
+        woo_variation_id: row.woo_variation_id,
+        metadata: %{"ticket_type_name" => ticket_type_name}
+      )
+    end)
+  end
+
   defp non_published_event_findings(events) do
     events
     |> Enum.reject(&(&1["event_status"] == @published))
@@ -150,13 +212,79 @@ defmodule EventSales.Catalog.TickeraCatalog.Normalizer do
     end)
   end
 
-  defp ticket_type_name(row, nil) do
-    clean(row["ticket_display_name"]) || clean(row["product_title"])
+  defp ticket_type_name(row, nil), do: simple_ticket_type_name(row)
+  defp ticket_type_name(row, _variation_id), do: variation_ticket_type_name(row)
+
+  defp simple_ticket_type_name(row) do
+    clean(row["product_title"]) || clean(row["ticket_display_name"])
   end
 
-  defp ticket_type_name(row, _variation_id) do
-    clean(row["ticket_display_name"]) || clean(row["variation_title"]) ||
-      clean(row["product_title"])
+  defp variation_ticket_type_name(row) do
+    product_title = clean(row["product_title"])
+    option_label = variation_option_label(product_title, row["variation_title"])
+
+    if meaningful_variation_option_label?(product_title, option_label) do
+      "#{product_title} [#{option_label}]"
+    end
+  end
+
+  defp variation_option_label(nil, _variation_title), do: nil
+
+  defp variation_option_label(product_title, variation_title) do
+    variation_title = clean(variation_title)
+
+    if variation_title do
+      prefixed_variation_option_label(product_title, variation_title) || variation_title
+    end
+  end
+
+  defp prefixed_variation_option_label(product_title, variation_title) do
+    Enum.find_value([" - ", " – ", " — ", ": "], fn separator ->
+      strip_variation_title_prefix(product_title, variation_title, separator)
+    end)
+  end
+
+  defp strip_variation_title_prefix(product_title, variation_title, separator) do
+    prefix = product_title <> separator
+
+    if String.starts_with?(variation_title, prefix) do
+      variation_title
+      |> String.replace_prefix(prefix, "")
+      |> normalize_label_whitespace()
+    end
+  end
+
+  defp meaningful_variation_option_label?(product_title, option_label)
+       when is_binary(product_title) and is_binary(option_label) do
+    option_label != "" and option_label != product_title
+  end
+
+  defp meaningful_variation_option_label?(_product_title, _option_label), do: false
+
+  defp variation_name_ambiguity_reason(row) do
+    product_title = clean(row.product_title)
+    variation_title = clean(row.variation_title)
+    option_label = variation_option_label(product_title, variation_title)
+
+    cond do
+      is_nil(product_title) ->
+        "missing_product_title"
+
+      is_nil(variation_title) ->
+        "missing_variation_title"
+
+      is_nil(option_label) ->
+        "missing_variation_option_label"
+
+      option_label == product_title ->
+        "variation_title_matches_product_title"
+
+      is_nil(row.ticket_type_name) ->
+        "missing_ticket_type_name"
+
+      true ->
+        nil
+    end
   end
 
   defp identity(row), do: {row.tickera_event_id, row.woo_product_id, row.woo_variation_id}
@@ -181,6 +309,13 @@ defmodule EventSales.Catalog.TickeraCatalog.Normalizer do
   end
 
   defp clean(value), do: value
+
+  defp normalize_label_whitespace(value) when is_binary(value) do
+    value
+    |> String.trim()
+    |> String.replace(~r/\s+/, " ")
+    |> clean()
+  end
 
   defp int(nil), do: nil
   defp int(""), do: nil

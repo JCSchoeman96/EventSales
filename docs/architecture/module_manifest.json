@@ -6286,6 +6286,14 @@
         },
         {
           "arity": 0,
+          "name": "lbl_event"
+        },
+        {
+          "arity": 0,
+          "name": "lbl_variation_rows"
+        },
+        {
+          "arity": 0,
           "name": "private_event_row"
         },
         {

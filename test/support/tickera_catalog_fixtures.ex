@@ -30,6 +30,47 @@ defmodule EventSales.TestSupport.TickeraCatalogFixtures do
   def vwg_event, do: Map.new(@vwg_event)
   def vwg_row, do: Map.new(@vwg_row)
 
+  def lbl_event do
+    %{
+      "tickera_event_id" => 108_000,
+      "event_title" => "Lynette Beer LIVE - MP",
+      "event_slug" => "lynette-beer-live-mp",
+      "event_status" => "publish",
+      "event_source_updated_at" => "2026-06-04T10:00:00Z"
+    }
+  end
+
+  def lbl_variation_rows do
+    base =
+      lbl_event()
+      |> Map.merge(%{
+        "woo_product_id" => 108_657,
+        "product_title" => "LBL – Nelspruit",
+        "product_slug" => "lbl-nelspruit",
+        "product_status" => "publish",
+        "product_source_updated_at" => "2026-06-04T10:05:00Z",
+        "ticket_display_name" => "Toegang",
+        "price" => "250",
+        "regular_price" => "250",
+        "ticket_template_id" => "101"
+      })
+
+    [
+      Map.merge(base, %{
+        "woo_variation_id" => 108_658,
+        "variation_title" => "LBL – Nelspruit - Kaartjie",
+        "variation_status" => "publish",
+        "variation_source_updated_at" => "2026-06-04T10:10:00Z"
+      }),
+      Map.merge(base, %{
+        "woo_variation_id" => 108_659,
+        "variation_title" => "LBL – Nelspruit - Kaartjie + 1 x Verloor gewig op jóú manier",
+        "variation_status" => "publish",
+        "variation_source_updated_at" => "2026-06-04T10:15:00Z"
+      })
+    ]
+  end
+
   def private_event_row do
     @vwg_row
     |> Map.merge(%{
