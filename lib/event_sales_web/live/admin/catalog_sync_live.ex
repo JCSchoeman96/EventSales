@@ -20,6 +20,30 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
     "updated_since" => ""
   }
 
+  @displayable_failure_codes ~w(
+    discovery_source_not_configured
+    invalid_manual_rows
+    missing_manual_rows
+    catalog_feed_misconfigured
+    catalog_feed_unauthorized
+    catalog_feed_forbidden
+    catalog_feed_timeout
+    catalog_feed_pagination_limit
+    invalid_catalog_feed_response
+    catalog_feed_rate_limited
+    catalog_feed_server_error
+    catalog_feed_transport_error
+    catalog_sync_discovery_failed
+    enqueue_failed
+    stale_dry_run_hash
+    missing_plan_snapshot
+    blocking_findings
+    run_not_ready
+    not_found
+    catalog_sync_apply_failed
+    catalog_sync_failed
+  )
+
   @impl true
   def mount(_params, session, socket) do
     socket =
@@ -349,6 +373,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
             <tr>
               <th class="px-3 py-2">Queued</th>
               <th class="px-3 py-2">Status</th>
+              <th class="px-3 py-2">Failure reason</th>
               <th class="px-3 py-2">Hash</th>
               <th class="px-3 py-2">Summary</th>
               <th class="px-3 py-2">Action</th>
@@ -358,6 +383,9 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
             <tr :for={run <- @runs}>
               <td class="px-3 py-2 text-base-content/80">{format_datetime(run.inserted_at)}</td>
               <td class="px-3 py-2 text-base-content/80">{run.status}</td>
+              <td class="px-3 py-2 font-mono text-xs text-base-content/80">
+                {failure_reason_text(run)}
+              </td>
               <td class="px-3 py-2 font-mono text-xs text-base-content/80">
                 {run.dry_run_hash || "-"}
               </td>
@@ -376,7 +404,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
               </td>
             </tr>
             <tr :for={run <- @runs}>
-              <td class="px-3 py-4" colspan="5">
+              <td class="px-3 py-4" colspan="6">
                 <div class="space-y-4">
                   <div :if={findings(preview(@previews, run.id)) != []}>
                     <h3 class="mb-2 text-xs font-semibold uppercase text-base-content/70">
@@ -736,6 +764,17 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
   end
 
   defp summary_text(_summary), do: "-"
+
+  defp failure_reason_text(%{status: :failed, last_error: last_error})
+       when is_binary(last_error) do
+    if last_error in @displayable_failure_codes do
+      last_error
+    else
+      "catalog_sync_failed"
+    end
+  end
+
+  defp failure_reason_text(_run), do: "-"
 
   defp format_datetime(nil), do: "-"
   defp format_datetime(datetime), do: Calendar.strftime(datetime, "%Y-%m-%d %H:%M")
