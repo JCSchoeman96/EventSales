@@ -55,7 +55,12 @@ defmodule EventSales.Catalog.TickeraCatalog.PlannerApplierTest do
                external_event_id: 109_316,
                external_event_kind: :tickera_event,
                source_status: "publish",
-               source_updated_at: ~U[2026-06-01 10:00:00Z]
+               source_updated_at: ~U[2026-06-01 10:00:00Z],
+               starts_at: ~U[2026-08-01 16:00:00Z],
+               ends_at: ~U[2026-08-01 18:00:00Z],
+               venue_name: "Pretoria",
+               booking_fee_type: :fixed,
+               booking_fee_value: Decimal.new("25.00")
              }
            ]
 
@@ -96,6 +101,11 @@ defmodule EventSales.Catalog.TickeraCatalog.PlannerApplierTest do
     assert updated_event.external_event_id == 109_316
     assert updated_event.external_event_kind == :tickera_event
     assert updated_event.name == "Manual VWG Pretoria"
+    assert updated_event.starts_at == ~U[2026-08-01 16:00:00.000000Z]
+    assert updated_event.ends_at == ~U[2026-08-01 18:00:00.000000Z]
+    assert updated_event.venue_name == "Pretoria"
+    assert updated_event.booking_fee_type == :fixed
+    assert updated_event.booking_fee_value == Decimal.new("25.00")
     assert updated_ticket.external_ticket_type_id == 109_740
     assert updated_ticket.external_ticket_type_kind == :woo_product
     assert updated_ticket.name == "Manual Toegang"
@@ -150,12 +160,13 @@ defmodule EventSales.Catalog.TickeraCatalog.PlannerApplierTest do
 
     result = %DiscoveryResult{
       events: [
-        %{
+        TickeraCatalogFixtures.vwg_event()
+        |> Map.merge(%{
           "tickera_event_id" => 500_001,
           "event_title" => "Source Managed Event",
           "event_slug" => "source-managed-event",
           "event_status" => "publish"
-        }
+        })
       ],
       catalog_rows: [row]
     }
@@ -165,9 +176,69 @@ defmodule EventSales.Catalog.TickeraCatalog.PlannerApplierTest do
     event_id = event.id
     ticket_id = ticket.id
 
-    assert [%{action: :reuse, event_id: ^event_id}] = plan.event_changes
+    assert [%{action: :update_metadata, event_id: ^event_id} = event_change] = plan.event_changes
+    assert event_change.starts_at == ~U[2026-08-01 16:00:00Z]
+    assert event_change.venue_name == "Pretoria"
     assert [%{action: :reuse, ticket_type_id: ^ticket_id}] = plan.ticket_type_changes
     assert [%{action: :create, woo_product_id: 500_740}] = plan.product_mapping_changes
+  end
+
+  test "applier updates reused source-managed event metadata without changing mappings", %{
+    source: source
+  } do
+    event =
+      SalesHelpers.create_event!(source, %{
+        name: "Source Managed Event",
+        slug: "source-managed-event-metadata",
+        external_event_id: 600_001,
+        external_event_kind: :tickera_event,
+        source_status: "publish"
+      })
+
+    ticket =
+      SalesHelpers.create_ticket_type!(event, %{
+        name: "Source Managed Ticket",
+        external_ticket_type_id: 600_740,
+        external_ticket_type_kind: :woo_product,
+        external_product_id: 600_740,
+        source_status: "publish"
+      })
+
+    row =
+      TickeraCatalogFixtures.vwg_row()
+      |> Map.merge(%{
+        "tickera_event_id" => 600_001,
+        "event_title" => "Source Managed Event",
+        "event_slug" => "source-managed-event-metadata",
+        "woo_product_id" => 600_740,
+        "product_title" => "Source Managed Product",
+        "product_slug" => "source-managed-product"
+      })
+
+    result = %DiscoveryResult{
+      events: [
+        TickeraCatalogFixtures.vwg_event()
+        |> Map.merge(%{
+          "tickera_event_id" => 600_001,
+          "event_title" => "Source Managed Event",
+          "event_slug" => "source-managed-event-metadata"
+        })
+      ],
+      catalog_rows: [row]
+    }
+
+    assert {:ok, plan} = Planner.plan(source.id, result)
+    run = create_run!(source.id, plan)
+
+    assert {:ok, _run} = Applier.apply(run.id, plan.dry_run_hash, actor: nil)
+
+    updated_event = Ash.get!(Event, event.id, domain: Catalog)
+    assert updated_event.starts_at == ~U[2026-08-01 16:00:00.000000Z]
+    assert updated_event.venue_name == "Pretoria"
+    assert updated_event.booking_fee_type == :fixed
+    assert mapping_count(source.id) == 2
+    assert ticket_type_count(event.id) == 1
+    assert ticket.id == Ash.get!(TicketType, ticket.id, domain: Catalog).id
   end
 
   test "applier rejects stale hash and missing plan snapshot", %{source: source} do

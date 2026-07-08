@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-297
+298
 
 ## Files
 
@@ -67,6 +67,7 @@ Project root: `.`
 - `lib/event_sales/catalog/changes/normalize_base_url.ex`
 - `lib/event_sales/catalog/changes/validate_event_dates.ex`
 - `lib/event_sales/catalog/changes/validate_ticket_type_event.ex`
+- `lib/event_sales/catalog/event_lifecycle.ex`
 - `lib/event_sales/catalog/manual_mapping_creator.ex`
 - `lib/event_sales/catalog/mapping_resolver.ex`
 - `lib/event_sales/catalog/mapping_side_effects.ex`
@@ -612,6 +613,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `change/3`
   - uses: `Ash.Resource.Change`
+- `EventSales.Catalog.EventLifecycle` - `lib/event_sales/catalog/event_lifecycle.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `classify/2`, `current_bucket?/2`, `past?/2`
+  - uses: _none_
 - `EventSales.Catalog.ManualMappingCreator` - `lib/event_sales/catalog/manual_mapping_creator.ex`
   - moduledoc?: true
   - specs?: true
