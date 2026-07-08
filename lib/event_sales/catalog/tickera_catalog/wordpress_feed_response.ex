@@ -3,7 +3,7 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponse do
   Validates and aggregates VS-26C WordPress Tickera catalog feed pages.
   """
 
-  @schema_version "2026-07-05.v1"
+  @schema_version "2026-07-08.v1"
   @source "wordpress_tickera"
 
   @type t :: %__MODULE__{

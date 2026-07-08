@@ -17,7 +17,7 @@ wordpress_tickera
 Schema version:
 
 ```text
-2026-07-05.v1
+2026-07-08.v1
 ```
 
 ## Authentication
@@ -87,7 +87,7 @@ Invalid request:
 
 ```json
 {
-  "schema_version": "2026-07-05.v1",
+  "schema_version": "2026-07-08.v1",
   "source": "wordpress_tickera",
   "source_snapshot_at": "2026-07-05T10:00:00Z",
   "generated_at": "2026-07-05T10:00:00Z",
@@ -124,6 +124,11 @@ event_title
 event_slug
 event_status
 event_source_updated_at
+event_start_at
+event_end_at
+event_location
+booking_fee_type
+booking_fee_value
 linked_ticket_products
 ```
 
@@ -166,6 +171,18 @@ review_reasons
 ```
 
 Nulls are allowed for missing event and variation fields. Timestamps are UTC ISO8601 strings ending in `Z`.
+
+Event metadata comes only from the safe Tickera event postmeta allowlist:
+
+```text
+booking_fee_type
+booking_fee_value
+event_date_time
+event_end_date_time
+event_location
+```
+
+Booking fee values are reported only as source metadata. They must not be used for checkout, revenue math, tax/VAT treatment, or reconciliation in this contract.
 
 ## Source Relationship
 
@@ -300,7 +317,7 @@ secrets
 
 ```json
 {
-  "schema_version": "2026-07-05.v1",
+  "schema_version": "2026-07-08.v1",
   "source": "wordpress_tickera",
   "source_snapshot_at": "2026-07-05T10:00:00Z",
   "generated_at": "2026-07-05T10:00:00Z",
@@ -321,6 +338,11 @@ secrets
       "event_slug": "vroue-wat-glo-retreat-pta",
       "event_status": "publish",
       "event_source_updated_at": "2026-06-01T10:00:00Z",
+      "event_start_at": "2026-08-01T16:00:00Z",
+      "event_end_at": "2026-08-01T18:00:00Z",
+      "event_location": "Pretoria",
+      "booking_fee_type": "fixed",
+      "booking_fee_value": "25.00",
       "linked_ticket_products": 1
     }
   ],

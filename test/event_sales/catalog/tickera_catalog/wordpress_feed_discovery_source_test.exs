@@ -134,7 +134,7 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedDiscoverySourceTest do
 
   defp page_response do
     %{
-      "schema_version" => "2026-07-05.v1",
+      "schema_version" => "2026-07-08.v1",
       "source" => "wordpress_tickera",
       "source_snapshot_at" => "2026-07-05T10:00:00Z",
       "page" => 1,

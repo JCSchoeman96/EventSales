@@ -172,7 +172,7 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedClientTest do
     has_more = Keyword.get(opts, :has_more, false)
 
     %{
-      "schema_version" => "2026-07-05.v1",
+      "schema_version" => "2026-07-08.v1",
       "source" => "wordpress_tickera",
       "source_snapshot_at" => "2026-07-05T10:00:00Z",
       "page" => page,

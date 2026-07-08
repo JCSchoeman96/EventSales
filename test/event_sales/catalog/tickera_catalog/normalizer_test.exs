@@ -17,7 +17,56 @@ defmodule EventSales.Catalog.TickeraCatalog.NormalizerTest do
     assert row.woo_variation_id == nil
     assert row.ticket_type_name == "VWG - Pretoria"
     assert row.ticket_type_kind == :woo_product
+    assert row.starts_at == ~U[2026-08-01 16:00:00Z]
+    assert row.ends_at == ~U[2026-08-01 18:00:00Z]
+    assert row.venue_name == "Pretoria"
+    assert row.booking_fee_type == :fixed
+    assert row.booking_fee_value == Decimal.new("25.00")
     assert findings == []
+  end
+
+  test "normalizes invalid or unsupported event metadata as nil" do
+    event =
+      TickeraCatalogFixtures.vwg_event()
+      |> Map.merge(%{
+        "event_start_at" => "not-a-date",
+        "event_end_at" => nil,
+        "event_location" => " ",
+        "booking_fee_type" => "per-seat",
+        "booking_fee_value" => "not-money"
+      })
+
+    result = %DiscoveryResult{
+      events: [event],
+      catalog_rows: [TickeraCatalogFixtures.vwg_row()]
+    }
+
+    assert {:ok, %{rows: [row], findings: []}} = Normalizer.normalize(result)
+
+    assert row.starts_at == nil
+    assert row.ends_at == nil
+    assert row.venue_name == nil
+    assert row.booking_fee_type == nil
+    assert row.booking_fee_value == nil
+  end
+
+  test "normalizes percentage booking fee type" do
+    event =
+      TickeraCatalogFixtures.vwg_event()
+      |> Map.merge(%{
+        "booking_fee_type" => "percentage",
+        "booking_fee_value" => "12.5"
+      })
+
+    result = %DiscoveryResult{
+      events: [event],
+      catalog_rows: [TickeraCatalogFixtures.vwg_row()]
+    }
+
+    assert {:ok, %{rows: [row], findings: []}} = Normalizer.normalize(result)
+
+    assert row.booking_fee_type == :percentage
+    assert row.booking_fee_value == Decimal.new("12.5")
   end
 
   test "simple product falls back to ticket display name only when product title is missing" do

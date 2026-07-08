@@ -59,13 +59,22 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponseTest do
 
   defp valid_page do
     %{
-      "schema_version" => "2026-07-05.v1",
+      "schema_version" => "2026-07-08.v1",
       "source" => "wordpress_tickera",
       "source_snapshot_at" => "2026-07-05T10:00:00Z",
       "page" => 1,
       "per_page" => 100,
       "has_more" => false,
-      "events" => [%{"tickera_event_id" => 109_316}],
+      "events" => [
+        %{
+          "tickera_event_id" => 109_316,
+          "event_start_at" => "2026-08-01T16:00:00Z",
+          "event_end_at" => "2026-08-01T18:00:00Z",
+          "event_location" => "Pretoria",
+          "booking_fee_type" => "fixed",
+          "booking_fee_value" => "25.00"
+        }
+      ],
       "catalog_rows" => [%{"woo_product_id" => 109_740}]
     }
   end

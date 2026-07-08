@@ -95,6 +95,16 @@ variation_status
 variation_source_updated_at
 ```
 
+Every `events` item must include the safe event metadata fields:
+
+```text
+event_start_at
+event_end_at
+event_location
+booking_fee_type
+booking_fee_value
+```
+
 ## Targeted Lookup Checks
 
 Product lookup:
