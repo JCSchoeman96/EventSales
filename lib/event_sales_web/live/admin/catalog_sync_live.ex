@@ -5,6 +5,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
 
   use EventSalesWeb, :live_view
 
+  alias EventSales.Catalog.MappingConflictResolver
   alias EventSales.Catalog.TickeraCatalog.PubSub
   alias EventSales.Ingestion.TickeraCatalogSync
   alias EventSalesWeb.Components.AdminShell
@@ -56,6 +57,8 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
       |> assign(:source_systems, [])
       |> assign(:runs, [])
       |> assign(:previews, %{})
+      |> assign(:mapping_conflicts, %{})
+      |> assign(:mapping_conflict_errors, %{})
       |> load_source_systems()
       |> load_runs()
 
@@ -143,6 +146,25 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
 
       {:error, _reason} ->
         {:noreply, put_flash(socket, :error, "Catalog apply could not be queued")}
+    end
+  end
+
+  def handle_event("deactivate_stale_mapping", params, socket) do
+    case MappingConflictResolver.deactivate_stale_mapping(
+           value(params, "run_id"),
+           value(params, "dry_run_hash"),
+           value(params, "woo_product_id"),
+           value(params, "woo_variation_id"),
+           actor: socket.assigns.current_user
+         ) do
+      {:ok, _result} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Stale mapping deactivated. Rerun full-feed dry-run.")
+         |> load_runs()}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Mapping conflict resolution failed: #{reason}")}
     end
   end
 
@@ -457,6 +479,87 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
                     </div>
                   </div>
 
+                  <div :if={
+                    mapping_conflict_rows(@mapping_conflicts, run.id) != [] or
+                      mapping_conflict_error(@mapping_conflict_errors, run.id)
+                  }>
+                    <h3 class="mb-2 text-xs font-semibold uppercase text-base-content/70">
+                      Mapping conflict resolution
+                    </h3>
+                    <div
+                      :if={mapping_conflict_error(@mapping_conflict_errors, run.id)}
+                      class="alert alert-warning mb-3 py-2 text-xs"
+                    >
+                      {mapping_conflict_error(@mapping_conflict_errors, run.id)}
+                    </div>
+                    <div
+                      :if={mapping_conflict_rows(@mapping_conflicts, run.id) != []}
+                      class="overflow-x-auto rounded border border-base-300 bg-base-100"
+                    >
+                      <table class="table table-zebra min-w-full text-xs">
+                        <thead class="bg-base-200 text-left text-[0.65rem] font-semibold uppercase text-base-content/70">
+                          <tr>
+                            <th class="px-2 py-2">Run id</th>
+                            <th class="px-2 py-2">Woo product ID</th>
+                            <th class="px-2 py-2">Woo variation ID</th>
+                            <th class="px-2 py-2">Feed Tickera event ID</th>
+                            <th class="px-2 py-2">Mapped event</th>
+                            <th class="px-2 py-2">Mapped external event ID</th>
+                            <th class="px-2 py-2">Mapped ticket type</th>
+                            <th class="px-2 py-2">Current active mapping id</th>
+                            <th class="px-2 py-2">order_item_count</th>
+                            <th class="px-2 py-2">Reason</th>
+                            <th class="px-2 py-2">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr :for={conflict <- mapping_conflict_rows(@mapping_conflicts, run.id)}>
+                            <td class="px-2 py-2 font-mono">{conflict.run_id}</td>
+                            <td class="px-2 py-2 font-mono">{conflict.woo_product_id}</td>
+                            <td class="px-2 py-2 font-mono">
+                              {display_value(conflict.woo_variation_id)}
+                            </td>
+                            <td class="px-2 py-2 font-mono">
+                              {display_value(conflict.feed_tickera_event_id)}
+                            </td>
+                            <td class="px-2 py-2">{display_value(conflict.mapped_event_name)}</td>
+                            <td class="px-2 py-2 font-mono">
+                              {display_value(conflict.mapped_event_external_event_id)}
+                            </td>
+                            <td class="px-2 py-2">
+                              {display_value(conflict.mapped_ticket_type_name)}
+                            </td>
+                            <td class="px-2 py-2 font-mono">
+                              {display_value(conflict.mapping_id)}
+                            </td>
+                            <td class="px-2 py-2 font-mono">{conflict.order_item_count}</td>
+                            <td class="px-2 py-2 font-mono">{conflict.reason}</td>
+                            <td class="px-2 py-2">
+                              <button
+                                :if={conflict.resolution_status == :safe}
+                                type="button"
+                                phx-click="deactivate_stale_mapping"
+                                phx-value-run_id={conflict.run_id}
+                                phx-value-dry_run_hash={conflict.dry_run_hash}
+                                phx-value-woo_product_id={conflict.woo_product_id}
+                                phx-value-woo_variation_id={conflict.woo_variation_id || ""}
+                                class="btn btn-warning btn-xs cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning/60 focus-visible:ring-offset-2 focus-visible:ring-offset-base-100"
+                              >
+                                Deactivate stale mapping
+                              </button>
+                              <span
+                                :if={conflict.resolution_status != :safe}
+                                class="badge badge-outline"
+                              >
+                                {conflict.reason}
+                              </span>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
                   <div :if={preview_event_groups(preview(@previews, run.id)) != []}>
                     <h3 class="mb-2 text-xs font-semibold uppercase text-base-content/70">
                       Proposed Catalog Changes
@@ -713,13 +816,23 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
   defp load_runs(socket) do
     case TickeraCatalogSync.list_runs(actor: socket.assigns.current_user) do
       {:ok, runs} ->
+        previews = load_previews(runs, socket.assigns.current_user)
+
+        {mapping_conflicts, mapping_conflict_errors} =
+          load_mapping_conflicts(runs, previews, socket.assigns.current_user)
+
         socket
         |> subscribe_runs(runs)
         |> assign(:runs, runs)
-        |> assign(:previews, load_previews(runs, socket.assigns.current_user))
+        |> assign(:previews, previews)
+        |> assign(:mapping_conflicts, mapping_conflicts)
+        |> assign(:mapping_conflict_errors, mapping_conflict_errors)
 
       {:error, _reason} ->
-        assign(socket, :runs, [])
+        socket
+        |> assign(:runs, [])
+        |> assign(:mapping_conflicts, %{})
+        |> assign(:mapping_conflict_errors, %{})
     end
   end
 
@@ -742,6 +855,45 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
 
     socket
   end
+
+  defp load_mapping_conflicts(runs, previews, current_user) do
+    Enum.reduce(runs, {%{}, %{}}, fn run, {conflicts, errors} ->
+      merge_mapping_conflict_result(
+        {conflicts, errors},
+        run,
+        preview(previews, run.id),
+        current_user
+      )
+    end)
+  end
+
+  defp merge_mapping_conflict_result({conflicts, errors}, run, preview, current_user) do
+    case mapping_conflict_result(run, preview, current_user) do
+      {:ok, rows} ->
+        {Map.put(conflicts, run.id, rows), errors}
+
+      {:error, reason} ->
+        {Map.put(conflicts, run.id, []), Map.put(errors, run.id, Atom.to_string(reason))}
+    end
+  end
+
+  defp mapping_conflict_result(run, preview, current_user) do
+    if has_mapping_conflict_finding?(preview) do
+      MappingConflictResolver.list_conflicts(run.id, run.dry_run_hash, actor: current_user)
+    else
+      {:ok, []}
+    end
+  end
+
+  defp has_mapping_conflict_finding?(preview) do
+    Enum.any?(findings(preview), fn finding ->
+      value(finding, "severity") in [:blocking, "blocking"] and
+        value(finding, "code") in [:existing_mapping_conflict, "existing_mapping_conflict"]
+    end)
+  end
+
+  defp mapping_conflict_rows(conflicts, run_id), do: Map.get(conflicts, run_id, [])
+  defp mapping_conflict_error(errors, run_id), do: Map.get(errors, run_id)
 
   defp preview(previews, run_id), do: Map.get(previews, run_id, %{})
 

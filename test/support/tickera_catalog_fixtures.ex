@@ -76,6 +76,52 @@ defmodule EventSales.TestSupport.TickeraCatalogFixtures do
     ]
   end
 
+  def lynette_wr_event do
+    %{
+      "tickera_event_id" => 109_120,
+      "event_title" => "Lynette Beer LIVE – WR",
+      "event_slug" => "lynette-beer-live-wr",
+      "event_status" => "publish",
+      "event_source_updated_at" => "2026-07-01T10:00:00Z",
+      "event_start_at" => "2026-09-01T16:00:00Z",
+      "event_end_at" => "2026-09-01T18:00:00Z",
+      "event_location" => "Witbank Ridge",
+      "booking_fee_type" => "fixed",
+      "booking_fee_value" => "25.00"
+    }
+  end
+
+  def lynette_wr_variation_rows do
+    base =
+      lynette_wr_event()
+      |> Map.merge(%{
+        "woo_product_id" => 109_132,
+        "product_title" => "Lynette Beer LIVE – WR",
+        "product_slug" => "lynette-beer-live-wr",
+        "product_status" => "publish",
+        "product_source_updated_at" => "2026-07-01T10:05:00Z",
+        "ticket_display_name" => "Toegang",
+        "price" => "250",
+        "regular_price" => "250",
+        "ticket_template_id" => "102"
+      })
+
+    [
+      Map.merge(base, %{
+        "woo_variation_id" => 109_165,
+        "variation_title" => "Lynette Beer LIVE – WR - Kaartjie",
+        "variation_status" => "publish",
+        "variation_source_updated_at" => "2026-07-01T10:10:00Z"
+      }),
+      Map.merge(base, %{
+        "woo_variation_id" => 109_167,
+        "variation_title" => "Lynette Beer LIVE – WR - VIP",
+        "variation_status" => "publish",
+        "variation_source_updated_at" => "2026-07-01T10:15:00Z"
+      })
+    ]
+  end
+
   def private_event_row do
     @vwg_row
     |> Map.merge(%{

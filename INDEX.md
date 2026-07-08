@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-298
+299
 
 ## Files
 
@@ -69,6 +69,7 @@ Project root: `.`
 - `lib/event_sales/catalog/changes/validate_ticket_type_event.ex`
 - `lib/event_sales/catalog/event_lifecycle.ex`
 - `lib/event_sales/catalog/manual_mapping_creator.ex`
+- `lib/event_sales/catalog/mapping_conflict_resolver.ex`
 - `lib/event_sales/catalog/mapping_resolver.ex`
 - `lib/event_sales/catalog/mapping_side_effects.ex`
 - `lib/event_sales/catalog/missing_catalog_resolver.ex`
@@ -624,6 +625,12 @@ Project root: `.`
   - specs?: true
   - docs_count: 0
   - public_funs: `create/2`, `source_statuses/0`
+  - uses: _none_
+- `EventSales.Catalog.MappingConflictResolver` - `lib/event_sales/catalog/mapping_conflict_resolver.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `list_conflicts/3`, `deactivate_stale_mapping/5`
   - uses: _none_
 - `EventSales.Catalog.MappingResolver` - `lib/event_sales/catalog/mapping_resolver.ex`
   - moduledoc?: true
@@ -2045,7 +2052,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: `vwg_event/0`, `vwg_row/0`, `lbl_event/0`, `lbl_variation_rows/0`, `private_event_row/0`, `zero_product_event/0`, `variation_rows/0`
+  - public_funs: `vwg_event/0`, `vwg_row/0`, `lbl_event/0`, `lbl_variation_rows/0`, `lynette_wr_event/0`, `lynette_wr_variation_rows/0`, `private_event_row/0`, `zero_product_event/0`, `variation_rows/0`
   - uses: _none_
 - `EventSales.TestSupport.TickeraSyncTestHelpers` - `test/support/tickera_sync_test_helpers.ex`
   - moduledoc?: true

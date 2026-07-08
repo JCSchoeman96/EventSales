@@ -57,6 +57,7 @@
     "lib/event_sales/catalog/changes/validate_ticket_type_event.ex",
     "lib/event_sales/catalog/event_lifecycle.ex",
     "lib/event_sales/catalog/manual_mapping_creator.ex",
+    "lib/event_sales/catalog/mapping_conflict_resolver.ex",
     "lib/event_sales/catalog/mapping_resolver.ex",
     "lib/event_sales/catalog/mapping_side_effects.ex",
     "lib/event_sales/catalog/missing_catalog_resolver.ex",
@@ -1307,6 +1308,25 @@
         {
           "arity": 0,
           "name": "source_statuses"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.MappingConflictResolver",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/mapping_conflict_resolver.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "list_conflicts"
+        },
+        {
+          "arity": 5,
+          "name": "deactivate_stale_mapping"
         }
       ],
       "specs?": true,
@@ -6323,6 +6343,14 @@
         {
           "arity": 0,
           "name": "lbl_variation_rows"
+        },
+        {
+          "arity": 0,
+          "name": "lynette_wr_event"
+        },
+        {
+          "arity": 0,
+          "name": "lynette_wr_variation_rows"
         },
         {
           "arity": 0,

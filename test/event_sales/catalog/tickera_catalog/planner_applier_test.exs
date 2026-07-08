@@ -4,8 +4,11 @@ defmodule EventSales.Catalog.TickeraCatalog.PlannerApplierTest do
 
   require Ash.Query
 
+  alias EventSales.Accounts
+  alias EventSales.Accounts.Resources.{Role, User, UserRole}
   alias EventSales.Analytics.DashboardCache
   alias EventSales.Catalog
+  alias EventSales.Catalog.MappingConflictResolver
   alias EventSales.Catalog.Resources.{Event, ProductMapping, TicketType}
   alias EventSales.Catalog.TickeraCatalog.{Applier, DiscoveryResult, Plan, Planner}
   alias EventSales.Ingestion
@@ -317,6 +320,88 @@ defmodule EventSales.Catalog.TickeraCatalog.PlannerApplierTest do
     assert event_count(source.id) == 1
   end
 
+  test "planner creates normal WR plan after stale MP mappings are deactivated", %{source: source} do
+    admin = create_admin!("vs-26i-4-planner-admin@example.com")
+
+    mp_event =
+      SalesHelpers.create_event!(source, %{
+        name: "Lynette Beer LIVE - MP",
+        slug: "lynette-beer-live-mp",
+        external_event_id: 108_658,
+        external_event_kind: :tickera_event
+      })
+
+    mp_ticket_a = SalesHelpers.create_ticket_type!(mp_event, %{name: "MP Ticket A"})
+    mp_ticket_b = SalesHelpers.create_ticket_type!(mp_event, %{name: "MP Ticket B"})
+
+    stale_a =
+      create_mapping!(source, mp_event, mp_ticket_a, %{
+        woo_product_id: 109_132,
+        woo_variation_id: 109_165,
+        original_label: "MP Ticket A",
+        current_label: "MP Ticket A"
+      })
+
+    stale_b =
+      create_mapping!(source, mp_event, mp_ticket_b, %{
+        woo_product_id: 109_132,
+        woo_variation_id: 109_167,
+        original_label: "MP Ticket B",
+        current_label: "MP Ticket B"
+      })
+
+    discovery = lynette_wr_discovery()
+
+    assert {:ok, blocked_plan} = Planner.plan(source.id, discovery)
+
+    assert Enum.count(
+             blocked_plan.findings,
+             &(&1.code == :existing_mapping_conflict and &1.woo_product_id == 109_132)
+           ) == 2
+
+    run = create_run!(source.id, blocked_plan)
+
+    assert {:ok, %{mapping: %{id: stale_a_id}}} =
+             MappingConflictResolver.deactivate_stale_mapping(
+               run.id,
+               blocked_plan.dry_run_hash,
+               109_132,
+               109_165,
+               actor: admin
+             )
+
+    assert {:ok, %{mapping: %{id: stale_b_id}}} =
+             MappingConflictResolver.deactivate_stale_mapping(
+               run.id,
+               blocked_plan.dry_run_hash,
+               109_132,
+               109_167,
+               actor: admin
+             )
+
+    assert stale_a_id == stale_a.id
+    assert stale_b_id == stale_b.id
+
+    assert {:ok, resolved_plan} = Planner.plan(source.id, discovery)
+
+    refute Enum.any?(
+             resolved_plan.findings,
+             &(&1.code == :existing_mapping_conflict and &1.woo_product_id == 109_132)
+           )
+
+    assert [%{action: :create, external_event_id: 109_120}] = resolved_plan.event_changes
+
+    assert Enum.sort(Enum.map(resolved_plan.ticket_type_changes, & &1.external_ticket_type_id)) ==
+             [109_165, 109_167]
+
+    assert Enum.all?(resolved_plan.ticket_type_changes, &(&1.action == :create))
+
+    assert Enum.sort(Enum.map(resolved_plan.product_mapping_changes, & &1.woo_variation_id)) ==
+             [109_165, 109_167]
+
+    assert Enum.all?(resolved_plan.product_mapping_changes, &(&1.action == :create))
+  end
+
   defp event_count(source_system_id) do
     Event
     |> Ash.Query.filter(source_system_id == ^source_system_id)
@@ -340,6 +425,59 @@ defmodule EventSales.Catalog.TickeraCatalog.PlannerApplierTest do
       events: [TickeraCatalogFixtures.vwg_event()],
       catalog_rows: [TickeraCatalogFixtures.vwg_row()]
     }
+  end
+
+  defp lynette_wr_discovery do
+    %DiscoveryResult{
+      events: [TickeraCatalogFixtures.lynette_wr_event()],
+      catalog_rows: TickeraCatalogFixtures.lynette_wr_variation_rows()
+    }
+  end
+
+  defp create_mapping!(source, event, ticket, attrs) do
+    defaults = %{
+      source_system_id: source.id,
+      event_id: event.id,
+      ticket_type_id: ticket.id,
+      woo_product_id: 1,
+      woo_variation_id: nil,
+      original_label: "Ticket",
+      current_label: "Ticket",
+      active: true
+    }
+
+    Ash.create!(ProductMapping, Map.merge(defaults, attrs), action: :create, domain: Catalog)
+  end
+
+  defp create_admin!(email) do
+    user =
+      Ash.create!(
+        User,
+        %{
+          email: email,
+          name: "Admin",
+          password: "valid-pass-123",
+          password_confirmation: "valid-pass-123"
+        },
+        action: :register_with_password,
+        domain: Accounts
+      )
+
+    role =
+      Role
+      |> Ash.Query.filter(name == :admin)
+      |> Ash.read_one!(domain: Accounts)
+      |> case do
+        nil -> Ash.create!(Role, %{name: :admin}, action: :create, domain: Accounts)
+        role -> role
+      end
+
+    Ash.create!(UserRole, %{user_id: user.id, role_id: role.id},
+      action: :create,
+      domain: Accounts
+    )
+
+    user
   end
 
   defp create_run!(source_system_id, plan) do
