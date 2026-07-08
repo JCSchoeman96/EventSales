@@ -32,6 +32,21 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponseTest do
     end
   end
 
+  test "temporarily accepts the previous feed schema without event metadata" do
+    page =
+      valid_page()
+      |> Map.put("schema_version", "2026-07-05.v1")
+      |> Map.put("events", [
+        %{
+          "tickera_event_id" => 109_316,
+          "event_title" => "Legacy feed event"
+        }
+      ])
+
+    assert {:ok, parsed} = WordPressFeedResponse.parse_page(page)
+    assert [%{"tickera_event_id" => 109_316}] = parsed.events
+  end
+
   test "aggregates pages by deduping events and keeping catalog row order" do
     {:ok, first} =
       valid_page()

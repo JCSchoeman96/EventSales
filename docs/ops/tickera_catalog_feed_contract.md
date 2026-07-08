@@ -20,6 +20,14 @@ Schema version:
 2026-07-08.v1
 ```
 
+Rollout compatibility:
+
+```text
+EventSales temporarily accepts 2026-07-05.v1 while the WordPress plugin is being
+upgraded. Legacy feeds do not include event metadata, so EventSales treats the
+new event fields as nil until the feed returns 2026-07-08.v1.
+```
+
 ## Authentication
 
 Requests must include:
