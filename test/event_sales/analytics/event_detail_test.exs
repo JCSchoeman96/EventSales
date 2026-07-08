@@ -102,6 +102,44 @@ defmodule EventSales.Analytics.EventDetailTest do
     assert zero_row.remaining == nil
   end
 
+  test "list_events filters lifecycle before pagination", %{admin: admin, source: source} do
+    now = ~U[2026-07-08 12:00:00Z]
+
+    for index <- 1..30 do
+      SalesHelpers.create_event!(source, %{
+        name: "Past Event #{String.pad_leading(to_string(index), 2, "0")}",
+        slug: unique_slug("past-#{index}"),
+        starts_at: ~U[2026-07-01 10:00:00Z],
+        ends_at: ~U[2026-07-01 12:00:00Z]
+      })
+    end
+
+    future =
+      SalesHelpers.create_event!(source, %{
+        name: "Future Event",
+        slug: unique_slug("future"),
+        starts_at: ~U[2026-07-09 10:00:00Z],
+        ends_at: ~U[2026-07-09 12:00:00Z],
+        venue_name: "Future Venue"
+      })
+
+    unknown =
+      SalesHelpers.create_event!(source, %{name: "Unknown Event", slug: unique_slug("unknown")})
+
+    assert {:ok, %{rows: current_rows}} =
+             EventDetail.list_events(actor: admin, lifecycle: :current, now: now, per_page: 50)
+
+    assert Enum.any?(current_rows, &(&1.event_id == future.id))
+    assert Enum.any?(current_rows, &(&1.event_id == unknown.id))
+    refute Enum.any?(current_rows, &String.starts_with?(&1.event_name, "Past Event"))
+    assert Enum.find(current_rows, &(&1.event_id == future.id)).venue_name == "Future Venue"
+
+    assert {:ok, %{rows: past_rows}} =
+             EventDetail.list_events(actor: admin, lifecycle: :past, now: now, per_page: 50)
+
+    assert Enum.all?(past_rows, &String.starts_with?(&1.event_name, "Past Event"))
+  end
+
   test "facade rejects missing and non-admin actors", %{staff: staff, event: event} do
     assert {:error, :forbidden} = EventDetail.list_events(actor: nil)
     assert {:error, :forbidden} = EventDetail.list_events(actor: staff)

@@ -10,6 +10,7 @@ defmodule EventSales.Analytics.AdminDashboard do
 
   alias EventSales.Analytics.{HotStateAggregator, MetricRules, SnapshotReader}
   alias EventSales.Catalog
+  alias EventSales.Catalog.EventLifecycle
   alias EventSales.Catalog.Resources.Event
   alias EventSales.Sales
   alias EventSales.Sales.OrderItemMapper
@@ -37,7 +38,7 @@ defmodule EventSales.Analytics.AdminDashboard do
   """
   @spec snapshot(keyword()) :: {:ok, snapshot()} | {:error, term()}
   def snapshot(opts \\ []) do
-    with {:ok, events} <- list_events(limit(opts, :event_limit, @default_event_limit)),
+    with {:ok, events} <- list_events(limit(opts, :event_limit, @default_event_limit), opts),
          {:ok, event_rows} <- event_rows(events, opts),
          {:ok, ticket_types} <- ticket_type_breakdown(events, opts),
          {:ok, recent_orders} <- recent_orders(opts),
@@ -94,8 +95,12 @@ defmodule EventSales.Analytics.AdminDashboard do
     end
   end
 
-  defp list_events(limit) do
+  defp list_events(limit, opts) do
     Event
+    |> lifecycle_filter(
+      Keyword.get(opts, :lifecycle, :current),
+      Keyword.get_lazy(opts, :now, &DateTime.utc_now/0)
+    )
     |> Ash.Query.sort(name: :asc)
     |> Ash.Query.limit(limit)
     |> Ash.read(domain: Catalog)
@@ -123,6 +128,9 @@ defmodule EventSales.Analytics.AdminDashboard do
     %{
       event_id: event.id,
       event_name: event.name,
+      venue_name: event.venue_name,
+      lifecycle:
+        EventLifecycle.classify(event, Keyword.get_lazy(opts, :now, &DateTime.utc_now/0)),
       total_sold: summary.total_sold,
       total_revenue: summary.total_revenue,
       today_sold: summary.today_sold,
@@ -322,5 +330,13 @@ defmodule EventSales.Analytics.AdminDashboard do
     |> Keyword.get(key, default)
     |> min(default)
     |> max(1)
+  end
+
+  defp lifecycle_filter(query, :past, %DateTime{} = now) do
+    Ash.Query.filter(query, not is_nil(starts_at) and not is_nil(ends_at) and ends_at < ^now)
+  end
+
+  defp lifecycle_filter(query, _current, %DateTime{} = now) do
+    Ash.Query.filter(query, is_nil(starts_at) or is_nil(ends_at) or ends_at >= ^now)
   end
 end

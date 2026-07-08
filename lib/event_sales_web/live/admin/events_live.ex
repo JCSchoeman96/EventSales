@@ -16,6 +16,17 @@ defmodule EventSalesWeb.Live.Admin.EventsLive do
      socket
      |> assign(:page_title, "Events")
      |> assign(:current_user, AdminSession.current_user(session))
+     |> assign(:lifecycle, :current)
+     |> load_events(1)}
+  end
+
+  @impl true
+  def handle_params(params, _uri, socket) do
+    lifecycle = lifecycle_param(params["lifecycle"])
+
+    {:noreply,
+     socket
+     |> assign(:lifecycle, lifecycle)
      |> load_events(1)}
   end
 
@@ -58,6 +69,21 @@ defmodule EventSalesWeb.Live.Admin.EventsLive do
       </:actions>
 
       <section>
+        <div class="tabs tabs-boxed mb-4 w-fit">
+          <.link
+            patch={~p"/admin/events?lifecycle=current"}
+            class={["tab", @lifecycle == :current && "tab-active"]}
+          >
+            Current
+          </.link>
+          <.link
+            patch={~p"/admin/events?lifecycle=past"}
+            class={["tab", @lifecycle == :past && "tab-active"]}
+          >
+            Past
+          </.link>
+        </div>
+
         <div class="overflow-x-auto rounded-box border border-base-300 bg-base-100">
           <table class="table table-zebra table-sm">
             <thead>
@@ -76,6 +102,9 @@ defmodule EventSalesWeb.Live.Admin.EventsLive do
                   <.link navigate={~p"/admin/events/#{event.event_id}"} class="hover:underline">
                     {event.event_name}
                   </.link>
+                  <div :if={event.venue_name} class="text-xs font-normal text-base-content/70">
+                    {event.venue_name}
+                  </div>
                   <div class="text-xs font-normal text-base-content/60">{event.slug}</div>
                 </td>
                 <td class="px-3 py-2">{event.status}</td>
@@ -116,7 +145,11 @@ defmodule EventSalesWeb.Live.Admin.EventsLive do
   end
 
   defp load_events(socket, page) do
-    case EventDetail.list_events(actor: socket.assigns.current_user, page: page) do
+    case EventDetail.list_events(
+           actor: socket.assigns.current_user,
+           page: page,
+           lifecycle: socket.assigns.lifecycle
+         ) do
       {:ok, %{rows: rows, page: page_info}} ->
         socket
         |> assign(:events, rows)
@@ -141,4 +174,7 @@ defmodule EventSalesWeb.Live.Admin.EventsLive do
 
   defp format_money(%Decimal{} = value), do: Decimal.to_string(value, :normal)
   defp format_money(value), do: to_string(value)
+
+  defp lifecycle_param("past"), do: :past
+  defp lifecycle_param(_value), do: :current
 end

@@ -14,6 +14,7 @@ defmodule EventSales.Analytics.EventDetail do
   alias EventSales.AdminRead.Pagination, as: AdminReadPagination
   alias EventSales.Analytics.{HotStateAggregator, SnapshotReader}
   alias EventSales.Catalog
+  alias EventSales.Catalog.EventLifecycle
   alias EventSales.Catalog.Resources.{Event, TicketType}
   alias EventSales.Repo
 
@@ -33,6 +34,10 @@ defmodule EventSales.Analytics.EventDetail do
           event_name: String.t(),
           slug: String.t(),
           status: atom(),
+          venue_name: String.t() | nil,
+          starts_at: DateTime.t() | nil,
+          ends_at: DateTime.t() | nil,
+          lifecycle: EventLifecycle.lifecycle(),
           capacity: non_neg_integer() | nil,
           sold: non_neg_integer(),
           remaining: non_neg_integer() | nil,
@@ -94,12 +99,12 @@ defmodule EventSales.Analytics.EventDetail do
     with :ok <- authorize(opts),
          %{page: page, per_page: per_page, offset: offset} <-
            AdminReadPagination.pagination(opts, @default_per_page, @max_per_page),
-         {:ok, events} <- read_events(per_page + 1, offset) do
+         {:ok, events} <- read_events(per_page + 1, offset, opts) do
       {visible_events, has_next?} = AdminReadPagination.split_page(events, per_page)
 
       {:ok,
        %{
-         rows: Enum.map(visible_events, &event_list_row/1),
+         rows: Enum.map(visible_events, &event_list_row(&1, opts)),
          page: AdminReadPagination.page_info(page, per_page, has_next?)
        }}
     end
@@ -180,8 +185,12 @@ defmodule EventSales.Analytics.EventDetail do
     end
   end
 
-  defp read_events(limit, offset) do
+  defp read_events(limit, offset, opts) do
     Event
+    |> lifecycle_filter(
+      Keyword.get(opts, :lifecycle, :current),
+      Keyword.get_lazy(opts, :now, &DateTime.utc_now/0)
+    )
     |> Ash.Query.sort(name: :asc)
     |> Ash.Query.limit(limit)
     |> Ash.Query.offset(offset)
@@ -195,14 +204,19 @@ defmodule EventSales.Analytics.EventDetail do
     |> Ash.read_one(domain: Catalog)
   end
 
-  defp event_list_row(%Event{} = event) do
+  defp event_list_row(%Event{} = event, opts) do
     summary = summary_for_list_event(event.id)
+    now = Keyword.get_lazy(opts, :now, &DateTime.utc_now/0)
 
     %{
       event_id: event.id,
       event_name: event.name,
       slug: event.slug,
       status: event.status,
+      venue_name: event.venue_name,
+      starts_at: event.starts_at,
+      ends_at: event.ends_at,
+      lifecycle: EventLifecycle.classify(event, now),
       capacity: event.capacity,
       sold: summary.sold,
       remaining: remaining(event.capacity, summary.sold),
@@ -428,6 +442,14 @@ defmodule EventSales.Analytics.EventDetail do
 
   defp remaining(nil, _sold), do: nil
   defp remaining(capacity, sold), do: max(capacity - sold, 0)
+
+  defp lifecycle_filter(query, :past, %DateTime{} = now) do
+    Ash.Query.filter(query, not is_nil(starts_at) and not is_nil(ends_at) and ends_at < ^now)
+  end
+
+  defp lifecycle_filter(query, _current, %DateTime{} = now) do
+    Ash.Query.filter(query, is_nil(starts_at) or is_nil(ends_at) or ends_at >= ^now)
+  end
 
   defp cast_uuid(value) do
     case Ecto.UUID.cast(value) do

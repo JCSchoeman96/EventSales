@@ -27,6 +27,8 @@ defmodule EventSales.Analytics.AdminDashboardContractTest do
   @event_row_keys [
     :event_id,
     :event_name,
+    :venue_name,
+    :lifecycle,
     :total_sold,
     :total_revenue,
     :today_sold,

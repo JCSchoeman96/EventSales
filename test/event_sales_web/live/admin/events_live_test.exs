@@ -75,6 +75,56 @@ defmodule EventSalesWeb.Live.Admin.EventsLiveTest do
     refute html =~ "phx-click=\"import"
   end
 
+  test "admin can switch between current and past events with venue display", %{conn: conn} do
+    admin = create_user!("events-lifecycle@example.com")
+    create_global_role!(admin, :admin)
+
+    source = SalesHelpers.create_source_system!()
+
+    current =
+      SalesHelpers.create_event!(source, %{
+        name: "Current Visible Event",
+        slug: unique_slug("current-visible"),
+        starts_at: DateTime.add(DateTime.utc_now(), -1, :hour),
+        ends_at: DateTime.add(DateTime.utc_now(), 1, :hour),
+        venue_name: "Main Hall"
+      })
+
+    past =
+      SalesHelpers.create_event!(source, %{
+        name: "Past Hidden Event",
+        slug: unique_slug("past-hidden"),
+        starts_at: ~U[2026-01-01 10:00:00Z],
+        ends_at: ~U[2026-01-01 12:00:00Z],
+        venue_name: "Old Hall"
+      })
+
+    unknown =
+      SalesHelpers.create_event!(source, %{
+        name: "Unknown Date Event",
+        slug: unique_slug("unknown-date")
+      })
+
+    {:ok, view, html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/events")
+
+    assert html =~ "Current"
+    assert html =~ "Past"
+    assert html =~ current.name
+    assert html =~ "Main Hall"
+    assert html =~ unknown.name
+    refute html =~ past.name
+
+    html = render_patch(view, "/admin/events?lifecycle=past")
+
+    assert html =~ past.name
+    assert html =~ "Old Hall"
+    refute html =~ current.name
+    refute html =~ unknown.name
+  end
+
   test "event list pagination does not render all events", %{conn: conn} do
     admin = create_user!("events-pagination@example.com")
     create_global_role!(admin, :admin)

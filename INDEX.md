@@ -1721,7 +1721,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: `mount/3`, `handle_event/3`, `handle_info/2`, `render/1`
+  - public_funs: `mount/3`, `handle_params/3`, `handle_event/3`, `handle_info/2`, `render/1`
   - uses: `EventSalesWeb`
 - `EventSalesWeb.Live.Admin.EventDetailLive` - `lib/event_sales_web/live/admin/event_detail_live.ex`
   - moduledoc?: true
@@ -1733,7 +1733,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: `mount/3`, `handle_event/3`, `render/1`
+  - public_funs: `mount/3`, `handle_params/3`, `handle_event/3`, `render/1`
   - uses: `EventSalesWeb`
 - `EventSalesWeb.Live.Admin.ImportsLive` - `lib/event_sales_web/live/admin/imports_live.ex`
   - moduledoc?: true

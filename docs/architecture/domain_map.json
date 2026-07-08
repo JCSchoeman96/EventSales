@@ -1936,6 +1936,10 @@
           },
           {
             "arity": 3,
+            "name": "handle_params"
+          },
+          {
+            "arity": 3,
             "name": "handle_event"
           },
           {
@@ -1991,6 +1995,10 @@
           {
             "arity": 3,
             "name": "mount"
+          },
+          {
+            "arity": 3,
+            "name": "handle_params"
           },
           {
             "arity": 3,
