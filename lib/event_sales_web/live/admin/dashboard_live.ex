@@ -27,7 +27,20 @@ defmodule EventSalesWeb.Live.Admin.DashboardLive do
      socket
      |> assign(:page_title, "Admin Dashboard")
      |> assign(:current_user_id, AdminSession.current_user_id(session))
+     |> assign(:dashboard_lifecycle, :current)
      |> assign(:subscribed_event_ids, MapSet.new())
+     |> load_dashboard()
+     |> assign_chart_data()
+     |> maybe_subscribe_to_event_topics()}
+  end
+
+  @impl true
+  def handle_params(params, _uri, socket) do
+    lifecycle = lifecycle_param(params["lifecycle"])
+
+    {:noreply,
+     socket
+     |> assign(:dashboard_lifecycle, lifecycle)
      |> load_dashboard()
      |> assign_chart_data()
      |> maybe_subscribe_to_event_topics()}
@@ -165,6 +178,20 @@ defmodule EventSalesWeb.Live.Admin.DashboardLive do
       <section class="card bg-base-100 border border-base-200 shadow-sm">
         <div class="card-body">
           <h2 class="card-title text-base">By Event</h2>
+          <div class="tabs tabs-boxed mb-4 w-fit">
+            <.link
+              patch={~p"/admin/dashboard?lifecycle=current"}
+              class={["tab", @dashboard_lifecycle == :current && "tab-active"]}
+            >
+              Current
+            </.link>
+            <.link
+              patch={~p"/admin/dashboard?lifecycle=past"}
+              class={["tab", @dashboard_lifecycle == :past && "tab-active"]}
+            >
+              Past
+            </.link>
+          </div>
           <div class="overflow-x-auto">
             <table class="table table-zebra table-sm">
               <thead>
@@ -177,7 +204,12 @@ defmodule EventSalesWeb.Live.Admin.DashboardLive do
               </thead>
               <tbody>
                 <tr :for={event <- @dashboard.events}>
-                  <td class="font-medium">{event.event_name}</td>
+                  <td class="font-medium">
+                    {event.event_name}
+                    <div :if={event.venue_name} class="text-xs font-normal text-base-content/70">
+                      {event.venue_name}
+                    </div>
+                  </td>
                   <td>{event.total_sold}</td>
                   <td>{format_money(event.total_revenue)}</td>
                   <td>{event.today_sold}</td>
@@ -231,7 +263,7 @@ defmodule EventSalesWeb.Live.Admin.DashboardLive do
   end
 
   defp load_dashboard(socket) do
-    case AdminDashboard.snapshot() do
+    case AdminDashboard.snapshot(lifecycle: socket.assigns.dashboard_lifecycle) do
       {:ok, dashboard} ->
         assign(socket, dashboard: dashboard, load_error: nil)
 
@@ -325,4 +357,7 @@ defmodule EventSalesWeb.Live.Admin.DashboardLive do
 
   defp format_money(%Decimal{} = value), do: Decimal.to_string(value, :normal)
   defp format_money(value), do: to_string(value)
+
+  defp lifecycle_param("past"), do: :past
+  defp lifecycle_param(_value), do: :current
 end

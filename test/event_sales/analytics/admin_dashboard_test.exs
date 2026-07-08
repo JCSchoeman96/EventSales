@@ -86,6 +86,36 @@ defmodule EventSales.Analytics.AdminDashboardTest do
     assert row.refreshed_at == ~U[2026-05-17 10:00:00Z]
   end
 
+  test "snapshot filters event lifecycle before event limit", %{source: source} do
+    now = ~U[2026-07-08 12:00:00Z]
+
+    for index <- 1..55 do
+      SalesHelpers.create_event!(source, %{
+        name: "Past Dashboard #{String.pad_leading(to_string(index), 2, "0")}",
+        slug: unique_slug("past-dashboard-#{index}"),
+        starts_at: ~U[2026-07-01 10:00:00Z],
+        ends_at: ~U[2026-07-01 12:00:00Z]
+      })
+    end
+
+    future =
+      SalesHelpers.create_event!(source, %{
+        name: "Future Dashboard",
+        slug: unique_slug("future-dashboard"),
+        starts_at: ~U[2026-07-09 10:00:00Z],
+        ends_at: ~U[2026-07-09 12:00:00Z],
+        venue_name: "Dashboard Venue"
+      })
+
+    assert {:ok, current} = AdminDashboard.snapshot(lifecycle: :current, now: now)
+    assert Enum.any?(current.events, &(&1.event_id == future.id))
+    refute Enum.any?(current.events, &String.starts_with?(&1.event_name, "Past Dashboard"))
+    assert Enum.find(current.events, &(&1.event_id == future.id)).venue_name == "Dashboard Venue"
+
+    assert {:ok, past} = AdminDashboard.snapshot(lifecycle: :past, now: now)
+    assert Enum.all?(past.events, &String.starts_with?(&1.event_name, "Past Dashboard"))
+  end
+
   test "event_row falls back to zero summary for known event without hot or snapshot data", %{
     event: event
   } do

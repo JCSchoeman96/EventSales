@@ -152,6 +152,53 @@ defmodule EventSalesWeb.Live.Admin.DashboardLiveTest do
     refute dashboard_dump =~ "payment_gateway_transaction_id"
   end
 
+  test "dashboard by event table switches between current and past with venue display", %{
+    conn: conn
+  } do
+    admin = create_user!("dashboard-lifecycle@example.com")
+    create_global_role!(admin, :admin)
+
+    source = SalesHelpers.create_source_system!()
+
+    current =
+      SalesHelpers.create_event!(source, %{
+        name: "Dashboard Current Event",
+        slug: unique_slug("dash-current"),
+        starts_at: DateTime.add(DateTime.utc_now(), -1, :hour),
+        ends_at: DateTime.add(DateTime.utc_now(), 1, :hour),
+        venue_name: "Dashboard Hall"
+      })
+
+    past =
+      SalesHelpers.create_event!(source, %{
+        name: "Dashboard Past Event",
+        slug: unique_slug("dash-past"),
+        starts_at: ~U[2026-01-01 10:00:00Z],
+        ends_at: ~U[2026-01-01 12:00:00Z],
+        venue_name: "Past Hall"
+      })
+
+    DashboardCache.put_event_summary(current.id, summary(%{total_sold: 1}))
+    DashboardCache.put_event_summary(past.id, summary(%{total_sold: 2}))
+
+    {:ok, view, html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/dashboard")
+
+    assert html =~ "Current"
+    assert html =~ "Past"
+    assert html =~ current.name
+    assert html =~ "Dashboard Hall"
+    refute html =~ past.name
+
+    html = render_patch(view, "/admin/dashboard?lifecycle=past")
+
+    assert html =~ past.name
+    assert html =~ "Past Hall"
+    refute html =~ current.name
+  end
+
   test "manual refresh requests hot-state rebuild and rate limits by user", %{conn: conn} do
     first_admin = create_user!("dashboard-refresh-1@example.com")
     second_admin = create_user!("dashboard-refresh-2@example.com")
