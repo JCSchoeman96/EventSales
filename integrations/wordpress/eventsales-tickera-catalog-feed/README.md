@@ -4,6 +4,10 @@ WordPress plugin artifact for VS-26C. It exposes a sanitized Tickera/WooCommerce
 
 This plugin does not send order, customer, payment, webhook, ticket delivery, QR, token, or raw provider payload data.
 
+The plugin emits schema version `2026-07-08.v1`. EventSales temporarily accepts
+the previous `2026-07-05.v1` schema during rollout and treats missing event
+metadata as empty until the upgraded plugin is active.
+
 ## Endpoint
 
 ```text
