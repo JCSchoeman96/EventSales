@@ -8,7 +8,12 @@ defmodule EventSales.TestSupport.TickeraCatalogFixtures do
     "event_title" => "Vroue wat Glo-retreat - PTA",
     "event_slug" => "vroue-wat-glo-retreat-pta",
     "event_status" => "publish",
-    "event_source_updated_at" => "2026-06-01T10:00:00Z"
+    "event_source_updated_at" => "2026-06-01T10:00:00Z",
+    "event_start_at" => "2026-08-01T16:00:00Z",
+    "event_end_at" => "2026-08-01T18:00:00Z",
+    "event_location" => "Pretoria",
+    "booking_fee_type" => "fixed",
+    "booking_fee_value" => "25.00"
   }
 
   @vwg_row Map.merge(@vwg_event, %{

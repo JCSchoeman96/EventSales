@@ -28,6 +28,9 @@ defmodule EventSales.Catalog.Resources.Event do
         :slug,
         :starts_at,
         :ends_at,
+        :venue_name,
+        :booking_fee_type,
+        :booking_fee_value,
         :capacity,
         :status,
         :external_event_id,
@@ -46,6 +49,9 @@ defmodule EventSales.Catalog.Resources.Event do
         :slug,
         :starts_at,
         :ends_at,
+        :venue_name,
+        :booking_fee_type,
+        :booking_fee_value,
         :capacity,
         :status,
         :external_event_id,
@@ -84,6 +90,19 @@ defmodule EventSales.Catalog.Resources.Event do
     end
 
     attribute :ends_at, :utc_datetime_usec do
+      public? true
+    end
+
+    attribute :venue_name, :string do
+      public? true
+    end
+
+    attribute :booking_fee_type, :atom do
+      constraints one_of: [:fixed, :percentage]
+      public? true
+    end
+
+    attribute :booking_fee_value, :decimal do
       public? true
     end
 

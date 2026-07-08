@@ -12,11 +12,12 @@ defmodule EventSales.Catalog.TickeraCatalog.Normalizer do
   def normalize(%DiscoveryResult{} = result) do
     events = Enum.map(result.events, &string_key_map/1)
     rows = Enum.map(result.catalog_rows, &string_key_map/1)
+    event_metadata = event_metadata_by_id(events)
 
     normalized_rows =
       rows
       |> Enum.filter(&published_row?/1)
-      |> Enum.map(&to_catalog_row/1)
+      |> Enum.map(&to_catalog_row(&1, event_metadata))
       |> dedupe_rows()
       |> drop_parent_rows_when_variations_exist()
 
@@ -42,8 +43,9 @@ defmodule EventSales.Catalog.TickeraCatalog.Normalizer do
   defp variation_published?(%{"woo_variation_id" => value}) when is_nil(value), do: true
   defp variation_published?(row), do: row["variation_status"] in [nil, "", @published]
 
-  defp to_catalog_row(row) do
+  defp to_catalog_row(row, event_metadata) do
     variation_id = int(row["woo_variation_id"])
+    metadata = Map.get(event_metadata, int(row["tickera_event_id"]), %{})
 
     %CatalogRow{
       tickera_event_id: int(row["tickera_event_id"]),
@@ -51,6 +53,11 @@ defmodule EventSales.Catalog.TickeraCatalog.Normalizer do
       event_slug: clean(row["event_slug"]),
       event_status: clean(row["event_status"]),
       event_source_updated_at: parse_datetime(row["event_source_updated_at"]),
+      starts_at: parse_datetime(metadata["event_start_at"]),
+      ends_at: parse_datetime(metadata["event_end_at"]),
+      venue_name: source_display_text(metadata["event_location"]),
+      booking_fee_type: booking_fee_type(metadata["booking_fee_type"]),
+      booking_fee_value: decimal(metadata["booking_fee_value"]),
       woo_product_id: int(row["woo_product_id"]),
       product_title: source_display_text(row["product_title"]),
       product_slug: clean(row["product_slug"]),
@@ -67,6 +74,12 @@ defmodule EventSales.Catalog.TickeraCatalog.Normalizer do
       variation_status: clean(row["variation_status"]),
       variation_source_updated_at: parse_datetime(row["variation_source_updated_at"])
     }
+  end
+
+  defp event_metadata_by_id(events) do
+    Map.new(events, fn event ->
+      {int(event["tickera_event_id"]), event}
+    end)
   end
 
   defp dedupe_rows(rows) do
@@ -351,6 +364,31 @@ defmodule EventSales.Catalog.TickeraCatalog.Normalizer do
   end
 
   defp int(_value), do: nil
+
+  defp decimal(nil), do: nil
+  defp decimal(""), do: nil
+  defp decimal(%Decimal{} = value), do: value
+
+  defp decimal(value) when is_binary(value) do
+    case Decimal.parse(String.trim(value)) do
+      {%Decimal{} = parsed, ""} -> parsed
+      _other -> nil
+    end
+  end
+
+  defp decimal(_value), do: nil
+
+  defp booking_fee_type(value) when is_atom(value) and value in [:fixed, :percentage], do: value
+
+  defp booking_fee_type(value) when is_binary(value) do
+    case value |> String.trim() |> String.downcase() do
+      "fixed" -> :fixed
+      "percentage" -> :percentage
+      _other -> nil
+    end
+  end
+
+  defp booking_fee_type(_value), do: nil
 
   defp parse_datetime(nil), do: nil
   defp parse_datetime(%DateTime{} = datetime), do: datetime

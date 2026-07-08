@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('EVENTSALES_TICKERA_CATALOG_SCHEMA_VERSION')) {
-    define('EVENTSALES_TICKERA_CATALOG_SCHEMA_VERSION', '2026-07-05.v1');
+    define('EVENTSALES_TICKERA_CATALOG_SCHEMA_VERSION', '2026-07-08.v1');
 }
 
 if (!defined('EVENTSALES_TICKERA_CATALOG_NAMESPACE')) {
@@ -57,6 +57,14 @@ final class EventSales_Tickera_Catalog_Feed
         '_subscription_sign_up_fee',
         '_wc_subscription_period',
         '_wc_subscription_length',
+    ];
+
+    private const ALLOWED_EVENT_META_KEYS = [
+        'booking_fee_type',
+        'booking_fee_value',
+        'event_date_time',
+        'event_end_date_time',
+        'event_location',
     ];
 
     public static function register(): void
@@ -516,7 +524,7 @@ final class EventSales_Tickera_Catalog_Feed
         $postmeta = $wpdb->postmeta;
         $targeted = $params['product_id'] !== null || $params['variation_id'] !== null || $params['event_id'] !== null || $params['include_private'];
         $where = ["ev.post_type = 'tc_events'"];
-        $values = [];
+        $values = self::ALLOWED_EVENT_META_KEYS;
 
         if (!$targeted) {
             $where[] = "ev.post_status = 'publish'";
@@ -555,8 +563,16 @@ final class EventSales_Tickera_Catalog_Feed
                 ev.post_name AS event_slug,
                 ev.post_status AS event_status,
                 ev.post_modified_gmt AS event_source_updated_at,
+                MAX(CASE WHEN evm.meta_key = 'event_date_time' THEN evm.meta_value END) AS event_start_at,
+                MAX(CASE WHEN evm.meta_key = 'event_end_date_time' THEN evm.meta_value END) AS event_end_at,
+                MAX(CASE WHEN evm.meta_key = 'event_location' THEN evm.meta_value END) AS event_location,
+                MAX(CASE WHEN evm.meta_key = 'booking_fee_type' THEN evm.meta_value END) AS booking_fee_type,
+                MAX(CASE WHEN evm.meta_key = 'booking_fee_value' THEN evm.meta_value END) AS booking_fee_value,
                 COUNT(DISTINCT CASE WHEN {$linked_product_count_condition} THEN p.ID END) AS linked_ticket_products
             FROM {$posts} ev
+            LEFT JOIN {$postmeta} evm
+                ON evm.post_id = ev.ID
+                AND evm.meta_key IN (" . $this->sql_placeholders(count(self::ALLOWED_EVENT_META_KEYS)) . ")
             LEFT JOIN {$postmeta} event_meta
                 ON event_meta.meta_key = '_event_name'
                 AND CAST(event_meta.meta_value AS UNSIGNED) = ev.ID
@@ -592,6 +608,11 @@ final class EventSales_Tickera_Catalog_Feed
                 'event_slug' => $this->nullable_string($row['event_slug'] ?? null),
                 'event_status' => $this->nullable_string($row['event_status'] ?? null),
                 'event_source_updated_at' => $this->sql_datetime_to_iso8601($row['event_source_updated_at'] ?? null),
+                'event_start_at' => $this->event_datetime_to_iso8601($row['event_start_at'] ?? null),
+                'event_end_at' => $this->event_datetime_to_iso8601($row['event_end_at'] ?? null),
+                'event_location' => $this->nullable_string($row['event_location'] ?? null),
+                'booking_fee_type' => $this->normalized_booking_fee_type($row['booking_fee_type'] ?? null),
+                'booking_fee_value' => $this->nullable_string($row['booking_fee_value'] ?? null),
                 'linked_ticket_products' => $this->nullable_int($row['linked_ticket_products'] ?? 0) ?? 0,
             ];
         }, $rows);
@@ -760,6 +781,40 @@ final class EventSales_Tickera_Catalog_Feed
         }
 
         return $datetime->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\TH:i:s\Z');
+    }
+
+    private function event_datetime_to_iso8601($value): ?string
+    {
+        $clean = $this->nullable_string($value);
+        if ($clean === null) {
+            return null;
+        }
+
+        $timezone = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('UTC');
+
+        try {
+            $datetime = new DateTimeImmutable($clean, $timezone);
+        } catch (Exception $error) {
+            return null;
+        }
+
+        return $datetime->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\TH:i:s\Z');
+    }
+
+    private function normalized_booking_fee_type($value): ?string
+    {
+        $clean = $this->nullable_string($value);
+        if ($clean === null) {
+            return null;
+        }
+
+        $normalized = strtolower($clean);
+
+        if (in_array($normalized, ['fixed', 'percentage'], true)) {
+            return $normalized;
+        }
+
+        return null;
     }
 
     private function nullable_int($value): ?int

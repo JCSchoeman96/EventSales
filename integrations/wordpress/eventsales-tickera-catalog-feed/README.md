@@ -4,6 +4,10 @@ WordPress plugin artifact for VS-26C. It exposes a sanitized Tickera/WooCommerce
 
 This plugin does not send order, customer, payment, webhook, ticket delivery, QR, token, or raw provider payload data.
 
+The plugin emits schema version `2026-07-08.v1`. EventSales temporarily accepts
+the previous `2026-07-05.v1` schema during rollout and treats missing event
+metadata as empty until the upgraded plugin is active.
+
 ## Endpoint
 
 ```text
@@ -149,7 +153,7 @@ Unauthorized response:
 
 ```json
 {
-  "schema_version": "2026-07-05.v1",
+  "schema_version": "2026-07-08.v1",
   "source": "wordpress_tickera",
   "source_snapshot_at": "2026-07-05T10:00:00Z",
   "generated_at": "2026-07-05T10:00:00Z",
@@ -182,6 +186,18 @@ review_reasons
 ## Pagination Note
 
 For full-feed pagination, the future VS-26D EventSales adapter must fetch all pages and aggregate `events` and `catalog_rows` before passing them to the EventSales catalog planner/normalizer. Page-at-a-time normalization can create false `published_event_without_ticket_products` findings.
+
+`events` also includes allowlisted Tickera event metadata:
+
+```text
+event_start_at
+event_end_at
+event_location
+booking_fee_type
+booking_fee_value
+```
+
+These fields are sanitized event metadata only. Booking fee fields must not be used for checkout, revenue math, tax/VAT treatment, or reconciliation in this feed contract.
 
 ## Cache
 

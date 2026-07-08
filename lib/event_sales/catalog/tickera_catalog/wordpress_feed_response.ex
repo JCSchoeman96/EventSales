@@ -3,7 +3,9 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponse do
   Validates and aggregates VS-26C WordPress Tickera catalog feed pages.
   """
 
-  @schema_version "2026-07-05.v1"
+  @schema_version "2026-07-08.v1"
+  @legacy_schema_version "2026-07-05.v1"
+  @supported_schema_versions [@schema_version, @legacy_schema_version]
   @source "wordpress_tickera"
 
   @type t :: %__MODULE__{
@@ -24,7 +26,7 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponse do
 
   @spec parse_page(term()) :: {:ok, t()} | {:error, :invalid_feed_response}
   def parse_page(%{} = decoded) do
-    with true <- decoded["schema_version"] == @schema_version,
+    with true <- decoded["schema_version"] in @supported_schema_versions,
          true <- decoded["source"] == @source,
          events when is_list(events) <- decoded["events"],
          rows when is_list(rows) <- decoded["catalog_rows"],
