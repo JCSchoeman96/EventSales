@@ -55,6 +55,7 @@
     "lib/event_sales/catalog/changes/normalize_base_url.ex",
     "lib/event_sales/catalog/changes/validate_event_dates.ex",
     "lib/event_sales/catalog/changes/validate_ticket_type_event.ex",
+    "lib/event_sales/catalog/event_lifecycle.ex",
     "lib/event_sales/catalog/manual_mapping_creator.ex",
     "lib/event_sales/catalog/mapping_resolver.ex",
     "lib/event_sales/catalog/mapping_side_effects.ex",
@@ -1268,6 +1269,29 @@
       "uses": [
         "Ash.Resource.Change"
       ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.EventLifecycle",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/event_lifecycle.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "classify"
+        },
+        {
+          "arity": 2,
+          "name": "current_bucket?"
+        },
+        {
+          "arity": 2,
+          "name": "past?"
+        }
+      ],
+      "specs?": true,
+      "uses": []
     },
     {
       "docs_count": 0,

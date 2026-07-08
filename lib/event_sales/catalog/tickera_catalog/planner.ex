@@ -6,6 +6,7 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
   require Ash.Query
 
   alias EventSales.Catalog
+  alias EventSales.Catalog.EventLifecycle
   alias EventSales.Catalog.Resources.{Event, ProductMapping, TicketType}
   alias EventSales.Catalog.TickeraCatalog.{CatalogRow, DiscoveryResult, Finding, Normalizer, Plan}
 
@@ -82,7 +83,12 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
           external_event_id: row.tickera_event_id,
           external_event_kind: :tickera_event,
           source_status: row.event_status,
-          source_updated_at: row.event_source_updated_at
+          source_updated_at: row.event_source_updated_at,
+          starts_at: row.starts_at,
+          ends_at: row.ends_at,
+          venue_name: row.venue_name,
+          booking_fee_type: row.booking_fee_type,
+          booking_fee_value: row.booking_fee_value
         }
 
         ticket_change = %{
@@ -115,7 +121,13 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
          |> touch_product(row)}
 
       mapping.event.external_event_id == row.tickera_event_id ->
-        {:ok, acc |> touch_event(mapping.event_id) |> touch_product(row)}
+        acc =
+          acc
+          |> maybe_add_event_metadata_update(mapping.event, row, nil)
+          |> touch_event(mapping.event_id)
+          |> touch_product(row)
+
+        {:ok, acc}
 
       true ->
         {:ok,
@@ -168,12 +180,16 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
     end
   end
 
-  defp event_change(_source_system_id, _row, event_ref, %Event{} = event) do
-    %{
-      action: :reuse,
-      ref: event_ref,
-      event_id: event.id
-    }
+  defp event_change(_source_system_id, row, event_ref, %Event{} = event) do
+    if event_metadata_changed?(event, row) do
+      event_metadata_change(event, row, event_ref)
+    else
+      %{
+        action: :reuse,
+        ref: event_ref,
+        event_id: event.id
+      }
+    end
   end
 
   defp event_change(source_system_id, row, event_ref, nil) do
@@ -187,8 +203,46 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
       external_event_id: row.tickera_event_id,
       external_event_kind: :tickera_event,
       source_status: row.event_status,
-      source_updated_at: row.event_source_updated_at
+      source_updated_at: row.event_source_updated_at,
+      starts_at: row.starts_at,
+      ends_at: row.ends_at,
+      venue_name: row.venue_name,
+      booking_fee_type: row.booking_fee_type,
+      booking_fee_value: row.booking_fee_value
     }
+  end
+
+  defp maybe_add_event_metadata_update(acc, %Event{} = event, row, event_ref) do
+    if event_metadata_changed?(event, row) do
+      add_event_change(acc, event_metadata_change(event, row, event_ref))
+    else
+      acc
+    end
+  end
+
+  defp event_metadata_change(%Event{} = event, row, event_ref) do
+    %{
+      action: :update_metadata,
+      ref: event_ref,
+      event_id: event.id,
+      source_status: row.event_status,
+      source_updated_at: row.event_source_updated_at,
+      starts_at: row.starts_at,
+      ends_at: row.ends_at,
+      venue_name: row.venue_name,
+      booking_fee_type: row.booking_fee_type,
+      booking_fee_value: row.booking_fee_value
+    }
+  end
+
+  defp event_metadata_changed?(%Event{} = event, row) do
+    event.source_status != row.event_status or
+      compare_datetime(event.source_updated_at, row.event_source_updated_at) or
+      compare_datetime(event.starts_at, row.starts_at) or
+      compare_datetime(event.ends_at, row.ends_at) or
+      event.venue_name != row.venue_name or
+      event.booking_fee_type != row.booking_fee_type or
+      !decimal_equal?(event.booking_fee_value, row.booking_fee_value)
   end
 
   defp ticket_change(_row, _event_ref, ticket_ref, %TicketType{} = ticket_type) do
@@ -322,9 +376,35 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
       tickera_event_id: Keyword.get(opts, :tickera_event_id) || (row && row.tickera_event_id),
       woo_product_id: Keyword.get(opts, :woo_product_id) || (row && row.woo_product_id),
       woo_variation_id: Keyword.get(opts, :woo_variation_id) || (row && row.woo_variation_id),
-      metadata: %{}
+      metadata: finding_metadata(row)
     }
   end
+
+  defp finding_metadata(nil), do: %{}
+
+  defp finding_metadata(row) do
+    case EventLifecycle.classify(row) do
+      :past ->
+        %{
+          "event_lifecycle" => "past",
+          "review_context" => "past_event_with_catalog_issue"
+        }
+
+      lifecycle ->
+        %{"event_lifecycle" => Atom.to_string(lifecycle)}
+    end
+  end
+
+  defp compare_datetime(nil, nil), do: false
+
+  defp compare_datetime(%DateTime{} = left, %DateTime{} = right),
+    do: DateTime.compare(left, right) != :eq
+
+  defp compare_datetime(left, right), do: left != right
+
+  defp decimal_equal?(nil, nil), do: true
+  defp decimal_equal?(%Decimal{} = left, %Decimal{} = right), do: Decimal.equal?(left, right)
+  defp decimal_equal?(left, right), do: left == right
 
   defp finding_snapshot(%Finding{} = finding), do: Map.from_struct(finding)
 
@@ -363,6 +443,7 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
   defp unique_append(values, value), do: if(value in values, do: values, else: values ++ [value])
 
   defp json_safe(nil), do: nil
+  defp json_safe(%Decimal{} = decimal), do: Decimal.to_string(decimal, :normal)
   defp json_safe(%DateTime{} = datetime), do: DateTime.to_iso8601(datetime)
 
   defp json_safe(%{} = map),

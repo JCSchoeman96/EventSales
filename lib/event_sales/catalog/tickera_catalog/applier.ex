@@ -92,19 +92,34 @@ defmodule EventSales.Catalog.TickeraCatalog.Applier do
         action when action in [:reuse, "reuse"] ->
           Map.put(refs, {:event_ref, value(change, "ref")}, value(change, "event_id"))
 
+        action when action in [:update_metadata, "update_metadata"] ->
+          event = Ash.get!(Event, value(change, "event_id"), domain: Catalog)
+
+          {_event, notifications} =
+            Ash.update!(
+              event,
+              event_update_attrs(change),
+              action: :update,
+              domain: Catalog,
+              context: %{warn_on_transaction_hooks?: false},
+              return_notifications?: true
+            )
+
+          refs
+          |> maybe_put_event_ref(change)
+          |> append_notifications(notifications)
+
         action when action in [:adopt_existing, "adopt_existing"] ->
           event = Ash.get!(Event, value(change, "event_id"), domain: Catalog)
 
           {_event, notifications} =
             Ash.update!(
               event,
-              %{
+              event_update_attrs(change)
+              |> Map.merge(%{
                 external_event_id: value(change, "external_event_id"),
-                external_event_kind: atom(value(change, "external_event_kind")),
-                source_status: value(change, "source_status"),
-                source_updated_at: parse_datetime(value(change, "source_updated_at")),
-                last_synced_at: DateTime.utc_now()
-              },
+                external_event_kind: atom(value(change, "external_event_kind"))
+              }),
               action: :update,
               domain: Catalog,
               context: %{warn_on_transaction_hooks?: false},
@@ -123,11 +138,9 @@ defmodule EventSales.Catalog.TickeraCatalog.Applier do
                 slug: value(change, "slug"),
                 status: :active,
                 external_event_id: value(change, "external_event_id"),
-                external_event_kind: :tickera_event,
-                source_status: value(change, "source_status"),
-                source_updated_at: parse_datetime(value(change, "source_updated_at")),
-                last_synced_at: DateTime.utc_now()
-              },
+                external_event_kind: :tickera_event
+              }
+              |> Map.merge(event_update_attrs(change)),
               action: :create,
               domain: Catalog,
               context: %{warn_on_transaction_hooks?: false},
@@ -260,6 +273,26 @@ defmodule EventSales.Catalog.TickeraCatalog.Applier do
     Map.update(refs, :notifications, notifications, &(&1 ++ notifications))
   end
 
+  defp maybe_put_event_ref(refs, change) do
+    case value(change, "ref") do
+      nil -> refs
+      ref -> Map.put(refs, {:event_ref, ref}, value(change, "event_id"))
+    end
+  end
+
+  defp event_update_attrs(change) do
+    %{
+      source_status: value(change, "source_status"),
+      source_updated_at: parse_datetime(value(change, "source_updated_at")),
+      starts_at: parse_datetime(value(change, "starts_at")),
+      ends_at: parse_datetime(value(change, "ends_at")),
+      venue_name: value(change, "venue_name"),
+      booking_fee_type: atom(value(change, "booking_fee_type")),
+      booking_fee_value: decimal(value(change, "booking_fee_value")),
+      last_synced_at: DateTime.utc_now()
+    }
+  end
+
   defp after_apply(source_system_id, touched) do
     Enum.each(touched.event_ids, fn event_id ->
       DashboardCache.invalidate_event(event_id, :tickera_catalog_sync_applied)
@@ -309,4 +342,16 @@ defmodule EventSales.Catalog.TickeraCatalog.Applier do
   end
 
   defp parse_datetime(value), do: value
+
+  defp decimal(nil), do: nil
+  defp decimal(%Decimal{} = value), do: value
+
+  defp decimal(value) when is_binary(value) do
+    case Decimal.parse(String.trim(value)) do
+      {%Decimal{} = parsed, ""} -> parsed
+      _other -> nil
+    end
+  end
+
+  defp decimal(value), do: value
 end
