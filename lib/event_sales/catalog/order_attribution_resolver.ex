@@ -89,6 +89,18 @@ defmodule EventSales.Catalog.OrderAttributionResolver do
     end
   end
 
+  defp product_mapping(source_system_id, woo_product_id, nil) do
+    ProductMapping
+    |> Ash.Query.filter(
+      source_system_id == ^source_system_id and
+        woo_product_id == ^woo_product_id and
+        is_nil(woo_variation_id) and
+        active == true
+    )
+    |> Ash.Query.limit(1)
+    |> Ash.read_one(domain: Catalog)
+  end
+
   defp product_mapping(source_system_id, woo_product_id, woo_variation_id) do
     ProductMapping
     |> Ash.Query.filter(

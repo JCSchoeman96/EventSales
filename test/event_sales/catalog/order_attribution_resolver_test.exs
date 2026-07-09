@@ -48,6 +48,34 @@ defmodule EventSales.Catalog.OrderAttributionResolverTest do
     assert result.attribution_status_reason == nil
   end
 
+  test "maps product-level ticket type and mapping when variation is nil", %{
+    source: source,
+    wr_event: wr_event
+  } do
+    wr_product_ticket =
+      SalesHelpers.create_ticket_type!(wr_event, %{
+        name: "WR Product General",
+        external_ticket_type_kind: :woo_product,
+        external_ticket_type_id: 109_132,
+        external_product_id: 109_132,
+        external_variation_id: nil
+      })
+
+    create_mapping!(source, wr_event, wr_product_ticket, %{
+      woo_product_id: 109_132,
+      woo_variation_id: nil
+    })
+
+    assert {:ok, result} =
+             OrderAttributionResolver.resolve(source.id, 109_120, 109_132, nil)
+
+    assert result.status == :mapped
+    assert result.event_id == wr_event.id
+    assert result.ticket_type_id == wr_product_ticket.id
+    assert result.source_tickera_event_id == 109_120
+    assert result.attribution_status_reason == nil
+  end
+
   test "stale active ProductMapping does not override event-first attribution", %{
     source: source,
     wr_event: wr_event,
