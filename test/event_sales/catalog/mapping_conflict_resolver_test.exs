@@ -242,6 +242,14 @@ defmodule EventSales.Catalog.MappingConflictResolverTest do
              )
   end
 
+  test "deactivate path uses a transaction-backed final guardrail recheck" do
+    source = File.read!("lib/event_sales/catalog/mapping_conflict_resolver.ex")
+
+    assert source =~ "deactivate_with_final_guardrails"
+    assert source =~ "Repo.transaction"
+    assert source =~ "Ash.Query.lock(query, :for_update)"
+  end
+
   test "deactivates only the stale mapping through ProductMapping deactivate with PaperTrail", %{
     admin: admin,
     source: source,

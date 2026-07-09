@@ -14,6 +14,7 @@ defmodule EventSales.Catalog.MappingConflictResolver do
   alias EventSales.Catalog.Resources.ProductMapping
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.TickeraCatalogSyncRun
+  alias EventSales.Repo
   alias EventSales.Sales
   alias EventSales.Sales.Resources.OrderItem
 
@@ -74,13 +75,8 @@ defmodule EventSales.Catalog.MappingConflictResolver do
          {:ok, finding} <- find_requested_conflict(snapshot, product_id, variation_id),
          %{} = conflict <- conflict_row(run, finding),
          :safe <- conflict.reason,
-         {:ok, mapping} <-
-           Ash.update(conflict.mapping, %{},
-             action: :deactivate,
-             domain: Catalog,
-             actor: Keyword.get(opts, :actor)
-           ) do
-      {:ok, %{mapping: mapping, conflict: public_conflict_row(conflict)}}
+         {:ok, result} <- deactivate_with_final_guardrails(conflict, Keyword.get(opts, :actor)) do
+      {:ok, result}
     else
       {:error, :invalid_integer} ->
         {:error, :conflict_not_found}
@@ -92,6 +88,43 @@ defmodule EventSales.Catalog.MappingConflictResolver do
       when reason in [:mapping_not_active, :manual_review_required, :order_history_exists] ->
         {:error, reason}
     end
+  end
+
+  defp deactivate_with_final_guardrails(conflict, actor) do
+    Repo.transaction(fn ->
+      conflict
+      |> final_conflict_row()
+      |> deactivate_final_conflict(actor)
+    end)
+    |> case do
+      {:ok, {mapping, conflict, notifications}} ->
+        Ash.Notifier.notify(notifications)
+        {:ok, %{mapping: mapping, conflict: conflict}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp deactivate_final_conflict(%{reason: :safe} = final_conflict, actor) do
+    case Ash.update(final_conflict.mapping, %{},
+           action: :deactivate,
+           domain: Catalog,
+           actor: actor,
+           context: %{warn_on_transaction_hooks?: false},
+           return_notifications?: true
+         ) do
+      {:ok, mapping, notifications} ->
+        {mapping, public_conflict_row(final_conflict), notifications}
+
+      {:error, reason} ->
+        Repo.rollback(reason)
+    end
+  end
+
+  defp deactivate_final_conflict(%{reason: reason}, _actor)
+       when reason in [:mapping_not_active, :manual_review_required, :order_history_exists] do
+    Repo.rollback(reason)
   end
 
   defp authorize_admin(opts) do
@@ -165,14 +198,47 @@ defmodule EventSales.Catalog.MappingConflictResolver do
     variation_id = value(finding, "woo_variation_id")
     feed_event_id = value(finding, "tickera_event_id")
 
-    {mapping, loaded_mapping} = active_mapping(run.source_system_id, product_id, variation_id)
+    conflict_row_from_identity(
+      run.id,
+      run.dry_run_hash,
+      run.source_system_id,
+      product_id,
+      variation_id,
+      feed_event_id
+    )
+  end
+
+  defp final_conflict_row(conflict) do
+    conflict_row_from_identity(
+      conflict.run_id,
+      conflict.dry_run_hash,
+      conflict.source_system_id,
+      conflict.woo_product_id,
+      conflict.woo_variation_id,
+      conflict.feed_tickera_event_id,
+      lock?: true
+    )
+  end
+
+  defp conflict_row_from_identity(
+         run_id,
+         dry_run_hash,
+         source_system_id,
+         product_id,
+         variation_id,
+         feed_event_id,
+         opts \\ []
+       ) do
+    {mapping, loaded_mapping} =
+      active_mapping(source_system_id, product_id, variation_id, opts)
+
     order_item_count = if loaded_mapping, do: order_item_count(loaded_mapping), else: 0
     reason = conflict_reason(loaded_mapping, feed_event_id, order_item_count)
 
     %{
-      run_id: run.id,
-      dry_run_hash: run.dry_run_hash,
-      source_system_id: run.source_system_id,
+      run_id: run_id,
+      dry_run_hash: dry_run_hash,
+      source_system_id: source_system_id,
       woo_product_id: product_id,
       woo_variation_id: variation_id,
       feed_tickera_event_id: feed_event_id,
@@ -201,28 +267,40 @@ defmodule EventSales.Catalog.MappingConflictResolver do
 
   defp conflict_reason(%ProductMapping{}, _feed_event_id, _order_item_count), do: :safe
 
-  defp active_mapping(_source_system_id, nil, _variation_id), do: {nil, nil}
+  defp active_mapping(source_system_id, product_id, variation_id, opts)
 
-  defp active_mapping(source_system_id, product_id, nil) do
+  defp active_mapping(_source_system_id, nil, _variation_id, _opts), do: {nil, nil}
+
+  defp active_mapping(source_system_id, product_id, nil, opts) do
     ProductMapping
     |> Ash.Query.filter(
       source_system_id == ^source_system_id and woo_product_id == ^product_id and
         is_nil(woo_variation_id) and active == true
     )
     |> Ash.Query.limit(1)
+    |> maybe_lock(opts)
     |> Ash.read_one(domain: Catalog)
     |> load_mapping()
   end
 
-  defp active_mapping(source_system_id, product_id, variation_id) do
+  defp active_mapping(source_system_id, product_id, variation_id, opts) do
     ProductMapping
     |> Ash.Query.filter(
       source_system_id == ^source_system_id and woo_product_id == ^product_id and
         woo_variation_id == ^variation_id and active == true
     )
     |> Ash.Query.limit(1)
+    |> maybe_lock(opts)
     |> Ash.read_one(domain: Catalog)
     |> load_mapping()
+  end
+
+  defp maybe_lock(query, opts) do
+    if Keyword.get(opts, :lock?, false) do
+      Ash.Query.lock(query, :for_update)
+    else
+      query
+    end
   end
 
   defp load_mapping({:ok, %ProductMapping{} = mapping}) do
