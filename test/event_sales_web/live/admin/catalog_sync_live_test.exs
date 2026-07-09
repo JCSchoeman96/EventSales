@@ -8,6 +8,8 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
 
   alias EventSales.Accounts
   alias EventSales.Accounts.Resources.{Role, User, UserRole}
+  alias EventSales.Catalog
+  alias EventSales.Catalog.Resources.ProductMapping
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.TickeraCatalogSyncRun
   alias EventSales.Ingestion.Workers.{ApplyTickeraCatalogWorker, DiscoverTickeraCatalogWorker}
@@ -509,6 +511,86 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
     assert has_element?(view, ~s(button[phx-click="queue_apply"][disabled]), "Apply")
   end
 
+  test "mapping conflict section renders safe stale mapping details and deactivates safe rows", %{
+    conn: conn,
+    admin: admin,
+    source: source
+  } do
+    %{mapping: mapping} = create_stale_mapping_conflict!(source, 109_165)
+    run = create_mapping_conflict_run!(source, "conflict-hash", 109_165)
+
+    {:ok, view, html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/catalog-sync")
+
+    assert html =~ "Mapping conflict resolution"
+    assert html =~ run.id
+    assert html =~ "109132"
+    assert html =~ "109165"
+    assert html =~ "109120"
+    assert html =~ "Lynette Beer LIVE - MP"
+    assert html =~ "108658"
+    assert html =~ "MP Ticket 109165"
+    assert html =~ mapping.id
+    assert html =~ "order_item_count"
+    assert html =~ "0"
+    assert html =~ "Deactivate stale mapping"
+
+    html =
+      render_click(view, "deactivate_stale_mapping", %{
+        "run_id" => run.id,
+        "dry_run_hash" => "conflict-hash",
+        "woo_product_id" => "109132",
+        "woo_variation_id" => "109165"
+      })
+
+    assert html =~ "Stale mapping deactivated. Rerun full-feed dry-run."
+    refute Ash.get!(ProductMapping, mapping.id, domain: Catalog).active
+  end
+
+  test "mapping conflict section hides actions for blocked guardrail states", %{
+    conn: conn,
+    admin: admin,
+    source: source
+  } do
+    history = create_stale_mapping_conflict!(source, 109_165)
+    create_order_item!(source, history.event, history.ticket, 109_165)
+    create_mapping_conflict_run!(source, "history-hash", 109_165)
+
+    inactive = create_stale_mapping_conflict!(source, 109_167)
+    Ash.update!(inactive.mapping, %{}, action: :deactivate, domain: Catalog, actor: admin)
+    create_mapping_conflict_run!(source, "inactive-hash", 109_167)
+
+    create_mapping_conflict_run!(source, "stale-hash", 109_169, %{
+      plan_snapshot: mapping_conflict_snapshot("different-hash", 109_169)
+    })
+
+    {:ok, view, html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/catalog-sync")
+
+    assert html =~ "order_history_exists"
+    assert html =~ "mapping_not_active"
+    assert html =~ "stale_preview"
+
+    refute has_element?(
+             view,
+             ~s(button[phx-click="deactivate_stale_mapping"][phx-value-woo_variation_id="109165"])
+           )
+
+    refute has_element?(
+             view,
+             ~s(button[phx-click="deactivate_stale_mapping"][phx-value-woo_variation_id="109167"])
+           )
+
+    refute has_element?(
+             view,
+             ~s(button[phx-click="deactivate_stale_mapping"][phx-value-woo_variation_id="109169"])
+           )
+  end
+
   test "CatalogSyncLive source stays inside approved boundaries" do
     source = File.read!("lib/event_sales_web/live/admin/catalog_sync_live.ex")
 
@@ -559,5 +641,98 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
       action: :create,
       domain: Accounts
     )
+  end
+
+  defp create_stale_mapping_conflict!(source, variation_id) do
+    event =
+      SalesHelpers.create_event!(source, %{
+        name: "Lynette Beer LIVE - MP",
+        slug: "lynette-beer-live-mp-#{variation_id}",
+        external_event_id: mapped_external_event_id(variation_id),
+        external_event_kind: :tickera_event
+      })
+
+    ticket = SalesHelpers.create_ticket_type!(event, %{name: "MP Ticket #{variation_id}"})
+
+    mapping =
+      Ash.create!(
+        ProductMapping,
+        %{
+          source_system_id: source.id,
+          event_id: event.id,
+          ticket_type_id: ticket.id,
+          woo_product_id: 109_132,
+          woo_variation_id: variation_id,
+          original_label: ticket.name,
+          current_label: ticket.name,
+          active: true
+        },
+        action: :create,
+        domain: Catalog
+      )
+
+    %{event: event, ticket: ticket, mapping: mapping}
+  end
+
+  defp mapped_external_event_id(109_165), do: 108_658
+  defp mapped_external_event_id(variation_id), do: 108_658 + variation_id
+
+  defp create_mapping_conflict_run!(source, hash, variation_id, attrs \\ %{}) do
+    defaults = %{
+      source_system_id: source.id,
+      scope: %{"kind" => "wordpress_feed", "mode" => "full"},
+      status: :dry_run_ready,
+      dry_run_hash: hash,
+      summary: %{"finding_count" => 1},
+      plan_snapshot: mapping_conflict_snapshot(hash, variation_id)
+    }
+
+    Ash.create!(TickeraCatalogSyncRun, Map.merge(defaults, attrs),
+      action: :create_dry_run,
+      domain: Ingestion
+    )
+  end
+
+  defp mapping_conflict_snapshot(hash, variation_id) do
+    %{
+      "dry_run_hash" => hash,
+      "event_changes" => [],
+      "ticket_type_changes" => [],
+      "product_mapping_changes" => [],
+      "findings" => [
+        %{
+          "severity" => "blocking",
+          "code" => "existing_mapping_conflict",
+          "message" => "Active ProductMapping points at a different catalog identity.",
+          "tickera_event_id" => 109_120,
+          "woo_product_id" => 109_132,
+          "woo_variation_id" => variation_id
+        }
+      ],
+      "touched_event_ids" => [],
+      "touched_product_keys" => [[109_132, variation_id]]
+    }
+  end
+
+  defp create_order_item!(source, event, ticket, variation_id) do
+    order = SalesHelpers.create_order_from_fixture!(:order_completed, source)
+
+    line = %{
+      "id" => System.unique_integer([:positive]),
+      "product_id" => 109_132,
+      "variation_id" => variation_id,
+      "name" => "Historical ticket",
+      "quantity" => 1,
+      "subtotal" => "100.00",
+      "total" => "100.00",
+      "discount_total" => "0.00"
+    }
+
+    SalesHelpers.create_order_item_from_line!(order, line, %{
+      event_id: event.id,
+      ticket_type_id: ticket.id,
+      mapping_status: :mapped,
+      item_kind: :ticket
+    })
   end
 end
