@@ -24,6 +24,37 @@ defmodule EventSales.Audit.Logger do
     reason
   )
 
+  @product_mapping_cutover_metadata_keys ~w(
+    run_id
+    dry_run_hash
+    source_system_id
+    woo_product_id
+    woo_variation_id
+    stale_mapped_event_external_id
+    feed_tickera_event_id
+    mapping_id
+    order_item_count
+    reason
+    pii_policy
+  )
+
+  @order_attribution_corrected_metadata_keys ~w(
+    source_system_id
+    woo_order_id
+    woo_product_id
+    woo_variation_id
+    quantity
+    order_item_id
+    from_event_external_id
+    to_event_external_id
+    from_event_id
+    to_event_id
+    from_ticket_type_id
+    to_ticket_type_id
+    reason
+    pii_policy
+  )
+
   @type attrs :: %{optional(atom()) => term()}
   @type result :: {:ok, AuditLog.t()} | {:error, term()}
 
@@ -50,6 +81,24 @@ defmodule EventSales.Audit.Logger do
     log(
       :manual_mapping_created,
       Map.update(attrs, :metadata, %{}, &allow_manual_mapping_metadata/1)
+    )
+  end
+
+  @doc "Writes a reviewed stale ProductMapping cutover audit event."
+  @spec product_mapping_cutover(attrs()) :: result()
+  def product_mapping_cutover(attrs) do
+    log(
+      :product_mapping_cutover,
+      Map.update(attrs, :metadata, %{}, &allow_product_mapping_cutover_metadata/1)
+    )
+  end
+
+  @doc "Writes a reviewed single order attribution correction audit event."
+  @spec order_attribution_corrected(attrs()) :: result()
+  def order_attribution_corrected(attrs) do
+    log(
+      :order_attribution_corrected,
+      Map.update(attrs, :metadata, %{}, &allow_order_attribution_corrected_metadata/1)
     )
   end
 
@@ -106,6 +155,22 @@ defmodule EventSales.Audit.Logger do
   end
 
   defp allow_manual_mapping_metadata(metadata), do: metadata
+
+  defp allow_product_mapping_cutover_metadata(metadata) when is_map(metadata) do
+    metadata
+    |> stringify_keys()
+    |> Map.take(@product_mapping_cutover_metadata_keys)
+  end
+
+  defp allow_product_mapping_cutover_metadata(metadata), do: metadata
+
+  defp allow_order_attribution_corrected_metadata(metadata) when is_map(metadata) do
+    metadata
+    |> stringify_keys()
+    |> Map.take(@order_attribution_corrected_metadata_keys)
+  end
+
+  defp allow_order_attribution_corrected_metadata(metadata), do: metadata
 
   defp stringify_keys(metadata) do
     Map.new(metadata, fn

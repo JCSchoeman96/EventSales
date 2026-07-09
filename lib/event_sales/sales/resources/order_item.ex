@@ -18,6 +18,15 @@ defmodule EventSales.Sales.Resources.OrderItem do
     :ignored
   ]
 
+  @attribution_status_reasons [
+    :invalid_source_tickera_event_id,
+    :source_event_identity_conflict,
+    :source_event_not_found,
+    :source_ticket_type_not_found,
+    :missing_product_mapping,
+    :order_event_mapping_conflict
+  ]
+
   @create_accept [
     :order_id,
     :event_id,
@@ -31,7 +40,9 @@ defmodule EventSales.Sales.Resources.OrderItem do
     :line_total,
     :discount_total,
     :item_kind,
-    :mapping_status
+    :mapping_status,
+    :source_tickera_event_id,
+    :attribution_status_reason
   ]
 
   postgres do
@@ -55,6 +66,15 @@ defmodule EventSales.Sales.Resources.OrderItem do
 
       index [:event_id, :mapping_status],
         name: "sales_order_items_event_mapping_status_idx"
+
+      index [:source_tickera_event_id, :woo_product_id, :woo_variation_id],
+        name: "sales_order_items_source_event_product_variation_idx"
+
+      index :attribution_status_reason,
+        name: "sales_order_items_attribution_status_reason_idx"
+
+      index [:mapping_status, :attribution_status_reason],
+        name: "sales_order_items_mapping_status_attribution_reason_idx"
     end
   end
 
@@ -75,7 +95,9 @@ defmodule EventSales.Sales.Resources.OrderItem do
         :quantity,
         :line_subtotal,
         :line_total,
-        :discount_total
+        :discount_total,
+        :source_tickera_event_id,
+        :attribution_status_reason
       ]
 
       validate compare(:quantity, greater_than: 0)
@@ -91,7 +113,9 @@ defmodule EventSales.Sales.Resources.OrderItem do
         :quantity,
         :line_subtotal,
         :line_total,
-        :discount_total
+        :discount_total,
+        :source_tickera_event_id,
+        :attribution_status_reason
       ]
 
       require_atomic? false
@@ -108,6 +132,40 @@ defmodule EventSales.Sales.Resources.OrderItem do
       validate present([:event_id, :ticket_type_id])
       change ValidateTicketTypeEvent
       change transition_state(:mapped)
+      change set_attribute(:item_kind, :ticket)
+    end
+
+    update :apply_event_first_mapping do
+      accept [
+        :event_id,
+        :ticket_type_id,
+        :source_tickera_event_id,
+        :attribution_status_reason
+      ]
+
+      require_atomic? false
+      validate present([:event_id, :ticket_type_id])
+      change ValidateTicketTypeEvent
+      change transition_state(:mapped)
+      change set_attribute(:item_kind, :ticket)
+    end
+
+    update :set_attribution_status_reason do
+      accept [:source_tickera_event_id, :attribution_status_reason]
+      require_atomic? false
+    end
+
+    update :correct_event_attribution do
+      accept [
+        :event_id,
+        :ticket_type_id,
+        :source_tickera_event_id,
+        :attribution_status_reason
+      ]
+
+      require_atomic? false
+      validate present([:event_id, :ticket_type_id])
+      change ValidateTicketTypeEvent
       change set_attribute(:item_kind, :ticket)
     end
 
@@ -188,6 +246,16 @@ defmodule EventSales.Sales.Resources.OrderItem do
       public? true
     end
 
+    attribute :source_tickera_event_id, :integer do
+      public? true
+      constraints min: 1
+    end
+
+    attribute :attribution_status_reason, :atom do
+      constraints one_of: @attribution_status_reasons
+      public? true
+    end
+
     create_timestamp :inserted_at
     update_timestamp :updated_at
   end
@@ -218,6 +286,11 @@ defmodule EventSales.Sales.Resources.OrderItem do
 
     transitions do
       transition :apply_mapping, from: [:pending_mapping_resolution, :unmapped], to: :mapped
+
+      transition :apply_event_first_mapping,
+        from: [:pending_mapping_resolution, :unmapped],
+        to: :mapped
+
       transition :mark_unmapped, from: :pending_mapping_resolution, to: :unmapped
       transition :mark_non_ticket, from: :pending_mapping_resolution, to: :non_ticket
       transition :mark_ignored, from: :pending_mapping_resolution, to: :ignored

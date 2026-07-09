@@ -52,6 +52,21 @@ defmodule EventSales.Sales.SalesStorageStatusStateMachinesTest do
     assert item.quantity == 2
   end
 
+  test "order item stores source event attribution metadata" do
+    source = SalesHelpers.create_source_system!()
+    order = SalesHelpers.create_order_from_fixture!(:order_completed, source)
+    line = hd(FixtureHelpers.decode_json_fixture!(:woocommerce, :order_completed)["line_items"])
+
+    item =
+      SalesHelpers.create_order_item_from_line!(order, line, %{
+        source_tickera_event_id: 109_120,
+        attribution_status_reason: :order_event_mapping_conflict
+      })
+
+    assert item.source_tickera_event_id == 109_120
+    assert item.attribution_status_reason == :order_event_mapping_conflict
+  end
+
   test "mixed-event orders support multiple event_ids on one order" do
     source = SalesHelpers.create_source_system!()
     %{order: order, items: items} = SalesHelpers.create_mixed_event_order!(source)
@@ -132,6 +147,84 @@ defmodule EventSales.Sales.SalesStorageStatusStateMachinesTest do
 
     reloaded = Ash.get!(OrderItem, item.id, domain: Sales)
     assert reloaded.mapping_status == :pending_mapping_resolution
+  end
+
+  test "event-first mapping action maps pending rows but not already mapped rows" do
+    source = SalesHelpers.create_source_system!()
+    order = SalesHelpers.create_order_from_fixture!(:order_completed, source)
+    line = hd(FixtureHelpers.decode_json_fixture!(:woocommerce, :order_completed)["line_items"])
+    event = SalesHelpers.create_event!(source, %{name: "WR", external_event_id: 109_120})
+    ticket = SalesHelpers.create_ticket_type!(event, %{name: "WR General"})
+
+    pending = SalesHelpers.create_order_item_from_line!(order, line)
+
+    assert {:ok, mapped} =
+             Ash.update(
+               pending,
+               %{
+                 event_id: event.id,
+                 ticket_type_id: ticket.id,
+                 source_tickera_event_id: 109_120,
+                 attribution_status_reason: :missing_product_mapping
+               },
+               action: :apply_event_first_mapping,
+               domain: Sales
+             )
+
+    assert mapped.mapping_status == :mapped
+    assert mapped.item_kind == :ticket
+    assert mapped.source_tickera_event_id == 109_120
+    assert mapped.attribution_status_reason == :missing_product_mapping
+
+    assert {:error, _reason} =
+             Ash.update(
+               mapped,
+               %{
+                 event_id: event.id,
+                 ticket_type_id: ticket.id,
+                 source_tickera_event_id: 109_120
+               },
+               action: :apply_event_first_mapping,
+               domain: Sales
+             )
+  end
+
+  test "correction action can reattribute an explicitly reviewed mapped row" do
+    source = SalesHelpers.create_source_system!()
+    order = SalesHelpers.create_order_from_fixture!(:order_completed, source)
+    line = hd(FixtureHelpers.decode_json_fixture!(:woocommerce, :order_completed)["line_items"])
+    old_event = SalesHelpers.create_event!(source, %{name: "MP", external_event_id: 108_658})
+    old_ticket = SalesHelpers.create_ticket_type!(old_event, %{name: "MP General"})
+    target_event = SalesHelpers.create_event!(source, %{name: "WR", external_event_id: 109_120})
+    target_ticket = SalesHelpers.create_ticket_type!(target_event, %{name: "WR General"})
+
+    mapped =
+      SalesHelpers.create_order_item_from_line!(order, line, %{
+        event_id: old_event.id,
+        ticket_type_id: old_ticket.id,
+        mapping_status: :mapped,
+        item_kind: :ticket,
+        source_tickera_event_id: 108_658
+      })
+
+    assert {:ok, corrected} =
+             Ash.update(
+               mapped,
+               %{
+                 event_id: target_event.id,
+                 ticket_type_id: target_ticket.id,
+                 source_tickera_event_id: 109_120,
+                 attribution_status_reason: nil
+               },
+               action: :correct_event_attribution,
+               domain: Sales
+             )
+
+    assert corrected.mapping_status == :mapped
+    assert corrected.event_id == target_event.id
+    assert corrected.ticket_type_id == target_ticket.id
+    assert corrected.source_tickera_event_id == 109_120
+    assert corrected.attribution_status_reason == nil
   end
 
   test "completed order status is stored" do

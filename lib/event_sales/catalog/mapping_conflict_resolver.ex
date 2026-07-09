@@ -10,6 +10,7 @@ defmodule EventSales.Catalog.MappingConflictResolver do
   require Ash.Query
 
   alias EventSales.Accounts.Policies
+  alias EventSales.Audit.Logger, as: AuditLogger
   alias EventSales.Catalog
   alias EventSales.Catalog.Resources.ProductMapping
   alias EventSales.Ingestion
@@ -26,6 +27,15 @@ defmodule EventSales.Catalog.MappingConflictResolver do
           | :manual_review_required
           | :order_history_exists
           | :forbidden
+
+  @type cutover_error ::
+          :forbidden
+          | :stale_preview
+          | :conflict_not_found
+          | :mapping_not_active
+          | :manual_review_required
+          | :confirmation_required
+          | :audit_failed
 
   @type conflict_row :: %{
           run_id: Ecto.UUID.t(),
@@ -90,11 +100,106 @@ defmodule EventSales.Catalog.MappingConflictResolver do
     end
   end
 
+  @spec cutover_stale_mapping(
+          Ecto.UUID.t(),
+          String.t(),
+          integer() | String.t(),
+          integer() | String.t() | nil,
+          integer() | String.t(),
+          integer() | String.t(),
+          String.t(),
+          keyword()
+        ) ::
+          {:ok, %{mapping: ProductMapping.t(), conflict: conflict_row()}}
+          | {:error, cutover_error()}
+  def cutover_stale_mapping(
+        run_id,
+        dry_run_hash,
+        woo_product_id,
+        woo_variation_id,
+        stale_mapped_event_external_id,
+        feed_tickera_event_id,
+        confirmation,
+        opts \\ []
+      ) do
+    actor = Keyword.get(opts, :actor)
+
+    with :ok <- authorize_admin(opts),
+         {:ok, product_id} <- cast_positive_integer(woo_product_id),
+         {:ok, variation_id} <- cast_optional_positive_integer(woo_variation_id),
+         {:ok, stale_event_id} <- cast_positive_integer(stale_mapped_event_external_id),
+         {:ok, feed_event_id} <- cast_positive_integer(feed_tickera_event_id),
+         :ok <-
+           validate_cutover_confirmation(
+             confirmation,
+             product_id,
+             variation_id,
+             stale_event_id,
+             feed_event_id
+           ),
+         {:ok, run, snapshot} <- load_exact_preview(run_id, dry_run_hash),
+         {:ok, finding} <- find_requested_conflict(snapshot, product_id, variation_id),
+         %{} = conflict <- conflict_row(run, finding),
+         :ok <- validate_cutover_conflict(conflict, stale_event_id, feed_event_id),
+         {:ok, result} <-
+           cutover_with_final_guardrails(
+             conflict,
+             stale_event_id,
+             feed_event_id,
+             actor
+           ) do
+      {:ok, result}
+    else
+      {:error, :invalid_integer} ->
+        {:error, :conflict_not_found}
+
+      {:error, reason} ->
+        {:error, reason}
+
+      reason when reason in [:mapping_not_active, :manual_review_required] ->
+        {:error, reason}
+    end
+  end
+
   defp deactivate_with_final_guardrails(conflict, actor) do
     Repo.transaction(fn ->
       conflict
       |> final_conflict_row()
       |> deactivate_final_conflict(actor)
+    end)
+    |> case do
+      {:ok, {mapping, conflict, notifications}} ->
+        Ash.Notifier.notify(notifications)
+        {:ok, %{mapping: mapping, conflict: conflict}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp cutover_with_final_guardrails(conflict, stale_event_id, feed_event_id, actor) do
+    Repo.transaction(fn ->
+      with {:ok, run, snapshot} <- load_exact_preview(conflict.run_id, conflict.dry_run_hash),
+           {:ok, finding} <-
+             find_requested_conflict(snapshot, conflict.woo_product_id, conflict.woo_variation_id),
+           %{} = refreshed_conflict <- conflict_row(run, finding),
+           :ok <- validate_cutover_conflict(refreshed_conflict, stale_event_id, feed_event_id),
+           %{} = final_conflict <- final_conflict_row(refreshed_conflict),
+           :ok <- validate_cutover_conflict(final_conflict, stale_event_id, feed_event_id),
+           {:ok, mapping, notifications} <- deactivate_for_cutover(final_conflict, actor),
+           {:ok, _audit_log} <-
+             audit_cutover(final_conflict, actor, stale_event_id, feed_event_id) do
+        {mapping, public_conflict_row(final_conflict), notifications}
+      else
+        {:error, :audit_failed} ->
+          Repo.rollback(:audit_failed)
+
+        {:error, reason} ->
+          Repo.rollback(reason)
+
+        reason when reason in [:mapping_not_active, :manual_review_required] ->
+          Repo.rollback(reason)
+      end
     end)
     |> case do
       {:ok, {mapping, conflict, notifications}} ->
@@ -125,6 +230,87 @@ defmodule EventSales.Catalog.MappingConflictResolver do
   defp deactivate_final_conflict(%{reason: reason}, _actor)
        when reason in [:mapping_not_active, :manual_review_required, :order_history_exists] do
     Repo.rollback(reason)
+  end
+
+  defp deactivate_for_cutover(%{mapping: %ProductMapping{} = mapping}, actor) do
+    Ash.update(mapping, %{},
+      action: :deactivate,
+      domain: Catalog,
+      actor: actor,
+      context: %{warn_on_transaction_hooks?: false},
+      return_notifications?: true
+    )
+  end
+
+  defp audit_cutover(conflict, actor, stale_event_id, feed_event_id) do
+    actor_user_id = if actor, do: actor.id
+
+    AuditLogger.product_mapping_cutover(%{
+      actor_type: :user,
+      actor_user_id: actor_user_id,
+      actor_role: :admin,
+      source: :admin,
+      subject_type: "product_mapping",
+      subject_id: conflict.mapping_id,
+      event_id: conflict.mapping.event_id,
+      ash_opts: [return_notifications?: true],
+      metadata: %{
+        run_id: conflict.run_id,
+        dry_run_hash: conflict.dry_run_hash,
+        source_system_id: conflict.source_system_id,
+        woo_product_id: conflict.woo_product_id,
+        woo_variation_id: conflict.woo_variation_id,
+        stale_mapped_event_external_id: stale_event_id,
+        feed_tickera_event_id: feed_event_id,
+        mapping_id: conflict.mapping_id,
+        order_item_count: conflict.order_item_count,
+        reason: "reviewed_cutover",
+        pii_policy: "safe_ids_only"
+      }
+    })
+    |> case do
+      {:ok, audit_log} -> {:ok, audit_log}
+      {:error, _reason} -> {:error, :audit_failed}
+    end
+  end
+
+  defp validate_cutover_confirmation(
+         confirmation,
+         product_id,
+         variation_id,
+         stale_event_id,
+         feed_event_id
+       ) do
+    expected =
+      "CUTOVER #{product_id}/#{variation_id || "none"} FROM #{stale_event_id} TO #{feed_event_id}"
+
+    if confirmation == expected do
+      :ok
+    else
+      {:error, :confirmation_required}
+    end
+  end
+
+  defp validate_cutover_conflict(conflict, stale_event_id, feed_event_id) do
+    cond do
+      conflict.reason == :mapping_not_active ->
+        :mapping_not_active
+
+      is_nil(conflict.mapping) ->
+        :mapping_not_active
+
+      conflict.feed_tickera_event_id != feed_event_id ->
+        {:error, :manual_review_required}
+
+      conflict.mapped_event_external_event_id != stale_event_id ->
+        {:error, :manual_review_required}
+
+      stale_event_id == feed_event_id ->
+        {:error, :manual_review_required}
+
+      true ->
+        :ok
+    end
   end
 
   defp authorize_admin(opts) do

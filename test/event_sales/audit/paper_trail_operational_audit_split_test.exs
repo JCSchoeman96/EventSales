@@ -103,6 +103,61 @@ defmodule EventSales.Audit.PaperTrailOperationalAuditSplitTest do
                }
              })
 
+    assert {:ok, cutover} =
+             AuditLogger.product_mapping_cutover(%{
+               actor_type: :user,
+               actor_user_id: user.id,
+               actor_role: :admin,
+               source: :admin,
+               subject_type: "product_mapping",
+               subject_id: "mapping-456",
+               event_id: @event_id,
+               metadata: %{
+                 run_id: "run-123",
+                 dry_run_hash: "hash-123",
+                 source_system_id: "source-123",
+                 woo_product_id: 109_132,
+                 woo_variation_id: 109_167,
+                 stale_mapped_event_external_id: 108_658,
+                 feed_tickera_event_id: 109_120,
+                 mapping_id: "mapping-456",
+                 order_item_count: 1,
+                 reason: "reviewed_cutover",
+                 pii_policy: "safe_ids_only",
+                 confirmation: "CUTOVER secret",
+                 customer_email: "private@example.test"
+               }
+             })
+
+    assert {:ok, correction} =
+             AuditLogger.order_attribution_corrected(%{
+               actor_type: :user,
+               actor_user_id: user.id,
+               actor_role: :admin,
+               source: :admin,
+               subject_type: "order_item",
+               subject_id: "item-123",
+               event_id: @event_id,
+               metadata: %{
+                 source_system_id: "source-123",
+                 woo_order_id: 113_834,
+                 woo_product_id: 109_132,
+                 woo_variation_id: 109_167,
+                 quantity: 5,
+                 order_item_id: "item-123",
+                 from_event_external_id: 108_658,
+                 to_event_external_id: 109_120,
+                 from_event_id: "event-old",
+                 to_event_id: "event-new",
+                 from_ticket_type_id: "ticket-old",
+                 to_ticket_type_id: "ticket-new",
+                 reason: "confirmed_single_order_correction",
+                 pii_policy: "safe_ids_only",
+                 raw_payload: %{"secret" => true},
+                 phone: "123"
+               }
+             })
+
     assert manual_sync.event_type == :manual_sync_requested
     assert manual_sync.metadata == %{"scope" => "event"}
     assert csv_apply.event_type == :csv_apply_requested
@@ -113,6 +168,16 @@ defmodule EventSales.Audit.PaperTrailOperationalAuditSplitTest do
     assert manual_mapping.metadata["woo_product_id"] == 104_324
     refute Map.has_key?(manual_mapping.metadata, "email")
     refute Map.has_key?(manual_mapping.metadata, "raw_payload")
+    assert cutover.event_type == :product_mapping_cutover
+    assert cutover.metadata["woo_product_id"] == 109_132
+    assert cutover.metadata["stale_mapped_event_external_id"] == 108_658
+    refute Map.has_key?(cutover.metadata, "confirmation")
+    refute Map.has_key?(cutover.metadata, "customer_email")
+    assert correction.event_type == :order_attribution_corrected
+    assert correction.metadata["woo_order_id"] == 113_834
+    assert correction.metadata["to_event_external_id"] == 109_120
+    refute Map.has_key?(correction.metadata, "raw_payload")
+    refute Map.has_key?(correction.metadata, "phone")
   end
 
   test "webhook operational logger APIs write audit logs" do
