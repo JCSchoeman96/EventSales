@@ -83,7 +83,9 @@ defmodule EventSales.Ingestion.Parsers.WoocommerceOrderParser do
          {:ok, line_subtotal} <- required_decimal(line, "subtotal", :line_subtotal),
          {:ok, line_total} <- required_decimal(line, "total", :line_total),
          {:ok, woo_variation_id} <- optional_integer(line, "variation_id", :variation_id),
-         {:ok, discount_total} <- line_discount_total(line, line_subtotal, line_total) do
+         {:ok, discount_total} <- line_discount_total(line, line_subtotal, line_total),
+         {:ok, source_tickera_event_id, attribution_status_reason} <-
+           line_tickera_event_id(line) do
       {:ok,
        %{
          woo_line_item_id: woo_line_item_id,
@@ -95,7 +97,9 @@ defmodule EventSales.Ingestion.Parsers.WoocommerceOrderParser do
          line_total: line_total,
          discount_total: discount_total,
          item_kind: :unknown,
-         mapping_status: :pending_mapping_resolution
+         mapping_status: :pending_mapping_resolution,
+         source_tickera_event_id: source_tickera_event_id,
+         attribution_status_reason: attribution_status_reason
        }}
     end
   end
@@ -141,6 +145,50 @@ defmodule EventSales.Ingestion.Parsers.WoocommerceOrderParser do
     end
   end
 
+  defp line_tickera_event_id(line) do
+    line
+    |> Map.get("meta_data", [])
+    |> tickera_event_id_values()
+    |> normalize_tickera_event_id_values()
+  end
+
+  defp tickera_event_id_values(metadata) when is_list(metadata) do
+    metadata
+    |> Enum.filter(&(meta_key(&1) == "tickera_event_id"))
+    |> Enum.map(&meta_value/1)
+    |> Enum.reject(&blank?/1)
+  end
+
+  defp tickera_event_id_values(_metadata), do: []
+
+  defp normalize_tickera_event_id_values([]), do: {:ok, nil, nil}
+
+  defp normalize_tickera_event_id_values(values) do
+    parsed_ids = Enum.map(values, &positive_integer_value/1)
+
+    if Enum.all?(parsed_ids, &match?({:ok, _id}, &1)) do
+      unique_ids =
+        parsed_ids
+        |> Enum.map(fn {:ok, id} -> id end)
+        |> Enum.uniq()
+
+      case unique_ids do
+        [id] -> {:ok, id, nil}
+        _conflicting -> {:ok, nil, :invalid_source_tickera_event_id}
+      end
+    else
+      {:ok, nil, :invalid_source_tickera_event_id}
+    end
+  end
+
+  defp meta_key(%{"key" => key}) when is_binary(key), do: key
+  defp meta_key(%{key: key}) when is_binary(key), do: key
+  defp meta_key(_metadata), do: nil
+
+  defp meta_value(%{"value" => value}), do: value
+  defp meta_value(%{value: value}), do: value
+  defp meta_value(_metadata), do: nil
+
   defp required_integer(payload, key, field) do
     case Map.get(payload, key) do
       value when is_integer(value) -> {:ok, value}
@@ -164,6 +212,17 @@ defmodule EventSales.Ingestion.Parsers.WoocommerceOrderParser do
       {:error, reason} -> {:error, reason}
     end
   end
+
+  defp positive_integer_value(value) when is_integer(value) and value > 0, do: {:ok, value}
+
+  defp positive_integer_value(value) when is_binary(value) do
+    case Integer.parse(String.trim(value)) do
+      {integer, ""} when integer > 0 -> {:ok, integer}
+      _other -> :error
+    end
+  end
+
+  defp positive_integer_value(_value), do: :error
 
   defp required_string(payload, key, field) do
     case blank_to_nil(Map.get(payload, key)) do
@@ -238,6 +297,8 @@ defmodule EventSales.Ingestion.Parsers.WoocommerceOrderParser do
   end
 
   defp blank_to_nil(value), do: value
+
+  defp blank?(value), do: blank_to_nil(value) == nil
 
   defp zero_to_nil(0), do: nil
   defp zero_to_nil(value), do: value

@@ -8,6 +8,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
   alias EventSales.Catalog.MappingConflictResolver
   alias EventSales.Catalog.TickeraCatalog.PubSub
   alias EventSales.Ingestion.TickeraCatalogSync
+  alias EventSales.Sales.OrderAttributionCorrection
   alias EventSalesWeb.Components.AdminShell
   alias EventSalesWeb.Live.Admin.Session, as: AdminSession
 
@@ -59,8 +60,11 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
       |> assign(:previews, %{})
       |> assign(:mapping_conflicts, %{})
       |> assign(:mapping_conflict_errors, %{})
+      |> assign(:order_correction_preview, nil)
+      |> assign(:order_correction_error, nil)
       |> load_source_systems()
       |> load_runs()
+      |> load_order_correction_preview()
 
     {:ok, socket}
   end
@@ -73,7 +77,8 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
      socket
      |> assign(:form, form)
      |> assign(:form_state, validate_form(form))
-     |> assign(:queue_notice, nil)}
+     |> assign(:queue_notice, nil)
+     |> load_order_correction_preview()}
   end
 
   def handle_event("queue_dry_run", %{"catalog_sync" => form}, socket) do
@@ -165,6 +170,54 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "Mapping conflict resolution failed: #{reason}")}
+    end
+  end
+
+  def handle_event("cutover_stale_mapping", params, socket) do
+    case MappingConflictResolver.cutover_stale_mapping(
+           value(params, "run_id"),
+           value(params, "dry_run_hash"),
+           value(params, "woo_product_id"),
+           value(params, "woo_variation_id"),
+           value(params, "stale_mapped_event_external_id"),
+           value(params, "feed_tickera_event_id"),
+           value(params, "confirmation") || "",
+           actor: socket.assigns.current_user
+         ) do
+      {:ok, _result} ->
+        {:noreply,
+         socket
+         |> put_flash(
+           :info,
+           "Stale mapping cut over. Existing order items were not changed. Rerun full-feed dry-run."
+         )
+         |> load_runs()
+         |> load_order_correction_preview()}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Mapping cutover failed: #{reason}")}
+    end
+  end
+
+  def handle_event("correct_order_attribution", params, socket) do
+    source_system_id = correction_source_system_id(socket)
+
+    case OrderAttributionCorrection.correct_confirmed_order_113834(
+           source_system_id,
+           value(params, "confirmation") || "",
+           actor: socket.assigns.current_user
+         ) do
+      {:ok, _result} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Order attribution corrected for Woo order 113834.")
+         |> load_order_correction_preview()}
+
+      {:error, reason} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Order attribution correction failed: #{reason}")
+         |> assign(:order_correction_error, Atom.to_string(reason))}
     end
   end
 
@@ -547,8 +600,59 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
                               >
                                 Deactivate stale mapping
                               </button>
+                              <form
+                                :if={conflict.reason == :order_history_exists}
+                                phx-submit="cutover_stale_mapping"
+                                class="flex min-w-80 flex-col gap-2"
+                              >
+                                <input type="hidden" name="run_id" value={conflict.run_id} />
+                                <input
+                                  type="hidden"
+                                  name="dry_run_hash"
+                                  value={conflict.dry_run_hash}
+                                />
+                                <input
+                                  type="hidden"
+                                  name="woo_product_id"
+                                  value={conflict.woo_product_id}
+                                />
+                                <input
+                                  type="hidden"
+                                  name="woo_variation_id"
+                                  value={conflict.woo_variation_id || ""}
+                                />
+                                <input
+                                  type="hidden"
+                                  name="stale_mapped_event_external_id"
+                                  value={conflict.mapped_event_external_event_id}
+                                />
+                                <input
+                                  type="hidden"
+                                  name="feed_tickera_event_id"
+                                  value={conflict.feed_tickera_event_id}
+                                />
+                                <input
+                                  type="text"
+                                  name="confirmation"
+                                  class="input input-bordered input-xs bg-base-200 font-mono text-[0.65rem]"
+                                  placeholder={
+                                    cutover_confirmation_placeholder(
+                                      conflict.woo_product_id,
+                                      conflict.woo_variation_id,
+                                      conflict.mapped_event_external_event_id,
+                                      conflict.feed_tickera_event_id
+                                    )
+                                  }
+                                />
+                                <button type="submit" class="btn btn-warning btn-xs">
+                                  Review cutover
+                                </button>
+                              </form>
                               <span
-                                :if={conflict.resolution_status != :safe}
+                                :if={
+                                  conflict.resolution_status != :safe and
+                                    conflict.reason != :order_history_exists
+                                }
                                 class="badge badge-outline"
                               >
                                 {conflict.reason}
@@ -613,6 +717,60 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
             </tr>
           </tbody>
         </table>
+      </section>
+
+      <section class="mt-8 rounded-lg border border-base-300 bg-base-100 p-4">
+        <h2 class="mb-3 text-sm font-semibold text-base-content">
+          Confirmed order attribution correction
+        </h2>
+        <div :if={@order_correction_error} class="alert alert-warning mb-3 py-2 text-xs">
+          {@order_correction_error}
+        </div>
+        <div :if={@order_correction_preview} class="overflow-x-auto">
+          <table class="table table-zebra min-w-full text-xs">
+            <thead class="bg-base-200 text-left text-[0.65rem] font-semibold uppercase text-base-content/70">
+              <tr>
+                <th class="px-2 py-2">Woo order ID</th>
+                <th class="px-2 py-2">Woo product ID</th>
+                <th class="px-2 py-2">Woo variation ID</th>
+                <th class="px-2 py-2">Quantity</th>
+                <th class="px-2 py-2">Current event external ID</th>
+                <th class="px-2 py-2">Target event external ID</th>
+                <th class="px-2 py-2">Current ticket type</th>
+                <th class="px-2 py-2">Target ticket type</th>
+                <th class="px-2 py-2">Order item ID</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="px-2 py-2 font-mono">{@order_correction_preview.woo_order_id}</td>
+                <td class="px-2 py-2 font-mono">{@order_correction_preview.woo_product_id}</td>
+                <td class="px-2 py-2 font-mono">{@order_correction_preview.woo_variation_id}</td>
+                <td class="px-2 py-2 font-mono">{@order_correction_preview.quantity}</td>
+                <td class="px-2 py-2 font-mono">
+                  {@order_correction_preview.current_event_external_id}
+                </td>
+                <td class="px-2 py-2 font-mono">
+                  {@order_correction_preview.target_event_external_id}
+                </td>
+                <td class="px-2 py-2">{@order_correction_preview.current_ticket_type_name}</td>
+                <td class="px-2 py-2">{@order_correction_preview.target_ticket_type_name}</td>
+                <td class="px-2 py-2 font-mono">{@order_correction_preview.order_item_id}</td>
+              </tr>
+            </tbody>
+          </table>
+          <form phx-submit="correct_order_attribution" class="mt-3 flex flex-wrap gap-2">
+            <input
+              type="text"
+              name="confirmation"
+              class="input input-bordered input-sm min-w-96 bg-base-200 font-mono text-xs"
+              placeholder="CORRECT ORDER 113834 109132/109167 FROM 108658 TO 109120"
+            />
+            <button type="submit" class="btn btn-warning btn-sm">
+              Correct order attribution
+            </button>
+          </form>
+        </div>
       </section>
     </AdminShell.shell>
     """
@@ -836,6 +994,49 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
     end
   end
 
+  defp load_order_correction_preview(socket) do
+    case correction_source_system_id(socket) do
+      nil ->
+        socket
+        |> assign(:order_correction_preview, nil)
+        |> assign(:order_correction_error, nil)
+
+      source_system_id ->
+        case OrderAttributionCorrection.preview_confirmed_order_113834(source_system_id,
+               actor: socket.assigns.current_user
+             ) do
+          {:ok, preview} ->
+            socket
+            |> assign(:order_correction_preview, preview)
+            |> assign(:order_correction_error, nil)
+
+          {:error, reason} ->
+            socket
+            |> assign(:order_correction_preview, nil)
+            |> assign(:order_correction_error, Atom.to_string(reason))
+        end
+    end
+  end
+
+  defp correction_source_system_id(socket) do
+    selected =
+      socket.assigns.form
+      |> Map.get("source_system_id", "")
+      |> to_string()
+      |> String.trim()
+
+    cond do
+      selected != "" ->
+        selected
+
+      match?([_source | _rest], socket.assigns.source_systems) ->
+        socket.assigns.source_systems |> hd() |> Map.fetch!(:id)
+
+      true ->
+        nil
+    end
+  end
+
   defp load_previews(runs, current_user) do
     Map.new(runs, fn run ->
       preview =
@@ -894,6 +1095,10 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
 
   defp mapping_conflict_rows(conflicts, run_id), do: Map.get(conflicts, run_id, [])
   defp mapping_conflict_error(errors, run_id), do: Map.get(errors, run_id)
+
+  defp cutover_confirmation_placeholder(product_id, variation_id, stale_event_id, feed_event_id) do
+    "CUTOVER #{product_id}/#{variation_id || "none"} FROM #{stale_event_id} TO #{feed_event_id}"
+  end
 
   defp preview(previews, run_id), do: Map.get(previews, run_id, %{})
 

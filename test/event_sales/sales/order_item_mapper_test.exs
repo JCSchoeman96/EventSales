@@ -57,6 +57,106 @@ defmodule EventSales.Sales.OrderItemMapperTest do
     assert mapped.ticket_type_id == ticket.id
   end
 
+  test "pending item with source Tickera event id maps event-first despite stale mapping", %{
+    source: source,
+    order: order
+  } do
+    mp_event =
+      SalesHelpers.create_event!(source, %{
+        name: "Lynette Beer LIVE - MP",
+        external_event_id: 108_658,
+        external_event_kind: :tickera_event
+      })
+
+    mp_ticket = SalesHelpers.create_ticket_type!(mp_event, %{name: "MP General"})
+
+    wr_event =
+      SalesHelpers.create_event!(source, %{
+        name: "Lynette Beer LIVE - WR",
+        external_event_id: 109_120,
+        external_event_kind: :tickera_event
+      })
+
+    wr_ticket =
+      SalesHelpers.create_ticket_type!(wr_event, %{
+        name: "WR General",
+        external_ticket_type_kind: :woo_variation,
+        external_ticket_type_id: 109_167,
+        external_product_id: 109_132,
+        external_variation_id: 109_167
+      })
+
+    create_mapping!(source, mp_event, mp_ticket, %{
+      woo_product_id: 109_132,
+      woo_variation_id: 109_167
+    })
+
+    item =
+      create_item!(order, %{
+        woo_product_id: 109_132,
+        woo_variation_id: 109_167,
+        source_tickera_event_id: 109_120
+      })
+
+    assert {:ok, mapped} = OrderItemMapper.map_item(item)
+
+    assert mapped.mapping_status == :mapped
+    assert mapped.event_id == wr_event.id
+    assert mapped.ticket_type_id == wr_ticket.id
+    assert mapped.source_tickera_event_id == 109_120
+    assert mapped.attribution_status_reason == :order_event_mapping_conflict
+  end
+
+  test "invalid source event reason prevents legacy fallback", %{
+    source: source,
+    order: order,
+    event: event,
+    ticket: ticket
+  } do
+    create_mapping!(source, event, ticket, %{woo_product_id: 501, woo_variation_id: 601})
+
+    item =
+      create_item!(order, %{
+        woo_product_id: 501,
+        woo_variation_id: 601,
+        attribution_status_reason: :invalid_source_tickera_event_id
+      })
+
+    assert {:ok, unchanged} = OrderItemMapper.map_item(item)
+
+    assert unchanged.mapping_status == :pending_mapping_resolution
+    assert unchanged.event_id == nil
+    assert unchanged.ticket_type_id == nil
+    assert unchanged.attribution_status_reason == :invalid_source_tickera_event_id
+  end
+
+  test "already mapped items are not automatically reattributed", %{
+    source: source,
+    order: order
+  } do
+    wr_event =
+      SalesHelpers.create_event!(source, %{
+        name: "WR",
+        external_event_id: 109_120,
+        external_event_kind: :tickera_event
+      })
+
+    SalesHelpers.create_ticket_type!(wr_event, %{
+      name: "WR General",
+      external_ticket_type_kind: :woo_variation,
+      external_ticket_type_id: 109_167,
+      external_product_id: 109_132,
+      external_variation_id: 109_167
+    })
+
+    mapped = mapped_item!(order, %{source_tickera_event_id: 109_120})
+
+    assert {:ok, unchanged} = OrderItemMapper.map_item(mapped)
+    assert unchanged.id == mapped.id
+    assert unchanged.event_id == mapped.event_id
+    assert unchanged.ticket_type_id == mapped.ticket_type_id
+  end
+
   test "unknown item remains pending mapping resolution", %{order: order} do
     item = create_item!(order, %{woo_product_id: 999_999, woo_variation_id: nil})
 

@@ -13,6 +13,8 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.TickeraCatalogSyncRun
   alias EventSales.Ingestion.Workers.{ApplyTickeraCatalogWorker, DiscoverTickeraCatalogWorker}
+  alias EventSales.Sales
+  alias EventSales.Sales.Resources.{Order, OrderItem}
   alias EventSales.TestSupport.{SalesHelpers, TickeraCatalogFixtures}
 
   setup do
@@ -572,6 +574,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
       |> live("/admin/catalog-sync")
 
     assert html =~ "order_history_exists"
+    assert html =~ "Review cutover"
     assert html =~ "mapping_not_active"
     assert html =~ "stale_preview"
 
@@ -589,6 +592,76 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
              view,
              ~s(button[phx-click="deactivate_stale_mapping"][phx-value-woo_variation_id="109169"])
            )
+  end
+
+  test "reviewed cutover action deactivates mapping without changing order items", %{
+    conn: conn,
+    admin: admin,
+    source: source
+  } do
+    history = create_stale_mapping_conflict!(source, 109_165)
+    order_item = create_order_item!(source, history.event, history.ticket, 109_165)
+    run = create_mapping_conflict_run!(source, "cutover-hash", 109_165)
+
+    {:ok, view, html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/catalog-sync")
+
+    assert html =~ "Review cutover"
+
+    html =
+      render_submit(view, "cutover_stale_mapping", %{
+        "run_id" => run.id,
+        "dry_run_hash" => "cutover-hash",
+        "woo_product_id" => "109132",
+        "woo_variation_id" => "109165",
+        "stale_mapped_event_external_id" => "108658",
+        "feed_tickera_event_id" => "109120",
+        "confirmation" => "CUTOVER 109132/109165 FROM 108658 TO 109120"
+      })
+
+    assert html =~
+             "Stale mapping cut over. Existing order items were not changed. Rerun full-feed dry-run."
+
+    refute Ash.get!(ProductMapping, history.mapping.id, domain: Catalog).active
+    assert Ash.get!(OrderItem, order_item.id, domain: Sales).event_id == history.event.id
+  end
+
+  test "confirmed order correction preview renders safe fields and applies exact correction", %{
+    conn: conn,
+    admin: admin,
+    source: source
+  } do
+    ctx = create_order_correction_context!(source)
+
+    {:ok, view, html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/catalog-sync")
+
+    assert html =~ "Confirmed order attribution correction"
+    assert html =~ "113834"
+    assert html =~ "109132"
+    assert html =~ "109167"
+    assert html =~ "108658"
+    assert html =~ "109120"
+    assert html =~ "MP Ticket"
+    assert html =~ "WR Ticket"
+    assert html =~ ctx.order_item.id
+    refute html =~ "catalog-sync-admin@example.com"
+    refute html =~ "payment"
+    refute html =~ "raw_payload"
+
+    html =
+      render_submit(view, "correct_order_attribution", %{
+        "confirmation" => "CORRECT ORDER 113834 109132/109167 FROM 108658 TO 109120"
+      })
+
+    assert html =~ "Order attribution corrected for Woo order 113834."
+    corrected = Ash.get!(OrderItem, ctx.order_item.id, domain: Sales)
+    assert corrected.event_id == ctx.wr_event.id
+    assert corrected.ticket_type_id == ctx.wr_ticket.id
   end
 
   test "CatalogSyncLive source stays inside approved boundaries" do
@@ -734,5 +807,75 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
       mapping_status: :mapped,
       item_kind: :ticket
     })
+  end
+
+  defp create_order_correction_context!(source) do
+    mp_event =
+      SalesHelpers.create_event!(source, %{
+        name: "Lynette Beer LIVE - MP",
+        external_event_id: 108_658,
+        external_event_kind: :tickera_event
+      })
+
+    mp_ticket = SalesHelpers.create_ticket_type!(mp_event, %{name: "MP Ticket"})
+
+    wr_event =
+      SalesHelpers.create_event!(source, %{
+        name: "Lynette Beer LIVE - WR",
+        external_event_id: 109_120,
+        external_event_kind: :tickera_event
+      })
+
+    wr_ticket =
+      SalesHelpers.create_ticket_type!(wr_event, %{
+        name: "WR Ticket",
+        external_ticket_type_kind: :woo_variation,
+        external_ticket_type_id: 109_167,
+        external_product_id: 109_132,
+        external_variation_id: 109_167
+      })
+
+    Ash.create!(
+      ProductMapping,
+      %{
+        source_system_id: source.id,
+        event_id: wr_event.id,
+        ticket_type_id: wr_ticket.id,
+        woo_product_id: 109_132,
+        woo_variation_id: 109_167,
+        original_label: "WR Ticket",
+        current_label: "WR Ticket",
+        active: true
+      },
+      action: :create,
+      domain: Catalog
+    )
+
+    order =
+      :order_completed
+      |> SalesHelpers.normalized_order_attrs_from_fixture!(source)
+      |> Map.merge(%{woo_order_id: 113_834, order_number: "113834"})
+      |> then(&Ash.create!(Order, &1, action: :create_normalized, domain: Sales))
+
+    line = %{
+      "id" => System.unique_integer([:positive]),
+      "product_id" => 109_132,
+      "variation_id" => 109_167,
+      "name" => "WR Ticket",
+      "quantity" => 5,
+      "subtotal" => "500.00",
+      "total" => "500.00",
+      "discount_total" => "0.00"
+    }
+
+    order_item =
+      SalesHelpers.create_order_item_from_line!(order, line, %{
+        event_id: mp_event.id,
+        ticket_type_id: mp_ticket.id,
+        mapping_status: :mapped,
+        item_kind: :ticket
+      })
+
+    %{order_item: order_item, wr_event: wr_event, wr_ticket: wr_ticket}
   end
 end

@@ -21,7 +21,9 @@ defmodule EventSales.Audit.Resources.AuditLog do
     :tickera_attendee_sync_requested,
     :tickera_reconciliation_run_requested,
     :manual_mapping_created,
-    :event_sales_export_requested
+    :event_sales_export_requested,
+    :product_mapping_cutover,
+    :order_attribution_corrected
   ]
 
   @actor_types [:system, :user, :worker, :webhook]

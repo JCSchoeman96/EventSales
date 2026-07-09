@@ -67,6 +67,71 @@ defmodule EventSales.Ingestion.Parsers.WoocommerceOrderParserTest do
       assert discount_tax == Decimal.new("0.00")
     end
 
+    test "parses allowlisted line-level Tickera event id metadata" do
+      payload =
+        :order_completed
+        |> fixture()
+        |> put_in(
+          ["line_items", Access.at(0), "meta_data"],
+          [
+            %{"id" => 1, "key" => "tickera_event_id", "value" => "109120"},
+            %{"id" => 2, "key" => "tickera_event_name", "value" => "Display Only"}
+          ]
+        )
+
+      assert {:ok, order} = WoocommerceOrderParser.parse(payload)
+      assert [line] = order.line_items
+      assert line.source_tickera_event_id == 109_120
+      assert line.attribution_status_reason == nil
+    end
+
+    test "does not infer event id from display names" do
+      payload =
+        :order_completed
+        |> fixture()
+        |> put_in(["line_items", Access.at(0), "name"], "WR 109120 Display")
+        |> put_in(
+          ["line_items", Access.at(0), "meta_data"],
+          [%{"id" => 1, "key" => "tickera_event_name", "value" => "WR 109120"}]
+        )
+
+      assert {:ok, order} = WoocommerceOrderParser.parse(payload)
+      assert [line] = order.line_items
+      assert line.source_tickera_event_id == nil
+      assert line.attribution_status_reason == nil
+    end
+
+    test "invalid or conflicting line-level Tickera event ids become review reasons" do
+      invalid =
+        :order_completed
+        |> fixture()
+        |> put_in(
+          ["line_items", Access.at(0), "meta_data"],
+          [%{"id" => 1, "key" => "tickera_event_id", "value" => "not-an-id"}]
+        )
+
+      assert {:ok, %{line_items: [invalid_line]}} = WoocommerceOrderParser.parse(invalid)
+      assert invalid_line.source_tickera_event_id == nil
+      assert invalid_line.attribution_status_reason == :invalid_source_tickera_event_id
+
+      conflicting =
+        :order_completed
+        |> fixture()
+        |> put_in(
+          ["line_items", Access.at(0), "meta_data"],
+          [
+            %{"id" => 1, "key" => "tickera_event_id", "value" => "109120"},
+            %{"id" => 2, "key" => "tickera_event_id", "value" => 108_658}
+          ]
+        )
+
+      assert {:ok, %{line_items: [conflict_line]}} =
+               WoocommerceOrderParser.parse(conflicting)
+
+      assert conflict_line.source_tickera_event_id == nil
+      assert conflict_line.attribution_status_reason == :invalid_source_tickera_event_id
+    end
+
     test "missing optional fields are safe" do
       payload =
         :order_pending

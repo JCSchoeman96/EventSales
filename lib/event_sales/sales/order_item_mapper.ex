@@ -9,7 +9,7 @@ defmodule EventSales.Sales.OrderItemMapper do
 
   require Ash.Query
 
-  alias EventSales.Catalog.MappingResolver
+  alias EventSales.Catalog.{MappingResolver, OrderAttributionResolver}
   alias EventSales.Catalog.Resources.ProductMapping
   alias EventSales.Sales
   alias EventSales.Sales.Resources.{Order, OrderItem}
@@ -23,20 +23,14 @@ defmodule EventSales.Sales.OrderItemMapper do
   """
   @spec map_item(OrderItem.t()) :: {:ok, OrderItem.t()} | {:error, term()}
   def map_item(%OrderItem{mapping_status: status} = item)
-      when status != :pending_mapping_resolution do
+      when status not in [:pending_mapping_resolution, :unmapped] do
     {:ok, item}
   end
 
   def map_item(%OrderItem{} = item) do
     with {:ok, loaded} <- Ash.load(item, :order, domain: Sales),
-         %Order{source_system_id: source_system_id} <- loaded.order,
-         {:ok, resolution} <-
-           MappingResolver.resolve(
-             source_system_id,
-             loaded.woo_product_id,
-             loaded.woo_variation_id
-           ) do
-      apply_resolution(loaded, resolution)
+         %Order{source_system_id: source_system_id} <- loaded.order do
+      map_loaded_item(loaded, source_system_id)
     else
       {:error, reason} -> {:error, reason}
     end
@@ -94,6 +88,68 @@ defmodule EventSales.Sales.OrderItemMapper do
       {:error, reason} ->
         {:halt, {:error, reason}}
     end
+  end
+
+  defp map_loaded_item(
+         %OrderItem{attribution_status_reason: :invalid_source_tickera_event_id} = item,
+         _source_system_id
+       ) do
+    set_attribution_status_reason(item, %{
+      source_tickera_event_id: item.source_tickera_event_id,
+      attribution_status_reason: :invalid_source_tickera_event_id
+    })
+  end
+
+  defp map_loaded_item(
+         %OrderItem{source_tickera_event_id: source_tickera_event_id} = item,
+         source_system_id
+       )
+       when is_integer(source_tickera_event_id) do
+    with {:ok, resolution} <-
+           OrderAttributionResolver.resolve(
+             source_system_id,
+             source_tickera_event_id,
+             item.woo_product_id,
+             item.woo_variation_id
+           ) do
+      apply_event_first_resolution(item, resolution)
+    end
+  end
+
+  defp map_loaded_item(%OrderItem{} = item, source_system_id) do
+    with {:ok, resolution} <-
+           MappingResolver.resolve(
+             source_system_id,
+             item.woo_product_id,
+             item.woo_variation_id
+           ) do
+      apply_resolution(item, resolution)
+    end
+  end
+
+  defp apply_event_first_resolution(%OrderItem{} = item, %{status: :mapped} = resolution) do
+    Ash.update(
+      item,
+      %{
+        event_id: resolution.event_id,
+        ticket_type_id: resolution.ticket_type_id,
+        source_tickera_event_id: resolution.source_tickera_event_id,
+        attribution_status_reason: resolution.attribution_status_reason
+      },
+      action: :apply_event_first_mapping,
+      domain: Sales
+    )
+  end
+
+  defp apply_event_first_resolution(%OrderItem{} = item, %{status: :pending} = resolution) do
+    set_attribution_status_reason(item, %{
+      source_tickera_event_id: resolution.source_tickera_event_id,
+      attribution_status_reason: resolution.attribution_status_reason
+    })
+  end
+
+  defp set_attribution_status_reason(%OrderItem{} = item, attrs) do
+    Ash.update(item, attrs, action: :set_attribution_status_reason, domain: Sales)
   end
 
   defp apply_resolution(%OrderItem{} = item, {:mapped, %ProductMapping{} = mapping}) do

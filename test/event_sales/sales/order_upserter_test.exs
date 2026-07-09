@@ -35,6 +35,21 @@ defmodule EventSales.Sales.OrderUpserterTest do
     assert [%CouponSnapshot{code: "SYNTHETIC100"}] = coupons(order.id)
   end
 
+  test "creates order item with line-level source Tickera event id", %{source: source} do
+    payload =
+      :order_completed
+      |> fixture()
+      |> put_in(
+        ["line_items", Access.at(0), "meta_data"],
+        [%{"id" => 1, "key" => "tickera_event_id", "value" => "109120"}]
+      )
+
+    assert {:ok, order} = OrderUpserter.upsert_order(source.id, payload)
+    assert [line] = order_items(order.id)
+    assert line.source_tickera_event_id == 109_120
+    assert line.attribution_status_reason == :source_event_not_found
+  end
+
   test "maps pending order items after durable upsert when local mapping exists", %{
     source: source
   } do
@@ -104,6 +119,95 @@ defmodule EventSales.Sales.OrderUpserterTest do
 
     assert [line] = order_items(order.id)
     assert line.line_total == Decimal.new("500.00")
+  end
+
+  test "ordinary sync does not clear source event metadata on mapped rows", %{source: source} do
+    event =
+      SalesHelpers.create_event!(source, %{
+        name: "WR",
+        external_event_id: 109_120,
+        external_event_kind: :tickera_event
+      })
+
+    ticket =
+      SalesHelpers.create_ticket_type!(event, %{
+        name: "WR General",
+        external_ticket_type_kind: :woo_variation,
+        external_ticket_type_id: 601,
+        external_product_id: 501,
+        external_variation_id: 601
+      })
+
+    create_mapping!(source, event, ticket, %{woo_product_id: 501, woo_variation_id: 601})
+
+    initial =
+      :order_completed
+      |> fixture()
+      |> put_in(
+        ["line_items", Access.at(0), "meta_data"],
+        [%{"id" => 1, "key" => "tickera_event_id", "value" => "109120"}]
+      )
+
+    assert {:ok, order} = OrderUpserter.upsert_order(source.id, initial)
+    assert [mapped] = order_items(order.id)
+    assert mapped.mapping_status == :mapped
+    assert mapped.source_tickera_event_id == 109_120
+
+    missing_event_id =
+      initial
+      |> Map.put("date_modified_gmt", "2026-05-01T09:10:00")
+      |> put_in(["line_items", Access.at(0), "meta_data"], [])
+
+    assert {:ok, _updated} = OrderUpserter.upsert_order(source.id, missing_event_id)
+    assert [line] = order_items(order.id)
+    assert line.event_id == event.id
+    assert line.ticket_type_id == ticket.id
+    assert line.source_tickera_event_id == 109_120
+  end
+
+  test "ordinary sync records conflict without reattributing mapped rows", %{source: source} do
+    wr_event =
+      SalesHelpers.create_event!(source, %{
+        name: "WR",
+        external_event_id: 109_120,
+        external_event_kind: :tickera_event
+      })
+
+    wr_ticket =
+      SalesHelpers.create_ticket_type!(wr_event, %{
+        name: "WR General",
+        external_ticket_type_kind: :woo_variation,
+        external_ticket_type_id: 601,
+        external_product_id: 501,
+        external_variation_id: 601
+      })
+
+    create_mapping!(source, wr_event, wr_ticket, %{woo_product_id: 501, woo_variation_id: 601})
+
+    initial =
+      :order_completed
+      |> fixture()
+      |> put_in(
+        ["line_items", Access.at(0), "meta_data"],
+        [%{"id" => 1, "key" => "tickera_event_id", "value" => "109120"}]
+      )
+
+    assert {:ok, order} = OrderUpserter.upsert_order(source.id, initial)
+
+    conflicting =
+      initial
+      |> Map.put("date_modified_gmt", "2026-05-01T09:10:00")
+      |> put_in(
+        ["line_items", Access.at(0), "meta_data"],
+        [%{"id" => 1, "key" => "tickera_event_id", "value" => "108658"}]
+      )
+
+    assert {:ok, _updated} = OrderUpserter.upsert_order(source.id, conflicting)
+    assert [line] = order_items(order.id)
+    assert line.event_id == wr_event.id
+    assert line.ticket_type_id == wr_ticket.id
+    assert line.source_tickera_event_id == 109_120
+    assert line.attribution_status_reason == :source_event_identity_conflict
   end
 
   test "stale payload returns stale_noop before mutating order, items, or coupons", %{

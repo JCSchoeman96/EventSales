@@ -61,6 +61,7 @@
     "lib/event_sales/catalog/mapping_resolver.ex",
     "lib/event_sales/catalog/mapping_side_effects.ex",
     "lib/event_sales/catalog/missing_catalog_resolver.ex",
+    "lib/event_sales/catalog/order_attribution_resolver.ex",
     "lib/event_sales/catalog/product_metadata_cache.ex",
     "lib/event_sales/catalog/product_metadata_updater.ex",
     "lib/event_sales/catalog/resources/event.ex",
@@ -184,6 +185,7 @@
     "lib/event_sales/sales/changes/guard_source_version.ex",
     "lib/event_sales/sales/changes/sync_status_from_source.ex",
     "lib/event_sales/sales/changes/validate_ticket_type_event.ex",
+    "lib/event_sales/sales/order_attribution_correction.ex",
     "lib/event_sales/sales/order_item_mapper.ex",
     "lib/event_sales/sales/order_upserter.ex",
     "lib/event_sales/sales/resources/coupon_snapshot.ex",
@@ -1081,7 +1083,7 @@
       ]
     },
     {
-      "docs_count": 11,
+      "docs_count": 13,
       "moduledoc?": true,
       "name": "EventSales.Audit.Logger",
       "parse_error": null,
@@ -1106,6 +1108,14 @@
         {
           "arity": 1,
           "name": "manual_mapping_created"
+        },
+        {
+          "arity": 1,
+          "name": "product_mapping_cutover"
+        },
+        {
+          "arity": 1,
+          "name": "order_attribution_corrected"
         },
         {
           "arity": 1,
@@ -1327,6 +1337,10 @@
         {
           "arity": 5,
           "name": "deactivate_stale_mapping"
+        },
+        {
+          "arity": 8,
+          "name": "cutover_stale_mapping"
         }
       ],
       "specs?": true,
@@ -1372,6 +1386,21 @@
         {
           "arity": 4,
           "name": "recover_product"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.OrderAttributionResolver",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/order_attribution_resolver.ex",
+      "public_funs": [
+        {
+          "arity": 4,
+          "name": "resolve"
         }
       ],
       "specs?": true,
@@ -3860,6 +3889,25 @@
       "uses": [
         "Ash.Resource.Change"
       ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Sales.OrderAttributionCorrection",
+      "parse_error": null,
+      "path": "lib/event_sales/sales/order_attribution_correction.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "preview_confirmed_order_113834"
+        },
+        {
+          "arity": 3,
+          "name": "correct_confirmed_order_113834"
+        }
+      ],
+      "specs?": true,
+      "uses": []
     },
     {
       "docs_count": 3,

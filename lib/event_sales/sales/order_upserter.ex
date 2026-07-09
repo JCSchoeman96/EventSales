@@ -126,32 +126,23 @@ defmodule EventSales.Sales.OrderUpserter do
             :line_total,
             :discount_total,
             :item_kind,
-            :mapping_status
+            :mapping_status,
+            :source_tickera_event_id,
+            :attribution_status_reason
           ])
           |> Map.put(:order_id, order.id)
 
         ash_create(OrderItem, attrs, :create_normalized, opts)
 
       {:ok, %OrderItem{} = existing} ->
-        attrs =
-          Map.take(line_item, [
-            :event_id,
-            :ticket_type_id,
-            :woo_product_id,
-            :woo_variation_id,
-            :name,
-            :quantity,
-            :line_subtotal,
-            :line_total,
-            :discount_total
-          ])
-
         action =
           if mapped_import_line?(line_item) do
             :sync_from_mapped_import
           else
             :sync_from_order
           end
+
+        attrs = order_item_update_attrs(existing, line_item, action)
 
         ash_update(existing, attrs, action, opts)
 
@@ -165,6 +156,96 @@ defmodule EventSales.Sales.OrderUpserter do
       Map.has_key?(line_item, :ticket_type_id) and
       not is_nil(Map.get(line_item, :event_id)) and
       not is_nil(Map.get(line_item, :ticket_type_id))
+  end
+
+  defp order_item_update_attrs(%OrderItem{} = existing, line_item, :sync_from_mapped_import) do
+    line_item
+    |> Map.take([
+      :event_id,
+      :ticket_type_id,
+      :woo_product_id,
+      :woo_variation_id,
+      :name,
+      :quantity,
+      :line_subtotal,
+      :line_total,
+      :discount_total,
+      :source_tickera_event_id,
+      :attribution_status_reason
+    ])
+    |> protect_mapped_source_identity(existing, line_item)
+  end
+
+  defp order_item_update_attrs(%OrderItem{} = existing, line_item, :sync_from_order) do
+    line_item
+    |> Map.take([
+      :woo_product_id,
+      :woo_variation_id,
+      :name,
+      :quantity,
+      :line_subtotal,
+      :line_total,
+      :discount_total,
+      :source_tickera_event_id,
+      :attribution_status_reason
+    ])
+    |> protect_mapped_source_identity(existing, line_item)
+  end
+
+  defp protect_mapped_source_identity(
+         attrs,
+         %OrderItem{mapping_status: :mapped} = existing,
+         line_item
+       ) do
+    incoming_event_id = Map.get(line_item, :source_tickera_event_id)
+    incoming_reason = Map.get(line_item, :attribution_status_reason)
+    existing_event_id = existing.source_tickera_event_id
+    mapped_external_event_id = mapped_external_event_id(existing)
+
+    cond do
+      incoming_reason == :invalid_source_tickera_event_id ->
+        attrs
+        |> Map.delete(:source_tickera_event_id)
+        |> Map.put(:attribution_status_reason, incoming_reason)
+
+      is_nil(incoming_event_id) ->
+        attrs
+        |> Map.delete(:source_tickera_event_id)
+        |> Map.delete(:attribution_status_reason)
+
+      is_integer(existing_event_id) and incoming_event_id != existing_event_id ->
+        attrs
+        |> Map.put(:source_tickera_event_id, existing_event_id)
+        |> Map.put(:attribution_status_reason, :source_event_identity_conflict)
+
+      is_integer(mapped_external_event_id) and incoming_event_id != mapped_external_event_id ->
+        attrs
+        |> maybe_put_source_event_id(existing_event_id, incoming_event_id)
+        |> Map.put(:attribution_status_reason, :source_event_identity_conflict)
+
+      true ->
+        attrs
+    end
+  end
+
+  defp protect_mapped_source_identity(attrs, _existing, _line_item), do: attrs
+
+  defp maybe_put_source_event_id(attrs, nil, incoming_event_id),
+    do: Map.put(attrs, :source_tickera_event_id, incoming_event_id)
+
+  defp maybe_put_source_event_id(attrs, existing_event_id, _incoming_event_id),
+    do: Map.put(attrs, :source_tickera_event_id, existing_event_id)
+
+  defp mapped_external_event_id(%OrderItem{event_id: nil}), do: nil
+
+  defp mapped_external_event_id(%OrderItem{} = item) do
+    item
+    |> Ash.load!(:event, domain: Sales)
+    |> Map.get(:event)
+    |> case do
+      %{external_event_id: external_event_id} -> external_event_id
+      _other -> nil
+    end
   end
 
   defp upsert_coupons(%Order{} = order, coupons, opts) do

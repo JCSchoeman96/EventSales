@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-299
+301
 
 ## Files
 
@@ -73,6 +73,7 @@ Project root: `.`
 - `lib/event_sales/catalog/mapping_resolver.ex`
 - `lib/event_sales/catalog/mapping_side_effects.ex`
 - `lib/event_sales/catalog/missing_catalog_resolver.ex`
+- `lib/event_sales/catalog/order_attribution_resolver.ex`
 - `lib/event_sales/catalog/product_metadata_cache.ex`
 - `lib/event_sales/catalog/product_metadata_updater.ex`
 - `lib/event_sales/catalog/resources/event.ex`
@@ -196,6 +197,7 @@ Project root: `.`
 - `lib/event_sales/sales/changes/guard_source_version.ex`
 - `lib/event_sales/sales/changes/sync_status_from_source.ex`
 - `lib/event_sales/sales/changes/validate_ticket_type_event.ex`
+- `lib/event_sales/sales/order_attribution_correction.ex`
 - `lib/event_sales/sales/order_item_mapper.ex`
 - `lib/event_sales/sales/order_upserter.ex`
 - `lib/event_sales/sales/resources/coupon_snapshot.ex`
@@ -557,8 +559,8 @@ Project root: `.`
 - `EventSales.Audit.Logger` - `lib/event_sales/audit/logger.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 11
-  - public_funs: `manual_sync_requested/1`, `tickera_attendee_sync_requested/1`, `tickera_reconciliation_run_requested/1`, `csv_apply_requested/1`, `manual_mapping_created/1`, `event_sales_export_requested/1`, `webhook_replay_requested/1`, `log_webhook_replay_ignored/1`, `log_webhook_duplicate_payload_mismatch/1`, `log_webhook_stale_replay/1`, `log/2`
+  - docs_count: 13
+  - public_funs: `manual_sync_requested/1`, `tickera_attendee_sync_requested/1`, `tickera_reconciliation_run_requested/1`, `csv_apply_requested/1`, `manual_mapping_created/1`, `product_mapping_cutover/1`, `order_attribution_corrected/1`, `event_sales_export_requested/1`, `webhook_replay_requested/1`, `log_webhook_replay_ignored/1`, `log_webhook_duplicate_payload_mismatch/1`, `log_webhook_stale_replay/1`, `log/2`
   - uses: _none_
 - `EventSales.Audit.MetadataSanitizer` - `lib/event_sales/audit/metadata_sanitizer.ex`
   - moduledoc?: true
@@ -630,7 +632,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: true
   - docs_count: 0
-  - public_funs: `list_conflicts/3`, `deactivate_stale_mapping/5`
+  - public_funs: `list_conflicts/3`, `deactivate_stale_mapping/5`, `cutover_stale_mapping/8`
   - uses: _none_
 - `EventSales.Catalog.MappingResolver` - `lib/event_sales/catalog/mapping_resolver.ex`
   - moduledoc?: true
@@ -649,6 +651,12 @@ Project root: `.`
   - specs?: true
   - docs_count: 1
   - public_funs: `recover_product/4`
+  - uses: _none_
+- `EventSales.Catalog.OrderAttributionResolver` - `lib/event_sales/catalog/order_attribution_resolver.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `resolve/4`
   - uses: _none_
 - `EventSales.Catalog.ProductMetadataCache` - `lib/event_sales/catalog/product_metadata_cache.ex`
   - moduledoc?: true
@@ -1406,6 +1414,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `change/3`
   - uses: `Ash.Resource.Change`
+- `EventSales.Sales.OrderAttributionCorrection` - `lib/event_sales/sales/order_attribution_correction.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `preview_confirmed_order_113834/2`, `correct_confirmed_order_113834/3`
+  - uses: _none_
 - `EventSales.Sales.OrderItemMapper` - `lib/event_sales/sales/order_item_mapper.ex`
   - moduledoc?: true
   - specs?: true

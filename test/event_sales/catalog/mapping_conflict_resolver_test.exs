@@ -5,6 +5,8 @@ defmodule EventSales.Catalog.MappingConflictResolverTest do
 
   alias EventSales.Accounts
   alias EventSales.Accounts.Resources.{Role, User, UserRole}
+  alias EventSales.Audit
+  alias EventSales.Audit.Resources.AuditLog
   alias EventSales.Catalog
   alias EventSales.Catalog.MappingConflictResolver
   alias EventSales.Catalog.Resources.{Event, ProductMapping, TicketType}
@@ -288,6 +290,119 @@ defmodule EventSales.Catalog.MappingConflictResolverTest do
       |> Ash.read!(domain: Catalog)
 
     assert Enum.any?(versions, &(&1.version_action_name == :deactivate))
+  end
+
+  test "reviewed cutover can deactivate stale mapping with order history and writes audit", %{
+    admin: admin,
+    source: source,
+    mp_event: event,
+    mp_ticket: ticket,
+    mapping: mapping
+  } do
+    order_item =
+      create_order_item!(source, event, ticket, %{
+        woo_product_id: 109_132,
+        woo_variation_id: 109_165,
+        mapping_status: :mapped,
+        item_kind: :ticket
+      })
+
+    run = create_conflict_run!(source, "cutover-hash")
+
+    assert {:error, :order_history_exists} =
+             MappingConflictResolver.deactivate_stale_mapping(
+               run.id,
+               "cutover-hash",
+               109_132,
+               109_165,
+               actor: admin
+             )
+
+    assert {:error, :confirmation_required} =
+             MappingConflictResolver.cutover_stale_mapping(
+               run.id,
+               "cutover-hash",
+               109_132,
+               109_165,
+               108_658,
+               109_120,
+               "wrong",
+               actor: admin
+             )
+
+    assert {:ok, %{mapping: cutover, conflict: conflict}} =
+             MappingConflictResolver.cutover_stale_mapping(
+               run.id,
+               "cutover-hash",
+               109_132,
+               109_165,
+               108_658,
+               109_120,
+               "CUTOVER 109132/109165 FROM 108658 TO 109120",
+               actor: admin
+             )
+
+    refute cutover.active
+    assert conflict.reason == :order_history_exists
+    assert conflict.order_item_count == 1
+
+    reloaded_order_item = Ash.get!(OrderItem, order_item.id, domain: Sales)
+    assert reloaded_order_item.event_id == order_item.event_id
+    assert reloaded_order_item.ticket_type_id == order_item.ticket_type_id
+    assert reloaded_order_item.mapping_status == order_item.mapping_status
+    assert reloaded_order_item.quantity == order_item.quantity
+
+    versions =
+      ProductMapping.Version
+      |> Ash.Query.filter(version_source_id == ^mapping.id)
+      |> Ash.read!(domain: Catalog)
+
+    assert Enum.any?(versions, &(&1.version_action_name == :deactivate))
+
+    assert [audit] =
+             AuditLog
+             |> Ash.Query.filter(event_type == :product_mapping_cutover)
+             |> Ash.read!(domain: Audit)
+
+    assert audit.subject_type == "product_mapping"
+    assert audit.subject_id == mapping.id
+    assert audit.metadata["woo_product_id"] == 109_132
+    assert audit.metadata["woo_variation_id"] == 109_165
+    assert audit.metadata["stale_mapped_event_external_id"] == 108_658
+    assert audit.metadata["feed_tickera_event_id"] == 109_120
+    assert audit.metadata["order_item_count"] == 1
+    refute Map.has_key?(audit.metadata, "confirmation")
+  end
+
+  test "cutover rejects mismatched stale or feed event identities", %{
+    admin: admin,
+    source: source
+  } do
+    run = create_conflict_run!(source, "identity-hash")
+
+    assert {:error, :manual_review_required} =
+             MappingConflictResolver.cutover_stale_mapping(
+               run.id,
+               "identity-hash",
+               109_132,
+               109_165,
+               108_659,
+               109_120,
+               "CUTOVER 109132/109165 FROM 108659 TO 109120",
+               actor: admin
+             )
+
+    assert {:error, :manual_review_required} =
+             MappingConflictResolver.cutover_stale_mapping(
+               run.id,
+               "identity-hash",
+               109_132,
+               109_165,
+               108_658,
+               109_121,
+               "CUTOVER 109132/109165 FROM 108658 TO 109121",
+               actor: admin
+             )
   end
 
   defp create_conflict_run!(source, hash, attrs \\ %{}) do
