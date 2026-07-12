@@ -111,13 +111,14 @@ defmodule EventSalesWeb.Live.Admin.DashboardLiveTest do
       woo_line_item_id: 10
     )
 
-    create_item!(order, event, ticket,
-      name: "Unmapped Ticket",
-      mapping_status: :pending_mapping_resolution,
-      item_kind: :unknown,
-      woo_product_id: 888,
-      woo_line_item_id: 11
-    )
+    unmapped_item =
+      create_item!(order, event, ticket,
+        name: "Unmapped Ticket",
+        mapping_status: :pending_mapping_resolution,
+        item_kind: :unknown,
+        woo_product_id: 888,
+        woo_line_item_id: 11
+      )
 
     {:ok, _view, html} =
       conn
@@ -136,6 +137,7 @@ defmodule EventSalesWeb.Live.Admin.DashboardLiveTest do
     assert html =~ "GA"
     assert html =~ "ES-DASH-1"
     assert html =~ "Unmapped Ticket"
+    assert html =~ ~s(href="/admin/unmapped-alerts/#{unmapped_item.id}/resolve")
     assert html =~ "No sales trend data yet"
     refute html =~ "private@example.test"
     refute html =~ "Private Customer"

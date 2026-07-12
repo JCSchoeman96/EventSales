@@ -2142,6 +2142,31 @@
       {
         "docs_count": 0,
         "moduledoc?": true,
+        "name": "EventSalesWeb.Live.Admin.UnmappedAlertResolveLive",
+        "parse_error": null,
+        "path": "lib/event_sales_web/live/admin/unmapped_alert_resolve_live.ex",
+        "public_funs": [
+          {
+            "arity": 3,
+            "name": "mount"
+          },
+          {
+            "arity": 3,
+            "name": "handle_event"
+          },
+          {
+            "arity": 1,
+            "name": "render"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "EventSalesWeb"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
         "name": "EventSalesWeb.Live.Admin.WebhooksLive",
         "parse_error": null,
         "path": "lib/event_sales_web/live/admin/webhooks_live.ex",

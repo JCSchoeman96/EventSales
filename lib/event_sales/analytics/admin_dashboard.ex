@@ -260,6 +260,8 @@ defmodule EventSales.Analytics.AdminDashboard do
 
   defp unmapped_alert_row(%OrderItem{} = item) do
     %{
+      order_item_id: item.id,
+      source_system_id: source_system_id(item),
       order_number: order_number(item),
       name: item.name,
       woo_product_id: item.woo_product_id,
@@ -324,6 +326,12 @@ defmodule EventSales.Analytics.AdminDashboard do
     do: order_number
 
   defp order_number(_item), do: nil
+
+  defp source_system_id(%{order: %{source_system_id: source_system_id}})
+       when is_binary(source_system_id),
+       do: source_system_id
+
+  defp source_system_id(_item), do: nil
 
   defp limit(opts, key, default) do
     opts

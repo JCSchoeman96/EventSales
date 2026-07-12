@@ -57,6 +57,8 @@ defmodule EventSales.Analytics.AdminDashboardContractTest do
   ]
 
   @unmapped_alert_keys [
+    :order_item_id,
+    :source_system_id,
     :order_number,
     :name,
     :woo_product_id,

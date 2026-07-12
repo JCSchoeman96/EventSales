@@ -91,6 +91,7 @@ defmodule EventSalesWeb.Router do
     live "/sync", Live.Admin.SyncLive
     live "/catalog-sync", Live.Admin.CatalogSyncLive
     live "/mappings", Live.Admin.ProductMappingsLive
+    live "/unmapped-alerts/:order_item_id/resolve", Live.Admin.UnmappedAlertResolveLive
     live "/reconciliation", Live.Admin.ReconciliationLive
     get "/reconciliation/export.csv", Admin.ReconciliationExportController, :show
 
