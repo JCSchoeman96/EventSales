@@ -21,6 +21,12 @@ defmodule EventSalesWeb.Live.Admin.Components.UnmappedItemAlert do
             {alert.order_number || "-"} — product {alert.woo_product_id} — {alert.mapping_status}
           </div>
         </div>
+        <.link
+          navigate={"/admin/unmapped-alerts/#{alert.order_item_id}/resolve"}
+          class="btn btn-sm btn-outline"
+        >
+          Resolve
+        </.link>
       </div>
       <p :if={@alerts == []} class="text-sm text-base-content/60">
         No unmapped rows need attention.

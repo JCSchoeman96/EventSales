@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-301
+303
 
 ## Files
 
@@ -205,6 +205,7 @@ Project root: `.`
 - `lib/event_sales/sales/resources/order_item.ex`
 - `lib/event_sales/sales/source_version_guard.ex`
 - `lib/event_sales/sales/status_rules.ex`
+- `lib/event_sales/sales/unmapped_alert_resolver.ex`
 - `lib/event_sales/telemetry.ex`
 - `lib/event_sales_web.ex`
 - `lib/event_sales_web/auth/hooks.ex`
@@ -268,6 +269,7 @@ Project root: `.`
 - `lib/event_sales_web/live/admin/reconciliation_live.ex`
 - `lib/event_sales_web/live/admin/session.ex`
 - `lib/event_sales_web/live/admin/sync_live.ex`
+- `lib/event_sales_web/live/admin/unmapped_alert_resolve_live.ex`
 - `lib/event_sales_web/live/admin/webhooks_live.ex`
 - `lib/event_sales_web/live/auth/reset_password_live.ex`
 - `lib/event_sales_web/live/auth/sign_in_live.ex`
@@ -1462,6 +1464,12 @@ Project root: `.`
   - docs_count: 4
   - public_funs: `counts_toward_sold_tickets?/2`, `counts_toward_completed_revenue?/2`, `visible_status?/2`, `excluded_from_sold?/2`
   - uses: _none_
+- `EventSales.Sales.UnmappedAlertResolver` - `lib/event_sales/sales/unmapped_alert_resolver.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `load/2`, `resolve/3`, `retry_recovery/2`
+  - uses: _none_
 - `EventSales.Telemetry` - `lib/event_sales/telemetry.ex`
   - moduledoc?: true
   - specs?: true
@@ -1805,6 +1813,12 @@ Project root: `.`
   - public_funs: `current_user/1`, `current_user_id/1`
   - uses: _none_
 - `EventSalesWeb.Live.Admin.SyncLive` - `lib/event_sales_web/live/admin/sync_live.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `mount/3`, `handle_event/3`, `render/1`
+  - uses: `EventSalesWeb`
+- `EventSalesWeb.Live.Admin.UnmappedAlertResolveLive` - `lib/event_sales_web/live/admin/unmapped_alert_resolve_live.ex`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
@@ -2165,6 +2179,7 @@ _none_
 - `EventSalesWeb.Live.Admin.ProductMappingsLive` - `lib/event_sales_web/live/admin/product_mappings_live.ex`
 - `EventSalesWeb.Live.Admin.ReconciliationLive` - `lib/event_sales_web/live/admin/reconciliation_live.ex`
 - `EventSalesWeb.Live.Admin.SyncLive` - `lib/event_sales_web/live/admin/sync_live.ex`
+- `EventSalesWeb.Live.Admin.UnmappedAlertResolveLive` - `lib/event_sales_web/live/admin/unmapped_alert_resolve_live.ex`
 - `EventSalesWeb.Live.Admin.WebhooksLive` - `lib/event_sales_web/live/admin/webhooks_live.ex`
 
 ### Controllers
