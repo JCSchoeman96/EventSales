@@ -168,7 +168,7 @@ Railway smoke test
 ## Git safety
 
 ```text
-ONLY use subagents if/when the user explicitly asks requests them.
+ONLY use subagents if/when the user explicitly asks requests them
 Never reset hard.
 Never clean files.
 Never force push.
