@@ -168,6 +168,24 @@ defmodule EventSales.Sales.OrderItemMapperTest do
     assert unchanged.ticket_type_id == nil
   end
 
+  test "on-hold order item remains pending when a mapping exists", %{
+    source: source,
+    order: order,
+    event: event,
+    ticket: ticket
+  } do
+    create_mapping!(source, event, ticket, %{woo_product_id: 501})
+    on_hold_order = put_order_on_hold!(order)
+    item = create_item!(on_hold_order, %{woo_product_id: 501, woo_variation_id: nil})
+
+    assert {:ok, unchanged} = OrderItemMapper.map_item(item)
+
+    assert unchanged.id == item.id
+    assert unchanged.mapping_status == :pending_mapping_resolution
+    assert unchanged.event_id == nil
+    assert unchanged.ticket_type_id == nil
+  end
+
   test "normal order mapping only mutates pending rows", %{
     source: source,
     order: order,
@@ -279,6 +297,18 @@ defmodule EventSales.Sales.OrderItemMapperTest do
     }
 
     SalesHelpers.create_order_item_from_line!(order, line, Map.merge(defaults, attrs))
+  end
+
+  defp put_order_on_hold!(order) do
+    Ash.update!(
+      order,
+      %{
+        status: :on_hold,
+        updated_at_source: DateTime.add(order.updated_at_source, 1, :second)
+      },
+      action: :sync_status_from_source,
+      domain: Sales
+    )
   end
 
   defp unique_id, do: System.unique_integer([:positive])

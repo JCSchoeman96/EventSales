@@ -70,6 +70,44 @@ defmodule EventSales.Sales.OrderUpserterTest do
     assert line.ticket_type_id == ticket.id
   end
 
+  test "defers on-hold mapping until a completed order update arrives", %{source: source} do
+    event = SalesHelpers.create_event!(source, %{name: "Mapped Event"})
+    ticket = SalesHelpers.create_ticket_type!(event, %{name: "General Admission"})
+
+    create_mapping!(source, event, ticket, %{
+      woo_product_id: 501,
+      woo_variation_id: 601
+    })
+
+    on_hold =
+      :order_completed
+      |> fixture()
+      |> Map.put("status", "on-hold")
+      |> Map.put("date_modified_gmt", "2026-05-01T09:05:00")
+
+    assert {:ok, order} = OrderUpserter.upsert_order(source.id, on_hold)
+    assert order.status == :on_hold
+
+    assert [pending] = order_items(order.id)
+    assert pending.mapping_status == :pending_mapping_resolution
+    assert pending.event_id == nil
+    assert pending.ticket_type_id == nil
+
+    completed =
+      on_hold
+      |> Map.put("status", "completed")
+      |> Map.put("date_modified_gmt", "2026-05-01T09:10:00")
+      |> Map.put("date_completed_gmt", "2026-05-01T09:10:00")
+
+    assert {:ok, updated} = OrderUpserter.upsert_order(source.id, completed)
+    assert updated.status == :completed
+
+    assert [mapped] = order_items(order.id)
+    assert mapped.mapping_status == :mapped
+    assert mapped.event_id == event.id
+    assert mapped.ticket_type_id == ticket.id
+  end
+
   test "unknown products stay pending mapping resolution after upsert", %{source: source} do
     payload =
       :order_completed
