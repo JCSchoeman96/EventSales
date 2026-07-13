@@ -57,16 +57,38 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
       |> assign(:queue_notice, nil)
       |> assign(:source_systems, [])
       |> assign(:runs, [])
+      |> assign(:selected_run_id, nil)
+      |> assign(:selected_run, nil)
+      |> assign(:subscribed_run_ids, MapSet.new())
       |> assign(:previews, %{})
       |> assign(:mapping_conflicts, %{})
       |> assign(:mapping_conflict_errors, %{})
       |> assign(:order_correction_preview, nil)
       |> assign(:order_correction_error, nil)
       |> load_source_systems()
-      |> load_runs()
       |> load_order_correction_preview()
 
     {:ok, socket}
+  end
+
+  @impl true
+  def handle_params(params, _uri, socket) do
+    requested_run_id = params["run_id"]
+
+    socket =
+      if requested_run_id && requested_run_id == socket.assigns.selected_run_id &&
+           socket.assigns.selected_run do
+        socket
+      else
+        load_runs(socket, requested_run_id)
+      end
+
+    if (connected?(socket) and socket.assigns.selected_run_id) &&
+         requested_run_id != socket.assigns.selected_run_id do
+      {:noreply, push_patch(socket, to: selected_run_path(socket.assigns.selected_run_id))}
+    else
+      {:noreply, socket}
+    end
   end
 
   @impl true
@@ -87,7 +109,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
 
     with :ok <- validate_queue_ready(form_state),
          {:ok, scope} <- build_scope(form),
-         {:ok, %{run: _run}} <-
+         {:ok, %{run: run}} <-
            TickeraCatalogSync.queue_dry_run(
              %{source_system_id: form["source_system_id"], scope: scope},
              actor: socket.assigns.current_user
@@ -98,7 +120,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
        |> assign(:form, form)
        |> assign(:form_state, form_state)
        |> assign(:queue_notice, {:success, "Catalog dry-run queued"})
-       |> load_runs()}
+       |> push_patch(to: selected_run_path(run.id))}
     else
       {:error, :source_required} ->
         {:noreply,
@@ -139,13 +161,16 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
   end
 
   def handle_event("queue_apply", %{"run_id" => run_id, "dry_run_hash" => dry_run_hash}, socket) do
-    case TickeraCatalogSync.queue_apply(run_id, dry_run_hash, actor: socket.assigns.current_user) do
-      {:ok, _queued} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Catalog apply queued")
-         |> load_runs()}
-
+    with :ok <- validate_selected_apply(socket, run_id, dry_run_hash),
+         {:ok, _queued} <-
+           TickeraCatalogSync.queue_apply(run_id, dry_run_hash,
+             actor: socket.assigns.current_user
+           ) do
+      {:noreply,
+       socket
+       |> put_flash(:info, "Catalog apply queued")
+       |> load_runs(run_id)}
+    else
       {:error, :forbidden} ->
         {:noreply, put_flash(socket, :error, "You are not allowed to apply catalog sync")}
 
@@ -166,7 +191,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
         {:noreply,
          socket
          |> put_flash(:info, "Stale mapping deactivated. Rerun full-feed dry-run.")
-         |> load_runs()}
+         |> reload_selected_run()}
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "Mapping conflict resolution failed: #{reason}")}
@@ -191,7 +216,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
            :info,
            "Stale mapping cut over. Existing order items were not changed. Rerun full-feed dry-run."
          )
-         |> load_runs()
+         |> reload_selected_run()
          |> load_order_correction_preview()}
 
       {:error, reason} ->
@@ -229,7 +254,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
              :catalog_sync_failed,
              :catalog_sync_applied
            ] do
-    {:noreply, load_runs(socket)}
+    {:noreply, load_runs(socket, socket.assigns.selected_run_id)}
   end
 
   @impl true
@@ -466,19 +491,34 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
               </td>
               <td class="px-3 py-2 text-xs text-base-content/80">{summary_text(run.summary)}</td>
               <td class="px-3 py-2">
-                <button
-                  type="button"
-                  phx-click="queue_apply"
-                  phx-value-run_id={run.id}
-                  phx-value-dry_run_hash={run.dry_run_hash}
-                  disabled={!apply_enabled?(run, preview(@previews, run.id))}
-                  class="btn btn-primary btn-xs cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-base-100 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Apply
-                </button>
+                <div class="flex flex-wrap items-center gap-2">
+                  <.link
+                    :if={run.id != @selected_run_id}
+                    patch={selected_run_path(run.id)}
+                    class="btn btn-ghost btn-xs"
+                  >
+                    Review run
+                  </.link>
+                  <span :if={run.id == @selected_run_id} class="badge badge-outline badge-sm">
+                    Reviewing
+                  </span>
+                  <button
+                    type="button"
+                    phx-click="queue_apply"
+                    phx-value-run_id={run.id}
+                    phx-value-dry_run_hash={run.dry_run_hash}
+                    disabled={
+                      run.id != @selected_run_id or
+                        !apply_enabled?(run, preview(@previews, run.id))
+                    }
+                    class="btn btn-primary btn-xs cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-base-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Apply
+                  </button>
+                </div>
               </td>
             </tr>
-            <tr :for={run <- @runs}>
+            <tr :for={run <- selected_run_list(@selected_run)}>
               <td class="px-3 py-4" colspan="6">
                 <div class="space-y-4">
                   <div :if={findings(preview(@previews, run.id)) != []}>
@@ -971,28 +1011,37 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
     end
   end
 
-  defp load_runs(socket) do
-    case TickeraCatalogSync.list_runs(actor: socket.assigns.current_user) do
+  defp load_runs(socket, requested_run_id) do
+    case TickeraCatalogSync.list_runs(actor: socket.assigns.current_user, summary_only?: true) do
       {:ok, runs} ->
-        previews = load_previews(runs, socket.assigns.current_user)
+        selected_run = select_run(runs, requested_run_id)
+        previews = load_selected_preview(selected_run, socket.assigns.current_user)
 
         {mapping_conflicts, mapping_conflict_errors} =
-          load_mapping_conflicts(runs, previews, socket.assigns.current_user)
+          load_selected_mapping_conflicts(selected_run, previews, socket.assigns.current_user)
 
         socket
-        |> subscribe_runs(runs)
+        |> sync_run_subscriptions(runs, selected_run)
         |> assign(:runs, runs)
+        |> assign(:selected_run_id, selected_run && selected_run.id)
+        |> assign(:selected_run, selected_run)
         |> assign(:previews, previews)
         |> assign(:mapping_conflicts, mapping_conflicts)
         |> assign(:mapping_conflict_errors, mapping_conflict_errors)
 
       {:error, _reason} ->
         socket
+        |> sync_run_subscriptions([], nil)
         |> assign(:runs, [])
+        |> assign(:selected_run_id, nil)
+        |> assign(:selected_run, nil)
+        |> assign(:previews, %{})
         |> assign(:mapping_conflicts, %{})
         |> assign(:mapping_conflict_errors, %{})
     end
   end
+
+  defp reload_selected_run(socket), do: load_runs(socket, socket.assigns.selected_run_id)
 
   defp load_order_correction_preview(socket) do
     case correction_source_system_id(socket) do
@@ -1037,35 +1086,61 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
     end
   end
 
-  defp load_previews(runs, current_user) do
-    Map.new(runs, fn run ->
-      preview =
-        case TickeraCatalogSync.get_run_preview(run.id, actor: current_user) do
-          {:ok, %{preview: preview}} when is_map(preview) -> preview
-          _other -> %{}
-        end
-
-      {run.id, preview}
-    end)
+  defp select_run(runs, requested_run_id) do
+    Enum.find(runs, &(&1.id == requested_run_id)) || List.first(runs)
   end
 
-  defp subscribe_runs(socket, runs) do
+  defp load_selected_preview(nil, _current_user), do: %{}
+
+  defp load_selected_preview(run, current_user) do
+    preview =
+      case TickeraCatalogSync.get_run_preview(run.id, actor: current_user) do
+        {:ok, %{run: loaded_run, preview: preview}}
+        when is_map(preview) and loaded_run.id == run.id and
+               loaded_run.dry_run_hash == run.dry_run_hash ->
+          preview
+
+        _other ->
+          %{}
+      end
+
+    %{run.id => preview}
+  end
+
+  defp sync_run_subscriptions(socket, runs, selected_run) do
     if connected?(socket) do
-      Enum.each(runs, &PubSub.subscribe(&1.id))
-    end
+      desired_ids =
+        runs
+        |> Enum.filter(&active_run?/1)
+        |> Enum.map(& &1.id)
+        |> maybe_add_selected_run(selected_run)
+        |> MapSet.new()
 
-    socket
+      current_ids = socket.assigns.subscribed_run_ids
+
+      current_ids
+      |> MapSet.difference(desired_ids)
+      |> Enum.each(&Phoenix.PubSub.unsubscribe(EventSales.PubSub, PubSub.topic(&1)))
+
+      desired_ids
+      |> MapSet.difference(current_ids)
+      |> Enum.each(&PubSub.subscribe/1)
+
+      assign(socket, :subscribed_run_ids, desired_ids)
+    else
+      socket
+    end
   end
 
-  defp load_mapping_conflicts(runs, previews, current_user) do
-    Enum.reduce(runs, {%{}, %{}}, fn run, {conflicts, errors} ->
-      merge_mapping_conflict_result(
-        {conflicts, errors},
-        run,
-        preview(previews, run.id),
-        current_user
-      )
-    end)
+  defp active_run?(run), do: run.status in [:queued, :discovering, :applying]
+
+  defp maybe_add_selected_run(run_ids, nil), do: run_ids
+  defp maybe_add_selected_run(run_ids, selected_run), do: [selected_run.id | run_ids]
+
+  defp load_selected_mapping_conflicts(nil, _previews, _current_user), do: {%{}, %{}}
+
+  defp load_selected_mapping_conflicts(run, previews, current_user) do
+    merge_mapping_conflict_result({%{}, %{}}, run, preview(previews, run.id), current_user)
   end
 
   defp merge_mapping_conflict_result({conflicts, errors}, run, preview, current_user) do
@@ -1101,6 +1176,23 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
   end
 
   defp preview(previews, run_id), do: Map.get(previews, run_id, %{})
+
+  defp selected_run_list(nil), do: []
+  defp selected_run_list(run), do: [run]
+
+  defp selected_run_path(run_id), do: ~p"/admin/catalog-sync?run_id=#{run_id}"
+
+  defp validate_selected_apply(socket, run_id, dry_run_hash) do
+    run = socket.assigns.selected_run
+    run_preview = run && preview(socket.assigns.previews, run.id)
+
+    if run && run.id == run_id && run.dry_run_hash == dry_run_hash &&
+         apply_enabled?(run, run_preview) do
+      :ok
+    else
+      {:error, :run_not_ready}
+    end
+  end
 
   defp apply_enabled?(run, preview) do
     run.status == :dry_run_ready and is_binary(run.dry_run_hash) and
