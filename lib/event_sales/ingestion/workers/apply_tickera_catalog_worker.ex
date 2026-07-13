@@ -27,6 +27,7 @@ defmodule EventSales.Ingestion.Workers.ApplyTickeraCatalogWorker do
       :ok
     else
       {:ok, nil} -> :discard
+      {:error, :run_not_ready} -> discard_stale_run(run_id)
       {:error, reason} -> fail(run_id, reason)
     end
   end
@@ -41,6 +42,10 @@ defmodule EventSales.Ingestion.Workers.ApplyTickeraCatalogWorker do
 
   defp fail(run_id, reason) do
     case Ash.get(TickeraCatalogSyncRun, run_id, domain: Ingestion) do
+      {:ok, %TickeraCatalogSyncRun{status: status}}
+      when status in [:cancelled, :applying, :applied, :failed] ->
+        :discard
+
       {:ok, %TickeraCatalogSyncRun{} = run} ->
         update_run(run, :mark_failed, %{last_error: sanitize_error(reason)})
         PubSub.broadcast(run.id, :catalog_sync_failed, %{run_id: run.id})
@@ -48,6 +53,17 @@ defmodule EventSales.Ingestion.Workers.ApplyTickeraCatalogWorker do
 
       _other ->
         {:error, reason}
+    end
+  end
+
+  defp discard_stale_run(run_id) do
+    case Ash.get(TickeraCatalogSyncRun, run_id, domain: Ingestion) do
+      {:ok, %TickeraCatalogSyncRun{status: status}}
+      when status in [:cancelled, :applying, :applied, :failed] ->
+        :discard
+
+      _other ->
+        fail(run_id, :run_not_ready)
     end
   end
 

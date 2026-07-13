@@ -2988,6 +2988,14 @@
           "name": "queue_apply"
         },
         {
+          "arity": 3,
+          "name": "revoke_ready_dry_run"
+        },
+        {
+          "arity": 3,
+          "name": "claim_for_apply"
+        },
+        {
           "arity": 1,
           "name": "list_runs"
         },

@@ -1132,7 +1132,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: `queue_dry_run/2`, `queue_apply/3`, `list_runs/1`, `get_run_preview/2`, `list_source_systems/1`
+  - public_funs: `queue_dry_run/2`, `queue_apply/3`, `revoke_ready_dry_run/3`, `claim_for_apply/3`, `list_runs/1`, `get_run_preview/2`, `list_source_systems/1`
   - uses: _none_
 - `EventSales.Ingestion.TickeraEventSources` - `lib/event_sales/ingestion/tickera_event_sources.ex`
   - moduledoc?: true
