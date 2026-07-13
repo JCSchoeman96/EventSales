@@ -1227,8 +1227,8 @@ Project root: `.`
 - `EventSales.Ingestion.Workers.ApplyTickeraCatalogWorker` - `lib/event_sales/ingestion/workers/apply_tickera_catalog_worker.ex`
   - moduledoc?: true
   - specs?: false
-  - docs_count: 0
-  - public_funs: `perform/1`
+  - docs_count: 1
+  - public_funs: `perform/1`, `fail_run/3`
   - uses: `Oban.Worker`
 - `EventSales.Ingestion.Workers.BackfillOrdersWorker` - `lib/event_sales/ingestion/workers/backfill_orders_worker.ex`
   - moduledoc?: true
