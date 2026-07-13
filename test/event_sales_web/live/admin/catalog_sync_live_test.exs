@@ -131,7 +131,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
     refute fallback_html =~ "historical-detail"
   end
 
-  test "reviewing another run changes the URL and never enables Apply for unloaded rows", %{
+  test "historical rows only review and selected details own one stable Apply control", %{
     conn: conn,
     admin: admin,
     source: source
@@ -147,9 +147,11 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
     assert html =~ "latest-ready-detail"
     refute html =~ "historical-ready-detail"
 
+    refute has_element?(view, ~s(button[phx-value-run_id="#{historical.id}"]), "Apply")
+
     assert has_element?(
              view,
-             ~s(button[phx-value-run_id="#{historical.id}"][disabled]),
+             ~s(#catalog-sync-apply-#{latest.id}[phx-click="queue_apply"]),
              "Apply"
            )
 
@@ -161,7 +163,62 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
     html = render(view)
     assert html =~ "historical-ready-detail"
     refute html =~ "latest-ready-detail"
-    refute has_element?(view, ~s(button[phx-value-run_id="#{historical.id}"][disabled]), "Apply")
+
+    assert has_element?(
+             view,
+             ~s(#catalog-sync-apply-#{historical.id}[phx-click="queue_apply"]),
+             "Apply"
+           )
+
+    refute has_element?(view, ~s(button[phx-value-run_id="#{latest.id}"]), "Apply")
+  end
+
+  test "selected ready run can be revoked with audited reason and remains reviewable", %{
+    conn: conn,
+    admin: admin,
+    source: source
+  } do
+    run = create_ready_run!(source, "revoke-live-hash", "revoked-preview-remains")
+
+    {:ok, view, _html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/catalog-sync?run_id=#{run.id}")
+
+    assert has_element?(view, "#catalog-sync-revoke-#{run.id}", "Revoke dry-run")
+
+    view
+    |> element("#catalog-sync-revoke-#{run.id}")
+    |> render_click()
+
+    assert has_element?(view, "#catalog-sync-revoke-modal-#{run.id}")
+    assert render(view) =~ "Revoke this dry-run?"
+    assert render(view) =~ run.dry_run_hash
+    assert render(view) =~ "Event changes"
+    assert render(view) =~ "Warning findings"
+
+    html =
+      view
+      |> form("#catalog-sync-revoke-form", %{
+        "cancellation_reason_code" => "unexpected_changes",
+        "cancellation_reason_details" => "  Historical changes are too broad.  "
+      })
+      |> render_submit()
+
+    assert html =~ "Catalog dry-run revoked"
+    assert html =~ "revoked-preview-remains"
+    assert html =~ "Revoked by Test User"
+    assert html =~ "Proposed changes are unexpected or too broad"
+    assert html =~ "Historical changes are too broad."
+    refute has_element?(view, ~s(button[phx-click="queue_apply"]), "Apply")
+    refute has_element?(view, ~s(button[phx-click="open_revoke_dry_run"]), "Revoke dry-run")
+    refute_enqueued(worker: ApplyTickeraCatalogWorker)
+
+    revoked = Ash.get!(TickeraCatalogSyncRun, run.id, domain: Ingestion)
+    assert revoked.status == :cancelled
+    assert revoked.cancelled_by_user_id == admin.id
+    assert revoked.cancellation_reason_code == :unexpected_changes
+    assert revoked.cancellation_reason_details == "Historical changes are too broad."
   end
 
   test "selected-run PubSub refresh reloads only its matching preview", %{

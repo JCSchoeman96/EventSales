@@ -3,12 +3,13 @@ defmodule EventSales.Ingestion.Workers.ApplyTickeraCatalogWorkerTest do
   use Oban.Testing, repo: EventSales.Repo
 
   alias EventSales.Catalog
-  alias EventSales.Catalog.Resources.ProductMapping
+  alias EventSales.Catalog.Resources.{Event, ProductMapping, TicketType}
   alias EventSales.Catalog.TickeraCatalog.{DiscoveryResult, Planner, PubSub}
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.TickeraCatalogSyncRun
+  alias EventSales.Ingestion.TickeraCatalogSync
   alias EventSales.Ingestion.Workers.ApplyTickeraCatalogWorker
-  alias EventSales.TestSupport.{SalesHelpers, TickeraCatalogFixtures}
+  alias EventSales.TestSupport.{AuthHelpers, SalesHelpers, TickeraCatalogFixtures}
 
   test "applies a durable plan and broadcasts applied" do
     source = SalesHelpers.create_source_system!()
@@ -98,5 +99,121 @@ defmodule EventSales.Ingestion.Workers.ApplyTickeraCatalogWorkerTest do
     updated = Ash.get!(TickeraCatalogSyncRun, run.id, domain: Ingestion)
     assert updated.status == :failed
     assert updated.last_error == "stale_dry_run_hash"
+  end
+
+  test "queued Apply job discards when revocation wins and preserves its audit" do
+    admin = AuthHelpers.create_user!("revoked-apply-worker@example.com")
+    AuthHelpers.create_global_role!(admin, :admin)
+    source = SalesHelpers.create_source_system!()
+
+    run =
+      Ash.create!(
+        TickeraCatalogSyncRun,
+        %{
+          source_system_id: source.id,
+          scope: %{"kind" => "wordpress_feed", "mode" => "full"},
+          status: :dry_run_ready,
+          dry_run_hash: "revoked-worker-hash",
+          summary: %{},
+          plan_snapshot: %{
+            "dry_run_hash" => "revoked-worker-hash",
+            "event_changes" => [],
+            "ticket_type_changes" => [],
+            "product_mapping_changes" => [],
+            "findings" => [],
+            "touched_event_ids" => [],
+            "touched_product_keys" => []
+          }
+        },
+        action: :create_dry_run,
+        domain: Ingestion
+      )
+
+    assert {:ok, revoked} =
+             TickeraCatalogSync.revoke_ready_dry_run(
+               run.id,
+               %{
+                 cancellation_reason_code: :source_changed,
+                 cancellation_reason_details: "Source changed before execution"
+               },
+               actor: admin
+             )
+
+    catalog_counts = %{
+      events: Ash.count!(Event, domain: Catalog),
+      ticket_types: Ash.count!(TicketType, domain: Catalog),
+      mappings: Ash.count!(ProductMapping, domain: Catalog)
+    }
+
+    assert :discard =
+             ApplyTickeraCatalogWorker.perform(%Oban.Job{
+               args: %{"run_id" => run.id, "dry_run_hash" => run.dry_run_hash}
+             })
+
+    reloaded = Ash.get!(TickeraCatalogSyncRun, run.id, domain: Ingestion)
+    assert reloaded.status == :cancelled
+    assert reloaded.cancelled_at == revoked.cancelled_at
+    assert reloaded.cancelled_by_user_id == admin.id
+    assert reloaded.cancellation_reason_code == :source_changed
+    assert reloaded.cancellation_reason_details == "Source changed before execution"
+    assert is_nil(reloaded.last_error)
+    assert Ash.count!(Event, domain: Catalog) == catalog_counts.events
+    assert Ash.count!(TicketType, domain: Catalog) == catalog_counts.ticket_types
+    assert Ash.count!(ProductMapping, domain: Catalog) == catalog_counts.mappings
+  end
+
+  test "failure transition loses to a concurrent revocation without false failure" do
+    parent = self()
+    admin = AuthHelpers.create_user!("failure-race-admin@example.com")
+    AuthHelpers.create_global_role!(admin, :admin)
+    source = SalesHelpers.create_source_system!()
+
+    run =
+      Ash.create!(
+        TickeraCatalogSyncRun,
+        %{
+          source_system_id: source.id,
+          scope: %{"kind" => "wordpress_feed", "mode" => "full"},
+          status: :dry_run_ready,
+          dry_run_hash: "failure-race-hash",
+          summary: %{},
+          plan_snapshot: %{}
+        },
+        action: :create_dry_run,
+        domain: Ingestion
+      )
+
+    PubSub.subscribe(run.id)
+
+    failure_task =
+      Task.async(fn ->
+        ApplyTickeraCatalogWorker.fail_run(run.id, :stale_dry_run_hash,
+          before_update: fn ->
+            send(parent, :before_failure_update)
+
+            receive do
+              :continue_failure_update -> :ok
+            end
+          end
+        )
+      end)
+
+    assert_receive :before_failure_update
+
+    assert {:ok, _revoked} =
+             TickeraCatalogSync.revoke_ready_dry_run(
+               run.id,
+               %{cancellation_reason_code: :source_changed},
+               actor: admin
+             )
+
+    send(failure_task.pid, :continue_failure_update)
+    assert :discard = Task.await(failure_task)
+    refute_receive {:catalog_sync_failed, _}
+
+    reloaded = Ash.get!(TickeraCatalogSyncRun, run.id, domain: Ingestion)
+    assert reloaded.status == :cancelled
+    assert is_nil(reloaded.last_error)
+    assert reloaded.cancelled_by_user_id == admin.id
   end
 end

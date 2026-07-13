@@ -8,6 +8,14 @@ defmodule EventSales.Ingestion.Resources.TickeraCatalogSyncRun do
     domain: EventSales.Ingestion
 
   @statuses [:queued, :discovering, :dry_run_ready, :applying, :applied, :failed, :cancelled]
+  @cancellation_reason_codes [
+    :source_changed,
+    :incorrect_scope,
+    :unexpected_changes,
+    :superseded,
+    :operator_error,
+    :other
+  ]
 
   postgres do
     table "ingestion_tickera_catalog_sync_runs"
@@ -16,6 +24,16 @@ defmodule EventSales.Ingestion.Resources.TickeraCatalogSyncRun do
     references do
       reference :source_system, on_delete: :restrict, on_update: :update
       reference :requested_by_user, on_delete: :nilify, on_update: :update
+
+      reference :cancelled_by_user,
+        name: "catalog_sync_runs_cancelled_by_user_fkey",
+        on_delete: :restrict,
+        on_update: :update
+    end
+
+    custom_indexes do
+      index :cancelled_by_user_id,
+        name: "catalog_sync_runs_cancelled_by_user_idx"
     end
   end
 
@@ -52,7 +70,7 @@ defmodule EventSales.Ingestion.Resources.TickeraCatalogSyncRun do
       change &__MODULE__.set_finished_at/2
     end
 
-    update :mark_applying do
+    update :claim_for_apply do
       require_atomic? false
       change set_attribute(:status, :applying)
     end
@@ -68,6 +86,18 @@ defmodule EventSales.Ingestion.Resources.TickeraCatalogSyncRun do
       require_atomic? false
       change set_attribute(:status, :failed)
       change &__MODULE__.set_finished_at/2
+    end
+
+    update :revoke_ready_dry_run do
+      accept [
+        :cancelled_by_user_id,
+        :cancelled_at,
+        :cancellation_reason_code,
+        :cancellation_reason_details
+      ]
+
+      require_atomic? false
+      change set_attribute(:status, :cancelled)
     end
   end
 
@@ -113,6 +143,20 @@ defmodule EventSales.Ingestion.Resources.TickeraCatalogSyncRun do
       public? true
     end
 
+    attribute :cancelled_at, :utc_datetime_usec do
+      public? true
+    end
+
+    attribute :cancellation_reason_code, :atom do
+      constraints one_of: @cancellation_reason_codes
+      public? true
+    end
+
+    attribute :cancellation_reason_details, :string do
+      constraints max_length: 500
+      public? true
+    end
+
     create_timestamp :inserted_at
     update_timestamp :updated_at
   end
@@ -124,6 +168,10 @@ defmodule EventSales.Ingestion.Resources.TickeraCatalogSyncRun do
     end
 
     belongs_to :requested_by_user, EventSales.Accounts.Resources.User do
+      public? true
+    end
+
+    belongs_to :cancelled_by_user, EventSales.Accounts.Resources.User do
       public? true
     end
 

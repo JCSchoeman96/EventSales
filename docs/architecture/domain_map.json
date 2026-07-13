@@ -759,7 +759,7 @@
         ]
       },
       {
-        "docs_count": 0,
+        "docs_count": 1,
         "moduledoc?": true,
         "name": "EventSales.Ingestion.Workers.ApplyTickeraCatalogWorker",
         "parse_error": null,
@@ -768,6 +768,10 @@
           {
             "arity": 1,
             "name": "perform"
+          },
+          {
+            "arity": 3,
+            "name": "fail_run"
           }
         ],
         "specs?": false,

@@ -8,6 +8,7 @@ defmodule EventSales.Catalog.TickeraCatalog.Applier do
   alias EventSales.Catalog.Resources.{Event, ProductMapping, TicketType}
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.TickeraCatalogSyncRun
+  alias EventSales.Ingestion.TickeraCatalogSync
   alias EventSales.Ingestion.Workers.MissingCatalogResolutionWorker
   alias EventSales.Repo
 
@@ -21,7 +22,8 @@ defmodule EventSales.Catalog.TickeraCatalog.Applier do
          :ok <- validate_hash(run, expected_dry_run_hash),
          {:ok, snapshot} <- fetch_snapshot(run),
          :ok <- validate_no_blocking(snapshot),
-         {:ok, {applied, touched, notifications}} <- apply_transaction(run, snapshot) do
+         {:ok, {applied, touched, notifications}} <-
+           apply_transaction(run.id, expected_dry_run_hash, snapshot) do
       Ash.Notifier.notify(notifications)
       after_apply(run.source_system_id, touched)
       {:ok, applied}
@@ -48,9 +50,9 @@ defmodule EventSales.Catalog.TickeraCatalog.Applier do
     end
   end
 
-  defp apply_transaction(run, snapshot) do
+  defp apply_transaction(run_id, expected_dry_run_hash, snapshot) do
     Repo.transaction(fn ->
-      case do_apply_transaction(run, snapshot) do
+      case do_apply_transaction(run_id, expected_dry_run_hash, snapshot) do
         {:ok, result} -> result
         {:error, reason} -> Repo.rollback(reason)
       end
@@ -59,8 +61,11 @@ defmodule EventSales.Catalog.TickeraCatalog.Applier do
     error -> {:error, error}
   end
 
-  defp do_apply_transaction(run, snapshot) do
-    with {:ok, applying, applying_notifications} <- mark_applying(run),
+  defp do_apply_transaction(run_id, expected_dry_run_hash, snapshot) do
+    with {:ok, applying, applying_notifications} <-
+           TickeraCatalogSync.claim_for_apply(run_id, expected_dry_run_hash,
+             return_notifications?: true
+           ),
          {:ok, touched, snapshot_notifications} <- apply_snapshot(snapshot),
          {:ok, applied, applied_notifications} <- mark_applied(applying) do
       {:ok,
@@ -241,19 +246,6 @@ defmodule EventSales.Catalog.TickeraCatalog.Applier do
 
       append_notifications(refs, notifications)
     end)
-  end
-
-  defp mark_applying(run) do
-    case run
-         |> Ash.Changeset.for_update(:mark_applying, %{})
-         |> Ash.update(
-           domain: Ingestion,
-           context: %{warn_on_transaction_hooks?: false},
-           return_notifications?: true
-         ) do
-      {:ok, applying, notifications} -> {:ok, applying, notifications}
-      {:error, reason} -> {:error, reason}
-    end
   end
 
   defp mark_applied(run) do

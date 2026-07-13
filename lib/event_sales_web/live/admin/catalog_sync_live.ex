@@ -63,6 +63,11 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
       |> assign(:previews, %{})
       |> assign(:mapping_conflicts, %{})
       |> assign(:mapping_conflict_errors, %{})
+      |> assign(:revoke_modal_run_id, nil)
+      |> assign(:revoke_form, %{
+        "cancellation_reason_code" => "",
+        "cancellation_reason_details" => ""
+      })
       |> assign(:order_correction_preview, nil)
       |> assign(:order_correction_error, nil)
       |> load_source_systems()
@@ -179,6 +184,85 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
     end
   end
 
+  def handle_event("open_revoke_dry_run", %{"run_id" => run_id}, socket) do
+    case socket.assigns.selected_run do
+      %{id: ^run_id, status: :dry_run_ready} ->
+        {:noreply,
+         socket
+         |> assign(:revoke_modal_run_id, run_id)
+         |> assign(:revoke_form, %{
+           "cancellation_reason_code" => "",
+           "cancellation_reason_details" => ""
+         })}
+
+      _other ->
+        {:noreply, put_flash(socket, :error, "This catalog dry-run is no longer ready")}
+    end
+  end
+
+  def handle_event("close_revoke_dry_run", _params, socket) do
+    {:noreply, close_revoke_modal(socket)}
+  end
+
+  def handle_event("validate_revoke_dry_run", params, socket) do
+    {:noreply, assign(socket, :revoke_form, revoke_form(params))}
+  end
+
+  def handle_event("revoke_dry_run", params, socket) do
+    form = revoke_form(params)
+
+    with %{id: run_id, status: :dry_run_ready} <- socket.assigns.selected_run,
+         ^run_id <- socket.assigns.revoke_modal_run_id,
+         {:ok, _revoked} <-
+           TickeraCatalogSync.revoke_ready_dry_run(run_id, form,
+             actor: socket.assigns.current_user
+           ) do
+      {:noreply,
+       socket
+       |> close_revoke_modal()
+       |> put_flash(:info, "Catalog dry-run revoked")
+       |> load_runs(run_id)}
+    else
+      {:error, :already_cancelled} ->
+        {:noreply,
+         socket
+         |> close_revoke_modal()
+         |> put_flash(:error, "This catalog dry-run was already revoked")
+         |> reload_selected_run()}
+
+      {:error, :run_already_claimed} ->
+        {:noreply,
+         socket
+         |> close_revoke_modal()
+         |> put_flash(:error, "This catalog dry-run was already claimed for Apply")
+         |> reload_selected_run()}
+
+      {:error, :reason_details_required} ->
+        {:noreply,
+         socket
+         |> assign(:revoke_form, form)
+         |> put_flash(:error, "Enter details when selecting Other reason")}
+
+      {:error, :reason_details_too_long} ->
+        {:noreply,
+         socket
+         |> assign(:revoke_form, form)
+         |> put_flash(:error, "Revocation details must be 500 characters or fewer")}
+
+      {:error, :invalid_reason_code} ->
+        {:noreply,
+         socket
+         |> assign(:revoke_form, form)
+         |> put_flash(:error, "Select a revocation reason")}
+
+      _other ->
+        {:noreply,
+         socket
+         |> assign(:revoke_form, form)
+         |> put_flash(:error, "Catalog dry-run could not be revoked")}
+    end
+  end
+
   def handle_event("deactivate_stale_mapping", params, socket) do
     case MappingConflictResolver.deactivate_stale_mapping(
            value(params, "run_id"),
@@ -252,7 +336,8 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
              :catalog_sync_started,
              :catalog_sync_preview_ready,
              :catalog_sync_failed,
-             :catalog_sync_applied
+             :catalog_sync_applied,
+             :catalog_sync_cancelled
            ] do
     {:noreply, load_runs(socket, socket.assigns.selected_run_id)}
   end
@@ -502,25 +587,176 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
                   <span :if={run.id == @selected_run_id} class="badge badge-outline badge-sm">
                     Reviewing
                   </span>
-                  <button
-                    type="button"
-                    phx-click="queue_apply"
-                    phx-value-run_id={run.id}
-                    phx-value-dry_run_hash={run.dry_run_hash}
-                    disabled={
-                      run.id != @selected_run_id or
-                        !apply_enabled?(run, preview(@previews, run.id))
-                    }
-                    class="btn btn-primary btn-xs cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-base-100 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Apply
-                  </button>
                 </div>
               </td>
             </tr>
             <tr :for={run <- selected_run_list(@selected_run)}>
               <td class="px-3 py-4" colspan="6">
                 <div class="space-y-4">
+                  <section class="rounded border border-base-300 bg-base-200/40 p-3">
+                    <div class="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <h3 class="text-xs font-semibold uppercase text-base-content/70">
+                          Selected run actions
+                        </h3>
+                        <p class="mt-1 font-mono text-xs text-base-content/70">{run.id}</p>
+                      </div>
+                      <div :if={run.status == :dry_run_ready} class="flex flex-wrap gap-2">
+                        <button
+                          id={"catalog-sync-apply-#{run.id}"}
+                          type="button"
+                          phx-click="queue_apply"
+                          phx-value-run_id={run.id}
+                          phx-value-dry_run_hash={run.dry_run_hash}
+                          disabled={!apply_enabled?(run, preview(@previews, run.id))}
+                          class="btn btn-primary btn-sm cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Apply
+                        </button>
+                        <button
+                          id={"catalog-sync-revoke-#{run.id}"}
+                          type="button"
+                          phx-click="open_revoke_dry_run"
+                          phx-value-run_id={run.id}
+                          class="btn btn-error btn-outline btn-sm"
+                        >
+                          Revoke dry-run
+                        </button>
+                      </div>
+                    </div>
+
+                    <div
+                      :if={run.status == :cancelled}
+                      class="alert alert-warning mt-3 items-start text-sm"
+                    >
+                      <div>
+                        <div class="font-semibold">
+                          Revoked by {cancelled_by_name(run)} at {format_datetime(run.cancelled_at)}
+                        </div>
+                        <div>Reason: {cancellation_reason_label(run.cancellation_reason_code)}</div>
+                        <div :if={run.cancellation_reason_details}>
+                          Details: {run.cancellation_reason_details}
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <div
+                    :if={@revoke_modal_run_id == run.id and run.status == :dry_run_ready}
+                    id={"catalog-sync-revoke-modal-#{run.id}"}
+                    class="modal modal-open"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby={"catalog-sync-revoke-title-#{run.id}"}
+                  >
+                    <div class="modal-box max-w-2xl">
+                      <h3
+                        id={"catalog-sync-revoke-title-#{run.id}"}
+                        class="text-lg font-semibold"
+                      >
+                        Revoke this dry-run?
+                      </h3>
+                      <p class="mt-2 text-sm text-base-content/80">
+                        Its snapshot will remain available for audit, but it can never be applied.
+                      </p>
+
+                      <dl class="mt-4 grid gap-2 text-sm md:grid-cols-2">
+                        <div>
+                          <dt class="font-semibold">Run ID</dt>
+                          <dd class="font-mono">{run.id}</dd>
+                        </div>
+                        <div>
+                          <dt class="font-semibold">Source</dt>
+                          <dd>{source_name(@source_systems, run.source_system_id)}</dd>
+                        </div>
+                        <div>
+                          <dt class="font-semibold">Scope</dt>
+                          <dd>{scope_label(run.scope)}</dd>
+                        </div>
+                        <div>
+                          <dt class="font-semibold">Dry-run hash</dt>
+                          <dd class="break-all font-mono text-xs">{run.dry_run_hash}</dd>
+                        </div>
+                        <div>
+                          <dt class="font-semibold">Event changes</dt>
+                          <dd>{change_count(preview(@previews, run.id), "event_changes")}</dd>
+                        </div>
+                        <div>
+                          <dt class="font-semibold">TicketType changes</dt>
+                          <dd>{change_count(preview(@previews, run.id), "ticket_type_changes")}</dd>
+                        </div>
+                        <div>
+                          <dt class="font-semibold">Mapping changes</dt>
+                          <dd>
+                            {change_count(preview(@previews, run.id), "product_mapping_changes")}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt class="font-semibold">Warning findings</dt>
+                          <dd>{finding_count(preview(@previews, run.id), "warning")}</dd>
+                        </div>
+                        <div>
+                          <dt class="font-semibold">Blocking findings</dt>
+                          <dd>{finding_count(preview(@previews, run.id), "blocking")}</dd>
+                        </div>
+                      </dl>
+
+                      <form
+                        id="catalog-sync-revoke-form"
+                        phx-change="validate_revoke_dry_run"
+                        phx-submit="revoke_dry_run"
+                        class="mt-5 space-y-4"
+                      >
+                        <label class="form-control w-full">
+                          <span class="label-text font-medium">Reason</span>
+                          <select
+                            name="cancellation_reason_code"
+                            class="select select-bordered w-full"
+                            required
+                          >
+                            <option value="" selected={@revoke_form["cancellation_reason_code"] == ""}>
+                              Select a reason
+                            </option>
+                            <option
+                              :for={{code, label} <- cancellation_reason_options()}
+                              value={code}
+                              selected={@revoke_form["cancellation_reason_code"] == code}
+                            >
+                              {label}
+                            </option>
+                          </select>
+                        </label>
+                        <label class="form-control w-full">
+                          <span class="label-text font-medium">
+                            {if @revoke_form["cancellation_reason_code"] == "other",
+                              do: "Details — required",
+                              else: "Additional details — optional"}
+                          </span>
+                          <textarea
+                            name="cancellation_reason_details"
+                            maxlength="500"
+                            required={@revoke_form["cancellation_reason_code"] == "other"}
+                            class="textarea textarea-bordered min-h-24 w-full"
+                          >{@revoke_form["cancellation_reason_details"]}</textarea>
+                        </label>
+                        <div class="modal-action">
+                          <button type="button" phx-click="close_revoke_dry_run" class="btn btn-ghost">
+                            Keep dry-run
+                          </button>
+                          <button type="submit" class="btn btn-error">Confirm revocation</button>
+                        </div>
+                      </form>
+                    </div>
+                    <button
+                      type="button"
+                      phx-click="close_revoke_dry_run"
+                      class="modal-backdrop"
+                      aria-label="Close revocation dialog"
+                    >
+                      close
+                    </button>
+                  </div>
+
                   <div :if={findings(preview(@previews, run.id)) != []}>
                     <h3 class="mb-2 text-xs font-semibold uppercase text-base-content/70">
                       Findings
@@ -1014,8 +1250,10 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
   defp load_runs(socket, requested_run_id) do
     case TickeraCatalogSync.list_runs(actor: socket.assigns.current_user, summary_only?: true) do
       {:ok, runs} ->
-        selected_run = select_run(runs, requested_run_id)
-        previews = load_selected_preview(selected_run, socket.assigns.current_user)
+        selected_summary = select_run(runs, requested_run_id)
+
+        {selected_run, previews} =
+          load_selected_preview(selected_summary, socket.assigns.current_user)
 
         {mapping_conflicts, mapping_conflict_errors} =
           load_selected_mapping_conflicts(selected_run, previews, socket.assigns.current_user)
@@ -1090,21 +1328,18 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
     Enum.find(runs, &(&1.id == requested_run_id)) || List.first(runs)
   end
 
-  defp load_selected_preview(nil, _current_user), do: %{}
+  defp load_selected_preview(nil, _current_user), do: {nil, %{}}
 
   defp load_selected_preview(run, current_user) do
-    preview =
-      case TickeraCatalogSync.get_run_preview(run.id, actor: current_user) do
-        {:ok, %{run: loaded_run, preview: preview}}
-        when is_map(preview) and loaded_run.id == run.id and
-               loaded_run.dry_run_hash == run.dry_run_hash ->
-          preview
+    case TickeraCatalogSync.get_run_preview(run.id, actor: current_user) do
+      {:ok, %{run: loaded_run, preview: preview}}
+      when is_map(preview) and loaded_run.id == run.id and
+             loaded_run.dry_run_hash == run.dry_run_hash ->
+        {loaded_run, %{run.id => preview}}
 
-        _other ->
-          %{}
-      end
-
-    %{run.id => preview}
+      _other ->
+        {run, %{run.id => %{}}}
+    end
   end
 
   defp sync_run_subscriptions(socket, runs, selected_run) do
@@ -1181,6 +1416,83 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
   defp selected_run_list(run), do: [run]
 
   defp selected_run_path(run_id), do: ~p"/admin/catalog-sync?run_id=#{run_id}"
+
+  defp close_revoke_modal(socket) do
+    socket
+    |> assign(:revoke_modal_run_id, nil)
+    |> assign(:revoke_form, revoke_form(%{}))
+  end
+
+  defp revoke_form(params) when is_map(params) do
+    %{
+      "cancellation_reason_code" => Map.get(params, "cancellation_reason_code", ""),
+      "cancellation_reason_details" => Map.get(params, "cancellation_reason_details", "")
+    }
+  end
+
+  defp cancellation_reason_options do
+    [
+      {"source_changed", "Source catalog changed after snapshot"},
+      {"incorrect_scope", "Incorrect scope selected"},
+      {"unexpected_changes", "Proposed changes are unexpected or too broad"},
+      {"superseded", "Superseded by another dry-run"},
+      {"operator_error", "Operator error"},
+      {"other", "Other"}
+    ]
+  end
+
+  defp cancellation_reason_label(reason_code) do
+    reason = reason_code && Atom.to_string(reason_code)
+
+    cancellation_reason_options()
+    |> Enum.find_value("Unknown reason", fn
+      {^reason, label} -> label
+      _option -> nil
+    end)
+  end
+
+  defp cancelled_by_name(%{cancelled_by_user: %{name: name}})
+       when is_binary(name) and name != "",
+       do: name
+
+  defp cancelled_by_name(_run), do: "Admin user"
+
+  defp source_name(source_systems, source_system_id) do
+    source_systems
+    |> Enum.find(&(&1.id == source_system_id))
+    |> case do
+      %{name: name} when is_binary(name) and name != "" -> name
+      _source -> "Unavailable"
+    end
+  end
+
+  defp scope_label(%{"kind" => "wordpress_feed", "mode" => "full"}),
+    do: "WordPress feed full catalog"
+
+  defp scope_label(%{"kind" => "wordpress_feed", "product_id" => product_id}),
+    do: "WordPress feed product #{product_id}"
+
+  defp scope_label(%{"kind" => "wordpress_feed", "variation_id" => variation_id}),
+    do: "WordPress feed variation #{variation_id}"
+
+  defp scope_label(%{"kind" => "wordpress_feed", "event_id" => event_id}),
+    do: "WordPress feed event #{event_id}"
+
+  defp scope_label(%{"kind" => "wordpress_feed", "updated_since" => updated_since}),
+    do: "WordPress feed updated since #{updated_since}"
+
+  defp scope_label(%{"kind" => "manual_rows"}), do: "Sanitized manual rows"
+
+  defp scope_label(%{"kind" => "woo_product", "product_id" => product_id}),
+    do: "WooCommerce product #{product_id}"
+
+  defp scope_label(_scope), do: "Unavailable"
+
+  defp change_count(preview, key), do: preview |> list(key) |> length()
+
+  defp finding_count(preview, severity) do
+    Enum.count(findings(preview), &(display_value(value(&1, "severity")) == severity))
+  end
 
   defp validate_selected_apply(socket, run_id, dry_run_hash) do
     run = socket.assigns.selected_run
