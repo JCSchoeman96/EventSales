@@ -3924,12 +3924,16 @@
       "uses": []
     },
     {
-      "docs_count": 3,
+      "docs_count": 4,
       "moduledoc?": true,
       "name": "EventSales.Sales.OrderItemMapper",
       "parse_error": null,
       "path": "lib/event_sales/sales/order_item_mapper.ex",
       "public_funs": [
+        {
+          "arity": 1,
+          "name": "automatic_mapping_eligibility"
+        },
         {
           "arity": 1,
           "name": "map_item"

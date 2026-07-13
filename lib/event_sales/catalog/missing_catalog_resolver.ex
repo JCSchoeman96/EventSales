@@ -22,7 +22,8 @@ defmodule EventSales.Catalog.MissingCatalogResolver do
   @doc """
   Retries mapping for pending order items matching source/product/variation.
 
-  Matching rows that remain pending after local mapping is retried are marked
+  On-hold order items are intentionally deferred and remain pending. Other
+  matching rows that remain pending after local mapping is retried are marked
   `:unmapped` through the existing Ash action.
   """
   @spec recover_product(Ecto.UUID.t(), integer(), integer() | nil, keyword()) ::
@@ -68,6 +69,16 @@ defmodule EventSales.Catalog.MissingCatalogResolver do
   end
 
   defp recover_item(%OrderItem{} = item) do
+    case OrderItemMapper.automatic_mapping_eligibility(item) do
+      :deferred ->
+        {:ok, :unchanged}
+
+      :eligible ->
+        recover_eligible_item(item)
+    end
+  end
+
+  defp recover_eligible_item(%OrderItem{} = item) do
     case OrderItemMapper.map_item(item) do
       {:ok, %OrderItem{mapping_status: :mapped}} ->
         {:ok, :mapped}

@@ -2,9 +2,10 @@ defmodule EventSales.Sales.OrderItemMapper do
   @moduledoc """
   Applies local catalog mappings to normalized order items.
 
-  Only pending rows are mutated by normal mapping. Manual corrections and
-  terminal mapping states are preserved unless a later explicit remap action is
-  introduced and tested.
+  Only eligible pending rows are mutated by normal mapping. On-hold orders are
+  deferred until a later source update advances their status. Manual
+  corrections and terminal mapping states are preserved unless a later
+  explicit remap action is introduced and tested.
   """
 
   require Ash.Query
@@ -15,6 +16,18 @@ defmodule EventSales.Sales.OrderItemMapper do
   alias EventSales.Sales.Resources.{Order, OrderItem}
 
   @default_queue_limit 50
+
+  @type automatic_mapping_eligibility :: :eligible | :deferred
+
+  @doc """
+  Returns whether an order item may be mapped automatically.
+
+  The item must have its parent order loaded. On-hold WooCommerce orders are
+  deferred until a later order update advances their status.
+  """
+  @spec automatic_mapping_eligibility(OrderItem.t()) :: automatic_mapping_eligibility()
+  def automatic_mapping_eligibility(%OrderItem{order: %Order{status: :on_hold}}), do: :deferred
+  def automatic_mapping_eligibility(%OrderItem{order: %Order{}}), do: :eligible
 
   @doc """
   Maps one pending order item through local ProductMapping data.
@@ -30,7 +43,10 @@ defmodule EventSales.Sales.OrderItemMapper do
   def map_item(%OrderItem{} = item) do
     with {:ok, loaded} <- Ash.load(item, :order, domain: Sales),
          %Order{source_system_id: source_system_id} <- loaded.order do
-      map_loaded_item(loaded, source_system_id)
+      case automatic_mapping_eligibility(loaded) do
+        :eligible -> map_loaded_item(loaded, source_system_id)
+        :deferred -> {:ok, loaded}
+      end
     else
       {:error, reason} -> {:error, reason}
     end

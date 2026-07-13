@@ -40,6 +40,52 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
              :pending_mapping_resolution
   end
 
+  test "leaves on-hold rows pending when a local mapping exists", %{
+    source: source,
+    order: order,
+    event: event,
+    ticket: ticket
+  } do
+    on_hold_order = put_order_on_hold!(order)
+    item = create_item!(on_hold_order, %{woo_product_id: 501, woo_variation_id: 601})
+    create_mapping!(source, event, ticket, %{woo_product_id: 501, woo_variation_id: 601})
+
+    assert {:ok, %{mapped: 0, marked_unmapped: 0, unchanged: 1}} =
+             MissingCatalogResolver.recover_product(source.id, 501, 601)
+
+    persisted = Ash.get!(OrderItem, item.id, domain: Sales)
+    assert persisted.mapping_status == :pending_mapping_resolution
+    assert persisted.event_id == nil
+    assert persisted.ticket_type_id == nil
+  end
+
+  test "does not mark an unresolved on-hold row unmapped", %{source: source, order: order} do
+    on_hold_order = put_order_on_hold!(order)
+    item = create_item!(on_hold_order, %{woo_product_id: 999_999, woo_variation_id: nil})
+
+    assert {:ok, %{mapped: 0, marked_unmapped: 0, unchanged: 1}} =
+             MissingCatalogResolver.recover_product(source.id, 999_999, nil)
+
+    assert Ash.get!(OrderItem, item.id, domain: Sales).mapping_status ==
+             :pending_mapping_resolution
+  end
+
+  test "maps pending rows for cancelled orders", %{
+    source: source,
+    order: order,
+    event: event,
+    ticket: ticket
+  } do
+    cancelled_order = put_order_status!(order, :cancelled)
+    item = create_item!(cancelled_order, %{woo_product_id: 501, woo_variation_id: 601})
+    create_mapping!(source, event, ticket, %{woo_product_id: 501, woo_variation_id: 601})
+
+    assert {:ok, %{mapped: 1, marked_unmapped: 0, unchanged: 0}} =
+             MissingCatalogResolver.recover_product(source.id, 501, 601)
+
+    assert Ash.get!(OrderItem, item.id, domain: Sales).mapping_status == :mapped
+  end
+
   test "marks matching still-pending rows unmapped and is duplicate safe", %{
     source: source,
     order: order
@@ -180,6 +226,22 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
     ProductMapping
     |> Ash.read!(domain: Catalog)
     |> length()
+  end
+
+  defp put_order_on_hold!(order) do
+    put_order_status!(order, :on_hold)
+  end
+
+  defp put_order_status!(order, status) do
+    Ash.update!(
+      order,
+      %{
+        status: status,
+        updated_at_source: DateTime.add(order.updated_at_source, 1, :second)
+      },
+      action: :sync_status_from_source,
+      domain: Sales
+    )
   end
 
   defp collect_repo_queries(acc \\ []) do
