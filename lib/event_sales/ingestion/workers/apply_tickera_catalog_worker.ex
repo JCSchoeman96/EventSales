@@ -13,9 +13,14 @@ defmodule EventSales.Ingestion.Workers.ApplyTickeraCatalogWorker do
       states: ~w(available scheduled executing retryable)a
     ]
 
+  import Ash.Expr
+
   alias EventSales.Catalog.TickeraCatalog.{Applier, PubSub}
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.TickeraCatalogSyncRun
+
+  @failure_transition_statuses [:queued, :discovering, :dry_run_ready]
+  @terminal_statuses [:cancelled, :applying, :applied, :failed]
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"run_id" => run_id, "dry_run_hash" => dry_run_hash}})
@@ -28,42 +33,74 @@ defmodule EventSales.Ingestion.Workers.ApplyTickeraCatalogWorker do
     else
       {:ok, nil} -> :discard
       {:error, :run_not_ready} -> discard_stale_run(run_id)
-      {:error, reason} -> fail(run_id, reason)
+      {:error, reason} -> fail_run(run_id, reason)
     end
   end
 
   def perform(_job), do: :discard
 
-  defp update_run(run, action, attrs) do
-    run
-    |> Ash.Changeset.for_update(action, attrs)
-    |> Ash.update(domain: Ingestion)
-  end
-
-  defp fail(run_id, reason) do
+  @doc false
+  def fail_run(run_id, reason, opts \\ []) do
     case Ash.get(TickeraCatalogSyncRun, run_id, domain: Ingestion) do
       {:ok, %TickeraCatalogSyncRun{status: status}}
-      when status in [:cancelled, :applying, :applied, :failed] ->
+      when status in @terminal_statuses ->
         :discard
 
       {:ok, %TickeraCatalogSyncRun{} = run} ->
-        update_run(run, :mark_failed, %{last_error: sanitize_error(reason)})
-        PubSub.broadcast(run.id, :catalog_sync_failed, %{run_id: run.id})
-        {:error, reason}
+        invoke_before_failure_update(opts)
+
+        case mark_failed_if_current(run, reason) do
+          {:ok, _failed} ->
+            PubSub.broadcast(run.id, :catalog_sync_failed, %{run_id: run.id})
+            {:error, bounded_error(reason)}
+
+          {:error, _update_error} ->
+            classify_failed_race(run_id, reason)
+        end
 
       _other ->
-        {:error, reason}
+        {:error, bounded_error(reason)}
+    end
+  end
+
+  defp mark_failed_if_current(run, reason) do
+    statuses = @failure_transition_statuses
+
+    run
+    |> Ash.Changeset.for_update(:mark_failed, %{last_error: sanitize_error(reason)})
+    |> Ash.Changeset.filter(expr(status in ^statuses))
+    |> Ash.update(domain: Ingestion)
+  end
+
+  defp classify_failed_race(run_id, reason) do
+    case Ash.get(TickeraCatalogSyncRun, run_id, domain: Ingestion) do
+      {:ok, %TickeraCatalogSyncRun{status: status}}
+      when status in @terminal_statuses ->
+        :discard
+
+      {:ok, %TickeraCatalogSyncRun{}} ->
+        {:error, bounded_error(reason)}
+
+      _other ->
+        {:error, :not_found}
+    end
+  end
+
+  defp invoke_before_failure_update(opts) do
+    case Keyword.get(opts, :before_update) do
+      callback when is_function(callback, 0) -> callback.()
+      _other -> :ok
     end
   end
 
   defp discard_stale_run(run_id) do
     case Ash.get(TickeraCatalogSyncRun, run_id, domain: Ingestion) do
       {:ok, %TickeraCatalogSyncRun{status: status}}
-      when status in [:cancelled, :applying, :applied, :failed] ->
+      when status in @terminal_statuses ->
         :discard
 
       _other ->
-        fail(run_id, :run_not_ready)
+        fail_run(run_id, :run_not_ready)
     end
   end
 
@@ -73,4 +110,16 @@ defmodule EventSales.Ingestion.Workers.ApplyTickeraCatalogWorker do
   defp sanitize_error(:run_not_ready), do: "run_not_ready"
   defp sanitize_error(:not_found), do: "not_found"
   defp sanitize_error(_reason), do: "catalog_sync_apply_failed"
+
+  defp bounded_error(reason)
+       when reason in [
+              :stale_dry_run_hash,
+              :missing_plan_snapshot,
+              :blocking_findings,
+              :run_not_ready,
+              :not_found
+            ],
+       do: reason
+
+  defp bounded_error(_reason), do: :catalog_sync_apply_failed
 end
