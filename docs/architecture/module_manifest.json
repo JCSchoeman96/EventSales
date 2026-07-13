@@ -5108,6 +5108,10 @@
         },
         {
           "arity": 3,
+          "name": "handle_params"
+        },
+        {
+          "arity": 3,
           "name": "handle_event"
         },
         {

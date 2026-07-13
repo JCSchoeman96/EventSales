@@ -12,6 +12,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
   alias EventSales.Catalog.Resources.ProductMapping
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.TickeraCatalogSyncRun
+  alias EventSales.Ingestion.TickeraCatalogSync
   alias EventSales.Ingestion.Workers.{ApplyTickeraCatalogWorker, DiscoverTickeraCatalogWorker}
   alias EventSales.Sales
   alias EventSales.Sales.Resources.{Order, OrderItem}
@@ -39,6 +40,200 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
       |> get("/admin/catalog-sync")
 
     assert html_response(conn, 403) =~ "Admin role required"
+  end
+
+  test "mount keeps every run summary but loads details for only the latest run", %{
+    conn: conn,
+    admin: admin,
+    source: source
+  } do
+    runs =
+      for number <- 1..22 do
+        marker = Ecto.UUID.generate() <> String.duplicate("x", 10_000)
+        create_ready_run!(source, "history-hash-#{number}", marker)
+      end
+
+    {:ok, [latest | _rest]} = TickeraCatalogSync.list_runs(actor: admin)
+    handler_id = "catalog-sync-selected-preview-#{System.unique_integer([:positive])}"
+    test_pid = self()
+
+    :telemetry.attach(
+      handler_id,
+      [:event_sales, :repo, :query],
+      fn _event, _measurements, metadata, _config ->
+        send(test_pid, {:repo_query, metadata.query})
+      end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+
+    {:ok, _view, html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/catalog-sync")
+
+    for run <- runs do
+      assert html =~ run.dry_run_hash
+    end
+
+    assert html =~ preview_marker(latest)
+
+    for run <- runs, run.id != latest.id do
+      refute html =~ preview_marker(run)
+    end
+
+    assert byte_size(html) < 300_000
+
+    repo_queries = collect_repo_queries()
+
+    preview_queries =
+      repo_queries
+      |> Enum.count(fn query ->
+        String.contains?(query, ~s(FROM "ingestion_tickera_catalog_sync_runs")) and
+          String.contains?(query, ~s(WHERE)) and String.contains?(query, ~s("id"))
+      end)
+
+    assert preview_queries == 2
+
+    summary_query =
+      Enum.find(repo_queries, fn query ->
+        String.contains?(query, ~s(FROM "ingestion_tickera_catalog_sync_runs")) and
+          String.contains?(query, "ORDER BY")
+      end)
+
+    refute summary_query =~ ~s("plan_snapshot")
+  end
+
+  test "run_id selects one historical preview and invalid IDs fall back to latest", %{
+    conn: conn,
+    admin: admin,
+    source: source
+  } do
+    historical = create_ready_run!(source, "historical-hash", "historical-detail")
+    latest = create_ready_run!(source, "latest-hash", "latest-detail")
+
+    {:ok, view, html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/catalog-sync?run_id=#{historical.id}")
+
+    assert html =~ "historical-detail"
+    refute html =~ "latest-detail"
+    assert has_element?(view, ~s(a[href="/admin/catalog-sync?run_id=#{latest.id}"]), "Review run")
+
+    {:ok, _fallback_view, fallback_html} =
+      Phoenix.ConnTest.build_conn()
+      |> sign_in_as(admin)
+      |> live("/admin/catalog-sync?run_id=00000000-0000-0000-0000-000000000000")
+
+    assert fallback_html =~ "latest-detail"
+    refute fallback_html =~ "historical-detail"
+  end
+
+  test "reviewing another run changes the URL and never enables Apply for unloaded rows", %{
+    conn: conn,
+    admin: admin,
+    source: source
+  } do
+    historical = create_ready_run!(source, "historical-ready-hash", "historical-ready-detail")
+    latest = create_ready_run!(source, "latest-ready-hash", "latest-ready-detail")
+
+    {:ok, view, html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/catalog-sync?run_id=#{latest.id}")
+
+    assert html =~ "latest-ready-detail"
+    refute html =~ "historical-ready-detail"
+
+    assert has_element?(
+             view,
+             ~s(button[phx-value-run_id="#{historical.id}"][disabled]),
+             "Apply"
+           )
+
+    view
+    |> element(~s(a[href="/admin/catalog-sync?run_id=#{historical.id}"]), "Review run")
+    |> render_click()
+
+    assert_patch(view, "/admin/catalog-sync?run_id=#{historical.id}")
+    html = render(view)
+    assert html =~ "historical-ready-detail"
+    refute html =~ "latest-ready-detail"
+    refute has_element?(view, ~s(button[phx-value-run_id="#{historical.id}"][disabled]), "Apply")
+  end
+
+  test "selected-run PubSub refresh reloads only its matching preview", %{
+    conn: conn,
+    admin: admin,
+    source: source
+  } do
+    historical = create_ready_run!(source, "pubsub-history-hash", "pubsub-history-detail")
+    selected = create_ready_run!(source, "pubsub-selected-hash", "pubsub-selected-detail")
+
+    {:ok, view, _html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/catalog-sync?run_id=#{selected.id}")
+
+    refreshed_snapshot =
+      selected.plan_snapshot
+      |> Map.put("dry_run_hash", "pubsub-refreshed-hash")
+      |> put_in(["findings", Access.at(0), "message"], "pubsub-refreshed-detail")
+
+    Ash.update!(
+      selected,
+      %{
+        dry_run_hash: "pubsub-refreshed-hash",
+        summary: %{"finding_count" => 1},
+        plan_snapshot: refreshed_snapshot
+      },
+      action: :mark_dry_run_ready,
+      domain: Ingestion
+    )
+
+    handler_id = "catalog-sync-pubsub-preview-#{System.unique_integer([:positive])}"
+    test_pid = self()
+
+    :telemetry.attach(
+      handler_id,
+      [:event_sales, :repo, :query],
+      fn _event, _measurements, metadata, _config ->
+        send(test_pid, {:repo_query, metadata.query})
+      end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+
+    :ok =
+      EventSales.Catalog.TickeraCatalog.PubSub.broadcast(
+        selected.id,
+        :catalog_sync_preview_ready,
+        %{run_id: selected.id}
+      )
+
+    html = render(view)
+    assert html =~ "pubsub-refreshed-detail"
+    refute html =~ "pubsub-selected-detail"
+    refute html =~ "pubsub-history-detail"
+
+    assert has_element?(
+             view,
+             ~s|button[phx-value-run_id="#{selected.id}"][phx-value-dry_run_hash="pubsub-refreshed-hash"]:not([disabled])|,
+             "Apply"
+           )
+
+    preview_queries =
+      collect_repo_queries()
+      |> Enum.count(fn query ->
+        String.contains?(query, ~s(FROM "ingestion_tickera_catalog_sync_runs")) and
+          String.contains?(query, ~s(WHERE)) and String.contains?(query, ~s("id"))
+      end)
+
+    assert preview_queries == 1
+    assert historical.id != selected.id
   end
 
   test "admin queues manual-row dry-run through facade", %{
@@ -558,38 +753,51 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
   } do
     history = create_stale_mapping_conflict!(source, 109_165)
     create_order_item!(source, history.event, history.ticket, 109_165)
-    create_mapping_conflict_run!(source, "history-hash", 109_165)
+    history_run = create_mapping_conflict_run!(source, "history-hash", 109_165)
 
     inactive = create_stale_mapping_conflict!(source, 109_167)
     Ash.update!(inactive.mapping, %{}, action: :deactivate, domain: Catalog, actor: admin)
-    create_mapping_conflict_run!(source, "inactive-hash", 109_167)
+    inactive_run = create_mapping_conflict_run!(source, "inactive-hash", 109_167)
 
-    create_mapping_conflict_run!(source, "stale-hash", 109_169, %{
-      plan_snapshot: mapping_conflict_snapshot("different-hash", 109_169)
-    })
+    stale_run =
+      create_mapping_conflict_run!(source, "stale-hash", 109_169, %{
+        plan_snapshot: mapping_conflict_snapshot("different-hash", 109_169)
+      })
 
-    {:ok, view, html} =
+    {:ok, history_view, history_html} =
       conn
       |> sign_in_as(admin)
-      |> live("/admin/catalog-sync")
+      |> live("/admin/catalog-sync?run_id=#{history_run.id}")
 
-    assert html =~ "order_history_exists"
-    assert html =~ "Review cutover"
-    assert html =~ "mapping_not_active"
-    assert html =~ "stale_preview"
+    assert history_html =~ "order_history_exists"
+    assert history_html =~ "Review cutover"
 
     refute has_element?(
-             view,
+             history_view,
              ~s(button[phx-click="deactivate_stale_mapping"][phx-value-woo_variation_id="109165"])
            )
 
+    {:ok, inactive_view, inactive_html} =
+      Phoenix.ConnTest.build_conn()
+      |> sign_in_as(admin)
+      |> live("/admin/catalog-sync?run_id=#{inactive_run.id}")
+
+    assert inactive_html =~ "mapping_not_active"
+
     refute has_element?(
-             view,
+             inactive_view,
              ~s(button[phx-click="deactivate_stale_mapping"][phx-value-woo_variation_id="109167"])
            )
 
+    {:ok, stale_view, stale_html} =
+      Phoenix.ConnTest.build_conn()
+      |> sign_in_as(admin)
+      |> live("/admin/catalog-sync?run_id=#{stale_run.id}")
+
+    assert stale_html =~ "stale_preview"
+
     refute has_element?(
-             view,
+             stale_view,
              ~s(button[phx-click="deactivate_stale_mapping"][phx-value-woo_variation_id="109169"])
            )
   end
@@ -687,6 +895,53 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
     |> Ash.Query.filter(source_system_id == ^source_system_id)
     |> Ash.read!(domain: Ingestion)
     |> Enum.any?(fn run -> run.scope == expected_scope end)
+  end
+
+  defp create_ready_run!(source, hash, marker) do
+    Ash.create!(
+      TickeraCatalogSyncRun,
+      %{
+        source_system_id: source.id,
+        scope: %{"kind" => "wordpress_feed", "mode" => "full"},
+        status: :dry_run_ready,
+        dry_run_hash: hash,
+        summary: %{"finding_count" => 1},
+        plan_snapshot: %{
+          "dry_run_hash" => hash,
+          "event_changes" => [
+            %{"action" => "create", "external_event_id" => 100_000, "name" => marker}
+          ],
+          "ticket_type_changes" => [],
+          "product_mapping_changes" => [],
+          "findings" => [
+            %{
+              "severity" => "info",
+              "code" => "selected_preview_marker",
+              "message" => marker
+            }
+          ],
+          "touched_event_ids" => [],
+          "touched_product_keys" => []
+        }
+      },
+      action: :create_dry_run,
+      domain: Ingestion
+    )
+  end
+
+  defp preview_marker(run) do
+    run.plan_snapshot
+    |> Map.fetch!("event_changes")
+    |> hd()
+    |> Map.fetch!("name")
+  end
+
+  defp collect_repo_queries(acc \\ []) do
+    receive do
+      {:repo_query, query} -> collect_repo_queries([query | acc])
+    after
+      0 -> Enum.reverse(acc)
+    end
   end
 
   defp sign_in_as(conn, user), do: Plug.Test.init_test_session(conn, %{current_user_id: user.id})

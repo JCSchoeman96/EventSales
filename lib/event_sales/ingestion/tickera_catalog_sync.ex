@@ -13,6 +13,19 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
   alias EventSales.Ingestion.Workers.{ApplyTickeraCatalogWorker, DiscoverTickeraCatalogWorker}
 
   @default_limit 50
+  @run_summary_fields [
+    :id,
+    :source_system_id,
+    :scope,
+    :status,
+    :dry_run_hash,
+    :summary,
+    :started_at,
+    :finished_at,
+    :last_error,
+    :inserted_at,
+    :updated_at
+  ]
 
   def queue_dry_run(attrs, opts \\ []) do
     with :ok <- authorize_admin(opts),
@@ -42,6 +55,7 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
       TickeraCatalogSyncRun
       |> Ash.Query.sort(inserted_at: :desc, id: :desc)
       |> Ash.Query.limit(Keyword.get(opts, :limit, @default_limit))
+      |> maybe_select_run_summaries(opts)
       |> Ash.read(domain: Ingestion)
     end
   end
@@ -63,6 +77,14 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
       |> Ash.Query.filter(kind == :woocommerce and active == true)
       |> Ash.Query.sort(name: :asc)
       |> Ash.read(domain: Catalog)
+    end
+  end
+
+  defp maybe_select_run_summaries(query, opts) do
+    if Keyword.get(opts, :summary_only?, false) do
+      Ash.Query.select(query, @run_summary_fields)
+    else
+      query
     end
   end
 
