@@ -1247,8 +1247,8 @@ Project root: `.`
 - `EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker` - `lib/event_sales/ingestion/workers/discover_tickera_catalog_worker.ex`
   - moduledoc?: true
   - specs?: false
-  - docs_count: 0
-  - public_funs: `perform/1`
+  - docs_count: 1
+  - public_funs: `retryable_failure?/1`, `perform/1`
   - uses: `Oban.Worker`
 - `EventSales.Ingestion.Workers.MissingCatalogResolutionWorker` - `lib/event_sales/ingestion/workers/missing_catalog_resolution_worker.ex`
   - moduledoc?: true
