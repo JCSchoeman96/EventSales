@@ -3411,12 +3411,16 @@
       "uses": []
     },
     {
-      "docs_count": 0,
+      "docs_count": 1,
       "moduledoc?": true,
       "name": "EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker",
       "parse_error": null,
       "path": "lib/event_sales/ingestion/workers/discover_tickera_catalog_worker.ex",
       "public_funs": [
+        {
+          "arity": 1,
+          "name": "retryable_failure?"
+        },
         {
           "arity": 1,
           "name": "perform"

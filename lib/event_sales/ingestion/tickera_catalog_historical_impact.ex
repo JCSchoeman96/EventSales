@@ -9,20 +9,29 @@ defmodule EventSales.Ingestion.TickeraCatalogHistoricalImpact do
   alias EventSales.Repo
   alias EventSales.Sales.AutomaticMappingPolicy
 
-  @default_max_pairs 25
+  # Each aggregate query is limited to the production-validated 25 exact-pair shape.
+  @max_supported_batch_pairs 25
+  @default_max_batch_pairs @max_supported_batch_pairs
+
+  # This is an application-level safety ceiling for one complete forecast. It is not
+  # derived from feed pagination configuration. Aggregate batches run sequentially.
+  @default_max_total_pairs 5_000
   @notice "Discovery-time forecast. Order and mapping state is re-evaluated during recovery; actual outcomes may differ due to order updates."
 
   @spec forecast(Ecto.UUID.t(), map(), keyword()) :: {:ok, map()} | {:error, term()}
   def forecast(source_system_id, context, opts \\ [])
 
   def forecast(source_system_id, context, opts) when is_binary(source_system_id) do
-    max_pairs = Keyword.get(opts, :max_pairs, @default_max_pairs)
+    max_batch_pairs = Keyword.get(opts, :max_batch_pairs, @default_max_batch_pairs)
+    max_total_pairs = Keyword.get(opts, :max_total_pairs, @default_max_total_pairs)
     now = Keyword.get(opts, :now, DateTime.utc_now())
 
-    with {:ok, keys} <- normalize_keys(Map.get(context, :touched_product_keys, [])),
-         :ok <- enforce_limit(keys, max_pairs),
-         {:ok, destinations} <- destinations(source_system_id, keys, context),
-         {:ok, rows} <- aggregate(source_system_id, keys),
+    with :ok <- validate_limits(max_batch_pairs, max_total_pairs),
+         {:ok, keys} <- normalize_keys(Map.get(context, :touched_product_keys, [])),
+         :ok <- enforce_total_limit(keys, max_total_pairs),
+         indexed_context <- index_context(context, keys),
+         {:ok, destinations} <- destinations(source_system_id, keys, indexed_context),
+         {:ok, rows} <- aggregate(source_system_id, keys, max_batch_pairs),
          {:ok, impact} <- build(rows, destinations) do
       timestamp = DateTime.to_iso8601(now)
 
@@ -63,12 +72,46 @@ defmodule EventSales.Ingestion.TickeraCatalogHistoricalImpact do
   end
 
   defp normalize_keys(_), do: {:error, :invalid_touched_product_key}
-  defp enforce_limit(keys, limit) when length(keys) <= limit, do: :ok
-  defp enforce_limit(_keys, _limit), do: {:error, :historical_impact_scope_too_large}
 
-  defp aggregate(_source_system_id, []), do: {:ok, []}
+  defp validate_limits(max_batch_pairs, max_total_pairs)
+       when is_integer(max_batch_pairs) and max_batch_pairs > 0 and
+              is_integer(max_total_pairs) and max_total_pairs > 0 and
+              max_batch_pairs <= @max_supported_batch_pairs,
+       do: :ok
 
-  defp aggregate(source_system_id, keys) do
+  defp validate_limits(max_batch_pairs, max_total_pairs) do
+    {:error,
+     {:invalid_historical_impact_limits,
+      %{
+        max_batch_pairs: max_batch_pairs,
+        max_total_pairs: max_total_pairs,
+        max_supported_batch_pairs: @max_supported_batch_pairs
+      }}}
+  end
+
+  defp enforce_total_limit(keys, limit) when length(keys) <= limit, do: :ok
+
+  defp enforce_total_limit(keys, limit),
+    do:
+      {:error,
+       {:historical_impact_scope_too_large,
+        %{observed_pairs: length(keys), max_total_pairs: limit}}}
+
+  defp aggregate(_source_system_id, [], _max_batch_pairs), do: {:ok, []}
+
+  defp aggregate(source_system_id, keys, max_batch_pairs) do
+    keys
+    |> Enum.chunk_every(max_batch_pairs)
+    |> Enum.reduce({:ok, []}, fn batch, {:ok, rows} ->
+      {:ok, [Repo.all(aggregate_query(source_system_id, batch)) | rows]}
+    end)
+    |> case do
+      {:ok, batches} -> {:ok, batches |> Enum.reverse() |> List.flatten()}
+      error -> error
+    end
+  end
+
+  defp aggregate_query(source_system_id, keys) do
     pair_filter =
       Enum.reduce(keys, dynamic(false), fn {product, variation}, expression ->
         pair =
@@ -118,51 +161,59 @@ defmodule EventSales.Ingestion.TickeraCatalogHistoricalImpact do
           quantity: sum(item.quantity)
         }
 
-    {:ok, Repo.all(query)}
+    query
   end
 
   defp destinations(source_system_id, keys, context) do
-    Enum.reduce_while(keys, {:ok, []}, fn key, {:ok, destinations} ->
-      case destination(source_system_id, key, context) do
-        {:ok, destination} ->
-          {:cont, {:ok, [destination | destinations]}}
-
-        {:warning, warning} ->
-          {:cont, {:ok, [unresolved_destination(key, warning) | destinations]}}
-
-        {:error, reason} ->
-          {:halt, {:error, reason}}
-      end
-    end)
-    |> case do
-      {:ok, destinations} ->
-        {:ok, Enum.sort_by(destinations, &pair_sort_key/1)}
-
-      error ->
-        error
+    with {:ok, mappings} <- existing_mappings(source_system_id, keys, context.touched_keys_set) do
+      build_destinations(keys, context, mappings)
     end
   end
 
-  defp destination(source_system_id, {product, variation}, context) do
-    changes = Map.get(context, :product_mapping_changes, [])
+  defp build_destinations(keys, context, mappings) do
+    keys
+    |> Enum.reduce_while({:ok, []}, fn key, {:ok, destinations} ->
+      append_destination(key, context, mappings, destinations)
+    end)
+    |> case do
+      {:ok, destinations} -> {:ok, Enum.sort_by(destinations, &pair_sort_key/1)}
+      error -> error
+    end
+  end
 
-    case Enum.filter(
-           changes,
-           &(value(&1, :woo_product_id) == product and value(&1, :woo_variation_id) == variation)
-         ) do
-      [change] -> proposed_destination(change, context)
-      [] -> existing_destination(source_system_id, product, variation, context)
-      _ -> {:error, :ambiguous_planned_destination}
+  defp append_destination(key, context, mappings, destinations) do
+    case destination(key, context, mappings) do
+      {:ok, destination} -> {:cont, {:ok, [destination | destinations]}}
+      {:warning, warning} -> {:cont, {:ok, [unresolved_destination(key, warning) | destinations]}}
+      {:error, reason} -> {:halt, {:error, reason}}
+    end
+  end
+
+  defp destination({product, variation}, context, mappings) do
+    changes = Map.get(context.mapping_changes_by_pair, {product, variation}, [])
+
+    case changes do
+      [change] ->
+        proposed_destination(change, context)
+
+      [] ->
+        existing_destination(
+          Map.get(mappings, {product, variation}, []),
+          product,
+          variation,
+          context
+        )
+
+      _ ->
+        {:error, :ambiguous_planned_destination}
     end
   end
 
   defp proposed_destination(change, context) do
     event_ref = value(change, :event_ref)
     ticket_ref = value(change, :ticket_type_ref)
-    event = Enum.find(Map.get(context, :event_changes, []), &(value(&1, :ref) == event_ref))
-
-    ticket =
-      Enum.find(Map.get(context, :ticket_type_changes, []), &(value(&1, :ref) == ticket_ref))
+    event = Map.get(context.event_changes_by_ref, event_ref)
+    ticket = Map.get(context.ticket_changes_by_ref, ticket_ref)
 
     with true <- not is_nil(event) and not is_nil(ticket),
          {:ok, event_external_id, event_id} <- planned_event_identity(event),
@@ -231,65 +282,62 @@ defmodule EventSales.Ingestion.TickeraCatalogHistoricalImpact do
   defp validate_planned_membership(_event_id, _ticket_event_id),
     do: {:error, :ticket_type_event_mismatch}
 
-  defp existing_destination(source_system_id, product, variation, context) do
-    query =
-      ProductMapping
-      |> existing_mapping_filter(source_system_id, product, variation)
-      |> Ash.Query.load([:event, :ticket_type])
+  defp existing_mappings(source_system_id, keys, touched_keys_set) do
+    products = keys |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
 
-    case Ash.read(query, domain: Catalog) do
-      {:ok, [mapping]} when mapping.ticket_type.event_id == mapping.event_id ->
-        {event_external_id, ticket_external_id} = adopted_identities(mapping, context)
-
+    ProductMapping
+    |> Ash.Query.filter(
+      source_system_id == ^source_system_id and active == true and woo_product_id in ^products
+    )
+    |> Ash.Query.load([:event, :ticket_type])
+    |> Ash.read(domain: Catalog)
+    |> case do
+      {:ok, mappings} ->
         {:ok,
-         destination_map(
-           product,
-           variation,
-           event_external_id,
-           ticket_external_id,
-           "existing_active_mapping"
-         )}
-
-      {:ok, [mapping]} ->
-        {:warning, warning("ticket_type_event_mismatch", mapping)}
-
-      {:ok, []} ->
-        {:warning,
-         warning("missing_proposed_destination", %{
-           woo_product_id: product,
-           woo_variation_id: variation
-         })}
-
-      {:ok, _many} ->
-        {:warning,
-         warning("active_mapping_conflict", %{
-           woo_product_id: product,
-           woo_variation_id: variation
-         })}
+         mappings
+         |> Enum.filter(
+           &MapSet.member?(touched_keys_set, {&1.woo_product_id, &1.woo_variation_id})
+         )
+         |> Enum.group_by(&{&1.woo_product_id, &1.woo_variation_id})}
 
       {:error, reason} ->
         {:error, reason}
     end
   end
 
-  defp existing_mapping_filter(query, source_system_id, product, nil) do
-    Ash.Query.filter(
-      query,
-      source_system_id == ^source_system_id and woo_product_id == ^product and
-        is_nil(woo_variation_id) and active == true
-    )
+  defp existing_destination([mapping], product, variation, context)
+       when mapping.ticket_type.event_id == mapping.event_id do
+    {event_external_id, ticket_external_id} = adopted_identities(mapping, context)
+
+    {:ok,
+     destination_map(
+       product,
+       variation,
+       event_external_id,
+       ticket_external_id,
+       "existing_active_mapping"
+     )}
   end
 
-  defp existing_mapping_filter(query, source_system_id, product, variation) do
-    Ash.Query.filter(
-      query,
-      source_system_id == ^source_system_id and woo_product_id == ^product and
-        woo_variation_id == ^variation and active == true
-    )
+  defp existing_destination([mapping], _product, _variation, _context),
+    do: {:warning, warning("ticket_type_event_mismatch", mapping)}
+
+  defp existing_destination([], product, variation, _context) do
+    {:warning,
+     warning("missing_proposed_destination", %{
+       woo_product_id: product,
+       woo_variation_id: variation
+     })}
   end
+
+  defp existing_destination(_mappings, product, variation, _context),
+    do:
+      {:warning,
+       warning("active_mapping_conflict", %{woo_product_id: product, woo_variation_id: variation})}
 
   defp build(rows, destinations) do
     with {:ok, classified} <- classify(rows, destinations) do
+      historical_rows_by_pair = Enum.group_by(classified, &{&1.product_id, &1.variation_id})
       pending = Enum.filter(classified, &(&1.mapping_status == "pending_mapping_resolution"))
       mapped = Enum.filter(classified, &(&1.mapping_status == "mapped"))
       eligible = Enum.filter(pending, &(&1.eligibility == :eligible))
@@ -319,7 +367,7 @@ defmodule EventSales.Ingestion.TickeraCatalogHistoricalImpact do
            "already_mapped_lines" => sum(mapped, :lines),
            "already_mapped_quantity" => sum(mapped, :quantity)
          },
-         "by_product_variation" => by_pair(classified, destinations),
+         "by_product_variation" => by_pair(historical_rows_by_pair, destinations),
          "by_order_status" => grouped(classified, :order_status),
          "by_mapping_status" => grouped(classified, :mapping_status),
          "by_source_event_identity" => grouped(classified, :source_event_id),
@@ -374,14 +422,14 @@ defmodule EventSales.Ingestion.TickeraCatalogHistoricalImpact do
     |> AutomaticMappingPolicy.classify_order_status()
   end
 
-  defp by_pair(rows, destinations) do
+  defp by_pair(historical_rows_by_pair, destinations) do
     destinations
     |> Enum.map(fn destination ->
       pair_rows =
-        Enum.filter(
-          rows,
-          &(&1.product_id == destination["woo_product_id"] and
-              &1.variation_id == destination["woo_variation_id"])
+        Map.get(
+          historical_rows_by_pair,
+          {destination["woo_product_id"], destination["woo_variation_id"]},
+          []
         )
 
       pending = Enum.filter(pair_rows, &(&1.mapping_status == "pending_mapping_resolution"))
@@ -448,19 +496,8 @@ defmodule EventSales.Ingestion.TickeraCatalogHistoricalImpact do
   end
 
   defp adopted_identities(mapping, context) do
-    event_change =
-      Enum.find(
-        Map.get(context, :event_changes, []),
-        &(value(&1, :action) in [:adopt_existing, "adopt_existing"] and
-            value(&1, :event_id) == mapping.event_id)
-      )
-
-    ticket_change =
-      Enum.find(
-        Map.get(context, :ticket_type_changes, []),
-        &(value(&1, :action) in [:adopt_existing, "adopt_existing"] and
-            value(&1, :ticket_type_id) == mapping.ticket_type_id)
-      )
+    event_change = Map.get(context.adopted_events_by_id, mapping.event_id)
+    ticket_change = Map.get(context.adopted_tickets_by_id, mapping.ticket_type_id)
 
     {value(event_change || %{}, :external_event_id) || mapping.event.external_event_id,
      value(ticket_change || %{}, :external_ticket_type_id) ||
@@ -488,4 +525,33 @@ defmodule EventSales.Ingestion.TickeraCatalogHistoricalImpact do
   defp value(map, key), do: Map.get(map, key) || Map.get(map, to_string(key))
   defp iso8601(%DateTime{} = value), do: DateTime.to_iso8601(value)
   defp iso8601(nil), do: nil
+
+  defp index_context(context, keys) do
+    event_changes = Map.get(context, :event_changes, [])
+    ticket_type_changes = Map.get(context, :ticket_type_changes, [])
+
+    %{
+      mapping_changes_by_pair:
+        context
+        |> Map.get(:product_mapping_changes, [])
+        |> Enum.group_by(&{value(&1, :woo_product_id), value(&1, :woo_variation_id)}),
+      event_changes_by_ref: index_by_first(event_changes, &value(&1, :ref)),
+      ticket_changes_by_ref: index_by_first(ticket_type_changes, &value(&1, :ref)),
+      adopted_events_by_id:
+        event_changes
+        |> Enum.filter(&(value(&1, :action) in [:adopt_existing, "adopt_existing"]))
+        |> index_by_first(&value(&1, :event_id)),
+      adopted_tickets_by_id:
+        ticket_type_changes
+        |> Enum.filter(&(value(&1, :action) in [:adopt_existing, "adopt_existing"]))
+        |> index_by_first(&value(&1, :ticket_type_id)),
+      touched_keys_set: MapSet.new(keys)
+    }
+  end
+
+  defp index_by_first(values, key_fun) do
+    Enum.reduce(values, %{}, fn value, index ->
+      Map.put_new(index, key_fun.(value), value)
+    end)
+  end
 end
