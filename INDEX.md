@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-303
+305
 
 ## Files
 
@@ -152,6 +152,7 @@ Project root: `.`
 - `lib/event_sales/ingestion/tickera_attendee_sync.ex`
 - `lib/event_sales/ingestion/tickera_attendee_sync_queue.ex`
 - `lib/event_sales/ingestion/tickera_attendee_sync_runs.ex`
+- `lib/event_sales/ingestion/tickera_catalog_historical_impact.ex`
 - `lib/event_sales/ingestion/tickera_catalog_sync.ex`
 - `lib/event_sales/ingestion/tickera_event_sources.ex`
 - `lib/event_sales/ingestion/tickera_reconciliation.ex`
@@ -194,6 +195,7 @@ Project root: `.`
 - `lib/event_sales/release.ex`
 - `lib/event_sales/repo.ex`
 - `lib/event_sales/sales.ex`
+- `lib/event_sales/sales/automatic_mapping_policy.ex`
 - `lib/event_sales/sales/changes/guard_source_version.ex`
 - `lib/event_sales/sales/changes/sync_status_from_source.ex`
 - `lib/event_sales/sales/changes/validate_ticket_type_event.ex`
@@ -1128,6 +1130,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `list_runs/1`, `get_run/2`, `queue_manual/3`, `mark_started/2`, `mark_resumed/2`, `mark_completed/2`, `cancel/2`, `mark_paused/3`, `mark_failed/3`, `record_page/3`, `record_counts/3`
   - uses: _none_
+- `EventSales.Ingestion.TickeraCatalogHistoricalImpact` - `lib/event_sales/ingestion/tickera_catalog_historical_impact.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `forecast/3`
+  - uses: _none_
 - `EventSales.Ingestion.TickeraCatalogSync` - `lib/event_sales/ingestion/tickera_catalog_sync.ex`
   - moduledoc?: true
   - specs?: false
@@ -1398,6 +1406,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: _none_
   - uses: `Ash.Domain`
+- `EventSales.Sales.AutomaticMappingPolicy` - `lib/event_sales/sales/automatic_mapping_policy.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `supported_statuses/0`, `classify_order_status/1`
+  - uses: _none_
 - `EventSales.Sales.Changes.GuardSourceVersion` - `lib/event_sales/sales/changes/guard_source_version.ex`
   - moduledoc?: true
   - specs?: false

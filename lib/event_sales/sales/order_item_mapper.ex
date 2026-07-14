@@ -13,6 +13,7 @@ defmodule EventSales.Sales.OrderItemMapper do
   alias EventSales.Catalog.{MappingResolver, OrderAttributionResolver}
   alias EventSales.Catalog.Resources.ProductMapping
   alias EventSales.Sales
+  alias EventSales.Sales.AutomaticMappingPolicy
   alias EventSales.Sales.Resources.{Order, OrderItem}
 
   @default_queue_limit 50
@@ -26,8 +27,10 @@ defmodule EventSales.Sales.OrderItemMapper do
   deferred until a later order update advances their status.
   """
   @spec automatic_mapping_eligibility(OrderItem.t()) :: automatic_mapping_eligibility()
-  def automatic_mapping_eligibility(%OrderItem{order: %Order{status: :on_hold}}), do: :deferred
-  def automatic_mapping_eligibility(%OrderItem{order: %Order{}}), do: :eligible
+  def automatic_mapping_eligibility(%OrderItem{order: %Order{status: status}}) do
+    {:ok, eligibility} = AutomaticMappingPolicy.classify_order_status(status)
+    eligibility
+  end
 
   @doc """
   Maps one pending order item through local ProductMapping data.

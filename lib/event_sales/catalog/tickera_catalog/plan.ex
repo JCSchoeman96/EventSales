@@ -10,6 +10,7 @@ defmodule EventSales.Catalog.TickeraCatalog.Plan do
           findings: [EventSales.Catalog.TickeraCatalog.Finding.t()],
           touched_event_ids: [String.t()],
           touched_product_keys: [[integer() | nil]],
+          historical_impact: map() | nil,
           summary: map(),
           dry_run_hash: String.t() | nil,
           plan_snapshot: map() | nil
@@ -21,6 +22,7 @@ defmodule EventSales.Catalog.TickeraCatalog.Plan do
             findings: [],
             touched_event_ids: [],
             touched_product_keys: [],
+            historical_impact: nil,
             summary: %{},
             dry_run_hash: nil,
             plan_snapshot: nil

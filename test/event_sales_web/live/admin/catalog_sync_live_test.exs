@@ -131,6 +131,65 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
     refute fallback_html =~ "historical-detail"
   end
 
+  test "renders stored forecast and distinguishes legacy runs", %{
+    conn: conn,
+    admin: admin,
+    source: source
+  } do
+    legacy = create_ready_run!(source, "legacy-impact-hash", "legacy-impact")
+
+    impact = %{
+      "forecast_notice" => "Discovery-time forecast; recovery reloads current state.",
+      "order_state_observed_at" => "2026-07-14T08:00:00Z",
+      "totals" => %{
+        "affected_pending_lines" => 3,
+        "affected_quantity" => 5,
+        "eligible_lines" => 2,
+        "deferred_lines" => 1,
+        "conflicting_lines" => 1,
+        "already_mapped_lines" => 1
+      },
+      "by_product_variation" => [
+        %{
+          "woo_product_id" => 109_131,
+          "woo_variation_id" => 109_425,
+          "resolution" => "proposed",
+          "proposed_event_external_id" => 109_120,
+          "proposed_ticket_type_external_id" => 109_425,
+          "pending_line_count" => 3,
+          "quantity" => 5,
+          "eligible_line_count" => 2,
+          "deferred_line_count" => 1,
+          "conflicting_line_count" => 0,
+          "already_mapped_line_count" => 1,
+          "source_tickera_event_id_distribution" => %{"null" => %{"lines" => 3}}
+        }
+      ],
+      "by_order_status" => %{"completed" => %{"lines" => 2}},
+      "by_mapping_status" => %{"mapped" => %{"lines" => 1}},
+      "eligibility" => %{"ignored_already_mapped" => %{"lines" => 1}},
+      "warnings" => []
+    }
+
+    current = create_ready_run!(source, "current-impact-hash", "current-impact", impact)
+
+    {:ok, _view, html} =
+      conn |> sign_in_as(admin) |> live("/admin/catalog-sync?run_id=#{current.id}")
+
+    assert html =~ "Discovery-time forecast; recovery reloads current state."
+    assert html =~ "Touched product/variation pairs"
+    assert html =~ "109131 / 109425"
+    assert html =~ "Order statuses"
+    assert html =~ "Already mapped"
+
+    {:ok, _view, legacy_html} =
+      Phoenix.ConnTest.build_conn()
+      |> sign_in_as(admin)
+      |> live("/admin/catalog-sync?run_id=#{legacy.id}")
+
+    assert legacy_html =~ "Forecast unavailable for this earlier run"
+  end
+
   test "historical rows only review and selected details own one stable Apply control", %{
     conn: conn,
     admin: admin,
@@ -954,7 +1013,26 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
     |> Enum.any?(fn run -> run.scope == expected_scope end)
   end
 
-  defp create_ready_run!(source, hash, marker) do
+  defp create_ready_run!(source, hash, marker, historical_impact \\ nil) do
+    snapshot = %{
+      "dry_run_hash" => hash,
+      "event_changes" => [
+        %{"action" => "create", "external_event_id" => 100_000, "name" => marker}
+      ],
+      "ticket_type_changes" => [],
+      "product_mapping_changes" => [],
+      "findings" => [
+        %{"severity" => "info", "code" => "selected_preview_marker", "message" => marker}
+      ],
+      "touched_event_ids" => [],
+      "touched_product_keys" => []
+    }
+
+    snapshot =
+      if historical_impact,
+        do: Map.put(snapshot, "historical_impact", historical_impact),
+        else: snapshot
+
     Ash.create!(
       TickeraCatalogSyncRun,
       %{
@@ -963,23 +1041,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
         status: :dry_run_ready,
         dry_run_hash: hash,
         summary: %{"finding_count" => 1},
-        plan_snapshot: %{
-          "dry_run_hash" => hash,
-          "event_changes" => [
-            %{"action" => "create", "external_event_id" => 100_000, "name" => marker}
-          ],
-          "ticket_type_changes" => [],
-          "product_mapping_changes" => [],
-          "findings" => [
-            %{
-              "severity" => "info",
-              "code" => "selected_preview_marker",
-              "message" => marker
-            }
-          ],
-          "touched_event_ids" => [],
-          "touched_product_keys" => []
-        }
+        plan_snapshot: snapshot
       },
       action: :create_dry_run,
       domain: Ingestion

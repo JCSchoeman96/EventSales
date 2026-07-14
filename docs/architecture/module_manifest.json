@@ -140,6 +140,7 @@
     "lib/event_sales/ingestion/tickera_attendee_sync.ex",
     "lib/event_sales/ingestion/tickera_attendee_sync_queue.ex",
     "lib/event_sales/ingestion/tickera_attendee_sync_runs.ex",
+    "lib/event_sales/ingestion/tickera_catalog_historical_impact.ex",
     "lib/event_sales/ingestion/tickera_catalog_sync.ex",
     "lib/event_sales/ingestion/tickera_event_sources.ex",
     "lib/event_sales/ingestion/tickera_reconciliation.ex",
@@ -182,6 +183,7 @@
     "lib/event_sales/release.ex",
     "lib/event_sales/repo.ex",
     "lib/event_sales/sales.ex",
+    "lib/event_sales/sales/automatic_mapping_policy.ex",
     "lib/event_sales/sales/changes/guard_source_version.ex",
     "lib/event_sales/sales/changes/sync_status_from_source.ex",
     "lib/event_sales/sales/changes/validate_ticket_type_event.ex",
@@ -2975,6 +2977,21 @@
     {
       "docs_count": 0,
       "moduledoc?": true,
+      "name": "EventSales.Ingestion.TickeraCatalogHistoricalImpact",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/tickera_catalog_historical_impact.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "forecast"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
       "name": "EventSales.Ingestion.TickeraCatalogSync",
       "parse_error": null,
       "path": "lib/event_sales/ingestion/tickera_catalog_sync.ex",
@@ -3852,6 +3869,25 @@
       "uses": [
         "Ash.Domain"
       ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Sales.AutomaticMappingPolicy",
+      "parse_error": null,
+      "path": "lib/event_sales/sales/automatic_mapping_policy.ex",
+      "public_funs": [
+        {
+          "arity": 0,
+          "name": "supported_statuses"
+        },
+        {
+          "arity": 1,
+          "name": "classify_order_status"
+        }
+      ],
+      "specs?": true,
+      "uses": []
     },
     {
       "docs_count": 0,
