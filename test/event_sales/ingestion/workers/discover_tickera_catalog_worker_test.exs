@@ -93,13 +93,23 @@ defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorkerTest do
           domain: Ingestion
         )
 
-      assert {:error, ^reason} =
-               DiscoverTickeraCatalogWorker.perform(%Oban.Job{args: %{"run_id" => run.id}})
+      result = DiscoverTickeraCatalogWorker.perform(%Oban.Job{args: %{"run_id" => run.id}})
+
+      if reason in [:timeout, :rate_limited, :server_error, :transport_error] do
+        assert {:error, ^reason} = result
+      else
+        assert :discard = result
+      end
 
       updated = Ash.get!(TickeraCatalogSyncRun, run.id, domain: Ingestion)
       assert updated.status == :failed
       assert updated.last_error == expected_error
     end
+  end
+
+  test "does not retry deterministic planner failures" do
+    refute DiscoverTickeraCatalogWorker.retryable_failure?(:historical_impact_scope_too_large)
+    assert DiscoverTickeraCatalogWorker.retryable_failure?(:timeout)
   end
 
   defp restore_env(key, nil), do: Application.delete_env(:event_sales, key)

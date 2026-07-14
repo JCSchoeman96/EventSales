@@ -162,12 +162,41 @@ defmodule EventSales.Ingestion.TickeraCatalogHistoricalImpactTest do
     assert {:error, :invalid_touched_product_key} =
              TickeraCatalogHistoricalImpact.forecast(source.id, %{touched_product_keys: [:bad]})
 
-    assert {:error, :historical_impact_scope_too_large} =
+    assert {:error, {:historical_impact_scope_too_large, %{observed_pairs: 2, max_pairs: 1}}} =
              TickeraCatalogHistoricalImpact.forecast(
                source.id,
                %{touched_product_keys: [{1, nil}, {2, nil}]},
-               max_pairs: 1
+               max_total_pairs: 1
              )
+  end
+
+  test "forecasts a deterministic complete scope across 25-pair aggregate batches" do
+    source = SalesHelpers.create_source_system!()
+
+    keys =
+      for product_id <- 1..26 do
+        {product_id, if(rem(product_id, 2) == 0, do: nil, else: product_id + 1_000)}
+      end
+
+    assert {:ok, impact} =
+             TickeraCatalogHistoricalImpact.forecast(
+               source.id,
+               %{
+                 touched_product_keys: Enum.reverse(keys) ++ [hd(keys)],
+                 event_changes: [],
+                 ticket_type_changes: [],
+                 product_mapping_changes: []
+               },
+               now: ~U[2026-07-14 08:00:00Z]
+             )
+
+    assert length(impact["proposed_destinations"]) == 26
+    assert length(impact["by_product_variation"]) == 26
+
+    assert impact["proposed_destinations"] ==
+             Enum.sort_by(impact["proposed_destinations"], fn destination ->
+               {destination["woo_product_id"], destination["woo_variation_id"] || -1}
+             end)
   end
 
   defp mapped_destination!(source, product, variation, event_external_id, ticket_external_id) do

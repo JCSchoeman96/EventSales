@@ -10,6 +10,7 @@ defmodule EventSales.Ingestion.TickeraCatalogHistoricalImpact do
   alias EventSales.Sales.AutomaticMappingPolicy
 
   @default_max_pairs 25
+  @default_max_total_pairs 5_000
   @notice "Discovery-time forecast. Order and mapping state is re-evaluated during recovery; actual outcomes may differ due to order updates."
 
   @spec forecast(Ecto.UUID.t(), map(), keyword()) :: {:ok, map()} | {:error, term()}
@@ -17,12 +18,13 @@ defmodule EventSales.Ingestion.TickeraCatalogHistoricalImpact do
 
   def forecast(source_system_id, context, opts) when is_binary(source_system_id) do
     max_pairs = Keyword.get(opts, :max_pairs, @default_max_pairs)
+    max_total_pairs = Keyword.get(opts, :max_total_pairs, @default_max_total_pairs)
     now = Keyword.get(opts, :now, DateTime.utc_now())
 
     with {:ok, keys} <- normalize_keys(Map.get(context, :touched_product_keys, [])),
-         :ok <- enforce_limit(keys, max_pairs),
+         :ok <- enforce_total_limit(keys, max_total_pairs),
          {:ok, destinations} <- destinations(source_system_id, keys, context),
-         {:ok, rows} <- aggregate(source_system_id, keys),
+         {:ok, rows} <- aggregate(source_system_id, keys, max_pairs),
          {:ok, impact} <- build(rows, destinations) do
       timestamp = DateTime.to_iso8601(now)
 
@@ -63,12 +65,24 @@ defmodule EventSales.Ingestion.TickeraCatalogHistoricalImpact do
   end
 
   defp normalize_keys(_), do: {:error, :invalid_touched_product_key}
-  defp enforce_limit(keys, limit) when length(keys) <= limit, do: :ok
-  defp enforce_limit(_keys, _limit), do: {:error, :historical_impact_scope_too_large}
+  defp enforce_total_limit(keys, limit) when length(keys) <= limit, do: :ok
 
-  defp aggregate(_source_system_id, []), do: {:ok, []}
+  defp enforce_total_limit(keys, limit),
+    do:
+      {:error,
+       {:historical_impact_scope_too_large, %{observed_pairs: length(keys), max_pairs: limit}}}
 
-  defp aggregate(source_system_id, keys) do
+  defp aggregate(_source_system_id, [], _max_pairs), do: {:ok, []}
+
+  defp aggregate(source_system_id, keys, max_pairs) do
+    keys
+    |> Enum.chunk_every(max_pairs)
+    |> Enum.reduce({:ok, []}, fn batch, {:ok, rows} ->
+      {:ok, rows ++ Repo.all(aggregate_query(source_system_id, batch))}
+    end)
+  end
+
+  defp aggregate_query(source_system_id, keys) do
     pair_filter =
       Enum.reduce(keys, dynamic(false), fn {product, variation}, expression ->
         pair =
@@ -118,41 +132,50 @@ defmodule EventSales.Ingestion.TickeraCatalogHistoricalImpact do
           quantity: sum(item.quantity)
         }
 
-    {:ok, Repo.all(query)}
+    query
   end
 
   defp destinations(source_system_id, keys, context) do
-    Enum.reduce_while(keys, {:ok, []}, fn key, {:ok, destinations} ->
-      case destination(source_system_id, key, context) do
-        {:ok, destination} ->
-          {:cont, {:ok, [destination | destinations]}}
+    with {:ok, mappings} <- existing_mappings(source_system_id, keys) do
+      Enum.reduce_while(keys, {:ok, []}, fn key, {:ok, destinations} ->
+        case destination(key, context, mappings) do
+          {:ok, destination} ->
+            {:cont, {:ok, [destination | destinations]}}
 
-        {:warning, warning} ->
-          {:cont, {:ok, [unresolved_destination(key, warning) | destinations]}}
+          {:warning, warning} ->
+            {:cont, {:ok, [unresolved_destination(key, warning) | destinations]}}
 
-        {:error, reason} ->
-          {:halt, {:error, reason}}
+          {:error, reason} ->
+            {:halt, {:error, reason}}
+        end
+      end)
+      |> case do
+        {:ok, destinations} -> {:ok, Enum.sort_by(destinations, &pair_sort_key/1)}
+        error -> error
       end
-    end)
-    |> case do
-      {:ok, destinations} ->
-        {:ok, Enum.sort_by(destinations, &pair_sort_key/1)}
-
-      error ->
-        error
     end
   end
 
-  defp destination(source_system_id, {product, variation}, context) do
+  defp destination({product, variation}, context, mappings) do
     changes = Map.get(context, :product_mapping_changes, [])
 
     case Enum.filter(
            changes,
            &(value(&1, :woo_product_id) == product and value(&1, :woo_variation_id) == variation)
          ) do
-      [change] -> proposed_destination(change, context)
-      [] -> existing_destination(source_system_id, product, variation, context)
-      _ -> {:error, :ambiguous_planned_destination}
+      [change] ->
+        proposed_destination(change, context)
+
+      [] ->
+        existing_destination(
+          Map.get(mappings, {product, variation}, []),
+          product,
+          variation,
+          context
+        )
+
+      _ ->
+        {:error, :ambiguous_planned_destination}
     end
   end
 
@@ -231,62 +254,56 @@ defmodule EventSales.Ingestion.TickeraCatalogHistoricalImpact do
   defp validate_planned_membership(_event_id, _ticket_event_id),
     do: {:error, :ticket_type_event_mismatch}
 
-  defp existing_destination(source_system_id, product, variation, context) do
-    query =
-      ProductMapping
-      |> existing_mapping_filter(source_system_id, product, variation)
-      |> Ash.Query.load([:event, :ticket_type])
+  defp existing_mappings(source_system_id, keys) do
+    products = keys |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
 
-    case Ash.read(query, domain: Catalog) do
-      {:ok, [mapping]} when mapping.ticket_type.event_id == mapping.event_id ->
-        {event_external_id, ticket_external_id} = adopted_identities(mapping, context)
-
+    ProductMapping
+    |> Ash.Query.filter(
+      source_system_id == ^source_system_id and active == true and woo_product_id in ^products
+    )
+    |> Ash.Query.load([:event, :ticket_type])
+    |> Ash.read(domain: Catalog)
+    |> case do
+      {:ok, mappings} ->
         {:ok,
-         destination_map(
-           product,
-           variation,
-           event_external_id,
-           ticket_external_id,
-           "existing_active_mapping"
-         )}
-
-      {:ok, [mapping]} ->
-        {:warning, warning("ticket_type_event_mismatch", mapping)}
-
-      {:ok, []} ->
-        {:warning,
-         warning("missing_proposed_destination", %{
-           woo_product_id: product,
-           woo_variation_id: variation
-         })}
-
-      {:ok, _many} ->
-        {:warning,
-         warning("active_mapping_conflict", %{
-           woo_product_id: product,
-           woo_variation_id: variation
-         })}
+         mappings
+         |> Enum.filter(&({&1.woo_product_id, &1.woo_variation_id} in keys))
+         |> Enum.group_by(&{&1.woo_product_id, &1.woo_variation_id})}
 
       {:error, reason} ->
         {:error, reason}
     end
   end
 
-  defp existing_mapping_filter(query, source_system_id, product, nil) do
-    Ash.Query.filter(
-      query,
-      source_system_id == ^source_system_id and woo_product_id == ^product and
-        is_nil(woo_variation_id) and active == true
-    )
+  defp existing_destination([mapping], product, variation, context)
+       when mapping.ticket_type.event_id == mapping.event_id do
+    {event_external_id, ticket_external_id} = adopted_identities(mapping, context)
+
+    {:ok,
+     destination_map(
+       product,
+       variation,
+       event_external_id,
+       ticket_external_id,
+       "existing_active_mapping"
+     )}
   end
 
-  defp existing_mapping_filter(query, source_system_id, product, variation) do
-    Ash.Query.filter(
-      query,
-      source_system_id == ^source_system_id and woo_product_id == ^product and
-        woo_variation_id == ^variation and active == true
-    )
+  defp existing_destination([mapping], _product, _variation, _context),
+    do: {:warning, warning("ticket_type_event_mismatch", mapping)}
+
+  defp existing_destination([], product, variation, _context) do
+    {:warning,
+     warning("missing_proposed_destination", %{
+       woo_product_id: product,
+       woo_variation_id: variation
+     })}
   end
+
+  defp existing_destination(_mappings, product, variation, _context),
+    do:
+      {:warning,
+       warning("active_mapping_conflict", %{woo_product_id: product, woo_variation_id: variation})}
 
   defp build(rows, destinations) do
     with {:ok, classified} <- classify(rows, destinations) do

@@ -32,6 +32,11 @@ defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker do
     server_error: "catalog_feed_server_error",
     transport_error: "catalog_feed_transport_error"
   }
+  @transient_failures [:timeout, :rate_limited, :server_error, :transport_error]
+
+  @doc false
+  def retryable_failure?(reason) when is_atom(reason), do: reason in @transient_failures
+  def retryable_failure?(_reason), do: false
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"run_id" => run_id}}) when is_binary(run_id) do
@@ -94,7 +99,7 @@ defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker do
       {:ok, %TickeraCatalogSyncRun{} = run} ->
         update_run(run, :mark_failed, %{last_error: sanitize_error(reason)})
         broadcast(run.id, :catalog_sync_failed)
-        {:error, reason}
+        if retryable_failure?(reason), do: {:error, reason}, else: :discard
 
       _other ->
         {:error, reason}
