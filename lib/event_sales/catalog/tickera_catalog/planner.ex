@@ -9,13 +9,20 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
   alias EventSales.Catalog.EventLifecycle
   alias EventSales.Catalog.Resources.{Event, ProductMapping, TicketType}
   alias EventSales.Catalog.TickeraCatalog.{CatalogRow, DiscoveryResult, Finding, Normalizer, Plan}
+  alias EventSales.Ingestion.TickeraCatalogHistoricalImpact
 
   @spec plan(Ecto.UUID.t(), DiscoveryResult.t(), keyword()) :: {:ok, Plan.t()} | {:error, term()}
-  def plan(source_system_id, %DiscoveryResult{} = discovery_result, _opts \\ [])
+  def plan(source_system_id, %DiscoveryResult{} = discovery_result, opts \\ [])
       when is_binary(source_system_id) do
     with {:ok, %{rows: rows, findings: normalizer_findings}} <-
            Normalizer.normalize(discovery_result),
-         {:ok, planned} <- plan_rows(source_system_id, rows) do
+         {:ok, planned} <- plan_rows(source_system_id, rows),
+         {:ok, historical_impact} <-
+           TickeraCatalogHistoricalImpact.forecast(
+             source_system_id,
+             Map.merge(planned, %{source_snapshot_at: discovery_result.source_snapshot_at}),
+             Keyword.get(opts, :historical_impact_opts, [])
+           ) do
       findings =
         normalizer_findings
         |> Enum.concat(planned.findings)
@@ -29,7 +36,8 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
           product_mapping_changes: planned.product_mapping_changes,
           findings: Enum.map(findings, &finding_snapshot/1),
           touched_event_ids: planned.touched_event_ids,
-          touched_product_keys: planned.touched_product_keys
+          touched_product_keys: planned.touched_product_keys,
+          historical_impact: historical_impact
         })
 
       hash = hash_snapshot(snapshot)
@@ -42,6 +50,7 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
          findings: findings,
          touched_event_ids: planned.touched_event_ids,
          touched_product_keys: planned.touched_product_keys,
+         historical_impact: historical_impact,
          summary: summary(snapshot),
          dry_run_hash: hash,
          plan_snapshot: Map.put(snapshot, "dry_run_hash", hash)

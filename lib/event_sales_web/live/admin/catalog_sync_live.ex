@@ -757,6 +757,116 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
                     </button>
                   </div>
 
+                  <section class="rounded border border-base-300 bg-base-100 p-4">
+                    <h3 class="text-sm font-semibold">Historical impact forecast</h3>
+                    <div
+                      :if={is_nil(historical_impact(preview(@previews, run.id)))}
+                      class="mt-2 text-sm text-base-content/70"
+                    >
+                      Forecast unavailable for this earlier run
+                    </div>
+                    <div
+                      :if={impact = historical_impact(preview(@previews, run.id))}
+                      class="mt-3 space-y-3 text-sm"
+                    >
+                      <div class="alert alert-info text-sm">{value(impact, "forecast_notice")}</div>
+                      <dl class="grid gap-2 md:grid-cols-3">
+                        <div>
+                          <dt class="font-semibold">Observed</dt>
+                          <dd>{value(impact, "order_state_observed_at") || "-"}</dd>
+                        </div>
+                        <div>
+                          <dt class="font-semibold">Affected pending lines</dt>
+                          <dd>{impact_total(impact, "affected_pending_lines")}</dd>
+                        </div>
+                        <div>
+                          <dt class="font-semibold">Affected quantity</dt>
+                          <dd>{impact_total(impact, "affected_quantity")}</dd>
+                        </div>
+                        <div>
+                          <dt class="font-semibold">Eligible now</dt>
+                          <dd>{impact_total(impact, "eligible_lines")}</dd>
+                        </div>
+                        <div>
+                          <dt class="font-semibold">Deferred on-hold</dt>
+                          <dd>{impact_total(impact, "deferred_lines")}</dd>
+                        </div>
+                        <div>
+                          <dt class="font-semibold">Conflicting</dt>
+                          <dd>{impact_total(impact, "conflicting_lines")}</dd>
+                        </div>
+                        <div>
+                          <dt class="font-semibold">Already mapped</dt>
+                          <dd>{impact_total(impact, "already_mapped_lines")}</dd>
+                        </div>
+                      </dl>
+                      <div class="overflow-x-auto">
+                        <h4 class="font-semibold">Touched product/variation pairs</h4>
+                        <table class="table table-zebra mt-1 text-xs">
+                          <thead>
+                            <tr>
+                              <th>Pair</th>
+                              <th>Resolution</th>
+                              <th>Destination</th>
+                              <th>Pending qty</th>
+                              <th>Eligible</th>
+                              <th>Deferred</th>
+                              <th>Conflict</th>
+                              <th>Mapped</th>
+                              <th>Source identities</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr :for={pair <- impact_entries(impact, "by_product_variation")}>
+                              <td>
+                                {value(pair, "woo_product_id")} / {value(pair, "woo_variation_id") ||
+                                  "-"}
+                              </td>
+                              <td>{value(pair, "resolution")}</td>
+                              <td>
+                                {value(pair, "proposed_event_external_id") || "-"} / {value(
+                                  pair,
+                                  "proposed_ticket_type_external_id"
+                                ) || "-"}
+                              </td>
+                              <td>{value(pair, "pending_line_count")} / {value(pair, "quantity")}</td>
+                              <td>{value(pair, "eligible_line_count")}</td>
+                              <td>{value(pair, "deferred_line_count")}</td>
+                              <td>{value(pair, "conflicting_line_count")}</td>
+                              <td>{value(pair, "already_mapped_line_count")}</td>
+                              <td class="font-mono">
+                                {inspect(value(pair, "source_tickera_event_id_distribution"))}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                      <div class="grid gap-3 md:grid-cols-3 text-xs">
+                        <div>
+                          <h4 class="font-semibold">Order statuses</h4>
+                          <pre>{inspect(value(impact, "by_order_status"))}</pre>
+                        </div>
+                        <div>
+                          <h4 class="font-semibold">Mapping statuses</h4>
+                          <pre>{inspect(value(impact, "by_mapping_status"))}</pre>
+                        </div>
+                        <div>
+                          <h4 class="font-semibold">Eligibility</h4>
+                          <pre>{inspect(value(impact, "eligibility"))}</pre>
+                        </div>
+                      </div>
+                      <div :if={value(impact, "warnings") != []}>
+                        <h4 class="font-semibold">Warnings</h4>
+                        <ul class="mt-1 list-disc pl-5 font-mono text-xs">
+                          <li :for={warning <- value(impact, "warnings") || []}>
+                            {value(warning, "code")} — product {value(warning, "woo_product_id")} /
+                            variation {value(warning, "woo_variation_id") || "-"}
+                          </li>
+                        </ul>
+                      </div>
+                    </div>
+                  </section>
+
                   <div :if={findings(preview(@previews, run.id)) != []}>
                     <h3 class="mb-2 text-xs font-semibold uppercase text-base-content/70">
                       Findings
@@ -1492,6 +1602,25 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
 
   defp finding_count(preview, severity) do
     Enum.count(findings(preview), &(display_value(value(&1, "severity")) == severity))
+  end
+
+  defp historical_impact(preview) when is_map(preview), do: value(preview, "historical_impact")
+  defp historical_impact(_preview), do: nil
+
+  defp impact_total(impact, key) do
+    impact
+    |> value("totals")
+    |> case do
+      totals when is_map(totals) -> value(totals, key) || 0
+      _ -> 0
+    end
+  end
+
+  defp impact_entries(impact, key) do
+    case value(impact, key) do
+      entries when is_list(entries) -> entries
+      _ -> []
+    end
   end
 
   defp validate_selected_apply(socket, run_id, dry_run_hash) do
