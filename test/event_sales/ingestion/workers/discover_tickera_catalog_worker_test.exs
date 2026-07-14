@@ -108,8 +108,14 @@ defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorkerTest do
   end
 
   test "does not retry deterministic planner failures" do
-    refute DiscoverTickeraCatalogWorker.retryable_failure?(:historical_impact_scope_too_large)
-    assert DiscoverTickeraCatalogWorker.retryable_failure?(:timeout)
+    refute DiscoverTickeraCatalogWorker.retryable_failure?(
+             {:historical_impact_scope_too_large,
+              %{observed_pairs: 5_001, max_total_pairs: 5_000}}
+           )
+
+    for reason <- [:timeout, :rate_limited, :server_error, :transport_error] do
+      assert DiscoverTickeraCatalogWorker.retryable_failure?(reason)
+    end
   end
 
   defp restore_env(key, nil), do: Application.delete_env(:event_sales, key)
