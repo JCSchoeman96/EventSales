@@ -137,22 +137,26 @@ defmodule EventSales.Ingestion.TickeraCatalogHistoricalImpact do
 
   defp destinations(source_system_id, keys, context) do
     with {:ok, mappings} <- existing_mappings(source_system_id, keys) do
-      Enum.reduce_while(keys, {:ok, []}, fn key, {:ok, destinations} ->
-        case destination(key, context, mappings) do
-          {:ok, destination} ->
-            {:cont, {:ok, [destination | destinations]}}
+      build_destinations(keys, context, mappings)
+    end
+  end
 
-          {:warning, warning} ->
-            {:cont, {:ok, [unresolved_destination(key, warning) | destinations]}}
+  defp build_destinations(keys, context, mappings) do
+    keys
+    |> Enum.reduce_while({:ok, []}, fn key, {:ok, destinations} ->
+      append_destination(key, context, mappings, destinations)
+    end)
+    |> case do
+      {:ok, destinations} -> {:ok, Enum.sort_by(destinations, &pair_sort_key/1)}
+      error -> error
+    end
+  end
 
-          {:error, reason} ->
-            {:halt, {:error, reason}}
-        end
-      end)
-      |> case do
-        {:ok, destinations} -> {:ok, Enum.sort_by(destinations, &pair_sort_key/1)}
-        error -> error
-      end
+  defp append_destination(key, context, mappings, destinations) do
+    case destination(key, context, mappings) do
+      {:ok, destination} -> {:cont, {:ok, [destination | destinations]}}
+      {:warning, warning} -> {:cont, {:ok, [unresolved_destination(key, warning) | destinations]}}
+      {:error, reason} -> {:halt, {:error, reason}}
     end
   end
 
