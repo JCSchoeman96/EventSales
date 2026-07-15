@@ -20,7 +20,7 @@ defmodule EventSales.Ingestion.TickeraCatalogSyncConcurrencyTest do
     %{admin: admin, source: source} = create_committed_fixture!(state)
 
     on_exit(fn ->
-      cleanup_committed_fixture!(source.id, admin.id)
+      cleanup_committed_fixture!(state, source.id, admin.id)
       Agent.stop(state)
     end)
 
@@ -108,13 +108,17 @@ defmodule EventSales.Ingestion.TickeraCatalogSyncConcurrencyTest do
           domain: Accounts
         )
 
-      role =
+      {role, created_role_id} =
         Role
         |> Ash.Query.filter(name == :admin)
         |> Ash.read_one!(domain: Accounts)
         |> case do
-          nil -> Ash.create!(Role, %{name: :admin}, action: :create, domain: Accounts)
-          role -> role
+          nil ->
+            role = Ash.create!(Role, %{name: :admin}, action: :create, domain: Accounts)
+            {role, role.id}
+
+          role ->
+            {role, nil}
         end
 
       Ash.create!(UserRole, %{user_id: admin.id, role_id: role.id},
@@ -128,7 +132,15 @@ defmodule EventSales.Ingestion.TickeraCatalogSyncConcurrencyTest do
           base_url: "https://catalog-sync-race-#{suffix}.example.test"
         })
 
-      Agent.update(state, &Map.merge(&1, %{admin_id: admin.id, source_id: source.id}))
+      Agent.update(
+        state,
+        &Map.merge(&1, %{
+          admin_id: admin.id,
+          source_id: source.id,
+          created_role_id: created_role_id
+        })
+      )
+
       %{admin: admin, source: source}
     end)
   end
@@ -157,7 +169,9 @@ defmodule EventSales.Ingestion.TickeraCatalogSyncConcurrencyTest do
     end
   end
 
-  defp cleanup_committed_fixture!(source_id, admin_id) do
+  defp cleanup_committed_fixture!(state, source_id, admin_id) do
+    %{created_role_id: created_role_id} = Agent.get(state, & &1)
+
     with_unboxed_connection(fn ->
       run_ids =
         Repo.all(
@@ -177,6 +191,10 @@ defmodule EventSales.Ingestion.TickeraCatalogSyncConcurrencyTest do
       Repo.delete_all(from(source in SourceSystem, where: source.id == ^source_id))
       Repo.delete_all(from(user_role in UserRole, where: user_role.user_id == ^admin_id))
       Repo.delete_all(from(user in User, where: user.id == ^admin_id))
+
+      if created_role_id do
+        Repo.delete_all(from(role in Role, where: role.id == ^created_role_id))
+      end
     end)
   end
 
