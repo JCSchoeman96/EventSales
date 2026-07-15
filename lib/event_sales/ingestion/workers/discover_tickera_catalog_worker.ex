@@ -39,7 +39,7 @@ defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker do
   def retryable_failure?(_reason), do: false
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"run_id" => run_id}}) when is_binary(run_id) do
+  def perform(%Oban.Job{args: %{"run_id" => run_id}} = job) when is_binary(run_id) do
     with {:ok, %TickeraCatalogSyncRun{} = run} <-
            Ash.get(TickeraCatalogSyncRun, run_id, domain: Ingestion),
          {:ok, discovering} <- update_run(run, :mark_discovering, %{}),
@@ -54,7 +54,7 @@ defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker do
       :ok
     else
       {:ok, nil} -> :discard
-      {:error, reason} -> fail(run_id, reason)
+      {:error, reason} -> fail(run_id, reason, job)
     end
   end
 
@@ -94,12 +94,39 @@ defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker do
     |> Ash.update(domain: Ingestion)
   end
 
-  defp fail(run_id, reason) do
+  defp fail(run_id, reason, %Oban.Job{attempt: attempt, max_attempts: max_attempts}) do
+    attempt = max(attempt || 1, 1)
+    max_attempts = max(max_attempts || 1, attempt)
+
     case Ash.get(TickeraCatalogSyncRun, run_id, domain: Ingestion) do
       {:ok, %TickeraCatalogSyncRun{} = run} ->
-        update_run(run, :mark_failed, %{last_error: sanitize_error(reason)})
-        broadcast(run.id, :catalog_sync_failed)
-        if retryable_failure?(reason), do: {:error, reason}, else: :discard
+        if retryable_failure?(reason) and attempt < max_attempts do
+          with {:ok, scheduled} <-
+                 update_run(run, :mark_retry_scheduled, %{
+                   last_error: sanitize_error(reason),
+                   retry_attempt: attempt,
+                   retry_max_attempts: max_attempts
+                 }),
+               :ok <-
+                 PubSub.broadcast(scheduled.id, :catalog_sync_retry_scheduled, %{
+                   run_id: scheduled.id,
+                   retry_attempt: attempt,
+                   retry_max_attempts: max_attempts
+                 }) do
+            {:error, reason}
+          else
+            _error -> {:error, reason}
+          end
+        else
+          case update_run(run, :mark_failed, %{last_error: sanitize_error(reason)}) do
+            {:ok, failed} ->
+              broadcast(failed.id, :catalog_sync_failed)
+              if retryable_failure?(reason), do: {:error, reason}, else: :discard
+
+            {:error, _error} ->
+              if retryable_failure?(reason), do: {:error, reason}, else: :discard
+          end
+        end
 
       _other ->
         {:error, reason}

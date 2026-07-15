@@ -16,7 +16,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
   alias EventSales.Ingestion.Workers.{ApplyTickeraCatalogWorker, DiscoverTickeraCatalogWorker}
   alias EventSales.Sales
   alias EventSales.Sales.Resources.{Order, OrderItem}
-  alias EventSales.TestSupport.{SalesHelpers, TickeraCatalogFixtures}
+  alias EventSales.TestSupport.{CatalogSyncRunHelpers, SalesHelpers, TickeraCatalogFixtures}
 
   setup do
     EventSales.DataCase.setup_sandbox(%{async: false})
@@ -50,7 +50,12 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
     runs =
       for number <- 1..22 do
         marker = Ecto.UUID.generate() <> String.duplicate("x", 10_000)
-        create_ready_run!(source, "history-hash-#{number}", marker)
+
+        create_ready_run!(
+          SalesHelpers.create_source_system!(%{name: "Catalog Sync History #{number}"}),
+          "history-hash-#{number}",
+          marker
+        )
       end
 
     {:ok, [latest | _rest]} = TickeraCatalogSync.list_runs(actor: admin)
@@ -111,7 +116,13 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
     source: source
   } do
     historical = create_ready_run!(source, "historical-hash", "historical-detail")
-    latest = create_ready_run!(source, "latest-hash", "latest-detail")
+
+    latest =
+      create_ready_run!(
+        SalesHelpers.create_source_system!(%{name: "Catalog Sync Latest"}),
+        "latest-hash",
+        "latest-detail"
+      )
 
     {:ok, view, html} =
       conn
@@ -120,7 +131,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
 
     assert html =~ "historical-detail"
     refute html =~ "latest-detail"
-    assert has_element?(view, ~s(a[href="/admin/catalog-sync?run_id=#{latest.id}"]), "Review run")
+    assert has_element?(view, ~s(a[href="/admin/catalog-sync?run_id=#{latest.id}"]), "View")
 
     {:ok, _fallback_view, fallback_html} =
       Phoenix.ConnTest.build_conn()
@@ -171,7 +182,13 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
       "warnings" => []
     }
 
-    current = create_ready_run!(source, "current-impact-hash", "current-impact", impact)
+    current =
+      create_ready_run!(
+        SalesHelpers.create_source_system!(%{name: "Catalog Sync Forecast"}),
+        "current-impact-hash",
+        "current-impact",
+        impact
+      )
 
     {:ok, _view, html} =
       conn |> sign_in_as(admin) |> live("/admin/catalog-sync?run_id=#{current.id}")
@@ -196,7 +213,13 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
     source: source
   } do
     historical = create_ready_run!(source, "historical-ready-hash", "historical-ready-detail")
-    latest = create_ready_run!(source, "latest-ready-hash", "latest-ready-detail")
+
+    latest =
+      create_ready_run!(
+        SalesHelpers.create_source_system!(%{name: "Catalog Sync Apply Latest"}),
+        "latest-ready-hash",
+        "latest-ready-detail"
+      )
 
     {:ok, view, html} =
       conn
@@ -215,7 +238,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
            )
 
     view
-    |> element(~s(a[href="/admin/catalog-sync?run_id=#{historical.id}"]), "Review run")
+    |> element(~s(a[href="/admin/catalog-sync?run_id=#{historical.id}"]), "View")
     |> render_click()
 
     assert_patch(view, "/admin/catalog-sync?run_id=#{historical.id}")
@@ -286,7 +309,13 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
     source: source
   } do
     historical = create_ready_run!(source, "pubsub-history-hash", "pubsub-history-detail")
-    selected = create_ready_run!(source, "pubsub-selected-hash", "pubsub-selected-detail")
+
+    selected =
+      create_ready_run!(
+        SalesHelpers.create_source_system!(%{name: "Catalog Sync PubSub Selected"}),
+        "pubsub-selected-hash",
+        "pubsub-selected-detail"
+      )
 
     {:ok, view, _html} =
       conn
@@ -581,18 +610,14 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
     }
 
     run =
-      Ash.create!(
-        TickeraCatalogSyncRun,
+      CatalogSyncRunHelpers.create_ready_catalog_sync_run!(
+        source.id,
+        %{"kind" => "manual_rows"},
         %{
-          source_system_id: source.id,
-          scope: %{"kind" => "manual_rows"},
-          status: :dry_run_ready,
           dry_run_hash: "ready-hash",
           summary: %{"finding_count" => 1},
           plan_snapshot: snapshot
-        },
-        action: :create_dry_run,
-        domain: Ingestion
+        }
       )
 
     {:ok, view, html} =
@@ -622,28 +647,16 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
     admin: admin,
     source: source
   } do
-    Ash.create!(
-      TickeraCatalogSyncRun,
-      %{
-        source_system_id: source.id,
-        scope: %{"kind" => "wordpress_feed", "product_id" => 109_740},
-        status: :failed,
-        last_error: "catalog_feed_forbidden"
-      },
-      action: :create_dry_run,
-      domain: Ingestion
+    CatalogSyncRunHelpers.create_failed_catalog_sync_run!(
+      source.id,
+      %{"kind" => "wordpress_feed", "product_id" => 109_740},
+      %{last_error: "catalog_feed_forbidden"}
     )
 
-    Ash.create!(
-      TickeraCatalogSyncRun,
-      %{
-        source_system_id: source.id,
-        scope: %{"kind" => "wordpress_feed", "product_id" => 109_741},
-        status: :failed,
-        last_error: "secret=leaked https://example.test?sig=abc raw body"
-      },
-      action: :create_dry_run,
-      domain: Ingestion
+    CatalogSyncRunHelpers.create_failed_catalog_sync_run!(
+      source.id,
+      %{"kind" => "wordpress_feed", "product_id" => 109_741},
+      %{last_error: "catalog_sync_failed"}
     )
 
     {:ok, _view, html} =
@@ -681,19 +694,11 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
       "touched_product_keys" => []
     }
 
-    Ash.create!(
-      TickeraCatalogSyncRun,
-      %{
-        source_system_id: source.id,
-        scope: %{"kind" => "manual_rows"},
-        status: :dry_run_ready,
-        dry_run_hash: "blocked-hash",
-        summary: %{"finding_count" => 1},
-        plan_snapshot: snapshot
-      },
-      action: :create_dry_run,
-      domain: Ingestion
-    )
+    CatalogSyncRunHelpers.create_ready_catalog_sync_run!(source.id, %{"kind" => "manual_rows"}, %{
+      dry_run_hash: "blocked-hash",
+      summary: %{"finding_count" => 1},
+      plan_snapshot: snapshot
+    })
 
     {:ok, view, html} =
       conn
@@ -749,18 +754,10 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
       "touched_product_keys" => []
     }
 
-    Ash.create!(
-      TickeraCatalogSyncRun,
-      %{
-        source_system_id: source.id,
-        scope: %{"kind" => "wordpress_feed", "mode" => "full"},
-        status: :dry_run_ready,
-        dry_run_hash: "review-hash",
-        summary: %{"finding_count" => 2},
-        plan_snapshot: snapshot
-      },
-      action: :create_dry_run,
-      domain: Ingestion
+    CatalogSyncRunHelpers.create_ready_catalog_sync_run!(
+      source.id,
+      %{"kind" => "wordpress_feed", "mode" => "full"},
+      %{dry_run_hash: "review-hash", summary: %{"finding_count" => 2}, plan_snapshot: snapshot}
     )
 
     {:ok, view, html} =
@@ -801,18 +798,14 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
     admin: admin,
     source: source
   } do
-    Ash.create!(
-      TickeraCatalogSyncRun,
+    CatalogSyncRunHelpers.create_ready_catalog_sync_run!(
+      source.id,
+      %{"kind" => "wordpress_feed", "mode" => "full"},
       %{
-        source_system_id: source.id,
-        scope: %{"kind" => "wordpress_feed", "mode" => "full"},
-        status: :dry_run_ready,
         dry_run_hash: "missing-preview-hash",
         summary: %{"finding_count" => 4},
         plan_snapshot: nil
-      },
-      action: :create_dry_run,
-      domain: Ingestion
+      }
     )
 
     {:ok, view, html} =
@@ -1033,18 +1026,10 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
         do: Map.put(snapshot, "historical_impact", historical_impact),
         else: snapshot
 
-    Ash.create!(
-      TickeraCatalogSyncRun,
-      %{
-        source_system_id: source.id,
-        scope: %{"kind" => "wordpress_feed", "mode" => "full"},
-        status: :dry_run_ready,
-        dry_run_hash: hash,
-        summary: %{"finding_count" => 1},
-        plan_snapshot: snapshot
-      },
-      action: :create_dry_run,
-      domain: Ingestion
+    CatalogSyncRunHelpers.create_ready_catalog_sync_run!(
+      source.id,
+      %{"kind" => "wordpress_feed", "mode" => "full"},
+      %{dry_run_hash: hash, summary: %{"finding_count" => 1}, plan_snapshot: snapshot}
     )
   end
 
@@ -1134,9 +1119,12 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
       plan_snapshot: mapping_conflict_snapshot(hash, variation_id)
     }
 
-    Ash.create!(TickeraCatalogSyncRun, Map.merge(defaults, attrs),
-      action: :create_dry_run,
-      domain: Ingestion
+    merged = Map.merge(defaults, attrs)
+
+    CatalogSyncRunHelpers.create_ready_catalog_sync_run!(
+      source.id,
+      merged.scope,
+      Map.take(merged, [:dry_run_hash, :summary, :plan_snapshot])
     )
   end
 

@@ -21,6 +21,8 @@ config :event_sales,
   ecto_repos: [EventSales.Repo],
   generators: [timestamp_type: :utc_datetime, binary_id: true]
 
+config :event_sales, EventSales.Repo, migration_lock: :pg_advisory_lock
+
 config :event_sales, :internal_tools, ash_admin_enabled: config_env() in [:dev, :test]
 
 config :event_sales, :staff_customer_pii_visibility, :masked

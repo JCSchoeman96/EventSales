@@ -63,8 +63,6 @@ defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorkerTest do
   end
 
   test "stores bounded feed discovery errors" do
-    source = SalesHelpers.create_source_system!()
-
     cases = [
       {:misconfigured, "catalog_feed_misconfigured"},
       {:unauthorized, "catalog_feed_unauthorized"},
@@ -79,6 +77,7 @@ defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorkerTest do
     ]
 
     for {reason, expected_error} <- cases do
+      source = SalesHelpers.create_source_system!()
       Application.put_env(:event_sales, :tickera_catalog_discovery_source, FailingDiscoverySource)
       Application.put_env(:event_sales, :discover_worker_failure_reason, reason)
 
@@ -93,16 +92,25 @@ defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorkerTest do
           domain: Ingestion
         )
 
-      result = DiscoverTickeraCatalogWorker.perform(%Oban.Job{args: %{"run_id" => run.id}})
+      result =
+        DiscoverTickeraCatalogWorker.perform(%Oban.Job{
+          args: %{"run_id" => run.id},
+          attempt: 1,
+          max_attempts: 3
+        })
+
+      updated = Ash.get!(TickeraCatalogSyncRun, run.id, domain: Ingestion)
 
       if reason in [:timeout, :rate_limited, :server_error, :transport_error] do
         assert {:error, ^reason} = result
+        assert updated.status == :retry_scheduled
+        assert updated.retry_attempt == 1
+        assert updated.retry_max_attempts == 3
       else
         assert :discard = result
+        assert updated.status == :failed
       end
 
-      updated = Ash.get!(TickeraCatalogSyncRun, run.id, domain: Ingestion)
-      assert updated.status == :failed
       assert updated.last_error == expected_error
     end
   end

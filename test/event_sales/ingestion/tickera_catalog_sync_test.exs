@@ -10,7 +10,7 @@ defmodule EventSales.Ingestion.TickeraCatalogSyncTest do
   alias EventSales.Ingestion.Resources.{TickeraCatalogSyncFinding, TickeraCatalogSyncRun}
   alias EventSales.Ingestion.TickeraCatalogSync
   alias EventSales.Ingestion.Workers.{ApplyTickeraCatalogWorker, DiscoverTickeraCatalogWorker}
-  alias EventSales.TestSupport.{SalesHelpers, TickeraCatalogFixtures}
+  alias EventSales.TestSupport.{CatalogSyncRunHelpers, SalesHelpers, TickeraCatalogFixtures}
 
   setup do
     admin = create_user!("tickera-catalog-admin@example.com")
@@ -96,18 +96,14 @@ defmodule EventSales.Ingestion.TickeraCatalogSyncTest do
 
   test "queue_apply rejects missing previews before enqueue", %{admin: admin, source: source} do
     run =
-      Ash.create!(
-        TickeraCatalogSyncRun,
+      CatalogSyncRunHelpers.create_ready_catalog_sync_run!(
+        source.id,
+        %{"kind" => "wordpress_feed", "mode" => "full"},
         %{
-          source_system_id: source.id,
-          scope: %{"kind" => "wordpress_feed", "mode" => "full"},
-          status: :dry_run_ready,
           dry_run_hash: "missing-preview-hash",
           summary: %{"finding_count" => 4},
           plan_snapshot: nil
-        },
-        action: :create_dry_run,
-        domain: Ingestion
+        }
       )
 
     assert {:error, :missing_plan_snapshot} =
@@ -230,17 +226,7 @@ defmodule EventSales.Ingestion.TickeraCatalogSyncTest do
           applied: :run_already_claimed,
           failed: :run_not_revokeable
         ] do
-      run =
-        Ash.create!(
-          TickeraCatalogSyncRun,
-          %{
-            source_system_id: source.id,
-            scope: %{"kind" => "manual_rows"},
-            status: status
-          },
-          action: :create_dry_run,
-          domain: Ingestion
-        )
+      run = fixture_run_for_status!(status, SalesHelpers.create_source_system!())
 
       assert {:error, ^expected_error} =
                TickeraCatalogSync.revoke_ready_dry_run(
@@ -391,19 +377,55 @@ defmodule EventSales.Ingestion.TickeraCatalogSyncTest do
   end
 
   defp create_dry_run!(source_system_id, snapshot) do
-    Ash.create!(
-      TickeraCatalogSyncRun,
+    queued =
+      Ash.create!(
+        TickeraCatalogSyncRun,
+        %{
+          source_system_id: source_system_id,
+          scope: %{"kind" => "wordpress_feed", "mode" => "full"}
+        },
+        action: :create_dry_run,
+        domain: Ingestion
+      )
+
+    discovering = Ash.update!(queued, %{}, action: :mark_discovering, domain: Ingestion)
+
+    Ash.update!(
+      discovering,
       %{
-        source_system_id: source_system_id,
-        scope: %{"kind" => "wordpress_feed", "mode" => "full"},
-        status: :dry_run_ready,
         dry_run_hash: snapshot["dry_run_hash"],
         summary: %{"finding_count" => length(snapshot["findings"])},
         plan_snapshot: snapshot
       },
-      action: :create_dry_run,
+      action: :mark_dry_run_ready,
       domain: Ingestion
     )
+  end
+
+  defp fixture_run_for_status!(:queued, source),
+    do: CatalogSyncRunHelpers.create_queued_catalog_sync_run!(source.id)
+
+  defp fixture_run_for_status!(:discovering, source),
+    do: CatalogSyncRunHelpers.create_discovering_catalog_sync_run!(source.id)
+
+  defp fixture_run_for_status!(:failed, source),
+    do:
+      CatalogSyncRunHelpers.create_failed_catalog_sync_run!(source.id, %{"kind" => "manual_rows"})
+
+  defp fixture_run_for_status!(status, source) when status in [:applying, :applied] do
+    ready =
+      CatalogSyncRunHelpers.create_ready_catalog_sync_run!(
+        source.id,
+        %{"kind" => "manual_rows"},
+        %{
+          dry_run_hash: "fixture-#{status}",
+          summary: %{},
+          plan_snapshot: %{}
+        }
+      )
+
+    applying = CatalogSyncRunHelpers.claim_applying!(ready)
+    if status == :applied, do: CatalogSyncRunHelpers.mark_applied!(applying), else: applying
   end
 
   defp ready_snapshot(hash) do
