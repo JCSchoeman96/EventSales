@@ -511,6 +511,10 @@
           {
             "arity": 2,
             "name": "set_finished_at"
+          },
+          {
+            "arity": 2,
+            "name": "clear_retry_metadata"
           }
         ],
         "specs?": false,

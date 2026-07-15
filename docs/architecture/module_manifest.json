@@ -289,6 +289,7 @@
     "test/support/analytics/memory_snapshot_store_adapter.ex",
     "test/support/analytics/selective_event_aggregator.ex",
     "test/support/auth_helpers.ex",
+    "test/support/catalog_sync_run_helpers.ex",
     "test/support/conn_case.ex",
     "test/support/data_case.ex",
     "test/support/db_topology_helpers.ex",
@@ -2556,6 +2557,10 @@
         {
           "arity": 2,
           "name": "set_finished_at"
+        },
+        {
+          "arity": 2,
+          "name": "clear_retry_metadata"
         }
       ],
       "specs?": false,
@@ -3023,6 +3028,10 @@
         {
           "arity": 1,
           "name": "list_source_systems"
+        },
+        {
+          "arity": 2,
+          "name": "active_run_for_source"
         }
       ],
       "specs?": false,
@@ -6125,6 +6134,69 @@
         }
       ],
       "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.CatalogSyncRunHelpers",
+      "parse_error": null,
+      "path": "test/support/catalog_sync_run_helpers.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "create_queued_catalog_sync_run!"
+        },
+        {
+          "arity": 2,
+          "name": "create_discovering_catalog_sync_run!"
+        },
+        {
+          "arity": 1,
+          "name": "mark_discovering!"
+        },
+        {
+          "arity": 2,
+          "name": "mark_retry_scheduled!"
+        },
+        {
+          "arity": 2,
+          "name": "mark_ready!"
+        },
+        {
+          "arity": 2,
+          "name": "mark_failed!"
+        },
+        {
+          "arity": 1,
+          "name": "claim_applying!"
+        },
+        {
+          "arity": 1,
+          "name": "mark_applied!"
+        },
+        {
+          "arity": 3,
+          "name": "create_retry_scheduled_catalog_sync_run!"
+        },
+        {
+          "arity": 3,
+          "name": "create_ready_catalog_sync_run!"
+        },
+        {
+          "arity": 3,
+          "name": "create_failed_catalog_sync_run!"
+        },
+        {
+          "arity": 3,
+          "name": "create_applied_catalog_sync_run!"
+        },
+        {
+          "arity": 4,
+          "name": "create_cancelled_catalog_sync_run!"
+        }
+      ],
+      "specs?": false,
       "uses": []
     },
     {

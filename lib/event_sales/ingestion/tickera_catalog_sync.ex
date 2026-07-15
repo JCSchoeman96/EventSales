@@ -207,24 +207,53 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
   end
 
   defp enqueue_discovery(run, opts) do
-    oban_insert = Keyword.get(opts, :oban_insert, &Oban.insert/1)
+    job = DiscoverTickeraCatalogWorker.new(%{"run_id" => run.id})
 
-    case %{"run_id" => run.id}
-         |> DiscoverTickeraCatalogWorker.new()
-         |> oban_insert.() do
-      {:ok, job} -> {:ok, job}
+    with :ok <-
+           run_before_job_insert_hook(
+             opts,
+             :before_discovery_job_insert,
+             :invalid_before_discovery_job_insert_hook,
+             :invalid_before_discovery_job_insert_result
+           ),
+         {:ok, persisted_job} <- Oban.insert(job) do
+      {:ok, persisted_job}
+    else
       {:error, reason} -> {:error, {:enqueue_failed, reason}}
     end
   end
 
   defp enqueue_apply(run, dry_run_hash, opts) do
-    oban_insert = Keyword.get(opts, :oban_insert, &Oban.insert/1)
+    job = ApplyTickeraCatalogWorker.new(%{"run_id" => run.id, "dry_run_hash" => dry_run_hash})
 
-    case %{"run_id" => run.id, "dry_run_hash" => dry_run_hash}
-         |> ApplyTickeraCatalogWorker.new()
-         |> oban_insert.() do
-      {:ok, job} -> {:ok, job}
+    with :ok <-
+           run_before_job_insert_hook(
+             opts,
+             :before_apply_job_insert,
+             :invalid_before_apply_job_insert_hook,
+             :invalid_before_apply_job_insert_result
+           ),
+         {:ok, persisted_job} <- Oban.insert(job) do
+      {:ok, persisted_job}
+    else
       {:error, reason} -> {:error, {:enqueue_failed, reason}}
+    end
+  end
+
+  defp run_before_job_insert_hook(opts, hook_key, invalid_hook, invalid_result) do
+    case Keyword.fetch(opts, hook_key) do
+      :error ->
+        :ok
+
+      {:ok, hook} when is_function(hook, 0) ->
+        case hook.() do
+          :ok -> :ok
+          {:error, reason} -> {:error, reason}
+          _other -> {:error, invalid_result}
+        end
+
+      {:ok, _hook} ->
+        {:error, invalid_hook}
     end
   end
 

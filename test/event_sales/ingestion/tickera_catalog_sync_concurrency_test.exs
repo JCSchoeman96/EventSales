@@ -32,11 +32,11 @@ defmodule EventSales.Ingestion.TickeraCatalogSyncConcurrencyTest do
           TickeraCatalogSync.queue_dry_run(
             %{source_system_id: source.id, scope: manual_scope()},
             actor: admin,
-            oban_insert: fn job ->
+            before_discovery_job_insert: fn ->
               send(parent, {:winner_holding_transaction, self()})
 
               receive do
-                :commit_winner -> Oban.insert(job)
+                :commit_winner -> :ok
               end
             end
           )

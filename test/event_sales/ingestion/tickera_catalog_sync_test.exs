@@ -70,7 +70,7 @@ defmodule EventSales.Ingestion.TickeraCatalogSyncTest do
     assert persisted_job.queue == "tickera_sync"
   end
 
-  test "queue_dry_run rolls back the queued run when discovery enqueue fails", %{
+  test "queue_dry_run rolls back the queued run when the discovery pre-insert hook fails", %{
     admin: admin,
     source: source
   } do
@@ -81,11 +81,61 @@ defmodule EventSales.Ingestion.TickeraCatalogSyncTest do
              TickeraCatalogSync.queue_dry_run(
                %{source_system_id: source.id, scope: manual_scope()},
                actor: admin,
-               oban_insert: fn _job -> {:error, :injected_enqueue_failure} end
+               before_discovery_job_insert: fn -> {:error, :injected_enqueue_failure} end
              )
 
     assert catalog_sync_run_count() == run_count
     assert discovery_job_count() == job_count
+  end
+
+  test "queue_dry_run rejects fabricated discovery hook success and rolls back", %{
+    admin: admin,
+    source: source
+  } do
+    run_count = catalog_sync_run_count()
+    job_count = discovery_job_count()
+
+    assert {:error, :enqueue_failed} =
+             TickeraCatalogSync.queue_dry_run(
+               %{source_system_id: source.id, scope: manual_scope()},
+               actor: admin,
+               before_discovery_job_insert: fn -> {:ok, :fabricated_job} end
+             )
+
+    assert catalog_sync_run_count() == run_count
+    assert discovery_job_count() == job_count
+  end
+
+  test "queue_dry_run rejects an invalid discovery hook value and rolls back", %{
+    admin: admin,
+    source: source
+  } do
+    run_count = catalog_sync_run_count()
+    job_count = discovery_job_count()
+
+    assert {:error, :enqueue_failed} =
+             TickeraCatalogSync.queue_dry_run(
+               %{source_system_id: source.id, scope: manual_scope()},
+               actor: admin,
+               before_discovery_job_insert: :not_a_function
+             )
+
+    assert catalog_sync_run_count() == run_count
+    assert discovery_job_count() == job_count
+  end
+
+  test "queue_dry_run ignores the legacy oban_insert override and persists a real job", %{
+    admin: admin,
+    source: source
+  } do
+    assert {:ok, %{run: run, job: job}} =
+             TickeraCatalogSync.queue_dry_run(
+               %{source_system_id: source.id, scope: manual_scope()},
+               actor: admin,
+               oban_insert: fn _job -> raise "legacy callback must not execute" end
+             )
+
+    assert Repo.get!(Oban.Job, job.id).args == %{"run_id" => run.id}
   end
 
   test "active-run partial unique index has the required predicate and permits terminal history",
@@ -215,6 +265,80 @@ defmodule EventSales.Ingestion.TickeraCatalogSyncTest do
              TickeraCatalogSync.queue_apply(run.id, "missing-preview-hash", actor: admin)
 
     refute_enqueued(worker: ApplyTickeraCatalogWorker)
+  end
+
+  test "queue_apply persists a real Oban job with the exact dry-run hash", %{
+    admin: admin,
+    source: source
+  } do
+    run = create_dry_run!(source.id, ready_snapshot("apply-real-job-hash"))
+
+    assert {:ok, %{run: returned_run, job: job}} =
+             TickeraCatalogSync.queue_apply(run.id, "apply-real-job-hash", actor: admin)
+
+    assert returned_run.id == run.id
+
+    assert Repo.get!(Oban.Job, job.id).args == %{
+             "run_id" => run.id,
+             "dry_run_hash" => "apply-real-job-hash"
+           }
+  end
+
+  test "queue_apply rejects a failing apply pre-insert hook", %{admin: admin, source: source} do
+    run = create_dry_run!(source.id, ready_snapshot("apply-hook-error-hash"))
+    job_count = apply_job_count()
+
+    assert {:error, :enqueue_failed} =
+             TickeraCatalogSync.queue_apply(run.id, "apply-hook-error-hash",
+               actor: admin,
+               before_apply_job_insert: fn -> {:error, :injected_enqueue_failure} end
+             )
+
+    assert apply_job_count() == job_count
+  end
+
+  test "queue_apply rejects fabricated apply hook success", %{admin: admin, source: source} do
+    run = create_dry_run!(source.id, ready_snapshot("apply-fabricated-job-hash"))
+    job_count = apply_job_count()
+
+    assert {:error, :enqueue_failed} =
+             TickeraCatalogSync.queue_apply(run.id, "apply-fabricated-job-hash",
+               actor: admin,
+               before_apply_job_insert: fn -> {:ok, :fabricated_job} end
+             )
+
+    assert apply_job_count() == job_count
+  end
+
+  test "queue_apply rejects an invalid apply hook value", %{admin: admin, source: source} do
+    run = create_dry_run!(source.id, ready_snapshot("apply-invalid-hook-hash"))
+    job_count = apply_job_count()
+
+    assert {:error, :enqueue_failed} =
+             TickeraCatalogSync.queue_apply(run.id, "apply-invalid-hook-hash",
+               actor: admin,
+               before_apply_job_insert: :not_a_function
+             )
+
+    assert apply_job_count() == job_count
+  end
+
+  test "queue_apply ignores the legacy oban_insert override and persists a real job", %{
+    admin: admin,
+    source: source
+  } do
+    run = create_dry_run!(source.id, ready_snapshot("apply-legacy-override-hash"))
+
+    assert {:ok, %{job: job}} =
+             TickeraCatalogSync.queue_apply(run.id, "apply-legacy-override-hash",
+               actor: admin,
+               oban_insert: fn _job -> raise "legacy callback must not execute" end
+             )
+
+    assert Repo.get!(Oban.Job, job.id).args == %{
+             "run_id" => run.id,
+             "dry_run_hash" => "apply-legacy-override-hash"
+           }
   end
 
   test "global admin revokes a ready dry-run and preserves its snapshot", %{
@@ -488,6 +612,10 @@ defmodule EventSales.Ingestion.TickeraCatalogSyncTest do
   end
 
   defp discovery_job_count do
+    Repo.aggregate(Oban.Job, :count, :id)
+  end
+
+  defp apply_job_count do
     Repo.aggregate(Oban.Job, :count, :id)
   end
 
