@@ -3,6 +3,7 @@ defmodule EventSales.TestSupport.CatalogSyncRunHelpers do
 
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.TickeraCatalogSyncRun
+  alias EventSales.Ingestion.TickeraCatalogSync
 
   def create_queued_catalog_sync_run!(source_system_id, scope \\ %{"kind" => "manual_rows"}) do
     Ash.create!(TickeraCatalogSyncRun, %{source_system_id: source_system_id, scope: scope},
@@ -30,7 +31,14 @@ defmodule EventSales.TestSupport.CatalogSyncRunHelpers do
     Ash.update!(run, attrs, action: :mark_failed, domain: Ingestion)
   end
 
-  def claim_applying!(run), do: Ash.update!(run, %{}, action: :claim_for_apply, domain: Ingestion)
+  def claim_applying!(run) do
+    case TickeraCatalogSync.claim_for_apply(run.id, run.dry_run_hash) do
+      {:ok, claimed} -> claimed
+      {:ok, claimed, _notifications} -> claimed
+      {:error, reason} -> raise "could not claim catalog sync run for apply: #{inspect(reason)}"
+    end
+  end
+
   def mark_applied!(run), do: Ash.update!(run, %{}, action: :mark_applied, domain: Ingestion)
 
   def create_retry_scheduled_catalog_sync_run!(source_system_id, scope, retry_attrs) do
@@ -52,5 +60,18 @@ defmodule EventSales.TestSupport.CatalogSyncRunHelpers do
     |> create_ready_catalog_sync_run!(scope, ready_attrs)
     |> claim_applying!()
     |> mark_applied!()
+  end
+
+  def create_cancelled_catalog_sync_run!(source_system_id, scope, ready_attrs, actor) do
+    run = create_ready_catalog_sync_run!(source_system_id, scope, ready_attrs)
+
+    case TickeraCatalogSync.revoke_ready_dry_run(
+           run.id,
+           %{cancellation_reason_code: :superseded},
+           actor: actor
+         ) do
+      {:ok, cancelled} -> cancelled
+      {:error, reason} -> raise "could not cancel catalog sync run: #{inspect(reason)}"
+    end
   end
 end

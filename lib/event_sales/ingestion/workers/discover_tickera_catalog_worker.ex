@@ -100,38 +100,45 @@ defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker do
 
     case Ash.get(TickeraCatalogSyncRun, run_id, domain: Ingestion) do
       {:ok, %TickeraCatalogSyncRun{} = run} ->
-        if retryable_failure?(reason) and attempt < max_attempts do
-          with {:ok, scheduled} <-
-                 update_run(run, :mark_retry_scheduled, %{
-                   last_error: sanitize_error(reason),
-                   retry_attempt: attempt,
-                   retry_max_attempts: max_attempts
-                 }),
-               :ok <-
-                 PubSub.broadcast(scheduled.id, :catalog_sync_retry_scheduled, %{
-                   run_id: scheduled.id,
-                   retry_attempt: attempt,
-                   retry_max_attempts: max_attempts
-                 }) do
-            {:error, reason}
-          else
-            _error -> {:error, reason}
-          end
-        else
-          case update_run(run, :mark_failed, %{last_error: sanitize_error(reason)}) do
-            {:ok, failed} ->
-              broadcast(failed.id, :catalog_sync_failed)
-              if retryable_failure?(reason), do: {:error, reason}, else: :discard
-
-            {:error, _error} ->
-              if retryable_failure?(reason), do: {:error, reason}, else: :discard
-          end
-        end
+        persist_failure(run, reason, attempt, max_attempts)
 
       _other ->
         {:error, reason}
     end
   end
+
+  defp persist_failure(run, reason, attempt, max_attempts)
+       when attempt < max_attempts and reason in @transient_failures do
+    schedule_retry(run, reason, attempt, max_attempts)
+    {:error, reason}
+  end
+
+  defp persist_failure(run, reason, _attempt, _max_attempts) do
+    case update_run(run, :mark_failed, %{last_error: sanitize_error(reason)}) do
+      {:ok, failed} -> broadcast(failed.id, :catalog_sync_failed)
+      {:error, _error} -> :ok
+    end
+
+    terminal_worker_result(reason)
+  end
+
+  defp schedule_retry(run, reason, attempt, max_attempts) do
+    with {:ok, scheduled} <-
+           update_run(run, :mark_retry_scheduled, %{
+             last_error: sanitize_error(reason),
+             retry_attempt: attempt,
+             retry_max_attempts: max_attempts
+           }) do
+      PubSub.broadcast(scheduled.id, :catalog_sync_retry_scheduled, %{
+        run_id: scheduled.id,
+        retry_attempt: attempt,
+        retry_max_attempts: max_attempts
+      })
+    end
+  end
+
+  defp terminal_worker_result(reason) when reason in @transient_failures, do: {:error, reason}
+  defp terminal_worker_result(_reason), do: :discard
 
   defp broadcast(run_id, event) do
     PubSub.broadcast(run_id, event, %{run_id: run_id})

@@ -5,7 +5,7 @@ defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorkerTest do
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.{TickeraCatalogSyncFinding, TickeraCatalogSyncRun}
   alias EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker
-  alias EventSales.TestSupport.{SalesHelpers, TickeraCatalogFixtures}
+  alias EventSales.TestSupport.{CatalogSyncRunHelpers, SalesHelpers, TickeraCatalogFixtures}
 
   defmodule FailingDiscoverySource do
     @behaviour EventSales.Catalog.TickeraCatalog.DiscoverySource
@@ -30,19 +30,11 @@ defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorkerTest do
     source = SalesHelpers.create_source_system!()
 
     run =
-      Ash.create!(
-        TickeraCatalogSyncRun,
-        %{
-          source_system_id: source.id,
-          scope: %{
-            "kind" => "manual_rows",
-            "events" => [TickeraCatalogFixtures.zero_product_event()],
-            "catalog_rows" => [TickeraCatalogFixtures.vwg_row()]
-          }
-        },
-        action: :create_dry_run,
-        domain: Ingestion
-      )
+      CatalogSyncRunHelpers.create_queued_catalog_sync_run!(source.id, %{
+        "kind" => "manual_rows",
+        "events" => [TickeraCatalogFixtures.zero_product_event()],
+        "catalog_rows" => [TickeraCatalogFixtures.vwg_row()]
+      })
 
     PubSub.subscribe(run.id)
 
@@ -82,14 +74,9 @@ defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorkerTest do
       Application.put_env(:event_sales, :discover_worker_failure_reason, reason)
 
       run =
-        Ash.create!(
-          TickeraCatalogSyncRun,
-          %{
-            source_system_id: source.id,
-            scope: %{"kind" => "wordpress_feed", "mode" => "full"}
-          },
-          action: :create_dry_run,
-          domain: Ingestion
+        CatalogSyncRunHelpers.create_queued_catalog_sync_run!(
+          source.id,
+          %{"kind" => "wordpress_feed", "mode" => "full"}
         )
 
       result =

@@ -348,7 +348,8 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
              :catalog_sync_applied,
              :catalog_sync_cancelled
            ] do
-    {:noreply, load_runs(socket, socket.assigns.selected_run_id)}
+    socket = load_runs(socket, socket.assigns.selected_run_id)
+    {:noreply, load_active_run(socket, socket.assigns.form)}
   end
 
   @impl true

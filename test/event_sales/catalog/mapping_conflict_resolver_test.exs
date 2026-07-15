@@ -10,11 +10,9 @@ defmodule EventSales.Catalog.MappingConflictResolverTest do
   alias EventSales.Catalog
   alias EventSales.Catalog.MappingConflictResolver
   alias EventSales.Catalog.Resources.{Event, ProductMapping, TicketType}
-  alias EventSales.Ingestion
-  alias EventSales.Ingestion.Resources.TickeraCatalogSyncRun
   alias EventSales.Sales
   alias EventSales.Sales.Resources.OrderItem
-  alias EventSales.TestSupport.SalesHelpers
+  alias EventSales.TestSupport.{CatalogSyncRunHelpers, SalesHelpers}
 
   setup do
     admin = create_user!("mapping-conflict-admin@example.com")
@@ -98,15 +96,29 @@ defmodule EventSales.Catalog.MappingConflictResolverTest do
 
   test "classifies stale preview integrity failures", %{admin: admin, source: source} do
     ready = create_conflict_run!(source, "ready-hash")
-    failed_status = create_conflict_run!(source, "not-ready-hash", %{status: :failed})
+
+    failed_status =
+      create_conflict_run!(
+        SalesHelpers.create_source_system!(%{name: "Mapping Conflict Failed Fixture"}),
+        "not-ready-hash",
+        %{status: :failed}
+      )
 
     missing_snapshot =
-      create_conflict_run!(source, "missing-snapshot-hash", %{plan_snapshot: nil})
+      create_conflict_run!(
+        SalesHelpers.create_source_system!(%{name: "Mapping Conflict Missing Snapshot Fixture"}),
+        "missing-snapshot-hash",
+        %{plan_snapshot: nil}
+      )
 
     mismatched_snapshot =
-      create_conflict_run!(source, "run-hash", %{
-        plan_snapshot: conflict_snapshot("snapshot-hash")
-      })
+      create_conflict_run!(
+        SalesHelpers.create_source_system!(%{
+          name: "Mapping Conflict Mismatched Snapshot Fixture"
+        }),
+        "run-hash",
+        %{plan_snapshot: conflict_snapshot("snapshot-hash")}
+      )
 
     assert {:error, :stale_preview} =
              MappingConflictResolver.list_conflicts("not-a-uuid", "ready-hash", actor: admin)
@@ -407,20 +419,27 @@ defmodule EventSales.Catalog.MappingConflictResolverTest do
 
   defp create_conflict_run!(source, hash, attrs \\ %{}) do
     defaults = %{
-      source_system_id: source.id,
       scope: %{"kind" => "wordpress_feed", "mode" => "full"},
-      status: :dry_run_ready,
       dry_run_hash: hash,
       summary: %{"finding_count" => 1},
       plan_snapshot: conflict_snapshot(hash)
     }
 
-    Ash.create!(
-      TickeraCatalogSyncRun,
-      Map.merge(defaults, attrs),
-      action: :create_dry_run,
-      domain: Ingestion
-    )
+    merged = Map.merge(defaults, attrs)
+
+    case Map.get(merged, :status, :dry_run_ready) do
+      :failed ->
+        CatalogSyncRunHelpers.create_failed_catalog_sync_run!(source.id, merged.scope, %{
+          last_error: "catalog_sync_discovery_failed"
+        })
+
+      :dry_run_ready ->
+        CatalogSyncRunHelpers.create_ready_catalog_sync_run!(
+          source.id,
+          merged.scope,
+          Map.take(merged, [:dry_run_hash, :summary, :plan_snapshot])
+        )
+    end
   end
 
   defp conflict_snapshot(hash) do

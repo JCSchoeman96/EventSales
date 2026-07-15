@@ -162,16 +162,30 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
   end
 
   defp queue_run_and_job(source_system_id, scope, opts) do
-    case Repo.transaction(fn ->
-           with {:ok, run} <- create_run(source_system_id, scope, opts),
-                {:ok, job} <- enqueue_discovery(run, opts) do
-             %{run: run, job: job}
-           else
-             {:error, reason} -> Repo.rollback(reason)
-           end
-         end) do
-      {:ok, result} -> {:ok, result}
-      {:error, reason} -> {:error, queue_error(reason)}
+    source_system_id
+    |> queue_transaction(scope, opts)
+    |> finalize_queue_transaction()
+  end
+
+  defp queue_transaction(source_system_id, scope, opts) do
+    Repo.transaction(fn ->
+      with {:ok, run, notifications} <- create_run(source_system_id, scope, opts),
+           {:ok, job} <- enqueue_discovery(run, opts) do
+        %{run: run, job: job, notifications: notifications}
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+  end
+
+  defp finalize_queue_transaction(transaction_result) do
+    case transaction_result do
+      {:ok, %{notifications: notifications} = result} ->
+        Ash.Notifier.notify(notifications)
+        {:ok, Map.delete(result, :notifications)}
+
+      {:error, reason} ->
+        {:error, queue_error(reason)}
     end
   end
 
@@ -186,7 +200,9 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
         scope: json_safe(scope)
       },
       action: :create_dry_run,
-      domain: Ingestion
+      domain: Ingestion,
+      context: %{warn_on_transaction_hooks?: false},
+      return_notifications?: true
     )
   end
 

@@ -44,8 +44,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
 
   test "mount keeps every run summary but loads details for only the latest run", %{
     conn: conn,
-    admin: admin,
-    source: source
+    admin: admin
   } do
     runs =
       for number <- 1..22 do
@@ -310,11 +309,13 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
   } do
     historical = create_ready_run!(source, "pubsub-history-hash", "pubsub-history-detail")
 
+    selected_source =
+      SalesHelpers.create_source_system!(%{name: "Catalog Sync PubSub Selected"})
+
     selected =
-      create_ready_run!(
-        SalesHelpers.create_source_system!(%{name: "Catalog Sync PubSub Selected"}),
-        "pubsub-selected-hash",
-        "pubsub-selected-detail"
+      CatalogSyncRunHelpers.create_discovering_catalog_sync_run!(
+        selected_source.id,
+        %{"kind" => "wordpress_feed", "mode" => "full"}
       )
 
     {:ok, view, _html} =
@@ -322,21 +323,34 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
       |> sign_in_as(admin)
       |> live("/admin/catalog-sync?run_id=#{selected.id}")
 
-    refreshed_snapshot =
-      selected.plan_snapshot
-      |> Map.put("dry_run_hash", "pubsub-refreshed-hash")
-      |> put_in(["findings", Access.at(0), "message"], "pubsub-refreshed-detail")
+    refreshed_snapshot = %{
+      "dry_run_hash" => "pubsub-refreshed-hash",
+      "event_changes" => [
+        %{
+          "action" => "create",
+          "external_event_id" => 100_000,
+          "name" => "pubsub-refreshed-detail"
+        }
+      ],
+      "ticket_type_changes" => [],
+      "product_mapping_changes" => [],
+      "findings" => [
+        %{
+          "severity" => "info",
+          "code" => "selected_preview_marker",
+          "message" => "pubsub-refreshed-detail"
+        }
+      ],
+      "touched_event_ids" => [],
+      "touched_product_keys" => []
+    }
 
-    Ash.update!(
-      selected,
-      %{
+    selected =
+      CatalogSyncRunHelpers.mark_ready!(selected, %{
         dry_run_hash: "pubsub-refreshed-hash",
         summary: %{"finding_count" => 1},
         plan_snapshot: refreshed_snapshot
-      },
-      action: :mark_dry_run_ready,
-      domain: Ingestion
-    )
+      })
 
     handler_id = "catalog-sync-pubsub-preview-#{System.unique_integer([:positive])}"
     test_pid = self()
@@ -361,7 +375,6 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
 
     html = render(view)
     assert html =~ "pubsub-refreshed-detail"
-    refute html =~ "pubsub-selected-detail"
     refute html =~ "pubsub-history-detail"
 
     assert has_element?(
@@ -457,8 +470,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
 
   test "admin queues WordPress feed dry-runs without manual JSON", %{
     conn: conn,
-    admin: admin,
-    source: source
+    admin: admin
   } do
     {:ok, view, _html} =
       conn
@@ -477,7 +489,10 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
        %{"kind" => "wordpress_feed", "updated_since" => "2026-07-05T10:00:00Z"}}
     ]
 
-    for {scope_kind, extra_form, expected_scope} <- feed_scopes do
+    for {{scope_kind, extra_form, expected_scope}, number} <- Enum.with_index(feed_scopes, 1) do
+      source =
+        SalesHelpers.create_source_system!(%{name: "Catalog Sync Feed Queue #{number}"})
+
       html =
         render_change(view, "update_form", %{
           "catalog_sync" =>
@@ -864,12 +879,18 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
     create_order_item!(source, history.event, history.ticket, 109_165)
     history_run = create_mapping_conflict_run!(source, "history-hash", 109_165)
 
-    inactive = create_stale_mapping_conflict!(source, 109_167)
+    inactive_source =
+      SalesHelpers.create_source_system!(%{name: "Catalog Sync Inactive Mapping Conflict"})
+
+    inactive = create_stale_mapping_conflict!(inactive_source, 109_167)
     Ash.update!(inactive.mapping, %{}, action: :deactivate, domain: Catalog, actor: admin)
-    inactive_run = create_mapping_conflict_run!(source, "inactive-hash", 109_167)
+    inactive_run = create_mapping_conflict_run!(inactive_source, "inactive-hash", 109_167)
+
+    stale_source =
+      SalesHelpers.create_source_system!(%{name: "Catalog Sync Stale Mapping Conflict"})
 
     stale_run =
-      create_mapping_conflict_run!(source, "stale-hash", 109_169, %{
+      create_mapping_conflict_run!(stale_source, "stale-hash", 109_169, %{
         plan_snapshot: mapping_conflict_snapshot("different-hash", 109_169)
       })
 
@@ -1111,9 +1132,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
 
   defp create_mapping_conflict_run!(source, hash, variation_id, attrs \\ %{}) do
     defaults = %{
-      source_system_id: source.id,
       scope: %{"kind" => "wordpress_feed", "mode" => "full"},
-      status: :dry_run_ready,
       dry_run_hash: hash,
       summary: %{"finding_count" => 1},
       plan_snapshot: mapping_conflict_snapshot(hash, variation_id)
