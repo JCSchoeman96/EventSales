@@ -409,6 +409,9 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
 
   defp active_run_constraint?(%{constraint: @active_constraint}), do: true
 
+  defp active_run_constraint?(%{private_vars: private_vars}) when is_list(private_vars),
+    do: Keyword.get(private_vars, :constraint) == @active_constraint
+
   defp active_run_constraint?(%{errors: errors}) when is_list(errors),
     do: Enum.any?(errors, &active_run_constraint?/1)
 

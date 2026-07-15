@@ -52,6 +52,10 @@ defmodule EventSales.Ingestion.Resources.TickeraCatalogSyncRun do
           "status IN ('queued', 'discovering', 'retry_scheduled', 'dry_run_ready', 'applying')",
         name: "ingestion_tickera_catalog_sync_runs_one_active_per_source_idx"
     end
+
+    unique_index_names [
+      {[:source_system_id], "ingestion_tickera_catalog_sync_runs_one_active_per_source_idx"}
+    ]
   end
 
   actions do

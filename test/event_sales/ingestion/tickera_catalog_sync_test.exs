@@ -114,7 +114,10 @@ defmodule EventSales.Ingestion.TickeraCatalogSyncTest do
                domain: Ingestion
              )
 
-    assert inspect(error) =~ "ingestion_tickera_catalog_sync_runs_one_active_per_source_idx"
+    assert [%{private_vars: private_vars}] = error.errors
+
+    assert Keyword.get(private_vars, :constraint) ==
+             "ingestion_tickera_catalog_sync_runs_one_active_per_source_idx"
 
     queued
     |> CatalogSyncRunHelpers.mark_discovering!()
