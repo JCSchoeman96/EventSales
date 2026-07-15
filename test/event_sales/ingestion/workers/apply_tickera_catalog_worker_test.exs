@@ -9,7 +9,13 @@ defmodule EventSales.Ingestion.Workers.ApplyTickeraCatalogWorkerTest do
   alias EventSales.Ingestion.Resources.TickeraCatalogSyncRun
   alias EventSales.Ingestion.TickeraCatalogSync
   alias EventSales.Ingestion.Workers.ApplyTickeraCatalogWorker
-  alias EventSales.TestSupport.{AuthHelpers, SalesHelpers, TickeraCatalogFixtures}
+
+  alias EventSales.TestSupport.{
+    AuthHelpers,
+    CatalogSyncRunHelpers,
+    SalesHelpers,
+    TickeraCatalogFixtures
+  }
 
   test "applies a durable plan and broadcasts applied" do
     source = SalesHelpers.create_source_system!()
@@ -39,18 +45,14 @@ defmodule EventSales.Ingestion.Workers.ApplyTickeraCatalogWorkerTest do
       })
 
     run =
-      Ash.create!(
-        TickeraCatalogSyncRun,
+      CatalogSyncRunHelpers.create_ready_catalog_sync_run!(
+        source.id,
+        %{"kind" => "woo_product", "woo_product_id" => 109_740},
         %{
-          source_system_id: source.id,
-          scope: %{"kind" => "woo_product", "woo_product_id" => 109_740},
-          status: :dry_run_ready,
           dry_run_hash: plan.dry_run_hash,
           summary: plan.summary,
           plan_snapshot: plan.plan_snapshot
-        },
-        action: :create_dry_run,
-        domain: Ingestion
+        }
       )
 
     PubSub.subscribe(run.id)
@@ -65,30 +67,18 @@ defmodule EventSales.Ingestion.Workers.ApplyTickeraCatalogWorkerTest do
     assert run_id == run.id
   end
 
-  test "stale hash fails without leaving run in applying status" do
+  test "stale hash leaves the unclaimed review-ready run unchanged" do
     source = SalesHelpers.create_source_system!()
 
     run =
-      Ash.create!(
-        TickeraCatalogSyncRun,
+      CatalogSyncRunHelpers.create_ready_catalog_sync_run!(
+        source.id,
+        %{"kind" => "manual_rows"},
         %{
-          source_system_id: source.id,
-          scope: %{"kind" => "manual_rows"},
-          status: :dry_run_ready,
           dry_run_hash: "current-hash",
           summary: %{},
-          plan_snapshot: %{
-            "dry_run_hash" => "current-hash",
-            "event_changes" => [],
-            "ticket_type_changes" => [],
-            "product_mapping_changes" => [],
-            "findings" => [],
-            "touched_event_ids" => [],
-            "touched_product_keys" => []
-          }
-        },
-        action: :create_dry_run,
-        domain: Ingestion
+          plan_snapshot: empty_snapshot("current-hash")
+        }
       )
 
     assert {:error, :stale_dry_run_hash} =
@@ -97,8 +87,8 @@ defmodule EventSales.Ingestion.Workers.ApplyTickeraCatalogWorkerTest do
              })
 
     updated = Ash.get!(TickeraCatalogSyncRun, run.id, domain: Ingestion)
-    assert updated.status == :failed
-    assert updated.last_error == "stale_dry_run_hash"
+    assert updated.status == :dry_run_ready
+    assert is_nil(updated.last_error)
   end
 
   test "queued Apply job discards when revocation wins and preserves its audit" do
@@ -107,26 +97,14 @@ defmodule EventSales.Ingestion.Workers.ApplyTickeraCatalogWorkerTest do
     source = SalesHelpers.create_source_system!()
 
     run =
-      Ash.create!(
-        TickeraCatalogSyncRun,
+      CatalogSyncRunHelpers.create_ready_catalog_sync_run!(
+        source.id,
+        %{"kind" => "wordpress_feed", "mode" => "full"},
         %{
-          source_system_id: source.id,
-          scope: %{"kind" => "wordpress_feed", "mode" => "full"},
-          status: :dry_run_ready,
           dry_run_hash: "revoked-worker-hash",
           summary: %{},
-          plan_snapshot: %{
-            "dry_run_hash" => "revoked-worker-hash",
-            "event_changes" => [],
-            "ticket_type_changes" => [],
-            "product_mapping_changes" => [],
-            "findings" => [],
-            "touched_event_ids" => [],
-            "touched_product_keys" => []
-          }
-        },
-        action: :create_dry_run,
-        domain: Ingestion
+          plan_snapshot: empty_snapshot("revoked-worker-hash")
+        }
       )
 
     assert {:ok, revoked} =
@@ -169,18 +147,14 @@ defmodule EventSales.Ingestion.Workers.ApplyTickeraCatalogWorkerTest do
     source = SalesHelpers.create_source_system!()
 
     run =
-      Ash.create!(
-        TickeraCatalogSyncRun,
+      CatalogSyncRunHelpers.create_ready_catalog_sync_run!(
+        source.id,
+        %{"kind" => "wordpress_feed", "mode" => "full"},
         %{
-          source_system_id: source.id,
-          scope: %{"kind" => "wordpress_feed", "mode" => "full"},
-          status: :dry_run_ready,
           dry_run_hash: "failure-race-hash",
           summary: %{},
           plan_snapshot: %{}
-        },
-        action: :create_dry_run,
-        domain: Ingestion
+        }
       )
 
     PubSub.subscribe(run.id)
@@ -215,5 +189,17 @@ defmodule EventSales.Ingestion.Workers.ApplyTickeraCatalogWorkerTest do
     assert reloaded.status == :cancelled
     assert is_nil(reloaded.last_error)
     assert reloaded.cancelled_by_user_id == admin.id
+  end
+
+  defp empty_snapshot(hash) do
+    %{
+      "dry_run_hash" => hash,
+      "event_changes" => [],
+      "ticket_type_changes" => [],
+      "product_mapping_changes" => [],
+      "findings" => [],
+      "touched_event_ids" => [],
+      "touched_product_keys" => []
+    }
   end
 end
