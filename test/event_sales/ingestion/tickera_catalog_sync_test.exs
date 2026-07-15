@@ -49,6 +49,108 @@ defmodule EventSales.Ingestion.TickeraCatalogSyncTest do
     )
   end
 
+  test "queue_dry_run commits one queued run and one real Oban job", %{
+    admin: admin,
+    source: source
+  } do
+    run_count = catalog_sync_run_count()
+    job_count = discovery_job_count()
+
+    assert {:ok, %{run: run, job: job}} =
+             TickeraCatalogSync.queue_dry_run(
+               %{source_system_id: source.id, scope: manual_scope()},
+               actor: admin
+             )
+
+    assert catalog_sync_run_count() == run_count + 1
+    assert discovery_job_count() == job_count + 1
+
+    persisted_job = Repo.get!(Oban.Job, job.id)
+    assert persisted_job.args == %{"run_id" => run.id}
+    assert persisted_job.queue == "tickera_sync"
+  end
+
+  test "queue_dry_run rolls back the queued run when discovery enqueue fails", %{
+    admin: admin,
+    source: source
+  } do
+    run_count = catalog_sync_run_count()
+    job_count = discovery_job_count()
+
+    assert {:error, :enqueue_failed} =
+             TickeraCatalogSync.queue_dry_run(
+               %{source_system_id: source.id, scope: manual_scope()},
+               actor: admin,
+               oban_insert: fn _job -> {:error, :injected_enqueue_failure} end
+             )
+
+    assert catalog_sync_run_count() == run_count
+    assert discovery_job_count() == job_count
+  end
+
+  test "active-run partial unique index has the required predicate and permits terminal history",
+       %{
+         admin: admin,
+         source: source
+       } do
+    index = active_run_index_metadata()
+
+    assert index.name == "ingestion_tickera_catalog_sync_runs_one_active_per_source_idx"
+    assert index.unique
+    assert index.valid
+    assert index.columns == ["source_system_id"]
+
+    for status <- ~w(queued discovering retry_scheduled dry_run_ready applying) do
+      assert index.predicate =~ status
+    end
+
+    queued = CatalogSyncRunHelpers.create_queued_catalog_sync_run!(source.id)
+
+    assert {:error, error} =
+             Ash.create(
+               TickeraCatalogSyncRun,
+               %{source_system_id: source.id, scope: %{"kind" => "manual_rows"}},
+               action: :create_dry_run,
+               domain: Ingestion
+             )
+
+    assert inspect(error) =~ "ingestion_tickera_catalog_sync_runs_one_active_per_source_idx"
+
+    queued
+    |> CatalogSyncRunHelpers.mark_discovering!()
+    |> CatalogSyncRunHelpers.mark_failed!(%{last_error: "catalog_sync_discovery_failed"})
+
+    assert {:ok, %{run: run}} =
+             TickeraCatalogSync.queue_dry_run(
+               %{source_system_id: source.id, scope: manual_scope()},
+               actor: admin
+             )
+
+    assert run.status == :queued
+  end
+
+  test "queue_dry_run remains source-scoped for different active sources", %{
+    admin: admin,
+    source: source
+  } do
+    other_source = SalesHelpers.create_source_system!(%{name: "Catalog Sync Independent Source"})
+
+    assert {:ok, %{run: first}} =
+             TickeraCatalogSync.queue_dry_run(
+               %{source_system_id: source.id, scope: manual_scope()},
+               actor: admin
+             )
+
+    assert {:ok, %{run: second}} =
+             TickeraCatalogSync.queue_dry_run(
+               %{source_system_id: other_source.id, scope: manual_scope()},
+               actor: admin
+             )
+
+    assert first.source_system_id == source.id
+    assert second.source_system_id == other_source.id
+  end
+
   test "list_runs and get_run_preview are admin-only", %{
     admin: admin,
     staff: staff,
@@ -374,6 +476,38 @@ defmodule EventSales.Ingestion.TickeraCatalogSyncTest do
       "events" => [TickeraCatalogFixtures.zero_product_event()],
       "catalog_rows" => [TickeraCatalogFixtures.vwg_row()]
     }
+  end
+
+  defp catalog_sync_run_count do
+    TickeraCatalogSyncRun
+    |> Ash.Query.new()
+    |> Ash.count!(domain: Ingestion)
+  end
+
+  defp discovery_job_count do
+    Repo.aggregate(Oban.Job, :count, :id)
+  end
+
+  defp active_run_index_metadata do
+    %{rows: [[name, unique, valid, predicate, columns]]} =
+      Repo.query!("""
+      SELECT indexrelid::regclass::text,
+             indisunique,
+             indisvalid,
+             pg_get_expr(indpred, indrelid),
+             ARRAY(
+               SELECT attribute.attname
+               FROM unnest(indkey) WITH ORDINALITY AS key(attnum, position)
+               JOIN pg_attribute AS attribute
+                 ON attribute.attrelid = indrelid
+                AND attribute.attnum = key.attnum
+               ORDER BY key.position
+             )
+      FROM pg_index
+      WHERE indexrelid = 'ingestion_tickera_catalog_sync_runs_one_active_per_source_idx'::regclass
+      """)
+
+    %{name: name, unique: unique, valid: valid, predicate: predicate, columns: columns}
   end
 
   defp create_dry_run!(source_system_id, snapshot) do

@@ -47,7 +47,7 @@ defmodule EventSales.ReleaseTest do
           with_repo: fn repo, fun ->
             send(
               self(),
-              {:repo_url_during_with_repo, Application.fetch_env!(:event_sales, repo)[:url]}
+              {:repo_config_during_with_repo, Application.fetch_env!(:event_sales, repo)}
             )
 
             {:ok, fun.(repo), []}
@@ -60,8 +60,13 @@ defmodule EventSales.ReleaseTest do
 
       assert result == [:migrated]
 
-      assert_received {:repo_url_during_with_repo,
-                       "ecto://direct-user:direct-pass@db.internal/event_sales"}
+      assert_received {:repo_config_during_with_repo, migration_config}
+
+      assert migration_config[:url] == "ecto://direct-user:direct-pass@db.internal/event_sales"
+      assert migration_config[:migration_lock] == :pg_advisory_lock
+
+      assert Keyword.drop(migration_config, [:url]) ==
+               Keyword.drop(original_config, [:url])
 
       assert_received {:migrator_run, Repo, :up, [all: true]}
       assert Application.fetch_env!(:event_sales, Repo) == original_config
