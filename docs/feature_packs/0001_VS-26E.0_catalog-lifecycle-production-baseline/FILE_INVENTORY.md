@@ -85,11 +85,13 @@ None outside the pack folder.
 
 ## Generated locally / attached externally
 
-- `EventSales_VS-26E.0_v1.0.0_050d66e8.zip`
+- `EventSales_VS-26E.0_v1.1.0_050d66e8.zip`
 - external ZIP SHA-256 record
 - optional redacted evidence produced later
 
 Do not commit production evidence or ZIP binaries unless the repository owner explicitly chooses that policy. The canonical Markdown/JSON source is committed; the ZIP is attached to Linear and linked from the PR/issue.
+
+The canonical pack PR remains open during planning. Its review-ready source is authoritative for the ZIP, but merging it is deferred because merge triggers Railway deployment.
 
 ## Explicitly forbidden in the pack PR
 
