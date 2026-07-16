@@ -134,6 +134,7 @@ These dimensions must not be added merely because WooCommerce metadata contains 
 - Event/ticket sales targets should be configurable.
 - The system should support notifications when performance is under or over target.
 - Threshold crossings, pacing changes, and meaningful stale/operational conditions may also be notification inputs.
+- Target and pacing alerts for an event must remain disabled until the event's required data-completeness/backfill watermark is certified; partial history must never be presented as authoritative under/over-target performance.
 
 ### Required future contract
 
@@ -141,6 +142,7 @@ VS-27D must define:
 
 - target identity and scope;
 - evaluation cadence;
+- data-completeness eligibility;
 - deduplication and cooldown;
 - notification channels;
 - recipient/role permissions;
@@ -190,6 +192,7 @@ Default until reviewed: deny broader access and exclude customer PII.
 - The source/event mapping must be verified before order ingestion.
 - Backfill must use the existing order parser and `OrderUpserter`, not a parallel writer.
 - Cursor/progress must advance only after durable success.
+- Successful backfill must record a data-completeness watermark that downstream target/notification logic can require.
 
 ## 9. Corrections, Audit, Import, and Export
 
