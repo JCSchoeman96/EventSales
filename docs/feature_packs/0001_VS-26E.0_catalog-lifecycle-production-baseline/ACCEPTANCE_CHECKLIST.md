@@ -10,6 +10,8 @@
 - [ ] ZIP archive listing inspected.
 - [ ] ZIP SHA-256 recorded in Linear.
 - [ ] Independent pack review approved.
+- [ ] v1.0.0 recorded as superseded and not supplied to an agent.
+- [ ] PR #117 remains open/unmerged for JC-108 planning.
 
 ## Repository truth
 
@@ -30,6 +32,7 @@
 - [ ] Evidence/redaction rules are exact.
 - [ ] Rollback limitations are documented.
 - [ ] Plan review states authorised phases.
+- [ ] JC-109 explicitly states whether PR #117 merge/deploy/migrate is authorised.
 
 ## Railway and database preflight
 
