@@ -67,8 +67,11 @@
     "snapshot/hash mismatch",
     "missing separate Apply approval",
     "secret/PII/raw payload leak",
-    "corrective code or migration required"
+    "corrective code or migration required",
+    "PR #117 merge attempted before JC-109 deployment/migration authorisation"
   ],
+  "supersedes": "1.0.0",
+  "supersession_reason": "Pack PR merge is a Railway deployment/migration boundary and must remain deferred until JC-109 authorisation.",
   "verification_commands": [
     "git status --short",
     "git rev-parse HEAD",
@@ -89,8 +92,8 @@
     "bash scripts/local_ci.sh",
     "git diff --check"
   ],
-  "version": "1.0.0",
-  "zip_filename": "EventSales_VS-26E.0_v1.0.0_050d66e8.zip",
+  "version": "1.1.0",
+  "zip_filename": "EventSales_VS-26E.0_v1.1.0_050d66e8.zip",
   "zip_sha256": null,
   "zip_sha256_note": "Recorded externally in Linear/GitHub because a ZIP cannot contain its own stable hash."
 }
