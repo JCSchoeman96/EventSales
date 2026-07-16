@@ -11,10 +11,8 @@ defmodule EventSales.Catalog.TickeraCatalog.PlannerApplierTest do
   alias EventSales.Catalog.MappingConflictResolver
   alias EventSales.Catalog.Resources.{Event, ProductMapping, TicketType}
   alias EventSales.Catalog.TickeraCatalog.{Applier, DiscoveryResult, Plan, Planner}
-  alias EventSales.Ingestion
-  alias EventSales.Ingestion.Resources.TickeraCatalogSyncRun
   alias EventSales.Ingestion.Workers.MissingCatalogResolutionWorker
-  alias EventSales.TestSupport.{SalesHelpers, TickeraCatalogFixtures}
+  alias EventSales.TestSupport.{CatalogSyncRunHelpers, SalesHelpers, TickeraCatalogFixtures}
 
   setup do
     source = SalesHelpers.create_source_system!()
@@ -247,7 +245,12 @@ defmodule EventSales.Catalog.TickeraCatalog.PlannerApplierTest do
   test "applier rejects stale hash and missing plan snapshot", %{source: source} do
     assert {:ok, plan} = Planner.plan(source.id, discovery_result())
     run = create_run!(source.id, plan)
-    missing_snapshot = create_run!(source.id, %{plan | plan_snapshot: nil})
+
+    missing_snapshot =
+      create_run!(
+        SalesHelpers.create_source_system!(%{name: "Planner Applier Missing Snapshot Fixture"}).id,
+        %{plan | plan_snapshot: nil}
+      )
 
     assert {:error, :stale_dry_run_hash} = Applier.apply(run.id, "wrong", actor: nil)
 
@@ -259,18 +262,9 @@ defmodule EventSales.Catalog.TickeraCatalog.PlannerApplierTest do
     assert {:ok, plan} = Planner.plan(source.id, discovery_result())
 
     queued_run =
-      Ash.create!(
-        TickeraCatalogSyncRun,
-        %{
-          source_system_id: source.id,
-          scope: %{"kind" => "woo_product", "woo_product_id" => 109_740},
-          status: :queued,
-          dry_run_hash: plan.dry_run_hash,
-          summary: plan.summary,
-          plan_snapshot: plan.plan_snapshot
-        },
-        action: :create_dry_run,
-        domain: Ingestion
+      CatalogSyncRunHelpers.create_queued_catalog_sync_run!(
+        source.id,
+        %{"kind" => "woo_product", "woo_product_id" => 109_740}
       )
 
     assert {:error, :run_not_ready} = Applier.apply(queued_run.id, plan.dry_run_hash, actor: nil)
@@ -481,18 +475,14 @@ defmodule EventSales.Catalog.TickeraCatalog.PlannerApplierTest do
   end
 
   defp create_run!(source_system_id, plan) do
-    Ash.create!(
-      TickeraCatalogSyncRun,
+    CatalogSyncRunHelpers.create_ready_catalog_sync_run!(
+      source_system_id,
+      %{"kind" => "woo_product", "woo_product_id" => 109_740},
       %{
-        source_system_id: source_system_id,
-        scope: %{"kind" => "woo_product", "woo_product_id" => 109_740},
-        status: :dry_run_ready,
         dry_run_hash: plan.dry_run_hash,
         summary: plan.summary,
         plan_snapshot: plan.plan_snapshot
-      },
-      action: :create_dry_run,
-      domain: Ingestion
+      }
     )
   end
 end

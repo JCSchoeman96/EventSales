@@ -36,6 +36,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
     catalog_feed_server_error
     catalog_feed_transport_error
     catalog_sync_discovery_failed
+    catalog_sync_claim_failed
     enqueue_failed
     stale_dry_run_hash
     missing_plan_snapshot
@@ -55,6 +56,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
       |> assign(:form, @empty_form)
       |> assign(:form_state, validate_form(@empty_form))
       |> assign(:queue_notice, nil)
+      |> assign(:active_run, nil)
       |> assign(:source_systems, [])
       |> assign(:runs, [])
       |> assign(:selected_run_id, nil)
@@ -105,6 +107,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
      |> assign(:form, form)
      |> assign(:form_state, validate_form(form))
      |> assign(:queue_notice, nil)
+     |> load_active_run(form)
      |> load_order_correction_preview()}
   end
 
@@ -142,6 +145,12 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
          |> assign(:form_state, form_state)
          |> assign(:queue_notice, {:error, "Manual rows must be valid JSON"})
          |> put_flash(:error, "Manual rows must be valid JSON")}
+
+      {:error, :catalog_sync_already_active} ->
+        {:noreply,
+         socket
+         |> assign(:queue_notice, {:error, active_run_message()})
+         |> put_flash(:error, active_run_message())}
 
       {:error, :invalid_feed_scope} ->
         {:noreply,
@@ -334,12 +343,14 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
   def handle_info({event, %{run_id: _run_id}}, socket)
       when event in [
              :catalog_sync_started,
+             :catalog_sync_retry_scheduled,
              :catalog_sync_preview_ready,
              :catalog_sync_failed,
              :catalog_sync_applied,
              :catalog_sync_cancelled
            ] do
-    {:noreply, load_runs(socket, socket.assigns.selected_run_id)}
+    socket = load_runs(socket, socket.assigns.selected_run_id)
+    {:noreply, load_active_run(socket, socket.assigns.form)}
   end
 
   @impl true
@@ -371,6 +382,8 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
             >
               {elem(@queue_notice, 1)}
             </div>
+
+            <p :if={@active_run} class="text-sm text-warning">{active_run_message()}</p>
 
             <label class="form-control w-full">
               <span class="label">
@@ -556,18 +569,25 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
         <table class="table table-zebra min-w-full text-sm">
           <thead class="bg-base-200 text-left text-xs font-semibold uppercase text-base-content/70">
             <tr>
-              <th class="px-3 py-2">Queued</th>
+              <th class="px-3 py-2">Created at</th>
               <th class="px-3 py-2">Status</th>
               <th class="px-3 py-2">Failure reason</th>
               <th class="px-3 py-2">Hash</th>
               <th class="px-3 py-2">Summary</th>
-              <th class="px-3 py-2">Action</th>
+              <th class="px-3 py-2">View</th>
             </tr>
           </thead>
           <tbody>
             <tr :for={run <- @runs}>
               <td class="px-3 py-2 text-base-content/80">{format_datetime(run.inserted_at)}</td>
-              <td class="px-3 py-2 text-base-content/80">{run.status}</td>
+              <td class="px-3 py-2 text-base-content/80">
+                <span class="badge badge-outline gap-1">
+                  <span :if={status_spinner?(run.status)} class="loading loading-spinner loading-xs">
+                  </span>
+                  <span :if={status_clock?(run.status)}>◷</span>
+                  {status_label(run.status)}
+                </span>
+              </td>
               <td class="px-3 py-2 font-mono text-xs text-base-content/80">
                 {failure_reason_text(run)}
               </td>
@@ -582,10 +602,10 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
                     patch={selected_run_path(run.id)}
                     class="btn btn-ghost btn-xs"
                   >
-                    Review run
+                    View
                   </.link>
                   <span :if={run.id == @selected_run_id} class="badge badge-outline badge-sm">
-                    Reviewing
+                    Currently viewing
                   </span>
                 </div>
               </td>
@@ -1245,6 +1265,31 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
     }
   end
 
+  defp load_active_run(socket, form) do
+    case form["source_system_id"] do
+      source_system_id when is_binary(source_system_id) and source_system_id != "" ->
+        case TickeraCatalogSync.active_run_for_source(source_system_id,
+               actor: socket.assigns.current_user
+             ) do
+          {:ok, active_run} ->
+            form_state =
+              Map.put(
+                socket.assigns.form_state,
+                :queue_enabled?,
+                is_nil(active_run) and socket.assigns.form_state.queue_enabled?
+              )
+
+            socket |> assign(:active_run, active_run) |> assign(:form_state, form_state)
+
+          _other ->
+            socket
+        end
+
+      _other ->
+        assign(socket, :active_run, nil)
+    end
+  end
+
   defp validate_manual_json(value) when is_binary(value) do
     value = String.trim(value)
 
@@ -1477,7 +1522,8 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
     end
   end
 
-  defp active_run?(run), do: run.status in [:queued, :discovering, :applying]
+  defp active_run?(run),
+    do: run.status in [:queued, :discovering, :retry_scheduled, :dry_run_ready, :applying]
 
   defp maybe_add_selected_run(run_ids, nil), do: run_ids
   defp maybe_add_selected_run(run_ids, selected_run), do: [selected_run.id | run_ids]
@@ -1767,6 +1813,23 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
   end
 
   defp failure_reason_text(_run), do: "-"
+
+  defp active_run_message,
+    do:
+      "A Catalog Sync run is active or awaiting review. Apply or revoke the existing run before queueing another."
+
+  defp status_label(:queued), do: "Queued"
+  defp status_label(:discovering), do: "Discovering"
+  defp status_label(:retry_scheduled), do: "Retry scheduled"
+  defp status_label(:dry_run_ready), do: "Ready for review"
+  defp status_label(:applying), do: "Applying"
+  defp status_label(:applied), do: "Applied"
+  defp status_label(:failed), do: "Failed"
+  defp status_label(:cancelled), do: "Cancelled"
+  defp status_label(_status), do: "Unknown"
+
+  defp status_spinner?(status), do: status in [:discovering, :applying]
+  defp status_clock?(status), do: status in [:queued, :retry_scheduled]
 
   defp format_datetime(nil), do: "-"
   defp format_datetime(datetime), do: Calendar.strftime(datetime, "%Y-%m-%d %H:%M")

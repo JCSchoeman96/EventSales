@@ -10,7 +10,7 @@ defmodule EventSales.Ingestion.TickeraCatalogSyncTest do
   alias EventSales.Ingestion.Resources.{TickeraCatalogSyncFinding, TickeraCatalogSyncRun}
   alias EventSales.Ingestion.TickeraCatalogSync
   alias EventSales.Ingestion.Workers.{ApplyTickeraCatalogWorker, DiscoverTickeraCatalogWorker}
-  alias EventSales.TestSupport.{SalesHelpers, TickeraCatalogFixtures}
+  alias EventSales.TestSupport.{CatalogSyncRunHelpers, SalesHelpers, TickeraCatalogFixtures}
 
   setup do
     admin = create_user!("tickera-catalog-admin@example.com")
@@ -47,6 +47,161 @@ defmodule EventSales.Ingestion.TickeraCatalogSyncTest do
       queue: :tickera_sync,
       args: %{"run_id" => run.id}
     )
+  end
+
+  test "queue_dry_run commits one queued run and one real Oban job", %{
+    admin: admin,
+    source: source
+  } do
+    run_count = catalog_sync_run_count()
+    job_count = discovery_job_count()
+
+    assert {:ok, %{run: run, job: job}} =
+             TickeraCatalogSync.queue_dry_run(
+               %{source_system_id: source.id, scope: manual_scope()},
+               actor: admin
+             )
+
+    assert catalog_sync_run_count() == run_count + 1
+    assert discovery_job_count() == job_count + 1
+
+    persisted_job = Repo.get!(Oban.Job, job.id)
+    assert persisted_job.args == %{"run_id" => run.id}
+    assert persisted_job.queue == "tickera_sync"
+  end
+
+  test "queue_dry_run rolls back the queued run when the discovery pre-insert hook fails", %{
+    admin: admin,
+    source: source
+  } do
+    run_count = catalog_sync_run_count()
+    job_count = discovery_job_count()
+
+    assert {:error, :enqueue_failed} =
+             TickeraCatalogSync.queue_dry_run(
+               %{source_system_id: source.id, scope: manual_scope()},
+               actor: admin,
+               before_discovery_job_insert: fn -> {:error, :injected_enqueue_failure} end
+             )
+
+    assert catalog_sync_run_count() == run_count
+    assert discovery_job_count() == job_count
+  end
+
+  test "queue_dry_run rejects fabricated discovery hook success and rolls back", %{
+    admin: admin,
+    source: source
+  } do
+    run_count = catalog_sync_run_count()
+    job_count = discovery_job_count()
+
+    assert {:error, :enqueue_failed} =
+             TickeraCatalogSync.queue_dry_run(
+               %{source_system_id: source.id, scope: manual_scope()},
+               actor: admin,
+               before_discovery_job_insert: fn -> {:ok, :fabricated_job} end
+             )
+
+    assert catalog_sync_run_count() == run_count
+    assert discovery_job_count() == job_count
+  end
+
+  test "queue_dry_run rejects an invalid discovery hook value and rolls back", %{
+    admin: admin,
+    source: source
+  } do
+    run_count = catalog_sync_run_count()
+    job_count = discovery_job_count()
+
+    assert {:error, :enqueue_failed} =
+             TickeraCatalogSync.queue_dry_run(
+               %{source_system_id: source.id, scope: manual_scope()},
+               actor: admin,
+               before_discovery_job_insert: :not_a_function
+             )
+
+    assert catalog_sync_run_count() == run_count
+    assert discovery_job_count() == job_count
+  end
+
+  test "queue_dry_run ignores the legacy oban_insert override and persists a real job", %{
+    admin: admin,
+    source: source
+  } do
+    assert {:ok, %{run: run, job: job}} =
+             TickeraCatalogSync.queue_dry_run(
+               %{source_system_id: source.id, scope: manual_scope()},
+               actor: admin,
+               oban_insert: fn _job -> raise "legacy callback must not execute" end
+             )
+
+    assert Repo.get!(Oban.Job, job.id).args == %{"run_id" => run.id}
+  end
+
+  test "active-run partial unique index has the required predicate and permits terminal history",
+       %{
+         admin: admin,
+         source: source
+       } do
+    index = active_run_index_metadata()
+
+    assert index.name == "ingestion_tickera_catalog_sync_runs_one_active_per_source_idx"
+    assert index.unique
+    assert index.valid
+    assert index.columns == ["source_system_id"]
+
+    for status <- ~w(queued discovering retry_scheduled dry_run_ready applying) do
+      assert index.predicate =~ status
+    end
+
+    queued = CatalogSyncRunHelpers.create_queued_catalog_sync_run!(source.id)
+
+    assert {:error, error} =
+             Ash.create(
+               TickeraCatalogSyncRun,
+               %{source_system_id: source.id, scope: %{"kind" => "manual_rows"}},
+               action: :create_dry_run,
+               domain: Ingestion
+             )
+
+    assert [%{private_vars: private_vars}] = error.errors
+
+    assert Keyword.get(private_vars, :constraint) ==
+             "ingestion_tickera_catalog_sync_runs_one_active_per_source_idx"
+
+    queued
+    |> CatalogSyncRunHelpers.mark_discovering!()
+    |> CatalogSyncRunHelpers.mark_failed!(%{last_error: "catalog_sync_discovery_failed"})
+
+    assert {:ok, %{run: run}} =
+             TickeraCatalogSync.queue_dry_run(
+               %{source_system_id: source.id, scope: manual_scope()},
+               actor: admin
+             )
+
+    assert run.status == :queued
+  end
+
+  test "queue_dry_run remains source-scoped for different active sources", %{
+    admin: admin,
+    source: source
+  } do
+    other_source = SalesHelpers.create_source_system!(%{name: "Catalog Sync Independent Source"})
+
+    assert {:ok, %{run: first}} =
+             TickeraCatalogSync.queue_dry_run(
+               %{source_system_id: source.id, scope: manual_scope()},
+               actor: admin
+             )
+
+    assert {:ok, %{run: second}} =
+             TickeraCatalogSync.queue_dry_run(
+               %{source_system_id: other_source.id, scope: manual_scope()},
+               actor: admin
+             )
+
+    assert first.source_system_id == source.id
+    assert second.source_system_id == other_source.id
   end
 
   test "list_runs and get_run_preview are admin-only", %{
@@ -96,24 +251,94 @@ defmodule EventSales.Ingestion.TickeraCatalogSyncTest do
 
   test "queue_apply rejects missing previews before enqueue", %{admin: admin, source: source} do
     run =
-      Ash.create!(
-        TickeraCatalogSyncRun,
+      CatalogSyncRunHelpers.create_ready_catalog_sync_run!(
+        source.id,
+        %{"kind" => "wordpress_feed", "mode" => "full"},
         %{
-          source_system_id: source.id,
-          scope: %{"kind" => "wordpress_feed", "mode" => "full"},
-          status: :dry_run_ready,
           dry_run_hash: "missing-preview-hash",
           summary: %{"finding_count" => 4},
           plan_snapshot: nil
-        },
-        action: :create_dry_run,
-        domain: Ingestion
+        }
       )
 
     assert {:error, :missing_plan_snapshot} =
              TickeraCatalogSync.queue_apply(run.id, "missing-preview-hash", actor: admin)
 
     refute_enqueued(worker: ApplyTickeraCatalogWorker)
+  end
+
+  test "queue_apply persists a real Oban job with the exact dry-run hash", %{
+    admin: admin,
+    source: source
+  } do
+    run = create_dry_run!(source.id, ready_snapshot("apply-real-job-hash"))
+
+    assert {:ok, %{run: returned_run, job: job}} =
+             TickeraCatalogSync.queue_apply(run.id, "apply-real-job-hash", actor: admin)
+
+    assert returned_run.id == run.id
+
+    assert Repo.get!(Oban.Job, job.id).args == %{
+             "run_id" => run.id,
+             "dry_run_hash" => "apply-real-job-hash"
+           }
+  end
+
+  test "queue_apply rejects a failing apply pre-insert hook", %{admin: admin, source: source} do
+    run = create_dry_run!(source.id, ready_snapshot("apply-hook-error-hash"))
+    job_count = apply_job_count()
+
+    assert {:error, :enqueue_failed} =
+             TickeraCatalogSync.queue_apply(run.id, "apply-hook-error-hash",
+               actor: admin,
+               before_apply_job_insert: fn -> {:error, :injected_enqueue_failure} end
+             )
+
+    assert apply_job_count() == job_count
+  end
+
+  test "queue_apply rejects fabricated apply hook success", %{admin: admin, source: source} do
+    run = create_dry_run!(source.id, ready_snapshot("apply-fabricated-job-hash"))
+    job_count = apply_job_count()
+
+    assert {:error, :enqueue_failed} =
+             TickeraCatalogSync.queue_apply(run.id, "apply-fabricated-job-hash",
+               actor: admin,
+               before_apply_job_insert: fn -> {:ok, :fabricated_job} end
+             )
+
+    assert apply_job_count() == job_count
+  end
+
+  test "queue_apply rejects an invalid apply hook value", %{admin: admin, source: source} do
+    run = create_dry_run!(source.id, ready_snapshot("apply-invalid-hook-hash"))
+    job_count = apply_job_count()
+
+    assert {:error, :enqueue_failed} =
+             TickeraCatalogSync.queue_apply(run.id, "apply-invalid-hook-hash",
+               actor: admin,
+               before_apply_job_insert: :not_a_function
+             )
+
+    assert apply_job_count() == job_count
+  end
+
+  test "queue_apply ignores the legacy oban_insert override and persists a real job", %{
+    admin: admin,
+    source: source
+  } do
+    run = create_dry_run!(source.id, ready_snapshot("apply-legacy-override-hash"))
+
+    assert {:ok, %{job: job}} =
+             TickeraCatalogSync.queue_apply(run.id, "apply-legacy-override-hash",
+               actor: admin,
+               oban_insert: fn _job -> raise "legacy callback must not execute" end
+             )
+
+    assert Repo.get!(Oban.Job, job.id).args == %{
+             "run_id" => run.id,
+             "dry_run_hash" => "apply-legacy-override-hash"
+           }
   end
 
   test "global admin revokes a ready dry-run and preserves its snapshot", %{
@@ -230,17 +455,7 @@ defmodule EventSales.Ingestion.TickeraCatalogSyncTest do
           applied: :run_already_claimed,
           failed: :run_not_revokeable
         ] do
-      run =
-        Ash.create!(
-          TickeraCatalogSyncRun,
-          %{
-            source_system_id: source.id,
-            scope: %{"kind" => "manual_rows"},
-            status: status
-          },
-          action: :create_dry_run,
-          domain: Ingestion
-        )
+      run = fixture_run_for_status!(status, SalesHelpers.create_source_system!())
 
       assert {:error, ^expected_error} =
                TickeraCatalogSync.revoke_ready_dry_run(
@@ -390,20 +605,98 @@ defmodule EventSales.Ingestion.TickeraCatalogSyncTest do
     }
   end
 
+  defp catalog_sync_run_count do
+    TickeraCatalogSyncRun
+    |> Ash.Query.new()
+    |> Ash.count!(domain: Ingestion)
+  end
+
+  defp discovery_job_count do
+    Repo.aggregate(Oban.Job, :count, :id)
+  end
+
+  defp apply_job_count do
+    Repo.aggregate(Oban.Job, :count, :id)
+  end
+
+  defp active_run_index_metadata do
+    %{rows: [[name, unique, valid, predicate, columns]]} =
+      Repo.query!("""
+      SELECT indexrelid::regclass::text,
+             indisunique,
+             indisvalid,
+             pg_get_expr(indpred, indrelid),
+             ARRAY(
+               SELECT attribute.attname
+               FROM unnest(indkey) WITH ORDINALITY AS key(attnum, position)
+               JOIN pg_attribute AS attribute
+                 ON attribute.attrelid = indrelid
+                AND attribute.attnum = key.attnum
+               ORDER BY key.position
+             )
+      FROM pg_index
+      WHERE indexrelid = 'ingestion_tickera_catalog_sync_runs_one_active_per_source_idx'::regclass
+      """)
+
+    %{name: name, unique: unique, valid: valid, predicate: predicate, columns: columns}
+  end
+
   defp create_dry_run!(source_system_id, snapshot) do
-    Ash.create!(
-      TickeraCatalogSyncRun,
+    queued =
+      Ash.create!(
+        TickeraCatalogSyncRun,
+        %{
+          source_system_id: source_system_id,
+          scope: %{"kind" => "wordpress_feed", "mode" => "full"}
+        },
+        action: :create_dry_run,
+        domain: Ingestion
+      )
+
+    discovering =
+      Ash.update!(
+        queued,
+        %{owner_attempt: 1, owner_max_attempts: 3},
+        action: :mark_discovering,
+        domain: Ingestion
+      )
+
+    Ash.update!(
+      discovering,
       %{
-        source_system_id: source_system_id,
-        scope: %{"kind" => "wordpress_feed", "mode" => "full"},
-        status: :dry_run_ready,
         dry_run_hash: snapshot["dry_run_hash"],
         summary: %{"finding_count" => length(snapshot["findings"])},
         plan_snapshot: snapshot
       },
-      action: :create_dry_run,
+      action: :mark_dry_run_ready,
       domain: Ingestion
     )
+  end
+
+  defp fixture_run_for_status!(:queued, source),
+    do: CatalogSyncRunHelpers.create_queued_catalog_sync_run!(source.id)
+
+  defp fixture_run_for_status!(:discovering, source),
+    do: CatalogSyncRunHelpers.create_discovering_catalog_sync_run!(source.id)
+
+  defp fixture_run_for_status!(:failed, source),
+    do:
+      CatalogSyncRunHelpers.create_failed_catalog_sync_run!(source.id, %{"kind" => "manual_rows"})
+
+  defp fixture_run_for_status!(status, source) when status in [:applying, :applied] do
+    ready =
+      CatalogSyncRunHelpers.create_ready_catalog_sync_run!(
+        source.id,
+        %{"kind" => "manual_rows"},
+        %{
+          dry_run_hash: "fixture-#{status}",
+          summary: %{},
+          plan_snapshot: %{}
+        }
+      )
+
+    applying = CatalogSyncRunHelpers.claim_applying!(ready)
+    if status == :applied, do: CatalogSyncRunHelpers.mark_applied!(applying), else: applying
   end
 
   defp ready_snapshot(hash) do

@@ -12,8 +12,10 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.TickeraCatalogSyncRun
   alias EventSales.Ingestion.Workers.{ApplyTickeraCatalogWorker, DiscoverTickeraCatalogWorker}
+  alias EventSales.Repo
 
   @default_limit 50
+  @active_constraint "ingestion_tickera_catalog_sync_runs_one_active_per_source_idx"
   @run_summary_fields [
     :id,
     :source_system_id,
@@ -24,6 +26,8 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
     :started_at,
     :finished_at,
     :last_error,
+    :retry_attempt,
+    :retry_max_attempts,
     :cancelled_at,
     :cancelled_by_user_id,
     :cancellation_reason_code,
@@ -36,8 +40,7 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
     with :ok <- authorize_admin(opts),
          {:ok, source_system_id} <- fetch_required(attrs, :source_system_id),
          {:ok, scope} <- fetch_scope(attrs),
-         {:ok, run} <- create_run(source_system_id, scope, opts),
-         {:ok, job} <- enqueue_discovery(run, opts) do
+         {:ok, %{run: run, job: job}} <- queue_run_and_job(source_system_id, scope, opts) do
       {:ok, %{run: run, job: job}}
     end
   end
@@ -138,11 +141,51 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
     end
   end
 
+  def active_run_for_source(source_system_id, opts \\ []) when is_binary(source_system_id) do
+    with :ok <- authorize_admin(opts) do
+      TickeraCatalogSyncRun
+      |> Ash.Query.filter(
+        source_system_id == ^source_system_id and
+          status in [:queued, :discovering, :retry_scheduled, :dry_run_ready, :applying]
+      )
+      |> Ash.Query.select([:id, :status])
+      |> Ash.read_one(domain: Ingestion)
+    end
+  end
+
   defp maybe_select_run_summaries(query, opts) do
     if Keyword.get(opts, :summary_only?, false) do
       Ash.Query.select(query, @run_summary_fields)
     else
       query
+    end
+  end
+
+  defp queue_run_and_job(source_system_id, scope, opts) do
+    source_system_id
+    |> queue_transaction(scope, opts)
+    |> finalize_queue_transaction()
+  end
+
+  defp queue_transaction(source_system_id, scope, opts) do
+    Repo.transaction(fn ->
+      with {:ok, run, notifications} <- create_run(source_system_id, scope, opts),
+           {:ok, job} <- enqueue_discovery(run, opts) do
+        %{run: run, job: job, notifications: notifications}
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+  end
+
+  defp finalize_queue_transaction(transaction_result) do
+    case transaction_result do
+      {:ok, %{notifications: notifications} = result} ->
+        Ash.Notifier.notify(notifications)
+        {:ok, Map.delete(result, :notifications)}
+
+      {:error, reason} ->
+        {:error, queue_error(reason)}
     end
   end
 
@@ -154,33 +197,63 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
       %{
         source_system_id: source_system_id,
         requested_by_user_id: actor && actor.id,
-        scope: json_safe(scope),
-        status: :queued
+        scope: json_safe(scope)
       },
       action: :create_dry_run,
-      domain: Ingestion
+      domain: Ingestion,
+      context: %{warn_on_transaction_hooks?: false},
+      return_notifications?: true
     )
   end
 
   defp enqueue_discovery(run, opts) do
-    oban_insert = Keyword.get(opts, :oban_insert, &Oban.insert/1)
+    job = DiscoverTickeraCatalogWorker.new(%{"run_id" => run.id})
 
-    case %{"run_id" => run.id}
-         |> DiscoverTickeraCatalogWorker.new()
-         |> oban_insert.() do
-      {:ok, job} -> {:ok, job}
+    with :ok <-
+           run_before_job_insert_hook(
+             opts,
+             :before_discovery_job_insert,
+             :invalid_before_discovery_job_insert_hook,
+             :invalid_before_discovery_job_insert_result
+           ),
+         {:ok, persisted_job} <- Oban.insert(job) do
+      {:ok, persisted_job}
+    else
       {:error, reason} -> {:error, {:enqueue_failed, reason}}
     end
   end
 
   defp enqueue_apply(run, dry_run_hash, opts) do
-    oban_insert = Keyword.get(opts, :oban_insert, &Oban.insert/1)
+    job = ApplyTickeraCatalogWorker.new(%{"run_id" => run.id, "dry_run_hash" => dry_run_hash})
 
-    case %{"run_id" => run.id, "dry_run_hash" => dry_run_hash}
-         |> ApplyTickeraCatalogWorker.new()
-         |> oban_insert.() do
-      {:ok, job} -> {:ok, job}
+    with :ok <-
+           run_before_job_insert_hook(
+             opts,
+             :before_apply_job_insert,
+             :invalid_before_apply_job_insert_hook,
+             :invalid_before_apply_job_insert_result
+           ),
+         {:ok, persisted_job} <- Oban.insert(job) do
+      {:ok, persisted_job}
+    else
       {:error, reason} -> {:error, {:enqueue_failed, reason}}
+    end
+  end
+
+  defp run_before_job_insert_hook(opts, hook_key, invalid_hook, invalid_result) do
+    case Keyword.fetch(opts, hook_key) do
+      :error ->
+        :ok
+
+      {:ok, hook} when is_function(hook, 0) ->
+        case hook.() do
+          :ok -> :ok
+          {:error, reason} -> {:error, reason}
+          _other -> {:error, invalid_result}
+        end
+
+      {:ok, _hook} ->
+        {:error, invalid_hook}
     end
   end
 
@@ -346,6 +419,7 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
   end
 
   defp sanitize_error(:forbidden), do: :forbidden
+  defp sanitize_error(:catalog_sync_already_active), do: :catalog_sync_already_active
   defp sanitize_error(:run_not_ready), do: :run_not_ready
   defp sanitize_error(:stale_dry_run_hash), do: :stale_dry_run_hash
   defp sanitize_error(:missing_plan_snapshot), do: :missing_plan_snapshot
@@ -355,6 +429,25 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
   defp sanitize_error(:reason_details_too_long), do: :reason_details_too_long
   defp sanitize_error({:enqueue_failed, _reason}), do: :enqueue_failed
   defp sanitize_error(_reason), do: :failed
+
+  defp queue_error(reason) do
+    if active_run_constraint?(reason),
+      do: :catalog_sync_already_active,
+      else: sanitize_error(reason)
+  end
+
+  defp active_run_constraint?(%{constraint: @active_constraint}), do: true
+
+  defp active_run_constraint?(%{private_vars: private_vars}) when is_list(private_vars),
+    do: Keyword.get(private_vars, :constraint) == @active_constraint
+
+  defp active_run_constraint?(%{errors: errors}) when is_list(errors),
+    do: Enum.any?(errors, &active_run_constraint?/1)
+
+  defp active_run_constraint?(errors) when is_list(errors),
+    do: Enum.any?(errors, &active_run_constraint?/1)
+
+  defp active_run_constraint?(_reason), do: false
 
   defp json_safe(%DateTime{} = datetime), do: DateTime.to_iso8601(datetime)
 
