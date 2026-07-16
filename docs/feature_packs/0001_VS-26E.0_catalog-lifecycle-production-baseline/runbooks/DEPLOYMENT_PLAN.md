@@ -4,6 +4,8 @@
 
 A GitHub merge may trigger Railway deployment, and `railway.toml` runs `EventSales.Release.migrate_and_bootstrap/0` before activation. Deployment and migration therefore form a production write boundary and require explicit approval.
 
+This applies to the canonical docs-only pack PR #117 itself. Pack approval does not authorise merge. Keep PR #117 open during JC-108 planning. Its merge is deferred until JC-109 records explicit authorisation for the deployment/pre-deploy boundary.
+
 ## Phase A — read-only deployment preflight
 
 Record without secret values:
@@ -24,13 +26,15 @@ Do not print variable values.
 
 ### No deployment needed
 
+PR #117 may remain open while read-only planning and preflight design are completed. The agent consumes the reviewed ZIP, not merged pack files.
+
 Use when the active Railway SHA already includes PR #111 and required migrations are verified.
 
 Proceed to database verification only.
 
 ### Deployment needed
 
-Before merging or redeploying, obtain explicit approval that acknowledges:
+Before a merge or redeploy, obtain explicit approval that acknowledges:
 
 - pre-deploy will run all pending migrations;
 - bootstrap will run idempotently;
