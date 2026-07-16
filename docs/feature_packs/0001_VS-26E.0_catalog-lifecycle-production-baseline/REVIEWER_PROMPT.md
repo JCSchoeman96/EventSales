@@ -23,12 +23,14 @@ Baseline contract: `050d66e88d55270655833cd9c9b51476a4bfefeb` unless a reviewed 
 - Repository truth, product decisions, scope, non-goals, migration route, security, performance, evidence, and stop conditions are explicit.
 - No production topology is invented.
 - No later slice leaks into scope.
+- The pack PR is explicitly kept open through JC-108 and JC-109; independent pack approval is not merge approval.
 
 ### Plan review
 
 - Read-only preflight is genuinely read-only.
 - Deployment/migration, dry-run, and Apply are separate authorisations.
 - Railway's pre-deploy migration behavior is accounted for.
+- Merging PR #117 is treated as a named deployment/migration action requiring JC-109 authorisation.
 - Direct/session-capable migration path is resolved safely.
 - Duplicate active runs and invalid index fail closed.
 - Oban queue/job state is bounded.
