@@ -1,431 +1,309 @@
 # VS-26E.0 — Catalog Lifecycle Deployment and Baseline Certification
 
-## 1. Identity and status
+## 1. Identity
 
 | Field | Value |
 |---|---|
 | Slice | `VS-26E.0` |
 | Pack | `0001_VS-26E.0` |
-| Version | `1.0.0` |
+| Version | `1.1.0` |
 | Status | `review_ready` |
 | Repository | `JCSchoeman96/EventSales` |
-| Baseline branch | `main` |
-| Baseline SHA | `050d66e88d55270655833cd9c9b51476a4bfefeb` |
-| GitHub roadmap | `#113` |
-| GitHub pack tracker | `#114` |
-| Linear parent | `JC-105` |
-| Linear pack gate | `JC-106` |
-| Linear pack-review gate | `JC-107` |
-| Predecessor | PR #111 Catalog Sync lifecycle; PR #112 programme planning |
+| Baseline | `main` at `050d66e88d55270655833cd9c9b51476a4bfefeb` |
+| GitHub | roadmap `#113`; pack `#114`; canonical PR `#117` |
+| Linear | parent `JC-105`; pack `JC-106`; review `JC-107` |
 | Successor | VS-26E.1 targeted WordPress catalog-change trigger |
 
-## 2. Executive summary
+Version 1.1.0 supersedes the unapproved v1.0.0 draft. Independent review found that merging the pack PR would itself trigger Railway deployment and pre-deploy migration before the planning gate. v1.0.0 must not be supplied to an agent.
 
-PR #111 added a retry-aware, generation-fenced Catalog Sync lifecycle with transactional run/job creation, one-active-run database authority, atomic finding replacement, bounded errors, exact snapshot/hash Apply gating, truthful admin states, and tests. EventSales is deployed on Railway and already receives production WordPress/WooCommerce traffic, but the company has not adopted it operationally and the existing EventSales data may be discarded.
+## 2. Outcome
 
-VS-26E.0 certifies the existing catalog path before automation increases its blast radius:
+Certify the Catalog Sync lifecycle already merged in PR #111 before automatic catalog triggers, schedules, or auto-apply increase its production blast radius.
 
 ```text
 authorised main
--> Railway topology and migration preflight
--> deploy/migration evidence
--> source/feed configuration evidence
--> one controlled full-feed dry-run
--> human findings and exact hash review
--> separate Apply/no-go decision
+-> read-only Railway/database/source preflight
+-> reviewed deployment and migration decision
+-> migration/index/queue verification
+-> one controlled public full-feed dry-run
+-> human findings and exact-hash review
+-> separate Apply or no-go decision
 -> post-Apply catalog verification
--> independent certification
+-> independent evidence certification
 ```
 
-This slice is successful only when operational evidence proves the baseline or records a safe, bounded no-go. A green test suite or successful Railway deployment alone is insufficient.
+A successful deployment or green CI is not certification. The slice is complete only when redacted operational evidence proves the baseline or records a safe no-go.
 
-## 3. Current repository truth
+## 3. Critical merge boundary
 
-### Deployment and database
+The owner confirmed that merging a GitHub PR deploys EventSales to Railway. `railway.toml` runs `EventSales.Release.migrate_and_bootstrap/0` as the pre-deploy command.
 
-- `railway.toml` runs `EventSales.Release.migrate_and_bootstrap/0` as a Railway pre-deploy command, then starts the release and checks `/health`.
-- `EventSales.Release.migrate/0` prefers `DIRECT_DATABASE_URL`; it falls back to `DATABASE_URL` only when that runtime path is explicitly documented safe.
-- Repository deployment guidance configures both variables to Railway's managed Postgres URL and states that no PgBouncer was introduced by the deployment slice.
-- The actual live Railway variables/topology are not verified by repository code and must be checked read-only.
-- PR #111 added migrations:
+Therefore:
+
+- PR #117 remains open during `JC-107`, `JC-108`, and `JC-109`.
+- The planning agent uses the approved immutable ZIP against baseline `050d66e88d55270655833cd9c9b51476a4bfefeb`.
+- The pack files do not need to be merged for planning.
+- Independent pack approval is not merge approval.
+- Merging PR #117 is a named production deployment/migration action that `JC-109` must explicitly authorise.
+
+## 4. Current repository truth
+
+### Railway and database
+
+- `railway.toml` runs migration/bootstrap before activation, starts the release, and checks `/health`.
+- `EventSales.Release.migrate/0` prefers `DIRECT_DATABASE_URL`; fallback to `DATABASE_URL` is allowed only when the runtime path is documented safe.
+- Repository docs describe Railway-managed Postgres without an intentionally introduced PgBouncer, but live topology is still unknown.
+- PR #111 added:
   - `20260714100000_add_catalog_sync_retry_metadata.exs`
   - `20260714100100_add_catalog_sync_active_run_index.exs`
-- The active-run migration disables the DDL transaction, fails closed on duplicate active runs, and creates a concurrent partial unique index:
-  `ingestion_tickera_catalog_sync_runs_one_active_per_source_idx`.
-- Active statuses governed by the index are `queued`, `discovering`, `retry_scheduled`, `dry_run_ready`, and `applying`.
+- The active-run migration disables the DDL transaction, checks for duplicate active runs, and creates the concurrent partial unique index `ingestion_tickera_catalog_sync_runs_one_active_per_source_idx`.
+- Active statuses are `queued`, `discovering`, `retry_scheduled`, `dry_run_ready`, and `applying`.
 
-### Catalog lifecycle
+### Catalog Sync lifecycle
 
 - `TickeraCatalogSync.queue_dry_run/2` is global-admin-only.
-- Run creation and real Oban job insertion occur in one database transaction.
-- `tickera_sync` queue concurrency is one.
-- `DiscoverTickeraCatalogWorker` uses max attempts three and unique `run_id` execution protection.
-- The worker persists attempt ownership, marks transient failures `retry_scheduled`, prevents stale attempts from finalising a newer owner, atomically replaces findings, stores a deterministic plan snapshot/hash, and broadcasts lifecycle events.
-- `ApplyTickeraCatalogWorker` accepts only the run id and exact dry-run hash.
-- `Applier.apply/3` verifies status, exact hash, stored snapshot, and absence of blocking findings; it claims and applies in one transaction, then invalidates dashboard state and queues missing-catalog resolution for touched product keys.
-- Event actions may reuse, adopt, update metadata, or create.
-- Ticket types may reuse, adopt, or create.
-- Product mappings are created from the stored snapshot.
-- Apply does not re-fetch WordPress. The approved immutable snapshot is authority for that Apply attempt.
+- Run creation and real Oban insertion occur in one database transaction.
+- The `tickera_sync` queue has concurrency one.
+- `DiscoverTickeraCatalogWorker` has three attempts and unique `run_id` execution protection.
+- Retry ownership is generation-fenced; stale attempts cannot finalise a newer owner.
+- Findings are atomically replaced and a deterministic plan snapshot/hash is stored.
+- `ApplyTickeraCatalogWorker` receives only run id and exact dry-run hash.
+- `Applier.apply/3` verifies status, exact hash, stored snapshot, and blocking findings before transactional catalog writes.
+- Apply uses the reviewed stored snapshot and does not re-fetch WordPress.
+- Apply may create, adopt, update, or reuse Events and TicketTypes and create ProductMappings.
+- Cache invalidation, PubSub, and missing-catalog recovery are post-commit effects; Postgres remains truth.
 
-### WordPress feed
+### WordPress catalog feed
 
-- WordPress endpoint: `/wp-json/eventsales/v1/tickera-catalog`.
-- Feed schema currently documents `2026-07-08.v1`, with temporary acceptance of `2026-07-05.v1`.
+- Endpoint: `/wp-json/eventsales/v1/tickera-catalog`.
+- Current documented schema: `2026-07-08.v1`; temporary compatibility: `2026-07-05.v1`.
 - Authentication uses a dedicated HMAC secret and timestamp with a five-minute skew limit.
-- Full-feed pagination must be completely aggregated before planning.
-- Production feed configuration requires:
-  - `TICKERA_CATALOG_FEED_ENABLED=true`
-  - `TICKERA_CATALOG_FEED_BASE_URL`
-  - `TICKERA_CATALOG_FEED_SECRET`
-- Optional limits include timeout, per-page, and max-pages.
-- Manual JSON remains the rollback/debug discovery path.
-- The feed excludes order, customer, payment, ticket-delivery, QR, token, and raw provider payload data.
-- WordPress feed responses default to excluding private events. Private-event lifecycle handling belongs to later automation contracts; VS-26E.0 certifies the current production public baseline only.
+- Full pagination is aggregated before planning.
+- Required runtime settings are the feed-enabled flag, base URL, and dedicated secret; optional settings bound timeout, page size, and page count.
+- The feed excludes customer, order, payment, delivery, QR, token, and raw provider payload data.
+- The public baseline excludes private events by default. Private-event lifecycle automation is a later contract.
 
-### Current operational facts supplied by the owner
+### Confirmed operational facts
 
-- EventSales and PostgreSQL are on Railway.
-- GitHub merge deploys to Railway.
-- Production WordPress/Tickera has been live for a long time.
-- Production plugin/webhooks already send data to EventSales.
-- Existing EventSales data is real but need not be preserved.
-- Approximately twenty events are currently live/public.
-- Catalog Sync has probably been tried before, but the result is not a certified baseline.
-- The desired first baseline is production dry-run with a possible human-approved Apply.
+- EventSales and PostgreSQL run on Railway.
+- Production WordPress/Tickera is active and already sends webhooks to EventSales.
+- Current EventSales data is real but does not need to be preserved.
+- Approximately twenty events are live/public.
+- Catalog Sync was probably attempted before, but no certified baseline exists.
+- The intended first operation is a production dry-run with a possible separately approved Apply.
 
-### Explicit unknowns
+### Unknowns that must not be guessed
 
-The pack must not guess:
-
-- whether the live app uses PgBouncer or another pooler;
-- whether `DIRECT_DATABASE_URL` exists and is distinct/safe;
+- live pooler/proxy topology;
+- whether `DIRECT_DATABASE_URL` exists and is safe;
 - whether both PR #111 migrations ran;
-- whether the active-run index exists and is valid;
-- whether duplicate active catalog runs or stale Oban jobs exist;
-- exact product/variation/special-product counts;
-- exact Railway deployment triggered by PR #112 and its migration outcome;
-- exact WordPress plugin version and feed schema active in production;
-- whether feed variables/secrets are correctly paired;
-- current local EventSales event/ticket/mapping counts.
+- whether the partial unique index exists and is valid;
+- duplicate active runs or stale/retryable Oban jobs;
+- exact product, variation, membership, subscription, payment-plan, bundle, and add-on counts;
+- the deployment/migration outcome caused by PR #112;
+- active WordPress plugin/feed schema and variable pairing;
+- current Event, TicketType, and ProductMapping counts.
 
-These are preflight outputs.
-
-## 4. Product decisions implemented or protected
-
-VS-26E.0 protects these programme decisions:
+## 5. Product decisions protected
 
 - Tickera event is the primary event identity.
-- The first baseline concerns live/public events.
-- Existing private/draft records must not be silently treated as the certified current public baseline.
-- Only completed orders count as sales; this slice does not alter order metrics.
-- EventSales data may be reset later, but this slice must not perform an unreviewed reset.
-- Backfill, notifications, roles, reporting dimensions, and WordPress write-back remain deferred.
-- No target/pacing logic may rely on this catalog certification as proof of complete sales history.
-
-## 5. Goal and observable outcome
-
-A successful slice produces a signed, redacted evidence pack proving:
-
-1. exact deployed application commit;
-2. approved migration path and successful migration state;
-3. retry columns/constraints and valid one-active-run partial unique index;
-4. no unexplained queue-blocking run/job state;
-5. correctly configured signed WordPress catalog feed;
-6. one controlled production full-feed dry-run reaches `dry_run_ready`;
-7. findings, counts, plan snapshot, and dry-run hash are reproducible and reviewed;
-8. Apply occurs only after a separate recorded decision, or a no-go is recorded;
-9. if applied, local Events, TicketTypes, ProductMappings, run state, and admin visibility match the approved snapshot;
-10. no secret, PII, raw protected payload, or unrelated production mutation is introduced;
-11. an independent reviewer records `CERTIFIED`, `CONDITIONALLY CERTIFIED`, `NOT CERTIFIED`, or `BLOCKED`.
+- This baseline concerns live/public events.
+- Draft/private records must not be silently certified as current public truth.
+- Only completed orders count as sales; this slice does not change order metrics.
+- Existing data may be reset later, but no reset or cleanup is authorised here.
+- Backfill, dashboards, roles, acquisition dimensions, targets, notifications, private-event automation, and WordPress write-back remain out of scope.
+- Catalog certification does not prove complete sales history or target-alert eligibility.
 
 ## 6. Dependencies and blockers
 
-### Available
+Available:
 
-- PR #111 merged.
-- PR #112 merged at `050d66e88d55270655833cd9c9b51476a4bfefeb`.
-- Railway deployment pipeline exists.
-- Production WordPress/Tickera source exists.
-- Signed catalog-feed plugin and EventSales adapter exist.
-- Admin Catalog Sync LiveView exists.
-- Oban `tickera_sync` queue exists.
-- Tests cover lifecycle, concurrency, workers, planner/applier, release, and LiveView.
+- PR #111 and PR #112 are merged.
+- Railway deployment pipeline, signed catalog feed, admin Catalog Sync UI, Oban queue, planner/applier, and focused tests exist.
 
-### Operator input required
+Operator inputs required:
 
-- Railway project/service access.
-- Read-only variable-name/topology inspection.
-- Deployment and database migration evidence.
-- Production admin access to `/admin/catalog-sync`.
-- Known representative product/event IDs for optional targeted probe.
-- Human findings/hash approval.
-- Separate Apply approval.
+- Railway project/service access;
+- safe read-only topology and variable-name inspection;
+- production admin access to `/admin/catalog-sync`;
+- migration/index/job evidence;
+- optional representative event/product identifiers;
+- human findings/hash review;
+- separate Apply approval.
 
-### Blocks
-
-- VS-26E.1.
-- Any unattended catalog schedule.
-- Any catalog auto-apply policy.
-- Launch backfill that assumes certified mappings.
+This slice blocks VS-26E.1, unattended catalog scheduling, catalog auto-apply, and launch backfill that assumes certified mappings.
 
 ## 7. Scope
 
-### Pack and planning scope
+### Pack and planning
 
-- Verify repository baseline and mandatory files.
-- Produce exact read-only and authorised execution plan.
-- Document commands without secrets.
-- Identify required human decisions.
+- Verify the exact repository baseline and mandatory files.
+- Produce an execution plan with exact read-only checks, approvals, stop conditions, and evidence.
+- Keep PR #117 open while the ZIP is used for planning.
+- Identify all unresolved human/operator inputs.
 
-### Controlled execution scope after approval
+### Controlled execution after approval
 
-- Read-only Railway/deployment/database/source preflight.
-- If required and explicitly approved, deploy the reviewed commit and allow the repository's pre-deploy migration/bootstrap.
-- Verify migration/index/constraint state.
-- Verify Catalog Sync and Oban state.
-- Queue one controlled full public WordPress-feed dry-run.
-- Review run lifecycle, summary, findings, snapshot, and hash.
-- Record separate Apply/no-go decision.
-- If approved, queue Apply for the exact run/hash.
-- Verify resulting catalog and admin state.
-- Produce redacted evidence and certification verdict.
+- Inspect Railway, deployment, database, source, feed, and Oban state read-only.
+- If explicitly authorised, merge/deploy the reviewed commit and allow the repository pre-deploy migration/bootstrap path.
+- Verify migrations, constraints, partial unique index, duplicate-run state, and jobs.
+- Queue one bounded full public-feed dry-run.
+- Review lifecycle, summary, findings, snapshot, and hash.
+- Record a separate exact-run/hash Apply or no-go decision.
+- If approved, queue Apply through the existing admin path.
+- Reconcile Events, TicketTypes, ProductMappings, run state, admin visibility, and bounded post-commit effects.
+- Produce redacted evidence and an independent verdict.
 
 ## 8. Explicit non-goals
 
 Do not:
 
-- add or modify production application code in this slice unless a newly discovered blocker is spun into a separately reviewed corrective PR;
-- add the VS-26E.1 WordPress trigger;
-- add scheduling, auto-apply, or background reconciliation;
-- alter order webhook ingestion, `OrderUpserter`, `MappingResolver`, payment, ticket issuance, scanner, customer delivery, or WooCommerce checkout;
-- implement order catch-up or historical backfill;
-- add dashboard analytics, filters, roles, targets, notifications, UTM, coupon, or source dimensions;
-- implement private-event automation;
-- write back to WordPress;
-- reset or clean production data merely because it is disposable;
-- edit WordPress content, event publication state, products, variations, or Tickera relationships;
-- expose secrets, connection strings, signatures, raw feed bodies, customer data, or unredacted screenshots;
-- run Apply automatically after dry-run;
-- run unlisted SQL writes or manually edit Catalog Sync run statuses;
-- treat Redis/ETS/Cachex/PubSub as truth.
+- merge PR #117 before `JC-109` authorisation;
+- modify runtime code, config, migrations, tests, dependencies, Railway configuration, or the WordPress plugin inside the pack PR;
+- add automatic triggers, schedules, reconciliation, or auto-apply;
+- change order webhooks, `OrderUpserter`, `MappingResolver`, payment, ticket issuance, scanner, customer delivery, or checkout;
+- implement catch-up or historical backfill;
+- add dashboard features, filters, roles, targets, notifications, coupon/UTM/source dimensions, or private-event automation;
+- write back to WordPress or edit source events/products;
+- reset or clean production data;
+- expose credentials, signatures, raw headers, raw feed/webhook bodies, customer data, cookies, or unredacted screenshots;
+- run Apply automatically or manually rewrite run states;
+- treat Redis, ETS, Cachex, or PubSub as durable truth.
+
+A required corrective code/config/migration change becomes a separate reviewed PR and stops this pack phase.
 
 ## 9. Durable model and invariants
 
-### `TickeraCatalogSyncRun`
+`TickeraCatalogSyncRun` owns durable source, scope, status, retry ownership, snapshot, dry-run hash, summary, bounded error, and lifecycle timestamps.
 
-- durable UUID identity;
-- source-system identity;
-- scope;
-- lifecycle status;
-- exact dry-run hash;
-- immutable stored plan snapshot for Apply;
-- summary;
-- bounded error;
-- retry attempt/max attempts;
-- started/finished/cancelled metadata;
-- one active run per source enforced by PostgreSQL partial unique index.
+`TickeraCatalogSyncFinding` owns durable per-run severity, code, message, source identifiers, and bounded metadata.
 
-### `TickeraCatalogSyncFinding`
+Apply affects `Catalog.Event`, `Catalog.TicketType`, and `Catalog.ProductMapping`.
 
-- durable per-run finding;
-- severity/code/message;
-- event/product/variation references;
-- bounded metadata;
-- prior findings are atomically replaced when the same run retries.
+Invariants:
 
-### Catalog truth affected by Apply
-
-- `Catalog.Event`
-- `Catalog.TicketType`
-- `Catalog.ProductMapping`
-
-### Invariants
-
-- run and discovery job are created atomically;
-- one queue-blocking run per source;
-- stale worker attempts cannot finalise current ownership;
-- retryable source errors remain visible as `retry_scheduled`;
-- exact stored snapshot and hash gate Apply;
+- run and discovery job are atomic;
+- one queue-blocking run per source is database-enforced;
+- stale attempts cannot finalise current ownership;
+- retryable source failures remain visible;
+- findings replacement is atomic;
+- exact stored snapshot/hash gates Apply;
 - blocking findings prevent Apply;
-- claim, catalog writes, and `applied` transition are transactional;
-- post-commit cache/PubSub failures cannot roll back durable catalog truth;
-- duplicate/stale Apply jobs fail closed or discard;
-- no source re-fetch occurs inside Apply;
-- production evidence never stores protected values.
+- claim, catalog writes, and applied transition are transactional;
+- stale/duplicate Apply fails closed;
+- post-commit notification failure cannot roll back catalog truth;
+- evidence never stores protected values.
 
-## 10. Interfaces and contracts
+## 10. Interfaces and architecture
 
-### Admin
+Admin surface: `/admin/catalog-sync`, global-admin-only, asynchronous through Oban.
 
-- `/admin/catalog-sync`
-- admin-only queue, preview, revoke, and Apply controls;
-- queue actions are asynchronous through Oban.
+Supported feed scopes include full, event, product, variation, and updated-since. VS-26E.0 certifies one full public-feed scope; a targeted probe is optional only when the reviewed plan justifies it.
 
-### WordPress feed
+Lifecycle PubSub messages notify UI state, but evidence reloads durable truth.
 
-Supported scopes include:
-
-```elixir
-%{"kind" => "wordpress_feed", "mode" => "full"}
-%{"kind" => "wordpress_feed", "product_id" => positive_integer}
-%{"kind" => "wordpress_feed", "variation_id" => positive_integer}
-%{"kind" => "wordpress_feed", "event_id" => positive_integer}
-%{"kind" => "wordpress_feed", "updated_since" => RFC3339}
-```
-
-VS-26E.0 uses one full-feed scope for certification. A targeted probe may precede it only if the reviewed plan requires it.
-
-### PubSub
-
-Lifecycle notifications include start, retry scheduled, preview ready, failed, cancelled, and applied. PubSub is notification only; reload durable state for evidence.
-
-### Runtime variables
-
-Inspect names/presence and safe topology only. Never record values.
-
-- `DATABASE_URL`
-- `DIRECT_DATABASE_URL`
-- `TICKERA_CATALOG_FEED_ENABLED`
-- `TICKERA_CATALOG_FEED_BASE_URL`
-- `TICKERA_CATALOG_FEED_SECRET`
-- optional feed timeout/page limits
-- `EVENTSALES_BOOTSTRAP_SOURCE_*`
-- Oban/Redis variables needed to confirm runtime health
-
-## 11. Architectural boundaries
+Architectural path:
 
 ```text
 CatalogSyncLive
 -> TickeraCatalogSync facade
--> transactionally persisted run + Oban job
+-> transactional run + Oban job
 
 DiscoverTickeraCatalogWorker
 -> ConfiguredDiscoverySource
 -> signed WordPress feed
 -> Planner
--> durable findings + plan snapshot/hash
+-> findings + snapshot/hash
 
 ApplyTickeraCatalogWorker
 -> Applier
 -> exact stored snapshot
 -> Ash/Postgres catalog mutations
--> post-commit cache/PubSub/recovery jobs
+-> bounded post-commit effects
 ```
 
-No LiveView/controller/component performs source HTTP. No direct SQL write replaces Ash/domain actions. Production SQL in this slice is read-only verification unless it is the reviewed migration command.
+LiveView/controllers/components do not perform source HTTP. Production SQL is read-only verification except for the reviewed release migration path.
 
-## 12. Security, privacy, and evidence
+## 11. Security and privacy
 
-- Admin authorization remains mandatory.
-- Feed secret is dedicated and never reused as WooCommerce REST credentials.
-- Never record URL credentials, secret values, signatures, raw request headers, raw response bodies, admin passwords, customer data, webhook payloads, or production cookies.
-- Screenshots must crop/redact browser session details and protected data.
-- SQL evidence records object names, booleans, counts, statuses, timestamps, and hashes only.
-- Error strings must remain bounded safe codes.
-- Evidence must identify the operator and approval decision without exposing credentials.
+- Preserve global-admin authorisation.
+- Never record database URLs, secrets, signatures, raw headers/bodies, passwords, cookies, customer PII, payment data, ticket/QR/delivery tokens, or production credentials.
+- Record safe names, booleans, counts, statuses, timestamps, UUIDs/hashes where appropriate, and bounded error codes.
+- Redact screenshots and logs.
+- If protected data enters evidence, stop, contain it, and treat it as an incident.
 
-## 13. Performance and scale
+## 12. Performance and boundedness
 
-- `tickera_sync` queue concurrency is one.
-- WordPress full feed is paginated and bounded by configured per-page/max-pages.
-- All pages are aggregated before planning.
+- `tickera_sync` concurrency remains one.
+- The full feed is paginated and bounded by timeout, page size, and max pages.
 - One active run per source prevents overlap.
-- Discovery worker max attempts: three.
-- Full-feed certification is a controlled cold-path action.
-- Do not run concurrent reconciliation/backfill/catalog work against the same source during the dry-run or Apply.
-- Verify the observed page count, row count, duration, and memory/timeout symptoms without storing raw payloads.
-- Do not increase limits merely to force success; a limit breach is evidence requiring review.
-- Initial business scale is modest, but no unbounded query/source-call pattern is accepted.
+- Discovery attempts remain bounded to three.
+- Do not run catalog reconciliation or backfill concurrently for the same source.
+- Record page count, row count, duration, and limit symptoms without retaining payloads.
+- Do not increase limits merely to force success.
+- No unbounded source call or dashboard query is accepted despite modest initial volume.
 
-## 14. Failure and recovery principles
+## 13. Failure principles
 
-- Missing/unsafe migration route: stop before deployment.
-- Duplicate active runs: stop; do not manually rewrite statuses.
-- Invalid/missing partial index: stop and assess migration state.
-- Feed unauthorized/misconfigured: correct configuration under separate approval; do not log secrets.
-- Timeout/rate-limit/server/transport error: allow bounded worker retry and inspect durable state.
-- Pagination limit/invalid feed: stop and investigate source/limit contract.
-- Blocking finding: no Apply.
-- Hash mismatch/missing snapshot/run not ready: no Apply.
-- Unexpected catalog scope or destructive result: revoke/no-go.
-- Post-Apply cache/PubSub issue: durable catalog may still be correct; verify DB truth and queue bounded repair separately.
-- Deployment rollback does not automatically roll back applied catalog data.
-- Migration rollback requires reviewed data-compatibility analysis and backup.
+- Unknown migration route, duplicate active runs, or invalid index: stop before deployment/dry-run.
+- Feed authentication/configuration failure: correct only under separate approval and never log secrets.
+- Transient source errors may use bounded worker retry; inspect durable state.
+- Pagination limit or invalid schema: stop and investigate.
+- Blocking/ambiguous/destructive findings: no Apply.
+- Missing snapshot, hash mismatch, or run-not-ready: no Apply.
+- Apply transaction failure or catalog mismatch: stop; no ad-hoc repair.
+- Cache/PubSub failure after commit: verify Postgres and plan bounded repair separately.
+- Deployment rollback does not undo migrations or catalog Apply.
 
-## 15. Files to inspect first
+Use the detailed failure matrix and rollback runbook.
 
-Use `FILE_INVENTORY.md`. Minimum anchors include:
+## 14. Mandatory files
 
-- `AGENTS.md`
-- project-wide rules and programme decisions
-- `railway.toml`
-- `config/config.exs`
-- `config/runtime.exs`
-- `lib/event_sales/release.ex`
-- deployment/database docs
-- Catalog Sync resource/facade/workers/LiveView
-- planner/applier/feed adapter and WordPress plugin README
-- PR #111 tests and migrations
-- current architecture indexes/manifests
+Use `FILE_INVENTORY.md`. It covers governance, programme decisions, Railway/release/database topology, Catalog Sync resources/workers/planner/applier/UI, WordPress feed, migrations, focused tests, and architecture indexes.
 
-## 16. Expected and forbidden files
+The canonical pack PR may change only files under:
 
-This is primarily an operational validation pack. The planning and execution agent must not modify application code.
+`docs/feature_packs/0001_VS-26E.0_catalog-lifecycle-production-baseline/`
 
-Expected pack-authoring changes only:
+## 15. Gated delivery sequence
 
-- canonical pack files under `docs/feature_packs/0001_VS-26E.0_catalog-lifecycle-production-baseline`.
+1. Complete `JC-106` pack generation while PR #117 remains open.
+2. Independently review v1.1.0 under `JC-107`; approval does not authorise merge.
+3. Give the approved ZIP to the planning agent under `JC-108`; checkout remains at the authorised `main` baseline and PR #117 remains open.
+4. Review the execution plan under `JC-109`.
+5. Run only explicitly authorised read-only preflight.
+6. `JC-109` records whether PR #117 merge/deploy/migration is authorised.
+7. If authorised, merge/deploy and verify exact SHA and pre-deploy result.
+8. Verify database/index/job state.
+9. Separately authorise and run the full-feed dry-run.
+10. Review findings and exact hash.
+11. Separately decide Apply or no-go.
+12. If approved, run exact-hash Apply and post-Apply reconciliation.
+13. Independently certify evidence under `JC-111`.
+14. Close and unlock the successor only under `JC-112`.
 
-Possible follow-up corrective PR, only after a blocker and separate approval:
+## 16. Acceptance criteria
 
-- narrowly scoped migration/config/code/tests/docs identified by evidence.
+- v1.1.0 ZIP and canonical PR match byte-for-byte and all checksums pass;
+- v1.0.0 is recorded as superseded and never handed to an agent;
+- PR #117 remains unmerged during pack review and planning;
+- exact baseline and deployed SHA are known;
+- migration topology is known without exposing values;
+- PR #111 migrations, constraints, and exact partial unique index are verified;
+- duplicate active-run and relevant Oban state are clean or cause a stop;
+- signed feed is configured and bounded;
+- one full public dry-run reaches truthful ready/terminal state;
+- findings, snapshot, hash, and counts are reproducible and human-reviewed;
+- blocking/ambiguous findings prevent Apply;
+- Apply/no-go is a separate decision tied to exact run/hash;
+- if applied, catalog and side effects reconcile to the approved snapshot;
+- evidence is redacted;
+- independent certification is recorded;
+- VS-26E.1 stays locked until certification.
 
-Forbidden in this pack PR:
+## 17. Verification
 
-- `lib/`, `config/`, `priv/repo/migrations/`, `assets/`, WordPress plugin runtime code, tests, dependencies, or unrelated docs.
-
-## 17. Gated sequence
-
-1. Pack review (`JC-107`).
-2. Planning/reconnaissance (`JC-108`).
-3. Plan review and exact phase authorization (`JC-109`).
-4. Read-only preflight.
-5. Separate deploy/migrate authorization if needed.
-6. Database/index/queue verification.
-7. Separate catalog dry-run authorization.
-8. Full-feed dry-run.
-9. Human findings/hash review.
-10. Separate Apply/no-go decision.
-11. If approved, exact-hash Apply.
-12. Post-Apply verification.
-13. Independent evidence review (`JC-111`).
-14. Closeout (`JC-112`).
-
-## 18. Acceptance criteria
-
-- exact baseline validated;
-- no code/runtime changes in pack PR;
-- Railway deployment SHA identified;
-- migration URL topology identified without values;
-- PR #111 migrations and constraints verified;
-- active-run index exists, is unique, partial, valid, and has exact predicate;
-- no unexplained active run/job conflict;
-- signed feed configured and healthy;
-- full dry-run reaches a truthful terminal/ready state;
-- retry/failure evidence is bounded if encountered;
-- preview counts/findings/snapshot/hash captured and reproducible;
-- blocking/ambiguous changes prevent Apply;
-- explicit Apply/no-go approval recorded;
-- if applied, catalog counts/identities and lifecycle state match approved snapshot;
-- admin visibility and PubSub-driven state are truthful;
-- no PII/secret/raw payload leak;
-- independent certification verdict recorded;
-- VS-26E.1 remains locked until certification.
-
-## 19. Verification commands
-
-Repository verification before planning:
+Before planning:
 
 ```bash
 git status --short
@@ -435,14 +313,14 @@ git rev-parse origin/main
 bash scripts/sync_with_origin_main.sh --check
 ```
 
-Pack/source verification:
+Pack verification:
 
 ```bash
 sha256sum -c checksums.sha256
-unzip -l EventSales_VS-26E.0_v1.0.0_050d66e8.zip
+unzip -l EventSales_VS-26E.0_v1.1.0_050d66e8.zip
 ```
 
-Code baseline evidence already required before execution:
+Code baseline before execution:
 
 ```bash
 mix format --check-formatted
@@ -460,59 +338,44 @@ bash scripts/local_ci.sh
 git diff --check
 ```
 
-Production commands must be resolved in the reviewed execution plan and must not print protected values.
+Production commands must be resolved in the reviewed plan and must not print protected values.
 
-## 20. Migration, rollout, and evidence
+## 18. Migration, rollout, and evidence
 
-- Merging a PR may trigger Railway deploy and therefore pre-deploy migrations. Do not merge a corrective execution PR without explicit deploy/migrate approval.
-- Prefer the existing release entry point and documented direct migration URL.
-- Verify backup/restore readiness before a migration corrective action.
-- Distinguish:
-  - deployed commit;
-  - migration status;
-  - application health;
-  - catalog dry-run state;
-  - Apply state.
-- Do not call a deployment successful merely because GitHub merge completed.
-- Use `evidence/EVIDENCE_TEMPLATE.md`.
+- PR #117 merge is itself a deployment/pre-deploy boundary.
+- Prefer the existing release entry point and documented direct/session-capable migration route.
+- Verify backup/restore readiness before any corrective migration.
+- Distinguish deployed commit, migration status, application health, dry-run state, and Apply state.
+- A GitHub merge does not prove successful deployment or certification.
+- Use `evidence/EVIDENCE_TEMPLATE.md` and the stage runbooks.
 
-## 21. Stop conditions
+## 19. Stop conditions
 
-Stop immediately when:
+Stop when:
 
-- worktree/baseline is wrong;
-- `main` materially advanced;
-- Railway topology or migration path required for safety is unknown;
+- worktree or baseline is wrong, or `main` materially advanced;
+- PR #117 merge is attempted before explicit JC-109 authorisation;
+- live Railway/migration topology required for safety is unknown;
 - a deployment would run unreviewed migrations;
-- duplicate active runs exist;
-- active-run index is absent/invalid/mismatched;
-- unexpected Catalog Sync/Oban work is active;
-- feed credentials/configuration cannot be verified safely;
-- source response exceeds bounded limits;
-- findings are blocking, ambiguous, destructive, or outside public baseline scope;
+- duplicate active runs, invalid/missing index, or unexpected active/retryable jobs exist;
+- feed configuration cannot be verified safely or bounded limits are exceeded;
+- findings are blocking, ambiguous, destructive, or outside public scope;
 - snapshot/hash cannot be reproduced;
-- Apply approval is absent or references a different hash;
-- protected data appears in evidence;
-- a code/migration/config fix is required;
+- Apply approval is absent or references another hash;
+- protected data enters evidence;
+- corrective code/config/migration is required;
 - the requested action exceeds this pack.
 
-## 22. Final response contract
+## 20. Required report
 
-Every agent/operator report must include:
+Every agent/operator report states:
 
-- baseline and observed deployed SHA;
-- phase authorised and phase completed;
-- files changed, if any;
-- commands actually run;
-- read-only findings;
+- pack version, baseline, observed deployed SHA, and authorised phase;
+- files changed or production actions executed;
+- commands actually run and evidence produced;
 - migration/index/queue/feed state;
-- run id/hash only when safe;
-- finding counts and decision;
-- Apply/no-go decision;
-- post-Apply result where applicable;
-- evidence location;
-- blockers/risks;
-- prohibited actions not performed;
-- next authorised Linear gate.
+- safe run/hash and finding counts where applicable;
+- Apply/no-go and post-Apply result where applicable;
+- blockers, risks, prohibited actions not performed, and next Linear gate.
 
 Never claim production certification before `JC-111`.
