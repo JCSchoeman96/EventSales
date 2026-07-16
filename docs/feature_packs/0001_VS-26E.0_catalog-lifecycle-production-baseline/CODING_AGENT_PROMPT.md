@@ -11,9 +11,10 @@ Do not modify code. Do not deploy. Do not run migrations. Do not queue Catalog S
 ## Baseline
 
 - Required repository baseline: `050d66e88d55270655833cd9c9b51476a4bfefeb`
-- Pack version: `1.0.0`
+- Pack version: `1.1.0`
 - Linear planning gate: `JC-108`
 - GitHub pack tracker: `#114`
+- Canonical pack PR: `#117` (must remain open/unmerged during this planning phase)
 
 Start with:
 
@@ -26,6 +27,8 @@ bash scripts/sync_with_origin_main.sh --check
 ```
 
 Stop if the worktree is dirty, HEAD is not the authorised baseline, `main` materially advanced, or the pack contradicts current code.
+
+The pack files do not need to be merged into `main` for planning. Use this approved ZIP while the checkout remains at the authorised baseline. Do not merge PR #117: that would deploy to Railway and cross a production write boundary reserved for JC-109.
 
 ## Read first
 
@@ -86,6 +89,7 @@ The plan must separate:
 - No automatic Apply.
 - No private-event automation, triggers, schedules, catch-up, backfill, dashboards, roles, targets, notifications, or WordPress write-back.
 - No application/migration/config corrective change inside the plan-only phase.
+- Do not merge PR #117 or any PR, because merge triggers Railway deployment/pre-deploy migration.
 - If a corrective change is required, describe the smallest separate follow-up PR and stop.
 
 ## Output
