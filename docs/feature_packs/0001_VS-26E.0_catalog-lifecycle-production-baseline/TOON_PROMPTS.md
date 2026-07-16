@@ -3,10 +3,10 @@
 ## 1. Repository audit and plan
 
 ```text
-TASK: Audit JCSchoeman96/EventSales at 050d66e88d55270655833cd9c9b51476a4bfefeb using the attached VS-26E.0 v1.0.0 pack.
+TASK: Audit JCSchoeman96/EventSales at 050d66e88d55270655833cd9c9b51476a4bfefeb using the attached VS-26E.0 v1.1.0 pack.
 MODE: PLAN ONLY.
 DO: validate baseline; read FILE_INVENTORY mandatory files; map Railway/release/migrations/Catalog Sync/feed/tests; produce exact gated execution plan.
-DO NOT: edit code; deploy; migrate; queue dry-run; Apply; mutate Railway/WordPress/database/Oban.
+DO NOT: edit code; merge PR #117 or any PR; deploy; migrate; queue dry-run; Apply; mutate Railway/WordPress/database/Oban.
 STOP: dirty/stale baseline, contradicted pack, unknown safety-critical topology, required corrective code.
 OUTPUT: plan, inspected files, read-only checks, operator inputs, risks, stop conditions, prohibited-actions statement.
 ```
@@ -15,7 +15,7 @@ OUTPUT: plan, inspected files, read-only checks, operator inputs, risks, stop co
 
 ```text
 TASK: Independently review VS-26E.0 pack source and immutable ZIP.
-CHECK: baseline, semantic version, canonical-source parity, checksums, repo truth, migration route, separate authorisations, scope/non-goals, security, boundedness, evidence and stop conditions.
+CHECK: baseline, semantic version, canonical-source parity, checksums, repo truth, migration route, explicit unmerged-pack-PR rule, separate authorisations, scope/non-goals, security, boundedness, evidence and stop conditions.
 OUTPUT: blocker/major/minor findings and APPROVE|REQUEST CHANGES|BLOCKED.
 ```
 
