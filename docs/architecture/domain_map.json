@@ -510,6 +510,10 @@
           },
           {
             "arity": 2,
+            "name": "set_discovery_owner"
+          },
+          {
+            "arity": 2,
             "name": "set_finished_at"
           },
           {
@@ -784,7 +788,7 @@
         ]
       },
       {
-        "docs_count": 1,
+        "docs_count": 2,
         "moduledoc?": true,
         "name": "EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker",
         "parse_error": null,
@@ -796,6 +800,10 @@
           },
           {
             "arity": 1,
+            "name": "perform"
+          },
+          {
+            "arity": 2,
             "name": "perform"
           }
         ],

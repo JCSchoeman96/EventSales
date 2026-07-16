@@ -1027,7 +1027,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: `set_started_at/2`, `set_finished_at/2`, `clear_retry_metadata/2`
+  - public_funs: `set_started_at/2`, `set_discovery_owner/2`, `set_finished_at/2`, `clear_retry_metadata/2`
   - uses: `Ash.Resource`
 - `EventSales.Ingestion.Resources.TickeraEventSource` - `lib/event_sales/ingestion/resources/tickera_event_source.ex`
   - moduledoc?: true
@@ -1248,8 +1248,8 @@ Project root: `.`
 - `EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker` - `lib/event_sales/ingestion/workers/discover_tickera_catalog_worker.ex`
   - moduledoc?: true
   - specs?: false
-  - docs_count: 1
-  - public_funs: `retryable_failure?/1`, `perform/1`
+  - docs_count: 2
+  - public_funs: `retryable_failure?/1`, `perform/1`, `perform/2`
   - uses: `Oban.Worker`
 - `EventSales.Ingestion.Workers.MissingCatalogResolutionWorker` - `lib/event_sales/ingestion/workers/missing_catalog_resolution_worker.ex`
   - moduledoc?: true
@@ -2011,7 +2011,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: `create_queued_catalog_sync_run!/2`, `create_discovering_catalog_sync_run!/2`, `mark_discovering!/1`, `mark_retry_scheduled!/2`, `mark_ready!/2`, `mark_failed!/2`, `claim_applying!/1`, `mark_applied!/1`, `create_retry_scheduled_catalog_sync_run!/3`, `create_ready_catalog_sync_run!/3`, `create_failed_catalog_sync_run!/3`, `create_applied_catalog_sync_run!/3`, `create_cancelled_catalog_sync_run!/4`
+  - public_funs: `create_queued_catalog_sync_run!/2`, `create_discovering_catalog_sync_run!/2`, `mark_discovering!/1`, `mark_discovering!/2`, `mark_retry_scheduled!/2`, `mark_ready!/2`, `mark_failed!/2`, `claim_applying!/1`, `mark_applied!/1`, `create_retry_scheduled_catalog_sync_run!/3`, `create_ready_catalog_sync_run!/3`, `create_failed_catalog_sync_run!/3`, `create_applied_catalog_sync_run!/3`, `create_cancelled_catalog_sync_run!/4`
   - uses: _none_
 - `EventSalesWeb.ConnCase` - `test/support/conn_case.ex`
   - moduledoc?: true

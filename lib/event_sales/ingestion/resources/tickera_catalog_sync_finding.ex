@@ -21,6 +21,10 @@ defmodule EventSales.Ingestion.Resources.TickeraCatalogSyncFinding do
   actions do
     defaults [:read]
 
+    destroy :destroy_for_retry do
+      require_atomic? false
+    end
+
     create :create do
       accept [
         :run_id,

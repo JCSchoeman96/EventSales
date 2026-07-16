@@ -16,8 +16,16 @@ defmodule EventSales.TestSupport.CatalogSyncRunHelpers do
     source_system_id |> create_queued_catalog_sync_run!(scope) |> mark_discovering!()
   end
 
-  def mark_discovering!(run),
-    do: Ash.update!(run, %{}, action: :mark_discovering, domain: Ingestion)
+  def mark_discovering!(run), do: mark_discovering!(run, next_owner_attempt(run))
+
+  def mark_discovering!(run, owner_attempt) do
+    Ash.update!(
+      run,
+      %{owner_attempt: owner_attempt, owner_max_attempts: max(owner_attempt, 3)},
+      action: :mark_discovering,
+      domain: Ingestion
+    )
+  end
 
   def mark_retry_scheduled!(run, attrs) do
     Ash.update!(run, attrs, action: :mark_retry_scheduled, domain: Ingestion)
@@ -74,4 +82,7 @@ defmodule EventSales.TestSupport.CatalogSyncRunHelpers do
       {:error, reason} -> raise "could not cancel catalog sync run: #{inspect(reason)}"
     end
   end
+
+  defp next_owner_attempt(%{retry_attempt: attempt}) when is_integer(attempt), do: attempt + 1
+  defp next_owner_attempt(_run), do: 1
 end

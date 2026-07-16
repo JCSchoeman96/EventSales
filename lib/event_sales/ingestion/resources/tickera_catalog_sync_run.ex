@@ -72,10 +72,24 @@ defmodule EventSales.Ingestion.Resources.TickeraCatalogSyncRun do
     end
 
     update :mark_discovering do
+      argument :owner_attempt, :integer, allow_nil?: false
+      argument :owner_max_attempts, :integer, allow_nil?: false
       require_atomic? false
-      change filter(expr(status in [:queued, :retry_scheduled]))
+      change filter(expr(status in [:queued, :retry_scheduled, :discovering]))
       change set_attribute(:status, :discovering)
+      change &__MODULE__.set_discovery_owner/2
       change &__MODULE__.set_started_at/2
+    end
+
+    update :mark_claim_failed do
+      argument :owner_attempt, :integer, allow_nil?: false
+      argument :owner_max_attempts, :integer, allow_nil?: false
+      require_atomic? false
+      change filter(expr(status in [:queued, :retry_scheduled, :discovering]))
+      change set_attribute(:status, :failed)
+      change set_attribute(:last_error, "catalog_sync_claim_failed")
+      change &__MODULE__.set_discovery_owner/2
+      change &__MODULE__.set_finished_at/2
     end
 
     update :mark_retry_scheduled do
@@ -224,6 +238,18 @@ defmodule EventSales.Ingestion.Resources.TickeraCatalogSyncRun do
       nil -> Ash.Changeset.force_change_attribute(changeset, :started_at, DateTime.utc_now())
       _started_at -> changeset
     end
+  end
+
+  def set_discovery_owner(changeset, _context) do
+    changeset
+    |> Ash.Changeset.force_change_attribute(
+      :retry_attempt,
+      Ash.Changeset.get_argument(changeset, :owner_attempt)
+    )
+    |> Ash.Changeset.force_change_attribute(
+      :retry_max_attempts,
+      Ash.Changeset.get_argument(changeset, :owner_max_attempts)
+    )
   end
 
   def set_finished_at(changeset, _context) do

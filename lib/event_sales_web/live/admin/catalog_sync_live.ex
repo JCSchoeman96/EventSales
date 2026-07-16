@@ -36,6 +36,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
     catalog_feed_server_error
     catalog_feed_transport_error
     catalog_sync_discovery_failed
+    catalog_sync_claim_failed
     enqueue_failed
     stale_dry_run_hash
     missing_plan_snapshot
@@ -1521,7 +1522,8 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
     end
   end
 
-  defp active_run?(run), do: run.status in [:queued, :discovering, :applying]
+  defp active_run?(run),
+    do: run.status in [:queued, :discovering, :retry_scheduled, :dry_run_ready, :applying]
 
   defp maybe_add_selected_run(run_ids, nil), do: run_ids
   defp maybe_add_selected_run(run_ids, selected_run), do: [selected_run.id | run_ids]

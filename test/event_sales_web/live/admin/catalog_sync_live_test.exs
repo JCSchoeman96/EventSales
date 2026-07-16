@@ -394,6 +394,66 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
     assert historical.id != selected.id
   end
 
+  test "non-selected retry-scheduled run remains subscribed through discovery and readiness", %{
+    conn: conn,
+    admin: admin,
+    source: source
+  } do
+    retry_source =
+      SalesHelpers.create_source_system!(%{name: "Catalog Sync Retry Subscription"})
+
+    retry_run =
+      CatalogSyncRunHelpers.create_retry_scheduled_catalog_sync_run!(
+        retry_source.id,
+        %{"kind" => "wordpress_feed", "mode" => "full"},
+        %{last_error: "catalog_feed_timeout", retry_attempt: 1, retry_max_attempts: 3}
+      )
+
+    selected = create_ready_run!(source, "selected-subscription-hash", "selected-subscription")
+
+    {:ok, view, _html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/catalog-sync?run_id=#{selected.id}")
+
+    discovering = CatalogSyncRunHelpers.mark_discovering!(retry_run)
+
+    :ok =
+      EventSales.Catalog.TickeraCatalog.PubSub.broadcast(
+        retry_run.id,
+        :catalog_sync_started,
+        %{run_id: retry_run.id}
+      )
+
+    assert render(view) =~ "Discovering"
+
+    CatalogSyncRunHelpers.mark_ready!(discovering, %{
+      dry_run_hash: "retry-subscription-ready",
+      summary: %{},
+      plan_snapshot: %{
+        "dry_run_hash" => "retry-subscription-ready",
+        "event_changes" => [],
+        "ticket_type_changes" => [],
+        "product_mapping_changes" => [],
+        "findings" => [],
+        "touched_event_ids" => [],
+        "touched_product_keys" => []
+      }
+    })
+
+    :ok =
+      EventSales.Catalog.TickeraCatalog.PubSub.broadcast(
+        retry_run.id,
+        :catalog_sync_preview_ready,
+        %{run_id: retry_run.id}
+      )
+
+    html = render(view)
+    assert html =~ "Ready for review"
+    assert has_element?(view, ~s([data-phx-link="patch"][href*="run_id=#{retry_run.id}"]))
+    assert html =~ selected.id
+  end
+
   test "admin queues manual-row dry-run through facade", %{
     conn: conn,
     admin: admin,

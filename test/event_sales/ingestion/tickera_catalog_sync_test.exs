@@ -653,7 +653,13 @@ defmodule EventSales.Ingestion.TickeraCatalogSyncTest do
         domain: Ingestion
       )
 
-    discovering = Ash.update!(queued, %{}, action: :mark_discovering, domain: Ingestion)
+    discovering =
+      Ash.update!(
+        queued,
+        %{owner_attempt: 1, owner_max_attempts: 3},
+        action: :mark_discovering,
+        domain: Ingestion
+      )
 
     Ash.update!(
       discovering,
