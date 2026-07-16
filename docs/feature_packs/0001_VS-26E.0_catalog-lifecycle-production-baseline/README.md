@@ -1,7 +1,7 @@
 # EventSales VS-26E.0 Execution Pack
 
 **Slice:** VS-26E.0 — Catalog Lifecycle Deployment and Baseline Certification  
-**Pack version:** 1.0.0  
+**Pack version:** 1.1.0  
 **Repository:** `JCSchoeman96/EventSales`  
 **Authorised baseline:** `050d66e88d55270655833cd9c9b51476a4bfefeb`  
 **GitHub tracker:** `#114`  
@@ -26,6 +26,10 @@ The first agent hand-off is **planning/reconnaissance only**:
 
 Later execution requires explicit approval through Linear `JC-109` and must follow the reviewed runbooks.
 
+## Canonical PR merge rule
+
+PR #117 must remain open and unmerged through independent pack review (`JC-107`), planning/reconnaissance (`JC-108`), and plan review (`JC-109`). The planning agent uses this ZIP against the authorised `main` baseline; it does not need the pack files merged into `main`. Because any PR merge deploys to Railway and runs the configured pre-deploy migration/bootstrap path, merging PR #117 is a production deployment boundary and requires explicit JC-109 authorisation.
+
 ## Pack contents
 
 - `VS-26E.0-FEATURE_PACK.md` — full contract.
@@ -43,3 +47,5 @@ Later execution requires explicit approval through Linear `JC-109` and must foll
 ## Authority
 
 GitHub `main` and reviewed PRs remain canonical technical truth. This ZIP is an immutable execution capsule. If `main` materially advances or a pack assumption changes, stop and issue a new semantic pack version.
+
+Version 1.1.0 supersedes the unapproved v1.0.0 draft after independent review identified the pack-PR deployment-order hazard. v1.0.0 must not be supplied to an agent.
