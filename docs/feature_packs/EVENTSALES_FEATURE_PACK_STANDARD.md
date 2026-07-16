@@ -2,18 +2,51 @@
 
 ## Purpose
 
-Every meaningful EventSales slice must receive a repository-specific feature pack before implementation begins.
+Every meaningful EventSales vertical slice must receive a repository-specific, reviewed feature pack before implementation or production execution begins.
 
-A feature pack is not a generic product brief. It is an implementation contract anchored to:
+A feature pack is not a generic brief. It is a scoped execution contract anchored to:
 
-- the exact current `main` commit;
-- the actual modules, resources, tests, migrations, routes, and scripts in the repository;
-- the current production evidence and open issues;
-- EventSales architectural and security rules.
+- an exact `main` commit;
+- verified repository files and current behaviour;
+- relevant production evidence and infrastructure facts;
+- approved product decisions;
+- EventSales architecture, security, performance, and rollout rules.
 
-The pack exists to prevent coding agents from guessing architecture, creating parallel write paths, changing unrelated authority, or implementing against stale repo assumptions.
+The pack exists to prevent agents from guessing architecture, inventing production topology, creating parallel writers, broadening authority, or implementing against stale assumptions.
 
-## Standard Folder
+## Authority Hierarchy
+
+```text
+GitHub repository and reviewed PRs
+= canonical technical truth
+
+Canonical feature-pack folder in GitHub
+= editable source, changed only by reviewed commits
+
+Versioned ZIP generated from that folder
+= immutable execution capsule for one agent hand-off
+
+Linear
+= status, ownership, blockers, dependencies, hand-offs, and evidence
+```
+
+The ZIP is never the long-term source of truth. The canonical source folder is never silently modified after a ZIP is issued; a material change creates a new semantic version and new ZIP.
+
+## One-Slice Rule
+
+Do not create implementation-ready packs for the whole roadmap upfront.
+
+A detailed pack may be created only when:
+
+- its predecessor is Done or explicitly deferred;
+- current `main` is known;
+- related production evidence has been checked;
+- open issues and dependencies have been re-evaluated;
+- the programme WIP limit permits it.
+
+Future roadmap descriptions are intent, not current file-level truth.
+
+## Canonical Folder Naming
 
 Use:
 
@@ -27,83 +60,165 @@ Example:
 docs/feature_packs/0001_VS-26E.0_catalog-lifecycle-production-baseline/
 ```
 
-Do not reuse or renumber an existing ordinal. When the next pack begins, inspect the directory and choose the next available number.
+Rules:
 
-## Required Files
+- inspect existing folders before selecting the ordinal;
+- never reuse or renumber an ordinal;
+- use the same canonical folder for later pack versions, with version history recorded in `pack.json` and Git;
+- never put secrets, credentials, production payloads, or customer PII in the folder.
 
-Every feature pack must contain:
+## Immutable ZIP Naming
 
-```text
-<SLICE>-FEATURE_PACK.md
-CODING_AGENT_PROMPT.md
-TOON_PROMPTS.md
-ACCEPTANCE_CHECKLIST.md
-pack.json
-```
-
-Add these when relevant:
+Use:
 
 ```text
-EVIDENCE_TEMPLATE.md
-ROLLBACK_PLAN.md
-MIGRATION_PLAN.md
-PERFORMANCE_EVIDENCE.md
-SECURITY_REVIEW.md
-RUNBOOK.md
-FAILURE_MATRIX.md
+EventSales_<SLICE>_v<semver>_<baseline-short-sha>.zip
 ```
 
-A planning-only slice may contain only documentation deliverables, but it still requires the same scope, non-goal, acceptance, verification, and stop-condition discipline.
+Example:
 
-## Required Feature Pack Sections
+```text
+EventSales_VS-26E.0_v1.0.0_abcdef12.zip
+```
 
-The main `<SLICE>-FEATURE_PACK.md` must contain the following sections.
+Record:
 
-### 1. Title and Status
+- full baseline SHA;
+- ZIP filename;
+- ZIP SHA-256;
+- canonical source commit/PR;
+- pack semantic version;
+- creation timestamp;
+- owning Linear parent and pack-review issues.
 
-Include:
+## Required Pack Structure
 
-- Slice ID.
-- Human-readable name.
-- Pack version.
-- Pack status: `draft`, `review_ready`, `implementation_ready`, `implemented`, or `production_validated`.
-- Exact baseline branch and SHA.
-- Owning GitHub issue.
-- Programme and predecessor/successor.
+Every full pack should contain:
 
-### 2. Executive Summary
+```text
+<pack-root>/
+├── README.md
+├── <SLICE>-FEATURE_PACK.md
+├── CODING_AGENT_PROMPT.md
+├── REVIEWER_PROMPT.md
+├── TOON_PROMPTS.md
+├── ACCEPTANCE_CHECKLIST.md
+├── FILE_INVENTORY.md
+├── REPO_BASELINE.json
+├── pack.json
+├── checksums.sha256
+├── IMPLEMENTATION_REPORT_TEMPLATE.md
+├── REVIEW_REPORT_TEMPLATE.md
+├── LINEAR_UPDATE_TEMPLATE.md
+├── runbooks/
+│   ├── DEPLOYMENT_PLAN.md                 # when applicable
+│   ├── MIGRATION_PREFLIGHT.md             # when applicable
+│   ├── ROLLBACK_AND_STOP_CONDITIONS.md    # when applicable
+│   ├── FAILURE_MATRIX.md                  # when applicable
+│   └── RUNBOOK.md                         # when applicable
+└── evidence/
+    └── EVIDENCE_TEMPLATE.md               # when production validation applies
+```
 
-Describe:
+A small docs-only slice may omit irrelevant optional files, but must retain baseline, scope, non-goals, acceptance, review, checksums, and stop-condition discipline.
 
-- the exact operator/user outcome;
-- why the slice is needed now;
-- what durable invariant it establishes;
-- why it is a vertical slice rather than a broad refactor.
+## Baseline Lock
 
-### 3. Current Repository Truth
+`REPO_BASELINE.json` must include at least:
 
-This section is mandatory and must be refreshed from the repository when the pack is created.
+```json
+{
+  "repository": "JCSchoeman96/EventSales",
+  "default_branch": "main",
+  "baseline_sha": "<full-main-sha>",
+  "pack_id": "0001_VS-26E.0",
+  "pack_version": "1.0.0",
+  "pack_status": "review_ready",
+  "canonical_source_commit": "<sha>",
+  "created_at": "<ISO-8601>"
+}
+```
 
-List:
+Before planning or implementation, the agent must run or otherwise prove the equivalent of:
 
-- existing relevant modules and their current responsibilities;
-- existing resources/actions/state machines;
-- existing routes/LiveViews/controllers;
-- existing workers and queue configuration;
-- existing tests and fixtures;
-- existing migrations/indexes;
-- existing scripts/runbooks;
-- relevant merged PRs and open issues;
-- known production evidence;
-- known placeholders or incomplete paths.
+```bash
+git status --short
+git rev-parse HEAD
+git fetch origin
+git rev-parse origin/main
+bash scripts/sync_with_origin_main.sh --check
+```
 
-Do not copy an old pack’s repo truth without re-verifying every claim.
+The agent must stop when:
 
-### 4. Goal and User Outcome
+- the worktree is dirty;
+- the authorised baseline is not checked out;
+- `origin/main` materially advanced and the pack has not been refreshed;
+- an expected file no longer exists;
+- current code contradicts a material pack assumption;
+- safe completion requires forbidden scope.
 
-State what becomes possible after the slice.
+The correct response to baseline drift is a pack-refresh request, not improvisation.
 
-The goal must be testable and operationally observable.
+## Semantic Versioning and Immutability
+
+Use standard semantic versions:
+
+```text
+1.0.0  approved initial execution contract
+1.0.1  non-material wording/checksum/typo correction
+1.1.0  clarified or expanded scope without architectural replacement
+2.0.0  materially changed design, authority, or execution approach
+```
+
+After a ZIP is issued:
+
+1. never replace the ZIP under the same filename;
+2. never silently change canonical source and pretend the old ZIP represents it;
+3. create a new version for material changes;
+4. record why the earlier version was superseded;
+5. update Linear and any active agent hand-off;
+6. stop active execution if the superseding change invalidates its plan.
+
+## Required Feature-Pack Sections
+
+`<SLICE>-FEATURE_PACK.md` must contain:
+
+### 1. Identity and status
+
+- slice ID and name;
+- pack semantic version and status;
+- baseline branch/SHA;
+- canonical source PR/commit;
+- GitHub issue and Linear parent/child IDs;
+- predecessor and successor.
+
+### 2. Executive summary
+
+State the exact operator/user outcome, why it is needed now, and the durable invariant it establishes.
+
+### 3. Current repository truth
+
+Refresh from the actual repository. List:
+
+- relevant modules and responsibilities;
+- Ash resources/actions/state machines;
+- routes, LiveViews, controllers, and components;
+- workers, queues, concurrency, and scheduling;
+- tests, fixtures, migrations, indexes, scripts, and runbooks;
+- related merged PRs/open issues;
+- known production evidence and unknowns;
+- placeholders/incomplete paths.
+
+Do not copy repo truth from an older pack without re-verification.
+
+### 4. Product decision inputs
+
+Reference `docs/roadmap/EVENTSALES_PRODUCT_DECISIONS.md` and state which decisions this slice implements, defers, or must clarify.
+
+### 5. Goal and observable outcome
+
+The goal must be testable and operationally visible.
 
 Bad:
 
@@ -114,182 +229,152 @@ Improve sync.
 Good:
 
 ```text
-A missed WooCommerce order update is fetched through an updated-since cursor, processed through the existing OrderUpserter, reflected in the affected event aggregate, and visible on the event page without creating a duplicate order or order item.
+A missed WooCommerce update is fetched through the durable cursor, processed through OrderUpserter, reflected in the affected event read model, and visible without duplicate durable effects.
 ```
 
-### 5. Dependencies and Blockers
+### 6. Dependencies and blockers
 
-List:
-
-- hard slice dependencies;
-- issue/PR dependencies;
-- production validation dependencies;
-- config/secret dependencies;
-- package or infrastructure dependencies;
-- which downstream slices this pack blocks.
-
-Classify each dependency as:
+Classify every dependency as:
 
 - merged/available;
 - pending;
-- production-validation required;
+- production validation required;
+- operator input required;
 - explicitly out of scope.
 
-### 6. Scope
+List downstream slices blocked by this pack.
 
-Describe the smallest end-to-end behavior included.
+### 7. Scope
 
-Cover all layers needed for the outcome:
+Describe the smallest end-to-end behaviour and every required layer:
 
-- source/contract;
-- intake/controller when applicable;
-- orchestration/worker;
-- Ash resource/actions;
-- persistence/indexes;
+- source contract;
+- intake boundary;
+- worker/orchestration;
+- Ash actions/persistence;
+- indexes/constraints;
 - cache/PubSub/read models;
-- LiveView/admin surface;
+- admin/LiveView surface;
 - tests;
 - docs/runbooks;
-- deployment/validation.
+- rollout and production validation.
 
-### 7. Explicit Non-Goals
+### 8. Explicit non-goals
 
-List what must not change.
-
-Typical EventSales exclusions:
+Name exact boundaries. Avoid “unchanged unless needed.” Typical exclusions include:
 
 - payment authority;
-- scanner authority;
-- ticket issuance;
-- PDF/wallet/delivery;
-- refund/revocation semantics;
-- webhook signature/intake behavior;
-- `OrderUpserter` semantics;
-- `MappingResolver` authority;
-- historical mapped OrderItem mutation;
-- direct Woo REST from web modules;
-- public routes;
+- ticket issuance/scanner/customer delivery;
+- unrelated webhook intake changes;
+- parallel order writers;
+- direct Woo REST from LiveView/controllers/components;
 - customer PII exposure;
+- unbounded historical import;
 - unrelated frontend redesign;
-- Redis as durable truth.
+- Redis as durable truth;
+- production actions outside the authorised runbook.
 
-Do not use “unchanged unless needed.” Name the boundary precisely.
-
-### 8. Domain Model and Durable Truth
+### 9. Domain model and durable truth
 
 Identify:
 
-- entities/resources involved;
-- durable identity keys;
+- resources/entities;
+- durable identities and source keys;
 - relationships;
-- source-of-truth fields;
+- authoritative timestamps;
+- uniqueness and concurrency rules;
 - state transitions;
-- uniqueness rules;
-- concurrency/ownership rules;
-- immutable history rules;
-- audit requirements.
+- source-version/stale-update handling;
+- immutable/audit history;
+- why each new field/table/index is required.
 
-For every new field/table/index, state why existing data cannot safely represent the requirement.
-
-### 9. Contracts and Interfaces
+### 10. Interfaces and contracts
 
 Document exact changes to:
 
-- HTTP routes and request/response bodies;
-- webhook/feed versions;
-- worker args and return values;
+- HTTP/feed/webhook shapes;
+- authentication/signature/replay behaviour;
+- worker args and uniqueness;
 - Ash actions and accepted attributes;
 - PubSub topics/messages;
-- cache keys and TTLs;
+- cache keys/TTLs;
 - LiveView params/events;
-- CSV/export columns;
-- environment variables.
+- CSV/XLSX/export columns;
+- environment variables and compatibility.
 
-Include compatibility and versioning behavior.
+Never add a public interface implicitly.
 
-Never add a new public interface implicitly.
+### 11. Architectural boundaries
 
-### 10. Architectural Boundaries
-
-The pack must explicitly restate applicable boundaries, including:
+Restate applicable rules:
 
 ```text
-LiveView/controller/component -> domain facade/read model only
-approved ingestion service/Oban worker -> WooCommerceClient
-Ash actions/domain services -> durable mutations
-Postgres -> source of truth
-Redis/ETS/Cachex -> hot/warm mirror only
-PubSub -> notification only, never truth
+LiveView/controller/component -> facade or read model
+approved ingestion/Oban worker -> WooCommerceClient
+Ash action/domain service -> durable mutation
+Postgres -> authority
+Redis/ETS/Cachex -> derived hot/warm state
+PubSub -> notification, never truth
 ```
 
-Name any exception and justify it.
+### 12. Security, privacy, and evidence
 
-### 11. Security, Privacy, and Evidence Rules
+Specify:
 
-Cover:
-
-- authentication and authorization;
-- replay/signature rules;
+- authentication/authorization;
 - PII visibility;
-- secrets/tokens/raw payload restrictions;
-- log/telemetry cardinality;
-- audit logging;
-- safe error codes;
+- secrets and forbidden evidence values;
+- raw-payload restrictions;
+- audit requirements;
+- safe bounded error codes;
+- telemetry/log cardinality;
 - evidence redaction.
 
-List forbidden values explicitly when the slice touches external systems or production evidence.
+### 13. Performance and scale
 
-### 12. Performance and Scaling Review
+For each path state:
 
-For every read/write path, answer:
+- hot/warm/cold classification;
+- expected and maximum cardinality;
+- query/source-call bounds;
+- supporting indexes;
+- worker concurrency and timeout/backoff;
+- duplicate/overlap protection;
+- cache/read-model strategy;
+- representative query/load evidence.
 
-- Is it hot, warm, or cold?
-- What is the maximum expected cardinality?
-- Is the query bounded?
-- What index supports it?
-- Could it scan raw orders during a LiveView request?
-- What is the worker concurrency?
-- What protects WooCommerce and Postgres?
-- What is the timeout/backoff policy?
-- What prevents duplicate or overlapping work?
-- What is the cache/read-model strategy?
-- What representative query/load evidence is required?
+EventSales must remain bounded even though the initial target is roughly 10,000 tickets over weeks and fifty concurrent dashboard viewers.
 
-Do not add an index based only on intuition; require representative query evidence when appropriate.
+### 14. Failure modes and recovery
 
-### 13. Failure Modes and Recovery
+For each failure define durable state, retry/terminal classification, operator visibility, and safe continuation. Include as relevant:
 
-List concrete failure paths such as:
-
-- request accepted but enqueue fails;
-- worker crashes after claim;
-- duplicate worker execution;
-- stale source update;
+- intake accepted but enqueue failed;
+- duplicate execution;
+- stale worker/source update;
 - partial page processing;
-- cursor advancement failure;
-- cache/PubSub failure after durable commit;
-- migration/index failure;
+- cursor failure;
+- cache/PubSub failure after commit;
 - source timeout/rate limit;
+- migration/index failure;
+- deploy during active work;
 - LiveView disconnect;
-- production deploy during active work.
+- production topology mismatch.
 
-For each, define durable state, retry behavior, operator visibility, and whether work may continue.
+### 15. Files to inspect first
 
-### 14. Files To Inspect First
-
-List exact current repository paths the coding agent must read before changing code.
-
-This list should include:
+List exact current paths, including:
 
 - `AGENTS.md`;
-- relevant canonical docs;
-- current domain modules;
-- current tests;
-- current migrations/indexes;
-- current asset conventions for UI slices;
-- relevant integration plugin files.
+- canonical docs;
+- relevant source modules;
+- tests/fixtures;
+- migrations/indexes;
+- asset conventions for UI work;
+- WordPress integration files when applicable;
+- deployment/release scripts and runbooks.
 
-### 15. Files Expected To Create/Modify
+### 16. Expected and forbidden files
 
 Separate:
 
@@ -300,43 +385,38 @@ Generated only if required
 Explicitly forbidden
 ```
 
-The list is a scope guide, not permission to change every file. The coding agent must stop if a fundamentally different architecture becomes necessary.
+This is a scope guide, not permission to touch every listed path.
 
-### 16. TDD Implementation Sequence
+### 17. Tests-first or execution sequence
 
-Specify ordered red/green steps.
+For code slices, specify ordered red/green steps with focused verification and stop conditions.
 
-Each step should state:
+For deployment/validation slices, specify:
 
-1. failing test or proof;
-2. implementation boundary;
-3. focused verification;
-4. stop condition.
+1. read-only preflight;
+2. explicit authorisation checkpoint;
+3. bounded action;
+4. evidence capture;
+5. separate next-phase decision;
+6. stop/rollback path.
 
-Include concurrency, idempotency, stale update, crash recovery, authorization, and PII tests where relevant.
+### 18. Acceptance criteria
 
-### 17. Acceptance Criteria
-
-Acceptance criteria must be externally meaningful and testable.
-
-Include:
+Include as relevant:
 
 - happy path;
 - duplicate/idempotent path;
 - stale/out-of-order path;
-- transient failure/retry path;
-- deterministic failure path;
-- authorization path;
-- performance/boundedness path;
-- observability path;
-- compatibility path;
-- production acceptance path.
+- retry and terminal failure;
+- authorization/PII path;
+- performance/boundedness;
+- observability;
+- compatibility;
+- deployment and production acceptance.
 
-### 18. Verification Commands
+### 19. Verification commands
 
-List exact commands in required order.
-
-Default baseline:
+Default code baseline:
 
 ```bash
 mix format --check-formatted
@@ -348,160 +428,148 @@ bash scripts/local_ci.sh
 git diff --check
 ```
 
-Add as required:
+Add relevant asset, Ash codegen, static-analysis, dependency-audit, PHP lint, migration, or query-plan checks. Do not claim commands were run when they were only documented.
 
-```bash
-mix assets.build
-mix test test/event_sales/assets_pipeline_config_test.exs
-mix ash.codegen --check
-mix credo --strict
-mix dialyzer
-mix hex.audit
-mix deps.audit
-php -l <plugin-file>
-```
+### 20. Migration, rollout, and production evidence
 
-### 19. Migration and Rollout Plan
+When applicable define:
 
-When a migration or runtime configuration is involved, define:
-
-- preflight query/check;
+- read-only preflight;
 - direct/session-capable migration connection requirement;
-- deploy order;
+- deploy/migrate/action order;
 - active-job/traffic gate;
 - rollback limitations;
-- index creation method;
-- post-deploy verification;
-- expected production state changes.
+- index method/validation;
+- expected state changes;
+- exact operator steps;
+- pass/fail evidence;
+- sign-off owner;
+- downstream gate released.
 
-Never treat `mix test` as migration rollout proof.
+A successful test suite is not migration or production proof.
 
-### 20. Production Validation and Evidence
+### 21. Stop conditions
 
-Define:
+Include all material stop conditions, such as:
 
-- exact human/operator steps;
-- safe identifiers/statuses that may be recorded;
-- forbidden evidence values;
-- expected metrics/logs/PubSub/UI result;
-- pass/fail criteria;
-- who signs off;
-- downstream gate released by the evidence.
-
-### 21. Stop Conditions
-
-List conditions that require implementation or rollout to stop.
-
-Examples:
-
-- dirty worktree;
-- baseline head changed unexpectedly;
-- unresolved migration/index conflict;
-- broader authority change required;
-- customer PII or secret exposure;
-- unbounded query or source call;
+- dirty worktree or stale baseline;
+- unknown production topology required for safe execution;
+- migration/index conflict;
 - duplicate durable mutation possible;
-- stale worker can overwrite current owner;
-- production state differs from pack assumptions;
-- CI/security gate fails;
-- representative query plan is unsafe.
+- stale owner can overwrite current owner;
+- unbounded query/source call;
+- secret/PII/raw protected data leak;
+- broader authority change required;
+- current production state contradicts pack assumptions;
+- exact-head CI or security gate failure.
 
-### 22. Final Agent Response Contract
+### 22. Final response contract
 
-The coding prompt must require the final response to include:
+Require the agent to report:
 
 - exact baseline and final head;
-- files changed;
-- behavior implemented;
-- tests and commands run;
-- generated artifacts;
-- migrations/config changes;
-- open risks/follow-ups;
-- PR/CI status;
-- production actions not performed;
-- next authorized step.
+- files changed or production actions executed;
+- behaviour/evidence produced;
+- tests/commands actually run;
+- migrations/config implications;
+- open risks and blockers;
+- PR/CI/deployment status;
+- prohibited actions not performed;
+- next authorised gate.
 
-## Coding-Agent Prompt Standard
+## Prompt Files
 
-`CODING_AGENT_PROMPT.md` must be directly reusable.
+### `CODING_AGENT_PROMPT.md`
 
-It must:
+Must be directly reusable and include repository, slice, baseline checks, exact goal, repo truth, hard rules, file inventory, tests/execution sequence, verification, stop conditions, and final report.
 
-1. Name the repository and slice.
-2. Tell the agent to read `AGENTS.md` and the feature pack first.
-3. Require worktree and baseline checks.
-4. State the exact goal.
-5. State current repo truth.
-6. List hard rules and non-goals.
-7. List exact files to inspect.
-8. Give the TDD sequence.
-9. Give verification commands.
-10. Define stop conditions.
-11. Require a PR and exact final report.
-
-Do not write vague prompts such as “implement issue #80.” The prompt must contain enough verified context to prevent architectural guessing.
-
-## TOON Prompt Standard
-
-`TOON_PROMPTS.md` should provide compact prompts for different agents/stages:
-
-- planning/repo-audit agent;
-- implementation agent;
-- test/adversarial agent;
-- security/privacy reviewer;
-- performance/query reviewer;
-- final PR reviewer;
-- production validation operator.
-
-Each prompt should preserve:
-
-- slice identity;
-- baseline SHA;
-- allowed scope;
-- forbidden scope;
-- exact output expected;
-- stop conditions.
-
-## Acceptance Checklist Standard
-
-`ACCEPTANCE_CHECKLIST.md` must be executable as a review checklist.
-
-Recommended sections:
+The initial hand-off should normally authorise planning only:
 
 ```text
-Planning
+Validate the baseline, inspect the mandatory files, and produce the requested plan.
+Do not modify production code or production state. Stop after the plan.
+```
+
+Implementation/execution requires a separate explicit instruction after plan review.
+
+### `REVIEWER_PROMPT.md`
+
+Must be independent of the implementer prompt and require:
+
+- exact pack/PR head;
+- contract-to-diff or contract-to-evidence comparison;
+- blocker/major/minor classification;
+- architecture, concurrency, security, performance, migration, rollout, and scope checks;
+- final verdict: APPROVE, REQUEST CHANGES, or BLOCKED.
+
+### `TOON_PROMPTS.md`
+
+Provide compact stage prompts for:
+
+- repository-audit/planning agent;
+- implementation agent;
+- adversarial test reviewer;
+- security/privacy reviewer;
+- performance/query reviewer;
+- exact-head PR reviewer;
+- production-validation operator.
+
+Each must preserve slice, version, baseline, allowed scope, forbidden scope, output, and stop conditions.
+
+## Acceptance Checklist
+
+`ACCEPTANCE_CHECKLIST.md` should contain unchecked boxes for:
+
+```text
+Baseline and planning
+Repository truth
+Product decisions
 Architecture
-Data model
+Data model and state
 Concurrency/idempotency
 Security/PII
-Performance/scaling
-Tests
-CI
+Performance/bounds
+Tests and CI
 Migration/config
 PR review
 Deployment
 Production evidence
-Closeout
+Linear/GitHub closeout
 ```
 
-Use unchecked Markdown boxes so the checklist can be copied into the owning issue or PR.
+## File Inventory
 
-## pack.json Minimum Schema
+`FILE_INVENTORY.md` must distinguish:
 
-Every pack must include valid JSON similar to:
+- mandatory read;
+- expected create;
+- expected modify;
+- generated;
+- forbidden;
+- production-only artefacts that must not be committed.
+
+The inventory must be verified against current `main`.
+
+## `pack.json` Minimum Schema
 
 ```json
 {
   "pack_id": "0001_VS-26E.0",
   "slice": "VS-26E.0",
   "name": "Catalog Lifecycle Deployment and Baseline Certification",
-  "version": "1.0-planning-ready",
+  "version": "1.0.0",
   "status": "review_ready",
   "repository": "JCSchoeman96/EventSales",
   "default_branch": "main",
-  "baseline_sha": "<exact-sha>",
-  "github_issue": null,
+  "baseline_sha": "<full-sha>",
+  "canonical_source_commit": "<sha>",
+  "github_issue": 113,
+  "linear_parent": "JC-105",
+  "linear_pack_issue": "JC-106",
+  "linear_review_issue": "JC-107",
   "repository_path": "docs/feature_packs/0001_VS-26E.0_catalog-lifecycle-production-baseline",
+  "zip_filename": "EventSales_VS-26E.0_v1.0.0_<short-sha>.zip",
+  "zip_sha256": null,
   "goal": "<testable outcome>",
   "dependencies": [],
   "blocks": [],
@@ -518,11 +586,34 @@ Every pack must include valid JSON similar to:
 }
 ```
 
-Additional structured fields are encouraged when useful, but do not put secrets, production identifiers, or customer data in `pack.json`.
+Do not place secrets, real database URLs, production credentials, customer identifiers, or raw payloads in JSON.
+
+## Checksums and Packaging
+
+Before issuing the ZIP:
+
+1. generate `checksums.sha256` for every included file except the checksum file itself;
+2. verify the checksum list from a clean generated directory;
+3. create the ZIP deterministically where practical;
+4. calculate the ZIP SHA-256;
+5. inspect the archive listing;
+6. prove the ZIP content matches canonical source at the recorded commit;
+7. record filename, SHA-256, baseline, version, and source commit in Linear.
+
+The ZIP must not include:
+
+- `.git`;
+- the whole repository;
+- build/dependency directories;
+- secrets or env files;
+- production payloads/data exports;
+- unredacted screenshots;
+- stale generated repository indexes;
+- arbitrary binaries.
 
 ## Pack Lifecycle
 
-Use these statuses:
+Canonical pack status:
 
 ```text
 draft
@@ -530,44 +621,40 @@ draft
 -> implementation_ready
 -> implemented
 -> production_validated
+-> superseded (when a later pack version replaces it)
 ```
 
-Rules:
+A ZIP remains immutable even when canonical status later changes. Generate a new ZIP/version when an active agent needs materially changed instructions.
 
-- `review_ready`: repo audit complete; open questions clearly listed.
-- `implementation_ready`: design accepted; no unresolved blocker.
-- `implemented`: merged and CI green, but production validation may remain.
-- `production_validated`: rollout and acceptance evidence complete.
+## Linear Update Contract
 
-Update the pack after material implementation changes so the repository does not retain a misleading planning document.
+`LINEAR_UPDATE_TEMPLATE.md` must capture:
 
-## One-Slice Rule
+- current gate and verdict;
+- pack version/baseline/source commit;
+- ZIP name/SHA-256;
+- plan or implementation PR;
+- exact reviewed head and CI;
+- deployment/migration state;
+- evidence link/verdict;
+- blockers and next authorised issue.
 
-Do not build all feature packs upfront as if their file inventories and contracts are stable.
-
-The programme roadmap may describe future slices, but the detailed pack for a slice must be created only when:
-
-- its predecessor is Done or explicitly deferred;
-- current `main` is known;
-- related production evidence is available;
-- current open issues and dependencies have been rechecked.
-
-This prevents later packs from freezing assumptions that earlier slices will invalidate.
+Only the appropriate child issue should be `In Progress`. The parent closes after all required gates pass.
 
 ## Review Standard
 
-A feature pack is not implementation-ready if any of these remain ambiguous:
+A pack is not implementation-ready while any of these remain materially ambiguous:
 
-- durable source of truth;
+- durable authority;
 - identity/idempotency key;
-- ownership/concurrency behavior;
+- ownership/concurrency;
 - state transitions;
-- source-version/stale update behavior;
-- authorization/PII behavior;
-- query bounds/index strategy;
+- timestamp/source-version semantics;
+- authorization/PII;
+- query/source-call bounds;
 - retry versus terminal failure;
-- migration/rollout plan;
-- production acceptance evidence;
+- migration/rollout route;
+- production evidence and sign-off;
 - explicit non-goals.
 
-When a pack is accepted, it becomes the scoped law for that slice. Implementation changes that contradict it require updating and re-reviewing the pack before code proceeds.
+When approved, the pack is scoped law for that version of the slice. Contradictory implementation requires a reviewed pack revision before work continues.
