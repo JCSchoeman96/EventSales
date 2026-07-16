@@ -2,20 +2,41 @@
 
 ## Purpose
 
-This programme turns the existing EventSales foundation into the operational product required by management and marketing:
+EventSales is the internal sales-intelligence and reconciliation layer for the existing production WooCommerce + Tickera site.
 
 ```text
-Tickera/WooCommerce catalog changes
--> EventSales discovers and safely creates or updates local catalog records
--> WooCommerce order webhooks update EventSales within seconds
--> REST catch-up repairs missed webhook gaps
--> durable Postgres sales truth feeds event-scoped aggregates
--> LiveView pages update through PubSub
--> management and marketing can inspect current event performance
--> historical backfill, imports, exports, and reconciliation remain available
+Production WordPress/Tickera catalog
+-> EventSales discovers and safely maintains local catalog truth
+-> WooCommerce webhooks deliver near-live order changes
+-> bounded REST catch-up repairs missed updates
+-> Ash/Postgres stores durable sales truth
+-> aggregate/read models serve bounded decision queries
+-> LiveView updates automatically through PubSub
+-> management and marketing inspect all-event and event-specific performance
+-> controlled backfill, import, export, correction, audit, and notifications support operations
 ```
 
-The programme is deliberately divided into small vertical slices. Only one slice may be active at a time. Every slice receives a repository-specific feature pack before implementation begins.
+WooCommerce remains the sales engine. EventSales does not become payment, ticket-issuance, scanner, or customer-delivery authority.
+
+## Source and Workflow Hierarchy
+
+The programme uses four deliberately separate artefacts:
+
+```text
+GitHub repository
+= canonical technical and product-contract truth
+
+Canonical feature-pack folder in GitHub
+= reviewed source for one vertical slice
+
+Versioned immutable ZIP
+= exact execution capsule supplied to an agent
+
+Linear
+= workflow, dependencies, blockers, ownership, hand-offs, and evidence status
+```
+
+A ZIP never replaces the repository. Linear never replaces the feature pack or reviewed PR.
 
 ## Canonical Repository Rules
 
@@ -26,639 +47,412 @@ Every slice must follow:
 - `docs/EventSales_Hardened_V2_1_Vertical_Slice_Roadmap.md`
 - `docs/EventSales_Hardened_V2_1_Folder_Structure.md`
 - `docs/EventSales_Hardened_V2_1_Domain_Mapping_Ash_Resource_Dossiers.md`
+- `docs/feature_packs/EVENTSALES_FEATURE_PACK_STANDARD.md`
+- `docs/roadmap/EVENTSALES_PRODUCT_DECISIONS.md`
 
 Non-negotiable programme rules:
 
-1. Build one vertical slice at a time.
-2. Write or adjust tests before business logic.
-3. Postgres/AshPostgres remains durable truth.
-4. Redis, ETS, Cachex, and `HotStateAggregator` remain read models only.
-5. LiveView, components, controllers, and `MappingResolver` must not call WooCommerce REST.
-6. Only approved ingestion services and Oban workers may call `WooCommerceClient`.
-7. Durable domain mutations belong in Ash actions or explicit domain services, not LiveViews.
-8. Webhook processing must remain idempotent and source-version guarded.
-9. Existing payment, scanner, ticket issuance, refund, revocation, PDF, wallet, and delivery authority is out of scope unless a slice explicitly owns it.
-10. No customer PII, secrets, tokens, raw provider payloads, or production values may enter code, fixtures, logs, docs, prompts, or evidence.
-11. No feature is complete at merge. The slice closes only after its required production validation is recorded.
+1. Build and validate one vertical slice at a time.
+2. Refresh each detailed pack against the exact current `main` SHA.
+3. Require an agent plan and human review before implementation or production execution.
+4. Write or adjust tests before business logic.
+5. Postgres/AshPostgres remains durable truth.
+6. Redis, ETS, Cachex, and `HotStateAggregator` remain read models only.
+7. LiveView, controllers, components, and `MappingResolver` must not call WooCommerce REST.
+8. Only approved ingestion services and Oban workers may call `WooCommerceClient`.
+9. Durable mutations belong in Ash actions or explicit domain services.
+10. Webhook, catch-up, reconciliation, and backfill paths must be idempotent and source-version guarded.
+11. WooCommerce REST concurrency remains bounded to a maximum of two unless a reviewed contract explicitly changes it.
+12. No secrets, customer PII, raw protected payloads, or production credentials may enter code, tests, packs, logs, screenshots, or evidence.
+13. A merge is not completion. Required deployment and production evidence must pass before the slice closes.
 
-## Current Repository Baseline
+## Current Operational Baseline
 
-The programme starts from an already substantial foundation.
+As confirmed on 16 July 2026:
 
-### Catalog foundation already present
+- EventSales is deployed on Railway but has not yet been adopted operationally by the company.
+- PostgreSQL is hosted on Railway.
+- Deployment is GitHub to Railway when a PR is merged.
+- The production WordPress + Tickera site has operated for a long period and is actively selling tickets.
+- The production plugin and WooCommerce webhooks already send data to EventSales on Railway.
+- EventSales currently contains real data, but that data does not need to be preserved. Correct repeatable sync and later controlled backfill take priority.
+- The source has approximately twenty currently live/public events; exact ticket-product, variation, and special-product counts still require discovery.
+- PgBouncer usage, a direct/session-capable migration URL, and whether PR #111 migrations have run are not yet verified.
+- Catalog Sync has likely been tried against production before, but its exact result and current database state are not trusted as a certified baseline.
 
-- Sanitized WordPress/Tickera catalog feed plugin.
-- Signed EventSales feed client and discovery adapter.
-- Dry-run planning and immutable plan snapshots.
-- Findings, review UI, exact-hash Apply gate, revocation, and manual mapping workflows.
-- Generation-fenced Discovery ownership and retry lifecycle.
-- Atomic queued run plus real Oban job persistence.
-- Safe finding replacement and durable readiness.
-- One queue-blocking catalog run per source system.
-- Event lifecycle metadata, ticket naming guardrails, and mapping conflict review.
+These unknowns are first-slice preflight requirements, not assumptions an agent may fill in.
 
-### Sales ingestion already present
+## Locked Product Direction
 
-- Exact raw-body WooCommerce webhook signature verification.
-- Durable webhook event persistence before async processing.
-- Duplicate delivery and stale source-version protection.
-- Oban-backed order processing.
-- `order.created`, `order.updated`, and `product.updated` handling.
-- Existing `OrderUpserter` as the normalized order/order-item write boundary.
-- Completed-only ticket and revenue metric rules.
-- Unmapped-item queue and reviewed recovery workflows.
+The detailed record is in `docs/roadmap/EVENTSALES_PRODUCT_DECISIONS.md`. The cross-programme rules are:
 
-### Analytics and UI already present
+### Catalog and event lifecycle
 
-- Event and daily aggregate snapshots.
-- ETS/Redis-backed hot and warm read models.
-- Event-scoped PubSub updates after durable order writes.
-- Admin dashboard and event detail pages.
-- Current/past event views.
-- Total sold, revenue, capacity, remaining, ticket-type breakdown, recent orders, and unmapped items.
-- Existing CSV import dry-run/apply and event exports.
-- Event-scoped authorization and revenue-visibility policy foundations.
+- A Tickera event is the primary event identity.
+- WooCommerce products and optional variations are linked ticket-selling entities.
+- New catalog automation concerns live/public events, not draft or private events.
+- Private events remain represented and must be clearly marked private in EventSales rather than silently appearing current/public.
+- Event date and lifecycle must support current and previous event views.
+- WordPress write-back may be considered later, but is not part of the current critical path.
 
-### Important gaps remaining
+### Sales truth
 
-- A newly created or published Tickera event is not yet automatically applied into EventSales.
-- Catalog automation is not yet scheduled or event-triggered.
-- Webhooks remain the primary order path without an automatic updated-since REST repair cursor.
-- The event detail page lacks decision-grade time windows such as last hour, rolling comparisons, and real chart buckets.
-- Management/marketing access is not yet delivered as the final safe event-scoped product surface.
-- The placeholder `BackfillOrdersWorker` does not yet provide historical REST backfill.
-- Routine and historical exports do not yet cover all planned time-window and filtered decision views.
-- The compact source-shaped webhook contract remains open hardening work.
+- Only completed orders contribute to sold-ticket and recognised-sales totals.
+- Pending, on-hold, failed, cancelled, and refunded states must still be ingested and visible as operational context.
+- On-hold commonly represents EFT awaiting verification and must not count as completed sales.
+- Prices and sales are currently tax-inclusive.
+- Fees and tax breakdowns are desired, but their exact source fields and accounting display contract must be verified before implementation.
+- The metric-contract slice must distinguish the timestamp used for completed-sale windows from the source-update timestamp used for freshness and status changes.
 
-## Programme Outcome
+### Freshness and UX
 
-The programme is complete when all of the following are true:
+- Normal data visibility target: less than five minutes.
+- Stale threshold: ten minutes.
+- Manual refresh queues work; it never performs WooCommerce REST inline from LiveView.
+- A page that queues refresh must update automatically when new data becomes available and clear stale state without a browser reload.
+- All-event and per-event views are required.
 
-1. A safe newly published Tickera event and its ticket products appear automatically in EventSales without manual JSON or database exports.
-2. Risky catalog changes stop for review rather than being silently applied.
-3. Order creation and updates normally reach EventSales through webhooks within seconds.
-4. Missed webhook updates are repaired automatically through a durable WooCommerce REST cursor.
-5. Replaying, catching up, or backfilling never duplicates orders or order items.
-6. Each event has a decision-grade page showing current totals, recent velocity, comparisons, ticket types, statuses, campaigns/coupons where supported, freshness, and operational warnings.
-7. Management and marketing see only the event data and revenue allowed by policy, without customer PII.
-8. Large historical backfills run through bounded Oban work with durable progress.
-9. Imports and exports are reviewable, auditable, bounded, and event-scoped.
-10. Operational freshness and source watermarks make stale data visible rather than presenting it as current.
+### Reporting and access
+
+- Required core metrics include total tickets, revenue, product/ticket-type performance, status context, and bounded date/time filters.
+- Date/time queries must have sensible limits and must not enable unbounded raw-order scans.
+- Coupon, UTM, campaign/source, and related acquisition dimensions are planned after the trustworthy baseline and source contract exist.
+- Initial access is admin-only; additional event-scoped roles and revenue permissions are planned.
+- Targets, pacing, and under/over-performance notifications are a planned feature after decision-grade metrics exist.
+
+### Backfill, import, correction, and scale
+
+- Launch backfill covers currently public events only, from each event's creation date.
+- Private events and old events that are not needed for launch are excluded from initial backfill.
+- Corrections must be flaggable/reviewable and retain audit history.
+- CSV and XLSX are the supported initial import formats.
+- One source site is authoritative for v1; a second, possibly non-WordPress source may be added later.
+- Initial scale target is roughly 10,000 ticket sales over several weeks and fifty concurrent dashboard viewers, while preserving bounded-query and flash-sale-safe architecture.
+
+## Existing Repository Foundation
+
+The repository already contains substantial capability that future slices must reuse rather than replace:
+
+### Catalog
+
+- Signed/sanitised WordPress + Tickera catalog feed.
+- Discovery adapters, dry-run planning, findings, exact-snapshot/hash Apply gates, revocation, and mapping workflows.
+- Retry-aware, generation-fenced Catalog Sync lifecycle from merged PR #111.
+- One-active-run database authority and truthful admin states.
+
+### Sales ingestion
+
+- Exact raw-body webhook signature verification.
+- Durable webhook intake before asynchronous processing.
+- Duplicate and stale-source guards.
+- Oban-backed `order.created`, `order.updated`, and `product.updated` processing.
+- Existing `OrderUpserter` as the normalised order/order-item writer.
+- Completed-only metric rules and unmapped-item recovery.
+
+### Analytics and UI
+
+- Hot/warm read models and snapshots.
+- Event-scoped PubSub notification after durable writes.
+- Admin dashboard and event detail views.
+- Existing totals, ticket-type detail, statuses, recent orders, unmapped items, CSV import, and exports.
+- Event-scoped dashboard facade and revenue-visibility foundations.
+
+Known gaps include automatic catalog creation, periodic catalog repair, order catch-up, self-updating queued refresh states, real time-window buckets, management/marketing surfaces, launch backfill, richer exports, acquisition dimensions, and targets/notifications.
+
+## Programme Success Criteria
+
+The programme is complete when:
+
+1. A new safe live/public Tickera event and its ticket products appear automatically in EventSales.
+2. Draft/private/ambiguous/destructive catalog changes never auto-apply as safe public catalog truth.
+3. Private events are visibly private and current/previous event classification is correct.
+4. Order changes normally appear within five minutes and missed changes recover automatically.
+5. Duplicate webhooks, catch-up, replay, reconciliation, and backfill never duplicate durable sales effects.
+6. Completed-only sales totals are correct while all relevant statuses remain visible.
+7. All-event and per-event dashboards expose bounded time windows, velocity, comparisons, product/ticket-type performance, and freshness.
+8. Queued refreshes and new sales update open LiveViews automatically through PubSub.
+9. Management/marketing access is event-scoped, revenue-aware, and PII-safe.
+10. Targets and notification rules can be configured and produce auditable alerts.
+11. Current public events can be backfilled from creation date with durable progress and safe restart.
+12. CSV/XLSX import, exports, corrections, and reconciliation are bounded and audited.
+13. The system supports the stated scale without raw-table dashboard scans or unbounded source calls.
 
 ## Ordered Vertical Slices
 
-### Phase 0 — Establish the certified production baseline
+### Phase 0 — Certify the deployed baseline
 
 #### VS-26E.0 — Catalog Lifecycle Deployment and Baseline Certification
 
-**Outcome:** Deploy the merged catalog lifecycle safely, run the required migrations, execute one controlled authoritative full-feed dry-run, review its exact hash/findings, and establish a certified catalog baseline.
+**Outcome:** Validate the already-merged Catalog Sync lifecycle on Railway, verify migration/index state, run one controlled production full-feed dry-run, review the exact snapshot/findings, and either Apply an approved baseline or record a safe no-go.
 
-**Why first:** Automatic catalog work must not begin on an unknown or unvalidated production baseline.
+**Dependencies:** PR #111 merged; planning PR #112 merged; Railway access; source plugin/webhooks available.
 
-**Primary deliverables:**
+**Required scope:**
 
-- Deployment and migration runbook.
-- Read-only preflight checks.
-- Controlled queueing instructions.
-- Exact-hash review checklist.
-- Sanitized evidence template.
-- Rollback/stop conditions.
-- Production baseline sign-off.
+- Verify deployed commit and Railway topology.
+- Determine whether a pooler is present and identify the approved direct/session-capable migration route.
+- Verify whether PR #111 migrations ran.
+- Read-only duplicate-active-run and index-validity preflight.
+- Controlled dry-run against production source.
+- Human review of findings and exact snapshot/hash.
+- Separate Apply decision.
+- Post-Apply event, ticket-type, mapping, lifecycle, and admin-visibility verification.
+- Redacted evidence and explicit certification verdict.
 
-**Likely repository scope:**
+**Out of scope:** automatic triggers, schedules, auto-apply policy, order backfill, dashboard work, and unrelated production-data correction.
 
-- `docs/ops/`
-- `docs/roadmap/`
-- existing production smoke/cutover scripts only when a missing safe check is proven
-
-**Must not:**
-
-- Change catalog semantics.
-- Auto-apply anything.
-- modify production mappings or orders outside the exact approved Apply.
-- cancel/edit production Oban jobs casually.
-- run broad historical corrections.
-
-**Exit gate:** Production catalog lifecycle is deployed, migration/index state is verified, one authoritative baseline has an approved result, and no unresolved blocker remains.
-
----
+**Exit gate:** `CERTIFIED — VS-26E.1 MAY START`, or a documented blocker/no-go that keeps downstream slices locked.
 
 ### Phase 1 — Automatic catalog creation and maintenance
 
 #### VS-26E.1 — Targeted WordPress Catalog Change Trigger
 
-**Outcome:** A catalog change in WordPress/Tickera produces a small authenticated notification that queues a targeted EventSales catalog discovery.
+**Outcome:** A Tickera event/product/variation lifecycle change sends a small authenticated trigger and queues targeted EventSales discovery.
 
-**Expected trigger coverage:**
+Rules:
 
-- Tickera event created or updated.
-- Ticket product created or updated.
-- Ticket variation created or updated.
-- Publication/private/draft status changed.
-- Product-to-event relationship changed.
+- Trigger is not catalog authority; EventSales fetches the signed authoritative feed.
+- Cover create/update, publication/private/draft transition, variation change, and product-to-event relationship change.
+- WordPress save requests do not wait for discovery.
+- Duplicate notifications are harmless.
+- No catalog Apply occurs inline.
 
-**Design constraints:**
-
-- The notification is a trigger, not catalog authority.
-- EventSales still fetches the authoritative sanitized catalog feed.
-- No full catalog payload is pushed through the notification.
-- Trigger delivery must be idempotent and bounded.
-- WordPress save hooks must not block on a long EventSales operation.
-- EventSales queues Oban work; it does not perform discovery inline in the HTTP request.
-- Existing full/product/event/updated-since feed scopes should be reused.
-
-**Likely files:**
-
-- `integrations/wordpress/eventsales-tickera-catalog-feed/eventsales-tickera-catalog-feed.php`
-- plugin README and catalog feed docs
-- a dedicated EventSales trigger controller/intake boundary
-- catalog sync queue facade and worker tests
-- router/runtime config only when required
-
-**Out of scope:**
-
-- Auto-apply policy.
-- Scheduled reconciliation.
-- Order webhooks.
-- Woo order catch-up.
-- Dashboard redesign.
-
-**Exit gate:** A safe targeted notification creates at most one appropriate active discovery run, duplicate notifications are harmless, and no catalog mutation occurs without the existing dry-run/apply machinery.
+**Exit gate:** a production live/public event change queues one bounded discovery, with private/draft transitions correctly represented for review.
 
 #### VS-26E.2 — Conservative Catalog Auto-Apply
 
-**Outcome:** Low-risk additive catalog changes apply automatically; ambiguous, risky, destructive, private, draft, subscription, payment-plan, or conflicting changes remain review-only.
+**Outcome:** Low-risk additive live/public catalog changes auto-apply; risky changes remain review-only.
 
-**Auto-apply candidates:**
+Possible safe candidates:
 
-- New published Tickera event.
-- New published simple ticket product.
-- New unambiguous published variation.
-- New ticket type with deterministic identity/name.
-- Conflict-free ProductMapping creation.
-- Safe additive metadata changes explicitly approved by policy.
+- New live/public Tickera event.
+- New unambiguous ticket product or variation.
+- Conflict-free ticket type and ProductMapping creation.
 
-**Must require review:**
+Always review:
 
-- Blocking or review-required findings.
+- Draft/private entities.
 - Product/event moves.
-- Duplicate or stale mapping conflicts.
-- Private/draft records.
-- Payment-plan, subscription, membership, add-on, bundle, or unknown semantics.
-- Ambiguous ticket naming.
-- Destructive deactivation or historical-impact changes.
+- Conflicts, ambiguous naming, destructive changes, unknown semantics, memberships, subscriptions, payment plans, bundles, and add-ons.
 
-**Likely files:**
-
-- `lib/event_sales/catalog/tickera_catalog/auto_apply_policy.ex`
-- `lib/event_sales/ingestion/tickera_catalog_auto_sync.ex`
-- catalog worker/facade and LiveView status rendering
-- policy, worker, and end-to-end tests
-
-**Out of scope:**
-
-- Changing Apply authority or exact-hash validation.
-- Editing historical mapped OrderItems.
-- Product semantics reclassification.
-- Recurring scheduling.
-
-**Exit gate:** Policy tests prove safe additive changes auto-apply and every risky category stops for human review.
+**Exit gate:** policy and end-to-end tests prove safe additions apply and every risky class stops.
 
 #### VS-26E.3 — Periodic Catalog Reconciliation Sweep
 
-**Outcome:** A durable periodic updated-since sweep catches missed catalog triggers without stampeding WordPress or overlapping active catalog runs.
+**Outcome:** A durable updated-since sweep recovers missed triggers without overlapping Catalog Sync runs or stampeding WordPress.
 
-**Initial operating target:**
+Initial target:
 
-- Trigger-driven discovery normally within two minutes.
-- Reconciliation recovery within fifteen minutes.
-- One active catalog run per source remains enforced.
+- Trigger-driven visibility within five minutes, preferably closer to two.
+- Missed-trigger recovery within fifteen minutes.
+- One queue-blocking catalog run per source.
 
-**Required behavior:**
-
-- Durable per-source watermark.
-- Bounded scheduled Oban worker.
-- Updated-since feed query.
-- Uniqueness and queue-exclusivity integration.
-- Safe retry lifecycle.
-- Admin visibility for last successful sweep, next/active state, and bounded errors.
-
-**Out of scope:**
-
-- WooCommerce order catch-up.
-- Full-feed scans every few minutes.
-- Redis as catalog truth.
-- Applying risky findings.
-
-**Exit gate:** A missed targeted trigger is recovered by the sweep and repeated schedules remain idempotent and source-safe.
-
----
+**Exit gate:** a deliberately missed trigger is recovered and repeated schedules remain idempotent.
 
 ### Phase 2 — Reliable near-live order truth
 
 #### VS-26F.1 — WooCommerce Order Catch-Up Core
 
-**Maps to:** Existing issue `#80`.
+**Maps to:** #80.
 
-**Outcome:** A durable updated-since cursor fetches missed or changed WooCommerce orders and routes every payload through the existing parser and `OrderUpserter` rather than creating a parallel sales writer.
+**Outcome:** A durable updated-since cursor fetches missed/changed orders through bounded REST and routes them through the existing parser and `OrderUpserter`.
 
-**Required behavior:**
+Required invariants:
 
-- Cursor per source system.
-- Safe initial lookback.
-- Bounded page size and REST concurrency maximum of two.
-- Cursor advances only after successful processing.
-- Stale source updates cannot overwrite newer local truth.
-- Retries and repeated runs remain idempotent.
-- Pending mappings remain pending rather than triggering catalog calls inline.
-- Safe progress and bounded error codes.
+- Cursor per source.
+- Maximum Woo REST concurrency two.
+- Bounded pages and safe initial overlap/lookback.
+- Advance cursor only after durable success.
+- Stale updates cannot overwrite newer truth.
+- Repeated runs do not duplicate orders/items.
 
-**Likely files:**
+**Exit gate:** a missed webhook update is repaired safely.
 
-- `lib/event_sales/ingestion/woo_order_catch_up.ex`
-- `lib/event_sales/ingestion/workers/woo_order_catch_up_worker.ex`
-- `lib/event_sales/ingestion/resources/woo_order_sync_cursor.ex`
-- existing `WooCommerceClient`
-- migration, resource, facade, and worker tests
+#### VS-26F.2 — Scheduled Catch-Up, Queued Refresh, and Live Status
 
-**Out of scope:**
+**Outcome:** Catch-up runs automatically and manual refresh queues bounded work whose progress/result updates open LiveViews automatically.
 
-- Webhook intake behavior changes.
-- New sales persistence path.
-- Dashboard aggregate redesign.
-- Historical multi-year backfill UX.
+Required behaviour:
 
-**Exit gate:** A missed update is repaired through REST, cursor advancement is crash-safe, and no duplicate order/item is created.
-
-#### VS-26F.2 — Scheduled Catch-Up and Admin Operations
-
-**Outcome:** The core cursor runs automatically on a conservative cadence and can be observed or manually requested safely by an administrator.
-
-**Required behavior:**
-
-- Periodic Oban schedule, initially around five minutes unless production evidence requires another cadence.
+- Conservative schedule around five minutes, adjusted by evidence.
 - One active catch-up run per source.
-- Manual queue action with rate limit and active-run protection.
-- Last successful cursor, active state, processed counts, lag, and safe error display.
-- PubSub-driven status where appropriate; no LiveView polling loop.
+- Rate-limited admin queue action.
+- Last-success watermark, lag, active state, counts, and bounded errors.
+- PubSub update when work starts/completes/fails and when affected read models refresh.
+- Stale banner clears without browser reload after fresh data arrives.
 
-**Out of scope:**
+**Exit gate:** missed updates recover and a queued refresh visibly completes in an already-open dashboard.
 
-- Large historical backfill.
-- Customer/order PII in status screens.
-- Raw REST payload display.
-
-**Exit gate:** Routine missed webhooks recover automatically and operators can see whether the source is current.
-
----
-
-### Phase 3 — Correct business semantics before richer reporting
+### Phase 3 — Product and order-line semantics
 
 #### VS-26G — Ticket, Payment-Plan, Membership, Add-On, and Renewal Semantics
 
-**Maps to:** Existing issue `#82`.
+**Maps to:** #82.
 
-**Outcome:** Explicitly classify which products and order lines count as event tickets and revenue, preventing memberships, renewals, payment plans, and unrelated products from inflating event sales.
+**Outcome:** Explicitly classify which products/order lines contribute tickets, sales, fees, tax, and status context.
 
-**Required decisions:**
+Conservative default: unknown/non-ticket semantics do not count as sold tickets until reviewed.
 
-- Ticket-count treatment for payment-plan initial checkout.
-- Revenue treatment for later instalments/renewals.
-- Membership/subscription reporting boundary.
-- Add-on and bundle semantics.
-- Historical data migration/reclassification policy.
-- Dashboard and export inclusion rules.
+This slice must lock tax-inclusive display, fee handling, partial/full refund treatment, variations, bundles, memberships, subscriptions, and payment plans before richer reporting.
 
-**Conservative default:** Unknown or risky products do not count as tickets until reviewed.
+**Exit gate:** tests make every inclusion/exclusion rule explicit and auditable.
 
-**Out of scope:**
-
-- Silent historical reclassification.
-- Payment authority changes.
-- Subscription billing implementation.
-
-**Exit gate:** Metric rules and tests make ticket and revenue inclusion explicit before decision-grade analytics are expanded.
-
----
-
-### Phase 4 — Decision-grade aggregates and event reporting
+### Phase 4 — Decision-grade metrics and dashboards
 
 #### VS-27B.1 — Event Sales Metric and Time-Window Contract
 
-**Outcome:** Define the exact business contract for totals and comparisons before building new tables or UI.
+**Outcome:** Define exact metrics and timestamps before new aggregate tables or UI.
 
-**Contract must define:**
+Must define:
 
-- Total sold and revenue.
-- Last 15, 30, and 60 minutes.
-- Today and yesterday in `Africa/Johannesburg`.
-- Rolling 7-day and selected-range totals.
-- Current period versus previous equivalent period.
-- Completed, pending, on-hold, cancelled, refunded, and failed display semantics.
-- Refund/cancellation treatment.
-- Ticket-type, product/variation, coupon, and campaign dimensions supported in v1.
-- Source watermark, freshness, partial-data, and stale-data semantics.
-- Revenue visibility and PII exclusion.
+- Completed-only ticket and revenue totals.
+- Operational status counts for pending, on-hold, failed, cancelled, and refunded.
+- Last 15/30/60 minutes; today/yesterday; rolling 7 days; bounded custom ranges.
+- Which completed/payment timestamp controls sale windows.
+- Which source-update timestamp controls freshness/status activity.
+- Refund/cancellation effects.
+- Tax-inclusive values and fee/tax presentation.
+- Previous-equivalent-period comparisons.
+- Stale threshold of ten minutes.
+- Query-range limits and maximum dimensional cardinality.
 
-**This is a contract/planning slice:** Do not build the final UI or a new aggregate engine until the contract is accepted.
-
-**Exit gate:** A reviewed document and contract tests define every metric displayed to management and marketing.
+**Exit gate:** reviewed contract and tests define every management-facing number.
 
 #### VS-27B.2 — Durable Hourly and Daily Event Sales Buckets
 
-**Outcome:** Add bounded durable aggregate buckets that support time-window reporting without repeatedly scanning raw sales rows from LiveView.
+**Outcome:** Durable bounded aggregates support all-event and event-level windows without scanning raw orders from LiveView.
 
-**Expected dimensions:**
-
-- Event.
-- Business date/hour.
-- Ticket type where required.
-- Order-status contribution.
-- Currency.
-- Optional coupon/campaign dimension only when cardinality and source truth are proven.
-
-**Rules:**
+Rules:
 
 - Aggregate only after durable order writes.
-- Updates must be idempotent under webhook retry and order update.
-- Changed/refunded/cancelled orders must recompute affected buckets correctly.
-- Postgres remains authoritative; hot caches mirror aggregate rows.
-- Rebuild/backfill capability must exist for selected events/ranges.
+- Correct affected buckets on status/refund changes.
+- Idempotent under duplicate delivery and replay.
+- Rebuild selected event/range safely.
+- Postgres remains authority; caches mirror.
 
-**Out of scope:**
-
-- Final dashboard layout.
-- Arbitrary analytics warehouse.
-- Unbounded dimensions.
-
-**Exit gate:** Tests prove real-time update, correction, rebuild, and comparison accuracy across order lifecycle changes.
+**Exit gate:** real-time, correction, comparison, and rebuild tests pass.
 
 #### VS-27B.3 — Event Sales Decision Dashboard
 
-**Outcome:** Enhance the event page into the primary decision surface for management and marketing.
+**Outcome:** Deliver all-event and per-event decision surfaces.
 
-**Required sections:**
+Core UI:
 
-- Total sold and revenue.
-- Last hour sold/revenue.
-- Today and yesterday.
-- Rolling/selected period comparison.
-- Sales velocity.
-- Hourly/daily trend chart.
-- Ticket-type performance.
-- Order-status, refund, and cancellation context.
-- Coupon/campaign performance where supported.
-- Recent order activity without default PII exposure.
-- Unmapped/partial-data warnings.
-- Source watermark and last-updated state.
+- Total tickets and revenue.
+- Last hour, today, yesterday, rolling and bounded selected range.
+- Current versus previous equivalent period.
+- Sales velocity and trend.
+- Product/ticket-type performance.
+- Status/refund/cancellation context.
+- Fees/tax where the source contract supports them.
+- Freshness watermark, ten-minute stale state, and queued-refresh status.
+- Automatic PubSub-driven updates.
 
-**Required filters:**
+Later dimensions such as coupon, UTM, campaign/source must only be enabled after source cardinality and persistence contracts are proven.
 
-- Preset and custom date/time range.
-- Ticket type.
-- Order status.
-- Coupon/campaign where supported.
-- Product/variation where useful.
-- Mapped/unmapped state for operational review.
+**Exit gate:** bounded queries support fifty concurrent viewers and open pages update without reload.
 
-**UI rules:**
+### Phase 5 — Access, targets, and notifications
 
-- Phoenix LiveView, Tailwind v4, vendored DaisyUI, Mishka hooks, and existing Chart.js pattern only.
-- No Woo/Tickera calls from UI.
-- No raw sales table scans from components.
-- PubSub updates only affected event data.
+#### VS-27C — Event-Scoped Management and Marketing Access
 
-**Exit gate:** An authorized user can keep the event page open and see safe, fresh, decision-useful updates after new sales arrive.
+**Outcome:** Add non-admin roles with event grants and revenue visibility rules, using the existing event-scoped facade and excluding customer PII.
 
----
+**Exit gate:** positive and negative policy tests prove event isolation and revenue restrictions.
 
-### Phase 5 — Management and marketing product access
+#### VS-27D — Targets, Pacing, and Notifications
 
-#### VS-27C — Event-Scoped Management and Marketing Dashboard Access
+**Outcome:** Allow authorised users to set event/ticket targets and receive auditable notifications for under/over-performance, threshold crossings, pacing changes, and selected operational freshness failures.
 
-**Outcome:** Deliver the decision dashboard through event-scoped authorization rather than requiring global-admin access.
+Rules:
 
-**Role intent:**
+- Use aggregate/read-model data, not raw order scans.
+- Deduplicate alerts and apply cooldowns.
+- Notifications never become sales truth.
+- Delivery channels and escalation rules require a separate reviewed contract.
 
-- Management: tickets, revenue, refunds/cancellations, trends, filters, and exports where granted.
-- Marketing: ticket counts, sales velocity, ticket/campaign performance, and revenue only when explicitly granted.
-- Event staff/owners: only assigned events.
+**Exit gate:** deterministic target evaluation and duplicate-safe alert evidence pass.
 
-**Security rules:**
+### Phase 6 — Launch backfill, import, export, and correction
 
-- Authorize before revealing whether an event UUID exists.
-- Use `EventScopedDashboard`/policy boundaries.
-- No customer names, email addresses, payment transaction IDs, raw payloads, tokens, or provider fields.
-- Revenue must follow `can_view_revenue?/2`.
-- Export authorization must match page authorization.
+#### VS-28A.1 — Current Public Event Backfill Core
 
-**Out of scope:**
+**Outcome:** Backfill WooCommerce orders for selected currently public events from each event's creation date through bounded, restartable Oban work.
 
-- Public dashboards.
-- Share-by-secret-link access.
-- Editing durable totals from the dashboard.
-- Customer CRM functionality.
+Explicit exclusions:
 
-**Exit gate:** Assigned management/marketing users can access only permitted event data with correct revenue visibility and no PII leakage.
+- Private events.
+- Old events not required for launch.
+- Unbounded multi-year/full-store import.
 
----
+**Exit gate:** a selected public event backfills idempotently with durable progress and safe resume.
 
-### Phase 6 — Historical backfill, imports, reconciliation, and exports
+#### VS-28A.2 — Backfill Admin Workflow
 
-#### VS-28A.1 — Historical WooCommerce REST Backfill Run Model
+**Outcome:** Admins can preview, queue, pause/cancel where safe, resume, and inspect event-scoped backfill without exposing raw payloads or PII.
 
-**Outcome:** Replace the placeholder backfill worker with a durable, bounded, operator-controlled historical order backfill.
+**Exit gate:** human workflow is bounded, audited, and fail-closed.
 
-**Required scope selectors:**
+#### VS-28B — CSV/XLSX Import, Filtered Exports, Reconciliation, and Corrections
 
-- Source system.
-- Date/time range.
-- Event/product/variation where the Woo API contract can support it safely.
-- Explicit dry-run/estimate when practical.
+**Outcome:** Extend existing import/export facilities for approved CSV/XLSX workflows, bounded filters, reconciliation evidence, issue flags, and audited corrections.
 
-**Required behavior:**
+Rules:
 
-- Durable run lifecycle and progress.
-- Keyset/page cursor rather than unbounded memory.
-- Existing parser and `OrderUpserter` only.
-- Restart/retry from durable progress.
-- One bounded source-level operation where necessary.
-- Safe partial/failure counts.
-- No direct dashboard or LiveView REST calls.
+- Dry-run before Apply.
+- No silent overwrite of durable source history.
+- Corrections preserve before/after audit and reason.
+- Export ranges/dimensions are bounded.
 
-**Exit gate:** A historical range can be imported safely without duplicate sales truth or an unobservable long-running request.
+**Exit gate:** imports, exports, flags, and corrections are reviewable and auditable.
 
-#### VS-28A.2 — Historical Backfill Admin Workflow
-
-**Outcome:** Add safe queue, progress, failure review, and restart controls for historical backfill runs.
-
-**Out of scope:**
-
-- Raw Woo payload browser.
-- Editing imported orders.
-- Unbounded full-history button without confirmation and safeguards.
-
-**Exit gate:** An operator can initiate and monitor an approved bounded backfill and recover safely after interruption.
-
-#### VS-28B — Filtered Event Exports and Reconciliation Pack
-
-**Outcome:** Export the same authorized metrics and filters shown on the event decision dashboard, with explicit source watermark and generation metadata.
-
-**Expected exports:**
-
-- Event summary.
-- Hourly/daily trend.
-- Ticket-type breakdown.
-- Status/refund/cancellation breakdown.
-- Coupon/campaign breakdown where supported.
-- Orders export under existing authorization/PII policy.
-- Unmapped/reconciliation report.
-
-**Rules:**
-
-- Export contract must match dashboard metric rules.
-- Large exports must stream or run asynchronously.
-- Audit export requests.
-- No raw provider payloads or secrets.
-
-**Exit gate:** Management can export a filtered report and reconcile it against the same durable metric contract shown in LiveView.
-
----
-
-### Phase 7 — Payload minimization and source-side enrichment
+### Phase 7 — Source-contract hardening
 
 #### VS-27A — Compact EventSales Order Webhook Contract
 
-**Maps to:** Existing issue `#81`.
+**Maps to:** #81.
 
-**Outcome:** WordPress emits a versioned, compact, PII-minimized order payload that preserves current EventSales order semantics and enriches line items with Tickera identity.
+**Outcome:** Reduce webhook payload exposure and ambiguity after the stable parser/catch-up/backfill semantics are known.
 
-**Why later:** The existing full WooCommerce webhook path already supports near-live sales. This slice improves privacy, payload size, and explicit source identity after catalog, catch-up, and reporting correctness are established.
+This remains late in the critical path to avoid changing the source contract while baseline recovery is still being proven.
 
-**Required compatibility:**
+**Exit gate:** compact and legacy contracts coexist or migrate safely without data loss.
 
-- Keep the existing Woo parser as fallback.
-- Route by explicit contract version.
-- Preserve order header, line financials, status timestamps, and coupons.
-- Keep webhook HMAC, delivery-id, replay, stale-version, persistence, and Oban semantics unchanged.
+## Operational Hardening Backlog
 
-**Exit gate:** Compact and full payloads produce semantically equivalent durable orders/items/coupons while the compact payload excludes unnecessary PII and provider noise.
+- #100 — searchable/paginated unmapped catalog selectors when catalog cardinality requires it.
+- #101 — bounded Oban unmapped recovery if production tuples threaten web-process limits.
+- #70 — direct WordPress MySQL adapter remains contingency-only while the signed feed is viable.
 
-## Parallel Operational Hardening Backlog
+Any production evidence that shows these are blockers may promote them ahead of the normal sequence.
 
-The following open issues remain valuable but do not block the critical programme unless production scale makes them immediate:
-
-- `#100` — Searchable/paginated catalog selectors for unmapped-alert resolution.
-- `#101` — Bounded Oban recovery for large unmapped-alert workloads.
-
-They should be scheduled when either:
-
-- catalog/event count exceeds the current selector bounds;
-- recovery sets approach LiveView timeout or memory risk;
-- production evidence elevates them above the next critical-path slice.
-
-The old direct WordPress MySQL evaluation (`#70`) should not be treated as the default path while the signed sanitized feed architecture remains viable.
-
-## Dependency Graph
+## Per-Slice Delivery Flow
 
 ```text
-VS-26E.0 Production baseline certification
-  -> VS-26E.1 Targeted catalog trigger
-  -> VS-26E.2 Conservative auto-apply
-  -> VS-26E.3 Periodic catalog reconciliation
-  -> VS-26F.1 Order catch-up core
-  -> VS-26F.2 Scheduled/admin catch-up
-  -> VS-26G Product semantics
-  -> VS-27B.1 Metric/time-window contract
-  -> VS-27B.2 Hourly/daily aggregates
-  -> VS-27B.3 Decision dashboard
-  -> VS-27C Event-scoped management/marketing access
-  -> VS-28A.1 Historical backfill core
-  -> VS-28A.2 Historical backfill admin workflow
-  -> VS-28B Filtered exports/reconciliation
-  -> VS-27A Compact webhook contract
+Linear parent/child gate
+-> current-main repository audit
+-> canonical pack source PR
+-> immutable versioned ZIP + SHA-256
+-> independent pack review
+-> planning/reconnaissance agent only
+-> human plan review
+-> implementation or bounded execution
+-> independent exact-head review
+-> merge
+-> authorised deployment/migration
+-> production validation
+-> Linear and roadmap closeout
+-> next pack
 ```
 
-Some implementation work may eventually be parallelizable, but this programme intentionally uses a single active-slice policy until production behavior is stable.
+## Immediate Next Action
 
-## Per-Slice Delivery Workflow
+Only `VS-26E.0` is active.
 
-Every slice follows the same gates.
+1. Merge this planning PR after exact-head review and green CI.
+2. Refresh the VS-26E.0 pack against the new `main` merge SHA.
+3. Generate its immutable ZIP and record SHA-256 in Linear issue `JC-106`.
+4. Complete independent pack review `JC-107`.
+5. Give the approved ZIP to the planning agent for `JC-108` only.
 
-### Gate 1 — Repository audit
-
-- Confirm clean worktree.
-- Run `bash scripts/sync_with_origin_main.sh --check`.
-- Record exact `main` SHA.
-- Read `AGENTS.md` and canonical docs.
-- Inspect every relevant current implementation and test file.
-- Confirm related issue/PR state and production evidence.
-
-### Gate 2 — Feature pack
-
-Create a docs-only feature pack using `docs/feature_packs/EVENTSALES_FEATURE_PACK_STANDARD.md`.
-
-The pack must include exact repo truth, files, contracts, invariants, TDD sequence, tests, verification, deployment, rollback, stop conditions, and coding-agent prompts.
-
-No business implementation begins until the pack is reviewed and accepted.
-
-### Gate 3 — TDD implementation
-
-- Create a dedicated branch from the accepted baseline.
-- Add failing tests first.
-- Implement only the accepted slice.
-- Keep unrelated refactors out.
-- Generate only required Ash/project artifacts.
-
-### Gate 4 — Local validation
-
-At minimum:
-
-```bash
-mix format --check-formatted
-mix compile --warnings-as-errors
-bash scripts/check_no_web_woocommerce_refs.sh
-mix test <focused tests>
-mix test
-bash scripts/local_ci.sh
-```
-
-Add PHP, asset, migration, security, or performance commands required by the specific pack.
-
-### Gate 5 — PR and independent review
-
-- Push without force.
-- Open/update PR with exact scope and evidence.
-- Require green CI.
-- Re-review the final exact head.
-- Resolve every blocker/major finding.
-- No merge on stale head or failed CI.
-
-### Gate 6 — Deploy and production validation
-
-- Follow the pack rollout plan.
-- Apply migrations through the approved direct/session-capable path when needed.
-- Run only authorized production actions.
-- Capture sanitized evidence.
-- Stop on defined safety conditions.
-
-### Gate 7 — Close and advance
-
-- Update the Kanban status and roadmap evidence.
-- Close the owning issue only after production acceptance, not merely merge.
-- Start the next feature pack only after the current slice reaches Done or is explicitly deferred with documented risk.
-
-## Definition of Done
-
-A slice is Done only when:
-
-- Its feature pack was approved.
-- Tests were written first or adjusted before logic.
-- Required implementation is merged.
-- Exact-head CI is green.
-- Required migrations/config are deployed.
-- Production validation passed or an explicit risk acceptance is recorded.
-- Security/PII rules were checked.
-- Operational runbooks and evidence are current.
-- Roadmap/Kanban status is updated.
-- No unresolved blocker remains for the next slice.
+Do not begin VS-26E.1 until VS-26E.0 is operationally certified.
