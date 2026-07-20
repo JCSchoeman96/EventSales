@@ -1,9 +1,11 @@
 defmodule EventSales.Ingestion.Workers.CatalogChangeDispatchWorkerTest do
   use EventSales.DataCase, async: false
   use Oban.Testing, repo: EventSales.Repo
+  import Ecto.Query
 
   alias EventSales.Ingestion
   alias EventSales.Ingestion.CatalogChangeDispatch
+  alias EventSales.Ingestion.CatalogChangeIntake
   alias EventSales.Ingestion.Resources.{CatalogChangePendingTarget, TickeraCatalogSyncRun}
   alias EventSales.Ingestion.Workers.CatalogChangeDispatchWorker
   alias EventSales.TestSupport.SalesHelpers
@@ -163,6 +165,59 @@ defmodule EventSales.Ingestion.Workers.CatalogChangeDispatchWorkerTest do
     assert Ash.get!(CatalogChangePendingTarget, second.id, domain: Ingestion).state == :queued
   end
 
+  test "intake inserts a successor while the current source dispatcher is executing" do
+    source = SalesHelpers.create_source_system!()
+    configure_dispatcher(true, quiet_window_seconds: 0)
+
+    current =
+      %{"source_system_id" => source.id}
+      |> CatalogChangeDispatchWorker.new()
+      |> Oban.insert!()
+
+    EventSales.Repo.update_all(
+      from(job in Oban.Job, where: job.id == ^current.id),
+      set: [state: "executing"]
+    )
+
+    payload = %{
+      "version" => "2026-07-20.v1",
+      "signal_id" => Ecto.UUID.generate(),
+      "source" => "wordpress_tickera",
+      "target_type" => "product",
+      "target_id" => 987,
+      "source_updated_at" => DateTime.utc_now() |> DateTime.to_iso8601(),
+      "reason" => "metadata_changed"
+    }
+
+    assert {:ok, :accepted} =
+             CatalogChangeIntake.persist(source.id, Jason.encode!(payload), payload)
+
+    jobs =
+      EventSales.Repo.all(
+        from(job in Oban.Job,
+          where:
+            job.worker == ^current.worker and
+              fragment("?->>'source_system_id' = ?", job.args, ^source.id),
+          order_by: [asc: job.id]
+        )
+      )
+
+    assert Enum.map(jobs, & &1.state) == ["executing", "available"]
+    successor = Enum.find(jobs, &(&1.state == "available"))
+    refute successor.conflict?
+
+    EventSales.Repo.update_all(
+      from(job in Oban.Job, where: job.id == ^current.id),
+      set: [state: "completed"]
+    )
+
+    assert {:snooze, 60} =
+             perform_job(CatalogChangeDispatchWorker, %{"source_system_id" => source.id})
+
+    assert {:ok, [target]} = Ash.read(CatalogChangePendingTarget, domain: Ingestion)
+    assert target.state == :queued
+  end
+
   defp create_target!(source_id, age_seconds \\ 10) do
     now = DateTime.add(DateTime.utc_now(), -age_seconds, :second)
 
@@ -190,7 +245,7 @@ defmodule EventSales.Ingestion.Workers.CatalogChangeDispatchWorkerTest do
     )
   end
 
-  defp configure_dispatcher(enabled) do
+  defp configure_dispatcher(enabled, extra_config \\ []) do
     current = Application.get_env(:event_sales, :catalog_change_trigger, [])
 
     Application.put_env(
@@ -201,6 +256,7 @@ defmodule EventSales.Ingestion.Workers.CatalogChangeDispatchWorkerTest do
         dispatcher_enabled: enabled,
         active_run_recheck_seconds: 60
       )
+      |> Keyword.merge(extra_config)
     )
   end
 end

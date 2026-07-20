@@ -7,7 +7,7 @@ defmodule EventSales.Ingestion.Workers.CatalogChangeDispatchWorker do
       period: :infinity,
       fields: [:args],
       keys: [:source_system_id],
-      states: ~w(available scheduled executing retryable)a
+      states: ~w(available scheduled retryable)a
     ]
 
   @impl true
