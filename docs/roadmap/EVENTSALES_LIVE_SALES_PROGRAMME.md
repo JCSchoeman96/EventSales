@@ -203,6 +203,8 @@ The programme is complete when:
 
 **Exit gate:** `CERTIFIED — VS-26E.1 MAY START`, or a documented blocker/no-go that keeps downstream slices locked.
 
+**Certified 20 July 2026:** VS-26E.0 passed with verdict `CERTIFIED — VS-26E.1 MAY START` on production SHA `59a55523d2afe53f08e2f82becef5adec2bed0d6`. The exact applied run was `bed002e4-8bf2-4356-b59b-2b6959948b3b` with dry-run hash `487b10f88f8df87eef8502f8e35ee306e744338c3f3d64f5636128bc5dea64ce`. The certified catalogue baseline is 10 Events, 31 TicketTypes, and 31 ProductMappings.
+
 ### Phase 1 — Automatic catalog creation and maintenance
 
 #### VS-26E.1 — Targeted WordPress Catalog Change Trigger
@@ -447,12 +449,9 @@ Linear parent/child gate
 
 ## Immediate Next Action
 
-Only `VS-26E.0` is active.
+`VS-26E.0` is certified and closed. `VS-26E.1` may proceed through its explicit gates; this certification does not bypass pack, plan, activation, merge, or production approvals.
 
-1. Merge this planning PR after exact-head review and green CI.
-2. Refresh the VS-26E.0 pack against the new `main` merge SHA.
-3. Generate its immutable ZIP and record SHA-256 in Linear issue `JC-106`.
-4. Complete independent pack review `JC-107`.
-5. Give the approved ZIP to the planning agent for `JC-108` only.
-
-Do not begin VS-26E.1 until VS-26E.0 is operationally certified.
+1. Complete independent VS-26E.1 pack review in `JC-115`.
+2. If approved, continue to the reconnaissance and plan gate `JC-116`.
+3. Keep implementation blocked until `JC-123` refreshes the exact baseline and issues an approved activation supplement.
+4. Preserve the existing no-auto-apply and single catalogue-writer boundaries.
