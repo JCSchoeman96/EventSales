@@ -95,14 +95,13 @@ final class EventSales_Tickera_Catalog_Feed
         if (wp_is_post_autosave($post_id) || wp_is_post_revision($post_id)) {
             return;
         }
-        $post_type = get_post_type($post_id);
-        $types = ['tc_events' => 'event', 'product' => 'product', 'product_variation' => 'variation'];
-        if (!isset($types[$post_type])) {
+        $target_type = self::catalog_target_type($post_id);
+        if ($target_type === null) {
             return;
         }
         self::$catalog_change_sequence++;
-        $key = $types[$post_type] . ':' . $post_id;
-        $candidate = ['target_type' => $types[$post_type], 'target_id' => $post_id,
+        $key = $target_type . ':' . $post_id;
+        $candidate = ['target_type' => $target_type, 'target_id' => $post_id,
             'reason' => $reason, 'priority' => self::reason_priority($reason),
             'sequence' => self::$catalog_change_sequence, 'source_updated_at' => gmdate('Y-m-d\TH:i:s.u\Z')];
         $current = self::$catalog_change_targets[$key] ?? null;
@@ -114,13 +113,32 @@ final class EventSales_Tickera_Catalog_Feed
 
     public static function record_status_change(string $new_status, string $old_status, WP_Post $post): void
     {
-        if ($new_status !== $old_status) self::record_catalog_change((int) $post->ID, 'status_changed');
+        if ($new_status !== $old_status) {
+            self::invalidate_and_record((int) $post->ID, 'status_changed');
+        }
     }
 
     public static function record_meta_change($meta_id, int $post_id, string $meta_key): void
     {
         $allowed = array_merge(self::ALLOWED_META_KEYS, self::ALLOWED_EVENT_META_KEYS, ['_tc_is_ticket', '_event_name']);
-        if (in_array($meta_key, $allowed, true)) self::record_catalog_change($post_id, 'metadata_changed');
+        if (in_array($meta_key, $allowed, true)) {
+            self::invalidate_and_record($post_id, 'metadata_changed');
+        }
+    }
+
+    public static function record_trashed(int $post_id): void
+    {
+        self::invalidate_and_record($post_id, 'trashed');
+    }
+
+    public static function record_restored(int $post_id): void
+    {
+        self::invalidate_and_record($post_id, 'restored');
+    }
+
+    public static function record_deleted(int $post_id): void
+    {
+        self::invalidate_and_record($post_id, 'deleted');
     }
 
     public static function flush_catalog_changes(): void
@@ -168,6 +186,22 @@ final class EventSales_Tickera_Catalog_Feed
     {
         return ['saved' => 1, 'metadata_changed' => 2, 'status_changed' => 3,
             'trashed' => 4, 'restored' => 4, 'deleted' => 5][$reason] ?? 1;
+    }
+
+    private static function invalidate_and_record(int $post_id, string $reason): void
+    {
+        if (self::catalog_target_type($post_id) === null) {
+            return;
+        }
+
+        self::invalidate_cache();
+        self::record_catalog_change($post_id, $reason);
+    }
+
+    private static function catalog_target_type(int $post_id): ?string
+    {
+        $types = ['tc_events' => 'event', 'product' => 'product', 'product_variation' => 'variation'];
+        return $types[get_post_type($post_id)] ?? null;
     }
 
     public function handle_request(WP_REST_Request $request): WP_REST_Response
@@ -946,8 +980,8 @@ add_action('transition_post_status', ['EventSales_Tickera_Catalog_Feed', 'record
 add_action('added_post_meta', ['EventSales_Tickera_Catalog_Feed', 'record_meta_change'], 10, 3);
 add_action('updated_post_meta', ['EventSales_Tickera_Catalog_Feed', 'record_meta_change'], 10, 3);
 add_action('deleted_post_meta', ['EventSales_Tickera_Catalog_Feed', 'record_meta_change'], 10, 3);
-add_action('trashed_post', static fn($id) => EventSales_Tickera_Catalog_Feed::record_catalog_change((int) $id, 'trashed'));
-add_action('untrashed_post', static fn($id) => EventSales_Tickera_Catalog_Feed::record_catalog_change((int) $id, 'restored'));
-add_action('before_delete_post', static fn($id) => EventSales_Tickera_Catalog_Feed::record_catalog_change((int) $id, 'deleted'));
+add_action('trashed_post', ['EventSales_Tickera_Catalog_Feed', 'record_trashed']);
+add_action('untrashed_post', ['EventSales_Tickera_Catalog_Feed', 'record_restored']);
+add_action('before_delete_post', ['EventSales_Tickera_Catalog_Feed', 'record_deleted']);
 add_action('shutdown', ['EventSales_Tickera_Catalog_Feed', 'flush_catalog_changes']);
 add_action('eventsales_catalog_change_deliver', ['EventSales_Tickera_Catalog_Feed', 'deliver_catalog_change'], 10, 2);

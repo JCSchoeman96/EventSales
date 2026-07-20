@@ -862,7 +862,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: `perform/1`
+  - public_funs: `perform/2`
   - uses: _none_
 - `EventSales.Ingestion.CatalogChangeIntake` - `lib/event_sales/ingestion/catalog_change_intake.ex`
   - moduledoc?: true

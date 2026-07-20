@@ -47,28 +47,15 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
 
   def queue_triggered_dry_run(pending_target_id, expected_generation, opts \\ []) do
     result =
-      Repo.transaction(fn ->
-        with :ok <- lock_pending_target(pending_target_id),
-             {:ok, %CatalogChangePendingTarget{} = target} <-
-               Ash.get(CatalogChangePendingTarget, pending_target_id, domain: Ingestion),
-             true <- target.generation == expected_generation,
-             :ok <- validate_trigger_source(target.source_system_id),
-             {:ok, scope} <- triggered_scope(target),
-             {:ok, run, run_notifications} <- create_run(target.source_system_id, scope, opts),
-             {:ok, job} <- enqueue_discovery(run, opts),
-             {:ok, linked, target_notifications} <- link_triggered_target(target, run.id) do
-          %{
-            run: run,
-            job: job,
-            target: linked,
-            notifications: run_notifications ++ target_notifications
-          }
-        else
-          false -> Repo.rollback(:stale_generation)
-          {:ok, nil} -> Repo.rollback(:not_found)
-          {:error, reason} -> Repo.rollback(reason)
-        end
-      end)
+      with :ok <-
+             run_before_job_insert_hook(
+               opts,
+               :before_trigger_lock,
+               :invalid_before_trigger_lock_hook,
+               :invalid_before_trigger_lock_result
+             ) do
+        queue_triggered_transaction(pending_target_id, expected_generation, opts)
+      end
 
     case result do
       {:ok, %{notifications: notifications} = value} ->
@@ -76,9 +63,40 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
         {:ok, Map.delete(value, :notifications)}
 
       {:error, reason} ->
-        {:error, queue_error(reason)}
+        {:error, triggered_queue_error(reason)}
     end
   end
+
+  defp queue_triggered_transaction(pending_target_id, expected_generation, opts) do
+    Repo.transaction(fn ->
+      with :ok <- lock_pending_target(pending_target_id),
+           {:ok, %CatalogChangePendingTarget{} = target} <-
+             Ash.get(CatalogChangePendingTarget, pending_target_id, domain: Ingestion),
+           true <- target.generation == expected_generation,
+           :ok <- validate_trigger_source(target.source_system_id),
+           {:ok, scope} <- triggered_scope(target),
+           {:ok, run, run_notifications} <- create_run(target.source_system_id, scope, opts),
+           {:ok, job} <- enqueue_discovery(run, opts),
+           {:ok, linked, target_notifications} <- link_triggered_target(target, run.id) do
+        %{
+          run: run,
+          job: job,
+          target: linked,
+          notifications: run_notifications ++ target_notifications
+        }
+      else
+        false -> Repo.rollback(:stale_generation)
+        {:ok, nil} -> Repo.rollback(:not_found)
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+  end
+
+  defp triggered_queue_error(:stale_generation), do: :stale_generation
+  defp triggered_queue_error(:not_found), do: :not_found
+  defp triggered_queue_error(:invalid_scope), do: :invalid_scope
+  defp triggered_queue_error(:source_not_eligible), do: :source_not_eligible
+  defp triggered_queue_error(reason), do: queue_error(reason)
 
   defp triggered_scope(%{target_type: :event, target_id: id}),
     do: {:ok, %{"kind" => "wordpress_feed", "event_id" => id}}

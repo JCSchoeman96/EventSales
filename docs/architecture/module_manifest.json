@@ -1970,7 +1970,7 @@
       "path": "lib/event_sales/ingestion/catalog_change_dispatch.ex",
       "public_funs": [
         {
-          "arity": 1,
+          "arity": 2,
           "name": "perform"
         }
       ],

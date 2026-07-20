@@ -7,65 +7,98 @@ defmodule EventSales.Ingestion.CatalogChangeDispatch do
 
   @active [:queued, :discovering, :retry_scheduled, :dry_run_ready, :applying]
 
-  def perform(source_system_id) do
+  def perform(source_system_id, opts \\ []) do
     if enabled?() do
       case next_target(source_system_id) do
-        nil -> :ok
-        target -> dispatch(target)
+        {:ok, nil} -> :ok
+        {:ok, target} -> dispatch(target, opts)
+        {:error, reason} -> {:error, reason}
       end
     else
-      :ok
+      {:snooze, recheck_seconds()}
     end
   end
 
-  defp dispatch(%{catalog_sync_run_id: run_id} = target) when not is_nil(run_id) do
-    case Ash.get(TickeraCatalogSyncRun, run_id, domain: Ingestion) do
-      {:ok, %{status: :dry_run_ready}} when target.generation == target.dispatched_generation ->
-        update(target, %{state: :preview_ready, recheck_at: nil})
-        :ok
-
-      {:ok, %{status: status}} when status in @active ->
-        update(target, %{
-          state:
-            if(target.generation > target.dispatched_generation, do: :deferred, else: :queued),
-          recheck_at: recheck_at()
-        })
-
-        {:snooze, recheck_seconds()}
-
-      {:ok, %{status: status}} when status in [:applied, :cancelled, :failed] ->
-        if target.generation > target.dispatched_generation do
-          update(target, %{state: :pending, catalog_sync_run_id: nil, recheck_at: nil})
-          dispatch(%{target | catalog_sync_run_id: nil})
-        else
-          update(target, %{state: :settled, recheck_at: nil})
-          :ok
-        end
-
-      _ ->
-        {:snooze, recheck_seconds()}
-    end
+  defp dispatch(%{catalog_sync_run_id: run_id} = target, opts) when not is_nil(run_id) do
+    TickeraCatalogSyncRun
+    |> Ash.get(run_id, domain: Ingestion)
+    |> reconcile_linked_run(target, opts)
   end
 
-  defp dispatch(target) do
+  defp dispatch(target, opts) do
     now = DateTime.utc_now()
 
     if DateTime.compare(target.quiet_until, now) == :gt do
       {:snooze, max(1, min(recheck_seconds(), DateTime.diff(target.quiet_until, now, :second)))}
     else
-      queue_or_defer(target, active_run(target.source_system_id))
+      case active_run(target.source_system_id) do
+        {:ok, run} -> queue_or_defer(target, run, opts)
+        {:error, reason} -> {:error, reason}
+      end
     end
   end
 
-  defp queue_or_defer(target, nil) do
-    case TickeraCatalogSync.queue_triggered_dry_run(target.id, target.generation) do
-      {:ok, _} -> {:snooze, recheck_seconds()}
-      {:error, :catalog_sync_already_active} -> defer(target)
-      {:error, _} -> fail(target)
+  defp reconcile_linked_run(
+         {:ok, %{status: :dry_run_ready}},
+         %{generation: generation, dispatched_generation: generation} = target,
+         opts
+       ),
+       do: transition_result(target, %{state: :preview_ready, recheck_at: nil}, opts, :ok)
+
+  defp reconcile_linked_run({:ok, %{status: status}}, target, opts) when status in @active do
+    state = if target.generation > target.dispatched_generation, do: :deferred, else: :queued
+
+    transition_result(
+      target,
+      %{state: state, recheck_at: recheck_at()},
+      opts,
+      {:snooze, recheck_seconds()}
+    )
+  end
+
+  defp reconcile_linked_run({:ok, %{status: status}}, target, opts)
+       when status in [:applied, :cancelled, :failed],
+       do: reconcile_terminal_run(target, opts)
+
+  defp reconcile_linked_run({:ok, _run}, _target, _opts), do: {:snooze, recheck_seconds()}
+  defp reconcile_linked_run({:error, reason}, _target, _opts), do: {:error, reason}
+
+  defp reconcile_terminal_run(target, opts)
+       when target.generation > target.dispatched_generation do
+    case update(target, %{state: :pending, catalog_sync_run_id: nil, recheck_at: nil}, opts) do
+      {:ok, updated} -> dispatch(updated, opts)
+      {:error, reason} -> {:error, reason}
     end
   end
 
-  defp queue_or_defer(target, _active_run), do: defer(target)
+  defp reconcile_terminal_run(target, opts),
+    do: transition_result(target, %{state: :settled, recheck_at: nil}, opts, :ok)
+
+  defp queue_or_defer(target, nil, opts) do
+    queue_opts = Keyword.get(opts, :queue_opts, [])
+
+    case TickeraCatalogSync.queue_triggered_dry_run(target.id, target.generation, queue_opts) do
+      {:ok, _} ->
+        {:snooze, recheck_seconds()}
+
+      {:error, :catalog_sync_already_active} ->
+        defer(target, opts)
+
+      {:error, :stale_generation} ->
+        {:snooze, 1}
+
+      {:error, :not_found} ->
+        :discard
+
+      {:error, reason} when reason in [:invalid_scope, :source_not_eligible] ->
+        fail(target, opts)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp queue_or_defer(target, _active_run, opts), do: defer(target, opts)
 
   defp next_target(source_id) do
     CatalogChangePendingTarget
@@ -75,10 +108,6 @@ defmodule EventSales.Ingestion.CatalogChangeDispatch do
     |> Ash.Query.sort(quiet_until: :asc, first_received_at: :asc, id: :asc)
     |> Ash.Query.limit(1)
     |> Ash.read_one(domain: Ingestion)
-    |> case do
-      {:ok, value} -> value
-      _ -> nil
-    end
   end
 
   defp active_run(source_id) do
@@ -86,29 +115,39 @@ defmodule EventSales.Ingestion.CatalogChangeDispatch do
     |> Ash.Query.filter(source_system_id == ^source_id and status in ^@active)
     |> Ash.Query.limit(1)
     |> Ash.read_one(domain: Ingestion)
-    |> case do
-      {:ok, value} -> value
-      _ -> nil
+  end
+
+  defp defer(target, opts),
+    do:
+      transition_result(
+        target,
+        %{state: :deferred, recheck_at: recheck_at()},
+        opts,
+        {:snooze, recheck_seconds()}
+      )
+
+  defp fail(target, opts),
+    do:
+      transition_result(
+        target,
+        %{state: :failed, recheck_at: nil, last_error: "catalog_change_dispatch_failed"},
+        opts,
+        :discard
+      )
+
+  defp transition_result(target, attrs, opts, success_result) do
+    case update(target, attrs, opts) do
+      {:ok, _updated} -> success_result
+      {:error, reason} -> {:error, reason}
     end
   end
 
-  defp defer(target) do
-    update(target, %{state: :deferred, recheck_at: recheck_at()})
-    {:snooze, recheck_seconds()}
+  defp update(target, attrs, opts) do
+    case Keyword.get(opts, :transition_fun) do
+      fun when is_function(fun, 2) -> fun.(target, attrs)
+      nil -> Ash.update(target, attrs, action: :transition, domain: Ingestion)
+    end
   end
-
-  defp fail(target) do
-    update(target, %{
-      state: :failed,
-      recheck_at: nil,
-      last_error: "catalog_change_dispatch_failed"
-    })
-
-    :discard
-  end
-
-  defp update(target, attrs),
-    do: Ash.update(target, attrs, action: :transition, domain: Ingestion)
 
   defp recheck_at, do: DateTime.add(DateTime.utc_now(), recheck_seconds(), :second)
 
