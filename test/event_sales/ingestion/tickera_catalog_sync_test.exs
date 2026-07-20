@@ -49,6 +49,38 @@ defmodule EventSales.Ingestion.TickeraCatalogSyncTest do
     )
   end
 
+  test "queue_triggered_dry_run atomically links an exact target without an admin", %{
+    source: source
+  } do
+    now = DateTime.utc_now()
+
+    {:ok, target} =
+      Ash.create(
+        EventSales.Ingestion.Resources.CatalogChangePendingTarget,
+        %{
+          source_system_id: source.id,
+          target_type: :product,
+          target_id: 321,
+          latest_source_updated_at: now,
+          latest_reason: :saved,
+          first_received_at: now,
+          last_received_at: now,
+          quiet_until: now
+        },
+        action: :create,
+        domain: EventSales.Ingestion
+      )
+
+    assert {:ok, %{run: run, target: linked}} =
+             TickeraCatalogSync.queue_triggered_dry_run(target.id, 1)
+
+    assert run.scope == %{"kind" => "wordpress_feed", "product_id" => 321}
+    assert is_nil(run.requested_by_user_id)
+    assert linked.catalog_sync_run_id == run.id
+    assert linked.dispatched_generation == 1
+    assert linked.state == :queued
+  end
+
   test "queue_dry_run commits one queued run and one real Oban job", %{
     admin: admin,
     source: source

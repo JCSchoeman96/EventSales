@@ -96,6 +96,15 @@ config :event_sales, :webhook_intake_rate_limit,
   adapter: EventSales.Ingestion.RedisRateLimiter.RedixAdapter,
   redis_url: nil
 
+config :event_sales, :catalog_change_trigger,
+  receiver_enabled: false,
+  dispatcher_enabled: false,
+  max_body_bytes: 4_096,
+  replay_window_seconds: 300,
+  quiet_window_seconds: 5,
+  active_run_recheck_seconds: 60,
+  max_dispatch_attempts: 100
+
 config :event_sales, :admin_http_rate_limit,
   window_ms: 30_000,
   max_requests: 10

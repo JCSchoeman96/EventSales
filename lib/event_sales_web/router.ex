@@ -35,6 +35,10 @@ defmodule EventSalesWeb.Router do
     plug EventSalesWeb.Plugs.RateLimitWebhookIntake
   end
 
+  pipeline :catalog_change_intake do
+    plug EventSalesWeb.Plugs.RateLimitCatalogChangeIntake
+  end
+
   pipeline :internal_admin_tools do
     plug EventSalesWeb.Plugs.InternalOnly
     plug EventSalesWeb.Plugs.LoadCurrentUser
@@ -54,6 +58,11 @@ defmodule EventSalesWeb.Router do
     pipe_through :webhook_intake
 
     post "/woocommerce/:path_token", WebhookController, :woocommerce
+  end
+
+  scope "/webhooks", EventSalesWeb do
+    pipe_through :catalog_change_intake
+    post "/catalog-change/:path_token", CatalogChangeController, :create
   end
 
   scope "/", EventSalesWeb do

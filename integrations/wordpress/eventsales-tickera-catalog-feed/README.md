@@ -1,5 +1,13 @@
 # EventSales Tickera Catalog Feed
 
+## Asynchronous change trigger
+
+The optional catalogue-change sender coalesces relevant event, product and
+variation hooks by target and enqueues delivery at WordPress shutdown. Configure
+its dedicated endpoint, path token, key ID and secret, then explicitly enable
+`EVENTSALES_CATALOG_CHANGE_SENDER_ENABLED`. It never sends catalogue rows or
+customer/order/payment data and never performs HTTP inside a save callback.
+
 WordPress plugin artifact for VS-26C. It exposes a sanitized Tickera/WooCommerce catalog feed that EventSales can consume in a later adapter slice.
 
 This plugin does not send order, customer, payment, webhook, ticket delivery, QR, token, or raw provider payload data.

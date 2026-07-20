@@ -19,6 +19,8 @@ defmodule EventSales.Ingestion do
     resource EventSales.Ingestion.Resources.TickeraReconciliationFinding
     resource EventSales.Ingestion.Resources.TickeraCatalogSyncRun
     resource EventSales.Ingestion.Resources.TickeraCatalogSyncFinding
+    resource EventSales.Ingestion.Resources.CatalogChangePendingTarget
+    resource EventSales.Ingestion.Resources.CatalogChangeSignal
     resource EventSales.Ingestion.Resources.CsvImportBatch
     resource EventSales.Ingestion.Resources.CsvImportRow
   end

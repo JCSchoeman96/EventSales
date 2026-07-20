@@ -393,6 +393,30 @@
       {
         "docs_count": 0,
         "moduledoc?": true,
+        "name": "EventSales.Ingestion.Resources.CatalogChangePendingTarget",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/resources/catalog_change_pending_target.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Ingestion.Resources.CatalogChangeSignal",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/resources/catalog_change_signal.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
         "name": "EventSales.Ingestion.Resources.CsvImportBatch",
         "parse_error": null,
         "path": "lib/event_sales/ingestion/resources/csv_import_batch.ex",
@@ -780,6 +804,23 @@
           {
             "arity": 3,
             "name": "fail_run"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Oban.Worker"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Ingestion.Workers.CatalogChangeDispatchWorker",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/workers/catalog_change_dispatch_worker.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "perform"
           }
         ],
         "specs?": false,
@@ -1783,6 +1824,23 @@
       },
       {
         "docs_count": 0,
+        "moduledoc?": false,
+        "name": "EventSalesWeb.CatalogChangeController",
+        "parse_error": null,
+        "path": "lib/event_sales_web/controllers/catalog_change_controller.ex",
+        "public_funs": [
+          {
+            "arity": 2,
+            "name": "create"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "EventSalesWeb"
+        ]
+      },
+      {
+        "docs_count": 0,
         "moduledoc?": true,
         "name": "EventSalesWeb.ErrorHTML",
         "parse_error": null,
@@ -2259,6 +2317,25 @@
         "name": "EventSalesWeb.Plugs.LoadCurrentUser",
         "parse_error": null,
         "path": "lib/event_sales_web/plugs/load_current_user.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "init"
+          },
+          {
+            "arity": 2,
+            "name": "call"
+          }
+        ],
+        "specs?": false,
+        "uses": []
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSalesWeb.Plugs.RateLimitCatalogChangeIntake",
+        "parse_error": null,
+        "path": "lib/event_sales_web/plugs/rate_limit_catalog_change_intake.ex",
         "public_funs": [
           {
             "arity": 1,

@@ -25,6 +25,8 @@ if (!defined('EVENTSALES_TICKERA_CATALOG_ROUTE')) {
 
 final class EventSales_Tickera_Catalog_Feed
 {
+    private static array $catalog_change_targets = [];
+    private static int $catalog_change_sequence = 0;
     private const SOURCE = 'wordpress_tickera';
     private const CACHE_VERSION_OPTION = 'eventsales_tickera_catalog_feed_cache_version';
     private const SECRET_OPTION = 'eventsales_tickera_catalog_secret';
@@ -86,6 +88,120 @@ final class EventSales_Tickera_Catalog_Feed
     {
         $current = (int) get_option(self::CACHE_VERSION_OPTION, 1);
         update_option(self::CACHE_VERSION_OPTION, $current + 1, false);
+    }
+
+    public static function record_catalog_change(int $post_id, string $reason = 'saved'): void
+    {
+        if (wp_is_post_autosave($post_id) || wp_is_post_revision($post_id)) {
+            return;
+        }
+        $target_type = self::catalog_target_type($post_id);
+        if ($target_type === null) {
+            return;
+        }
+        self::$catalog_change_sequence++;
+        $key = $target_type . ':' . $post_id;
+        $candidate = ['target_type' => $target_type, 'target_id' => $post_id,
+            'reason' => $reason, 'priority' => self::reason_priority($reason),
+            'sequence' => self::$catalog_change_sequence, 'source_updated_at' => gmdate('Y-m-d\TH:i:s.u\Z')];
+        $current = self::$catalog_change_targets[$key] ?? null;
+        if ($current === null || $candidate['priority'] > $current['priority'] ||
+            ($candidate['priority'] === $current['priority'] && $candidate['sequence'] > $current['sequence'])) {
+            self::$catalog_change_targets[$key] = $candidate;
+        }
+    }
+
+    public static function record_status_change(string $new_status, string $old_status, WP_Post $post): void
+    {
+        if ($new_status !== $old_status) {
+            self::invalidate_and_record((int) $post->ID, 'status_changed');
+        }
+    }
+
+    public static function record_meta_change($meta_id, int $post_id, string $meta_key): void
+    {
+        $allowed = array_merge(self::ALLOWED_META_KEYS, self::ALLOWED_EVENT_META_KEYS, ['_tc_is_ticket', '_event_name']);
+        if (in_array($meta_key, $allowed, true)) {
+            self::invalidate_and_record($post_id, 'metadata_changed');
+        }
+    }
+
+    public static function record_trashed(int $post_id): void
+    {
+        self::invalidate_and_record($post_id, 'trashed');
+    }
+
+    public static function record_restored(int $post_id): void
+    {
+        self::invalidate_and_record($post_id, 'restored');
+    }
+
+    public static function record_deleted(int $post_id): void
+    {
+        self::invalidate_and_record($post_id, 'deleted');
+    }
+
+    public static function flush_catalog_changes(): void
+    {
+        if (!defined('EVENTSALES_CATALOG_CHANGE_SENDER_ENABLED') || !EVENTSALES_CATALOG_CHANGE_SENDER_ENABLED) return;
+        if (!function_exists('as_enqueue_async_action')) {
+            error_log('eventsales_catalog_change_scheduler_unavailable');
+            return;
+        }
+        foreach (self::$catalog_change_targets as $target) {
+            unset($target['priority'], $target['sequence']);
+            $target = array_merge(['version' => '2026-07-20.v1', 'signal_id' => wp_generate_uuid4(),
+                'source' => self::SOURCE], $target);
+            as_enqueue_async_action('eventsales_catalog_change_deliver',
+                ['raw_body' => wp_json_encode($target), 'attempt' => 1], 'eventsales-catalog-change');
+        }
+        self::$catalog_change_targets = [];
+    }
+
+    public static function deliver_catalog_change(string $raw_body, int $attempt = 1): void
+    {
+        if (!defined('EVENTSALES_CATALOG_CHANGE_SENDER_ENABLED') || !EVENTSALES_CATALOG_CHANGE_SENDER_ENABLED) return;
+        $endpoint = defined('EVENTSALES_CATALOG_CHANGE_ENDPOINT') ? EVENTSALES_CATALOG_CHANGE_ENDPOINT : '';
+        $secret = defined('EVENTSALES_CATALOG_CHANGE_SECRET') ? EVENTSALES_CATALOG_CHANGE_SECRET : '';
+        $key_id = defined('EVENTSALES_CATALOG_CHANGE_KEY_ID') ? EVENTSALES_CATALOG_CHANGE_KEY_ID : '';
+        if ($endpoint === '' || $secret === '' || $key_id === '') return;
+        $timestamp = (string) time();
+        $path = (string) wp_parse_url($endpoint, PHP_URL_PATH);
+        $base = implode("\n", ['2026-07-20.v1', 'POST', $path, $timestamp, hash('sha256', $raw_body)]);
+        $response = wp_remote_post($endpoint, ['timeout' => 5, 'body' => $raw_body, 'headers' => [
+            'Content-Type' => 'application/json', 'Accept' => 'application/json',
+            'X-EventSales-Trigger-Key-Id' => $key_id,
+            'X-EventSales-Trigger-Timestamp' => $timestamp,
+            'X-EventSales-Trigger-Signature' => 'v1=' . hash_hmac('sha256', $base, $secret),
+        ]]);
+        $status = is_wp_error($response) ? 0 : (int) wp_remote_retrieve_response_code($response);
+        if (($status === 0 || in_array($status, [408, 425, 429], true) || $status >= 500) && $attempt < 5 && function_exists('as_schedule_single_action')) {
+            $delays = [1 => 30, 2 => 120, 3 => 600, 4 => 1800];
+            as_schedule_single_action(time() + $delays[$attempt], 'eventsales_catalog_change_deliver',
+                ['raw_body' => $raw_body, 'attempt' => $attempt + 1], 'eventsales-catalog-change');
+        }
+    }
+
+    private static function reason_priority(string $reason): int
+    {
+        return ['saved' => 1, 'metadata_changed' => 2, 'status_changed' => 3,
+            'trashed' => 4, 'restored' => 4, 'deleted' => 5][$reason] ?? 1;
+    }
+
+    private static function invalidate_and_record(int $post_id, string $reason): void
+    {
+        if (self::catalog_target_type($post_id) === null) {
+            return;
+        }
+
+        self::invalidate_cache();
+        self::record_catalog_change($post_id, $reason);
+    }
+
+    private static function catalog_target_type(int $post_id): ?string
+    {
+        $types = ['tc_events' => 'event', 'product' => 'product', 'product_variation' => 'variation'];
+        return $types[get_post_type($post_id)] ?? null;
     }
 
     public function handle_request(WP_REST_Request $request): WP_REST_Response
@@ -857,3 +973,15 @@ add_action('rest_api_init', ['EventSales_Tickera_Catalog_Feed', 'register']);
 add_action('save_post_product', ['EventSales_Tickera_Catalog_Feed', 'invalidate_cache']);
 add_action('save_post_product_variation', ['EventSales_Tickera_Catalog_Feed', 'invalidate_cache']);
 add_action('save_post_tc_events', ['EventSales_Tickera_Catalog_Feed', 'invalidate_cache']);
+add_action('save_post_product', ['EventSales_Tickera_Catalog_Feed', 'record_catalog_change']);
+add_action('save_post_product_variation', ['EventSales_Tickera_Catalog_Feed', 'record_catalog_change']);
+add_action('save_post_tc_events', ['EventSales_Tickera_Catalog_Feed', 'record_catalog_change']);
+add_action('transition_post_status', ['EventSales_Tickera_Catalog_Feed', 'record_status_change'], 10, 3);
+add_action('added_post_meta', ['EventSales_Tickera_Catalog_Feed', 'record_meta_change'], 10, 3);
+add_action('updated_post_meta', ['EventSales_Tickera_Catalog_Feed', 'record_meta_change'], 10, 3);
+add_action('deleted_post_meta', ['EventSales_Tickera_Catalog_Feed', 'record_meta_change'], 10, 3);
+add_action('trashed_post', ['EventSales_Tickera_Catalog_Feed', 'record_trashed']);
+add_action('untrashed_post', ['EventSales_Tickera_Catalog_Feed', 'record_restored']);
+add_action('before_delete_post', ['EventSales_Tickera_Catalog_Feed', 'record_deleted']);
+add_action('shutdown', ['EventSales_Tickera_Catalog_Feed', 'flush_catalog_changes']);
+add_action('eventsales_catalog_change_deliver', ['EventSales_Tickera_Catalog_Feed', 'deliver_catalog_change'], 10, 2);

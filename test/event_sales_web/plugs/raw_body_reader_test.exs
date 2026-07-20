@@ -25,6 +25,11 @@ defmodule EventSalesWeb.Plugs.RawBodyReaderTest do
     assert {:error, :missing_raw_body} = RawBodyReader.fetch_raw_body(conn)
   end
 
+  test "catalog change bodies are bounded by actual bytes" do
+    conn = Plug.Test.conn(:post, "/webhooks/catalog-change/token", String.duplicate("x", 4097))
+    assert_raise Plug.Parsers.ParseError, fn -> RawBodyReader.read_body(conn, length: 1024) end
+  end
+
   test "read_body does not mark raw body available when read_body was never stored" do
     conn = Plug.Test.conn(:get, "/")
 

@@ -31,6 +31,43 @@ config :event_sales, EventSalesWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
 if config_env() == :prod do
+  catalog_change_enabled? =
+    System.get_env("CATALOG_CHANGE_RECEIVER_ENABLED", "false") in ~w(true 1)
+
+  previous_key_id = System.get_env("CATALOG_CHANGE_PREVIOUS_KEY_ID")
+  previous_secret = System.get_env("CATALOG_CHANGE_PREVIOUS_SECRET")
+
+  if previous_key_id in [nil, ""] != previous_secret in [nil, ""] do
+    raise "CATALOG_CHANGE_PREVIOUS_KEY_ID and CATALOG_CHANGE_PREVIOUS_SECRET must be configured together."
+  end
+
+  catalog_change_config = [
+    receiver_enabled: catalog_change_enabled?,
+    dispatcher_enabled:
+      System.get_env("CATALOG_CHANGE_DISPATCHER_ENABLED", "false") in ~w(true 1),
+    path_token: System.get_env("CATALOG_CHANGE_PATH_TOKEN"),
+    source_system_id: System.get_env("CATALOG_CHANGE_SOURCE_SYSTEM_ID"),
+    current_key_id: System.get_env("CATALOG_CHANGE_CURRENT_KEY_ID"),
+    current_secret: System.get_env("CATALOG_CHANGE_CURRENT_SECRET"),
+    previous_key_id: previous_key_id,
+    previous_secret: previous_secret,
+    max_body_bytes: 4_096,
+    replay_window_seconds: 300,
+    quiet_window_seconds: 5,
+    active_run_recheck_seconds: 60,
+    max_dispatch_attempts: 100
+  ]
+
+  if catalog_change_enabled? and
+       Enum.any?(
+         [:path_token, :source_system_id, :current_key_id, :current_secret],
+         &(catalog_change_config[&1] in [nil, ""])
+       ) do
+    raise "catalog change path token, source UUID, current key ID and secret are required when the receiver is enabled."
+  end
+
+  config :event_sales, :catalog_change_trigger, catalog_change_config
+
   config :event_sales, :woocommerce_rest,
     base_url: System.get_env("WOOCOMMERCE_REST_BASE_URL"),
     consumer_key: System.get_env("WOOCOMMERCE_CONSUMER_KEY"),

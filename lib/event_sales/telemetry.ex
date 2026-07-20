@@ -85,6 +85,14 @@ defmodule EventSales.Telemetry do
     :exception
   ]
   @oban_queue_snapshot [:event_sales, :oban, :queue_snapshot]
+  @catalog_change_intake_accepted [:event_sales, :catalog_change, :intake, :accepted]
+  @catalog_change_intake_duplicate [:event_sales, :catalog_change, :intake, :duplicate]
+  @catalog_change_intake_stale [:event_sales, :catalog_change, :intake, :stale]
+  @catalog_change_intake_rejected [:event_sales, :catalog_change, :intake, :rejected]
+  @catalog_change_dispatch_deferred [:event_sales, :catalog_change, :dispatch, :deferred]
+  @catalog_change_dispatch_queued [:event_sales, :catalog_change, :dispatch, :queued]
+  @catalog_change_dispatch_settled [:event_sales, :catalog_change, :dispatch, :settled]
+  @catalog_change_dispatch_failed [:event_sales, :catalog_change, :dispatch, :failed]
 
   @doc """
   Returns every custom EventSales telemetry event name defined in Slice 0.8.
@@ -145,7 +153,15 @@ defmodule EventSales.Telemetry do
       maintenance_failed_job_alert_start(),
       maintenance_failed_job_alert_stop(),
       maintenance_failed_job_alert_exception(),
-      oban_queue_snapshot()
+      oban_queue_snapshot(),
+      catalog_change_intake_accepted(),
+      catalog_change_intake_duplicate(),
+      catalog_change_intake_stale(),
+      catalog_change_intake_rejected(),
+      catalog_change_dispatch_deferred(),
+      catalog_change_dispatch_queued(),
+      catalog_change_dispatch_settled(),
+      catalog_change_dispatch_failed()
     ]
   end
 
@@ -364,6 +380,15 @@ defmodule EventSales.Telemetry do
   @doc "Grouped Oban queue depth snapshot."
   @spec oban_queue_snapshot() :: event_name()
   def oban_queue_snapshot, do: @oban_queue_snapshot
+
+  def catalog_change_intake_accepted, do: @catalog_change_intake_accepted
+  def catalog_change_intake_duplicate, do: @catalog_change_intake_duplicate
+  def catalog_change_intake_stale, do: @catalog_change_intake_stale
+  def catalog_change_intake_rejected, do: @catalog_change_intake_rejected
+  def catalog_change_dispatch_deferred, do: @catalog_change_dispatch_deferred
+  def catalog_change_dispatch_queued, do: @catalog_change_dispatch_queued
+  def catalog_change_dispatch_settled, do: @catalog_change_dispatch_settled
+  def catalog_change_dispatch_failed, do: @catalog_change_dispatch_failed
 
   @doc "Returns the low-cardinality product metadata cache event for the cache outcome."
   @spec product_metadata_cache_event(:hit | :miss | :put) :: event_name()
