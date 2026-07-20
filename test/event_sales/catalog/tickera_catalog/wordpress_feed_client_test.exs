@@ -79,6 +79,11 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedClientTest do
              }
            ] = FakeTransport.requests()
 
+    assert {"accept", "application/json"} = List.keyfind(headers, "accept", 0)
+
+    assert {"user-agent", "EventSales/1.0 (+https://voelgoed.co.za)"} =
+             List.keyfind(headers, "user-agent", 0)
+
     assert {"x-eventsales-timestamp", timestamp} =
              List.keyfind(headers, "x-eventsales-timestamp", 0)
 
