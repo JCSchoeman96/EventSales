@@ -42,20 +42,22 @@ Current milestone: **M1 — Catalog Automation**
 
 Current active parent:
 
-- `JC-105` — VS-26E.0 Catalog Lifecycle Deployment and Baseline Certification
+- `JC-113` — VS-26E.1 Targeted WordPress Catalog Change Trigger
 
 Current active child:
 
-- `JC-106` — Prepare canonical feature pack and immutable ZIP
+- `JC-115` — Independently approve the trigger execution pack
 
 Gated children:
 
-1. `JC-107` — independent pack review.
-2. `JC-108` — agent reconnaissance and execution plan.
-3. `JC-109` — plan review and authorisation boundaries.
-4. `JC-110` — controlled deploy/migrate/dry-run/Apply procedure.
-5. `JC-111` — independent production-evidence validation.
-6. `JC-112` — closeout and VS-26E.1 unlock.
+1. `JC-116` — agent reconnaissance and implementation plan.
+2. `JC-117` — independent plan review.
+3. `JC-123` — refresh baseline and authorise the implementation capsule.
+4. `JC-118` — implement the targeted trigger.
+5. `JC-119` — independent exact-head code review.
+6. `JC-120` — controlled merge, deploy, and production validation.
+7. `JC-121` — independent evidence review and certification.
+8. `JC-122` — closeout and VS-26E.2 unlock.
 
 Creating a Linear card does not authorise production action.
 
@@ -248,19 +250,21 @@ A stale pack baseline is a blocker. The correct response is to refresh and versi
 
 ```text
 Project: In Progress
-Active slice: VS-26E.0
-Active gate: JC-106 PACK
+Completed slice: VS-26E.0
+Certification: CERTIFIED — VS-26E.1 MAY START
+Certified production SHA: 59a55523d2afe53f08e2f82becef5adec2bed0d6
+Active slice: VS-26E.1
+Active gate: JC-115 PACK-REVIEW
 Production validation: none
-Next gate: JC-107 PACK-REVIEW
-Next slice: locked
+Next gate: JC-116 PLAN
+Implementation: locked pending JC-123 activation approval
 ```
 
 ## Current Next Action
 
-1. Review and merge planning PR #112 on an exact green head.
-2. Lock the VS-26E.0 pack against the resulting `main` merge SHA.
-3. Generate the immutable ZIP and checksums.
-4. Record the ZIP metadata in `JC-106`.
-5. Move `JC-106` to In Review and activate only `JC-107`.
+1. Complete independent VS-26E.1 pack review in `JC-115`.
+2. If approved, activate only the reconnaissance and plan gate `JC-116`.
+3. Complete independent plan review in `JC-117`.
+4. Refresh exact current `main` and production facts in `JC-123` before implementation.
 
-Do not begin VS-26E.1 before `JC-111` certifies the production baseline and `JC-112` closes VS-26E.0.
+VS-26E.0 certification formally unlocks VS-26E.1 planning. It does not authorise implementation, merge, deployment, migration, production access, dry-run, or Apply.

@@ -251,22 +251,21 @@ Source-system identity and per-source cursors/watermarks must remain explicit ev
 
 ## 12. Current Slice Boundary
 
-The active slice is VS-26E.0.
+VS-26E.0 is certified and closed. Its certified production baseline is SHA `59a55523d2afe53f08e2f82becef5adec2bed0d6`, with 10 Events, 31 TicketTypes, and 31 ProductMappings.
 
-It may:
+The active slice is VS-26E.1. It may:
 
-- verify Railway deployment/database topology;
-- identify the migration route;
-- verify PR #111 migrations/indexes;
-- run a controlled production catalog dry-run;
-- support a separate human Apply decision;
-- certify or reject the baseline with redacted evidence.
+- define and review a compact authenticated, PII-free WordPress catalogue-change signal;
+- plan durable idempotency, coalescing, and active-run deferral;
+- reuse the existing targeted feed and Catalog Sync dry-run lifecycle;
+- proceed through pack, plan, and activation gates against exact current repository truth.
 
 It may not:
 
-- add automatic WordPress triggers;
-- add schedules;
-- add auto-apply;
+- auto-apply catalogue changes;
+- implement before the activation supplement in `JC-123` is approved;
+- introduce a second Event, TicketType, or ProductMapping writer;
+- use a full feed for every WordPress save;
 - implement order catch-up/backfill;
 - redesign dashboards;
 - add roles, targets, notifications, UTM/coupon dimensions, or write-back;
