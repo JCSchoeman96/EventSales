@@ -7,6 +7,8 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
 
   alias EventSales.Catalog.MappingConflictResolver
   alias EventSales.Catalog.TickeraCatalog.PubSub
+  alias EventSales.Ingestion
+  alias EventSales.Ingestion.Resources.CatalogChangePendingTarget
   alias EventSales.Ingestion.TickeraCatalogSync
   alias EventSales.Sales.OrderAttributionCorrection
   alias EventSalesWeb.Components.AdminShell
@@ -59,6 +61,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
       |> assign(:active_run, nil)
       |> assign(:source_systems, [])
       |> assign(:runs, [])
+      |> assign(:catalog_change_targets, load_catalog_change_targets())
       |> assign(:selected_run_id, nil)
       |> assign(:selected_run, nil)
       |> assign(:subscribed_run_ids, MapSet.new())
@@ -362,6 +365,38 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
       page_title="Catalog Sync"
       page_description="Dry-run publish-only Tickera Bridge catalog rows before apply."
     >
+      <section class="card mb-8 border border-base-300 bg-base-100 shadow-sm">
+        <div class="card-body">
+          <h2 class="card-title text-base">WordPress catalog changes</h2>
+          <div class="overflow-x-auto">
+            <table class="table table-sm">
+              <thead>
+                <tr>
+                  <th>Target</th>
+                  <th>State</th>
+                  <th>Generation</th>
+                  <th>Reason</th>
+                  <th>Run</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr :for={target <- @catalog_change_targets}>
+                  <td>{target.target_type}:{target.target_id}</td>
+                  <td>{target.state}</td>
+                  <td>{target.dispatched_generation}/{target.generation}</td>
+                  <td>
+                    {target.latest_reason}
+                    <span :if={target.latest_reason == :deleted} class="badge badge-warning ml-2">
+                      deletion_not_reconciled
+                    </span>
+                  </td>
+                  <td>{target.catalog_sync_run_id || "—"}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
       <section class="card mb-8 border border-base-300 bg-base-100 shadow-sm">
         <div class="card-body">
           <h2 class="mb-4 text-base font-semibold text-base-content">
@@ -1263,6 +1298,17 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
         source_selected? and is_nil(scope_error) and
           (feed_scope? or (manual_json_present? and manual_json_valid?))
     }
+  end
+
+  defp load_catalog_change_targets do
+    CatalogChangePendingTarget
+    |> Ash.Query.sort(updated_at: :desc, id: :desc)
+    |> Ash.Query.limit(50)
+    |> Ash.read(domain: Ingestion)
+    |> case do
+      {:ok, targets} -> targets
+      _ -> []
+    end
   end
 
   defp load_active_run(socket, form) do

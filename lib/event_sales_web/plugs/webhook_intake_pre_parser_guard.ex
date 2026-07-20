@@ -13,6 +13,7 @@ defmodule EventSalesWeb.Plugs.WebhookIntakePreParserGuard do
   alias EventSales.Telemetry
 
   @webhook_prefix "/webhooks/woocommerce/"
+  @catalog_change_prefix "/webhooks/catalog-change/"
 
   def init(opts), do: opts
 
@@ -38,7 +39,10 @@ defmodule EventSalesWeb.Plugs.WebhookIntakePreParserGuard do
     end
   end
 
-  defp webhook_path?(path), do: String.starts_with?(path, @webhook_prefix)
+  defp webhook_path?(path),
+    do:
+      String.starts_with?(path, @webhook_prefix) or
+        String.starts_with?(path, @catalog_change_prefix)
 
   defp limiter_key(conn) do
     RedisRateLimiter.webhook_key(

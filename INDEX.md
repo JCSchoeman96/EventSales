@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-306
+315
 
 ## Files
 
@@ -104,6 +104,9 @@ Project root: `.`
 - `lib/event_sales/exports/event_sales_csv.ex`
 - `lib/event_sales/ingestion.ex`
 - `lib/event_sales/ingestion/admin_reconciliation_dashboard.ex`
+- `lib/event_sales/ingestion/catalog_change_contract.ex`
+- `lib/event_sales/ingestion/catalog_change_dispatch.ex`
+- `lib/event_sales/ingestion/catalog_change_intake.ex`
 - `lib/event_sales/ingestion/clients/httpc_transport.ex`
 - `lib/event_sales/ingestion/clients/tickera_attendee_client.ex`
 - `lib/event_sales/ingestion/clients/tickera_error.ex`
@@ -127,6 +130,8 @@ Project root: `.`
 - `lib/event_sales/ingestion/redis_webhook_buffer.ex`
 - `lib/event_sales/ingestion/redis_webhook_buffer/adapter.ex`
 - `lib/event_sales/ingestion/redis_webhook_buffer/redix_adapter.ex`
+- `lib/event_sales/ingestion/resources/catalog_change_pending_target.ex`
+- `lib/event_sales/ingestion/resources/catalog_change_signal.ex`
 - `lib/event_sales/ingestion/resources/csv_import_batch.ex`
 - `lib/event_sales/ingestion/resources/csv_import_row.ex`
 - `lib/event_sales/ingestion/resources/sync_cursor.ex`
@@ -142,6 +147,7 @@ Project root: `.`
 - `lib/event_sales/ingestion/resources/webhook_event.ex`
 - `lib/event_sales/ingestion/rest_circuit_breaker.ex`
 - `lib/event_sales/ingestion/rest_rate_limiter.ex`
+- `lib/event_sales/ingestion/security/catalog_change_signature.ex`
 - `lib/event_sales/ingestion/security/low_cardinality_key.ex`
 - `lib/event_sales/ingestion/security/raw_body_reader.ex`
 - `lib/event_sales/ingestion/security/webhook_replay_guard.ex`
@@ -170,6 +176,7 @@ Project root: `.`
 - `lib/event_sales/ingestion/woocommerce_rest_config.ex`
 - `lib/event_sales/ingestion/workers/apply_tickera_catalog_worker.ex`
 - `lib/event_sales/ingestion/workers/backfill_orders_worker.ex`
+- `lib/event_sales/ingestion/workers/catalog_change_dispatch_worker.ex`
 - `lib/event_sales/ingestion/workers/discover_tickera_catalog_worker.ex`
 - `lib/event_sales/ingestion/workers/missing_catalog_resolution_worker.ex`
 - `lib/event_sales/ingestion/workers/process_csv_import_worker.ex`
@@ -242,6 +249,7 @@ Project root: `.`
 - `lib/event_sales_web/controllers/admin_session_html.ex`
 - `lib/event_sales_web/controllers/admin_session_html/new.html.heex`
 - `lib/event_sales_web/controllers/auth_controller.ex`
+- `lib/event_sales_web/controllers/catalog_change_controller.ex`
 - `lib/event_sales_web/controllers/error_html.ex`
 - `lib/event_sales_web/controllers/error_json.ex`
 - `lib/event_sales_web/controllers/export_controller.ex`
@@ -280,6 +288,7 @@ Project root: `.`
 - `lib/event_sales_web/plugs/admin_only.ex`
 - `lib/event_sales_web/plugs/internal_only.ex`
 - `lib/event_sales_web/plugs/load_current_user.ex`
+- `lib/event_sales_web/plugs/rate_limit_catalog_change_intake.ex`
 - `lib/event_sales_web/plugs/rate_limit_manual_actions.ex`
 - `lib/event_sales_web/plugs/rate_limit_webhook_intake.ex`
 - `lib/event_sales_web/plugs/raw_body_reader.ex`
@@ -843,6 +852,24 @@ Project root: `.`
   - docs_count: 3
   - public_funs: `snapshot/1`, `list_runs/1`, `list_findings/1`, `get_finding/2`, `finding_row/2`, `resolve_finding/3`, `ignore_finding/3`, `reopen_finding/2`, `queue_attendee_sync/2`, `queue_reconciliation/2`, `stream_findings_for_export/1`, `filter_opts_from/1`, `export_row_limit/1`
   - uses: _none_
+- `EventSales.Ingestion.CatalogChangeContract` - `lib/event_sales/ingestion/catalog_change_contract.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `parse/1`
+  - uses: _none_
+- `EventSales.Ingestion.CatalogChangeDispatch` - `lib/event_sales/ingestion/catalog_change_dispatch.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `perform/1`
+  - uses: _none_
+- `EventSales.Ingestion.CatalogChangeIntake` - `lib/event_sales/ingestion/catalog_change_intake.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `persist/3`
+  - uses: _none_
 - `EventSales.Ingestion.Clients.HttpcTransport` - `lib/event_sales/ingestion/clients/httpc_transport.ex`
   - moduledoc?: true
   - specs?: false
@@ -981,6 +1008,18 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `push/1`, `claim/0`, `ack/1`, `requeue/1`, `depth/0`, `processing_depth/0`
   - uses: _none_
+- `EventSales.Ingestion.Resources.CatalogChangePendingTarget` - `lib/event_sales/ingestion/resources/catalog_change_pending_target.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
+- `EventSales.Ingestion.Resources.CatalogChangeSignal` - `lib/event_sales/ingestion/resources/catalog_change_signal.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
 - `EventSales.Ingestion.Resources.CsvImportBatch` - `lib/event_sales/ingestion/resources/csv_import_batch.ex`
   - moduledoc?: true
   - specs?: false
@@ -1071,6 +1110,12 @@ Project root: `.`
   - docs_count: 3
   - public_funs: `start_link/1`, `checkout/2`, `snapshot/0`, `reset_for_test!/1`, `init/1`, `handle_call/3`, `handle_cast/2`, `handle_info/2`
   - uses: `GenServer`
+- `EventSales.Ingestion.Security.CatalogChangeSignature` - `lib/event_sales/ingestion/security/catalog_change_signature.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `sign/4`, `verify/5`, `verify_request/7`
+  - uses: _none_
 - `EventSales.Ingestion.Security.LowCardinalityKey` - `lib/event_sales/ingestion/security/low_cardinality_key.ex`
   - moduledoc?: true
   - specs?: true
@@ -1141,7 +1186,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: `queue_dry_run/2`, `queue_apply/3`, `revoke_ready_dry_run/3`, `claim_for_apply/3`, `list_runs/1`, `get_run_preview/2`, `list_source_systems/1`, `active_run_for_source/2`
+  - public_funs: `queue_dry_run/2`, `queue_triggered_dry_run/3`, `queue_apply/3`, `revoke_ready_dry_run/3`, `claim_for_apply/3`, `list_runs/1`, `get_run_preview/2`, `list_source_systems/1`, `active_run_for_source/2`
   - uses: _none_
 - `EventSales.Ingestion.TickeraEventSources` - `lib/event_sales/ingestion/tickera_event_sources.ex`
   - moduledoc?: true
@@ -1245,6 +1290,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: _none_
   - uses: _none_
+- `EventSales.Ingestion.Workers.CatalogChangeDispatchWorker` - `lib/event_sales/ingestion/workers/catalog_change_dispatch_worker.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `perform/1`
+  - uses: `Oban.Worker`
 - `EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker` - `lib/event_sales/ingestion/workers/discover_tickera_catalog_worker.ex`
   - moduledoc?: true
   - specs?: false
@@ -1489,7 +1540,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: true
   - docs_count: 57
-  - public_funs: `event_names/0`, `webhook_accepted/0`, `webhook_rejected/0`, `webhook_backpressure/0`, `webhook_buffered/0`, `webhook_drained/0`, `webhook_rate_limited/0`, `webhook_replay_audit_failed/0`, `rest_request_stop/0`, `rest_request_exception/0`, `hot_state_rebuild_start/0`, `hot_state_rebuild_stop/0`, `hot_state_rebuild_exception/0`, `hot_state_event_applied/0`, `hot_state_event_ignored/0`, `hot_state_snapshot_write/0`, `snapshot_refresh_start/0`, `snapshot_refresh_stop/0`, `snapshot_refresh_exception/0`, `cache_invalidate/0`, `missing_catalog_recovery_start/0`, `missing_catalog_recovery_stop/0`, `missing_catalog_recovery_exception/0`, `product_metadata_cache_hit/0`, `product_metadata_cache_miss/0`, `product_metadata_cache_put/0`, `product_metadata_update/0`, `reconciliation_start/0`, `reconciliation_stop/0`, `reconciliation_exception/0`, `reconciliation_pause/0`, `tickera_request_stop/0`, `tickera_request_exception/0`, `tickera_sync_start/0`, `tickera_sync_stop/0`, `tickera_sync_exception/0`, `csv_import_dry_run_start/0`, `csv_import_dry_run_stop/0`, `csv_import_dry_run_exception/0`, `csv_import_apply_start/0`, `csv_import_apply_stop/0`, `csv_import_apply_exception/0`, `maintenance_raw_payload_purge_start/0`, `maintenance_raw_payload_purge_stop/0`, `maintenance_raw_payload_purge_exception/0`, `maintenance_stale_sync_cleanup_start/0`, `maintenance_stale_sync_cleanup_stop/0`, `maintenance_stale_sync_cleanup_exception/0`, `maintenance_cache_cleanup_start/0`, `maintenance_cache_cleanup_stop/0`, `maintenance_cache_cleanup_exception/0`, `maintenance_failed_job_alert_start/0`, `maintenance_failed_job_alert_stop/0`, `maintenance_failed_job_alert_exception/0`, `oban_queue_snapshot/0`, `product_metadata_cache_event/1`, `emit/3`
+  - public_funs: `event_names/0`, `webhook_accepted/0`, `webhook_rejected/0`, `webhook_backpressure/0`, `webhook_buffered/0`, `webhook_drained/0`, `webhook_rate_limited/0`, `webhook_replay_audit_failed/0`, `rest_request_stop/0`, `rest_request_exception/0`, `hot_state_rebuild_start/0`, `hot_state_rebuild_stop/0`, `hot_state_rebuild_exception/0`, `hot_state_event_applied/0`, `hot_state_event_ignored/0`, `hot_state_snapshot_write/0`, `snapshot_refresh_start/0`, `snapshot_refresh_stop/0`, `snapshot_refresh_exception/0`, `cache_invalidate/0`, `missing_catalog_recovery_start/0`, `missing_catalog_recovery_stop/0`, `missing_catalog_recovery_exception/0`, `product_metadata_cache_hit/0`, `product_metadata_cache_miss/0`, `product_metadata_cache_put/0`, `product_metadata_update/0`, `reconciliation_start/0`, `reconciliation_stop/0`, `reconciliation_exception/0`, `reconciliation_pause/0`, `tickera_request_stop/0`, `tickera_request_exception/0`, `tickera_sync_start/0`, `tickera_sync_stop/0`, `tickera_sync_exception/0`, `csv_import_dry_run_start/0`, `csv_import_dry_run_stop/0`, `csv_import_dry_run_exception/0`, `csv_import_apply_start/0`, `csv_import_apply_stop/0`, `csv_import_apply_exception/0`, `maintenance_raw_payload_purge_start/0`, `maintenance_raw_payload_purge_stop/0`, `maintenance_raw_payload_purge_exception/0`, `maintenance_stale_sync_cleanup_start/0`, `maintenance_stale_sync_cleanup_stop/0`, `maintenance_stale_sync_cleanup_exception/0`, `maintenance_cache_cleanup_start/0`, `maintenance_cache_cleanup_stop/0`, `maintenance_cache_cleanup_exception/0`, `maintenance_failed_job_alert_start/0`, `maintenance_failed_job_alert_stop/0`, `maintenance_failed_job_alert_exception/0`, `oban_queue_snapshot/0`, `catalog_change_intake_accepted/0`, `catalog_change_intake_duplicate/0`, `catalog_change_intake_stale/0`, `catalog_change_intake_rejected/0`, `catalog_change_dispatch_deferred/0`, `catalog_change_dispatch_queued/0`, `catalog_change_dispatch_settled/0`, `catalog_change_dispatch_failed/0`, `product_metadata_cache_event/1`, `emit/3`
   - uses: _none_
 - `EventSalesWeb` - `lib/event_sales_web.ex`
   - moduledoc?: true
@@ -1665,6 +1716,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: _none_
   - uses: _none_
+- `EventSalesWeb.CatalogChangeController` - `lib/event_sales_web/controllers/catalog_change_controller.ex`
+  - moduledoc?: false
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `create/2`
+  - uses: `EventSalesWeb`
 - `EventSalesWeb.ErrorHTML` - `lib/event_sales_web/controllers/error_html.ex`
   - moduledoc?: true
   - specs?: false
@@ -1882,6 +1939,12 @@ Project root: `.`
   - public_funs: `init/1`, `call/2`
   - uses: _none_
 - `EventSalesWeb.Plugs.LoadCurrentUser` - `lib/event_sales_web/plugs/load_current_user.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `init/1`, `call/2`
+  - uses: _none_
+- `EventSalesWeb.Plugs.RateLimitCatalogChangeIntake` - `lib/event_sales_web/plugs/rate_limit_catalog_change_intake.ex`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
@@ -2135,6 +2198,8 @@ Project root: `.`
 - `EventSales.Catalog.Resources.ProductMapping` - `lib/event_sales/catalog/resources/product_mapping.ex`
 - `EventSales.Catalog.Resources.SourceSystem` - `lib/event_sales/catalog/resources/source_system.ex`
 - `EventSales.Catalog.Resources.TicketType` - `lib/event_sales/catalog/resources/ticket_type.ex`
+- `EventSales.Ingestion.Resources.CatalogChangePendingTarget` - `lib/event_sales/ingestion/resources/catalog_change_pending_target.ex`
+- `EventSales.Ingestion.Resources.CatalogChangeSignal` - `lib/event_sales/ingestion/resources/catalog_change_signal.ex`
 - `EventSales.Ingestion.Resources.CsvImportBatch` - `lib/event_sales/ingestion/resources/csv_import_batch.ex`
 - `EventSales.Ingestion.Resources.CsvImportRow` - `lib/event_sales/ingestion/resources/csv_import_row.ex`
 - `EventSales.Ingestion.Resources.SyncCursor` - `lib/event_sales/ingestion/resources/sync_cursor.ex`
@@ -2211,6 +2276,7 @@ _none_
 - `EventSalesWeb.AdminAccessHTML` - `lib/event_sales_web/controllers/admin_access_html.ex`
 - `EventSalesWeb.AdminSessionController` - `lib/event_sales_web/controllers/admin_session_controller.ex`
 - `EventSalesWeb.AdminSessionHTML` - `lib/event_sales_web/controllers/admin_session_html.ex`
+- `EventSalesWeb.CatalogChangeController` - `lib/event_sales_web/controllers/catalog_change_controller.ex`
 - `EventSalesWeb.ErrorHTML` - `lib/event_sales_web/controllers/error_html.ex`
 - `EventSalesWeb.HealthController` - `lib/event_sales_web/controllers/health_controller.ex`
 - `EventSalesWeb.PageController` - `lib/event_sales_web/controllers/page_controller.ex`
@@ -2252,6 +2318,7 @@ _none_
 - `EventSalesWeb.Plugs.AdminOnly` - `lib/event_sales_web/plugs/admin_only.ex`
 - `EventSalesWeb.Plugs.InternalOnly` - `lib/event_sales_web/plugs/internal_only.ex`
 - `EventSalesWeb.Plugs.LoadCurrentUser` - `lib/event_sales_web/plugs/load_current_user.ex`
+- `EventSalesWeb.Plugs.RateLimitCatalogChangeIntake` - `lib/event_sales_web/plugs/rate_limit_catalog_change_intake.ex`
 - `EventSalesWeb.Plugs.RateLimitManualActions` - `lib/event_sales_web/plugs/rate_limit_manual_actions.ex`
 - `EventSalesWeb.Plugs.RateLimitWebhookIntake` - `lib/event_sales_web/plugs/rate_limit_webhook_intake.ex`
 - `EventSalesWeb.Plugs.RawBodyReader` - `lib/event_sales_web/plugs/raw_body_reader.ex`
@@ -2265,6 +2332,7 @@ _none_
 - `EventSales.Analytics.Workers.RefreshSnapshotWorker` - `lib/event_sales/analytics/workers/refresh_snapshot_worker.ex`
 - `EventSales.Catalog.Workers.MappingChangedWorker` - `lib/event_sales/catalog/workers/mapping_changed_worker.ex`
 - `EventSales.Ingestion.Workers.ApplyTickeraCatalogWorker` - `lib/event_sales/ingestion/workers/apply_tickera_catalog_worker.ex`
+- `EventSales.Ingestion.Workers.CatalogChangeDispatchWorker` - `lib/event_sales/ingestion/workers/catalog_change_dispatch_worker.ex`
 - `EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker` - `lib/event_sales/ingestion/workers/discover_tickera_catalog_worker.ex`
 - `EventSales.Ingestion.Workers.MissingCatalogResolutionWorker` - `lib/event_sales/ingestion/workers/missing_catalog_resolution_worker.ex`
 - `EventSales.Ingestion.Workers.ProcessCsvImportWorker` - `lib/event_sales/ingestion/workers/process_csv_import_worker.ex`
