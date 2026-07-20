@@ -43,7 +43,7 @@ defmodule EventSales.Ingestion.CatalogChangeDispatch do
          %{generation: generation, dispatched_generation: generation} = target,
          opts
        ),
-       do: transition_result(target, %{state: :preview_ready, recheck_at: nil}, opts, :ok)
+       do: transition_and_continue(target, %{state: :preview_ready, recheck_at: nil}, opts)
 
   defp reconcile_linked_run({:ok, %{status: status}}, target, opts) when status in @active do
     state = if target.generation > target.dispatched_generation, do: :deferred, else: :queued
@@ -72,7 +72,7 @@ defmodule EventSales.Ingestion.CatalogChangeDispatch do
   end
 
   defp reconcile_terminal_run(target, opts),
-    do: transition_result(target, %{state: :settled, recheck_at: nil}, opts, :ok)
+    do: transition_and_continue(target, %{state: :settled, recheck_at: nil}, opts)
 
   defp queue_or_defer(target, nil, opts) do
     queue_opts = Keyword.get(opts, :queue_opts, [])
@@ -88,7 +88,7 @@ defmodule EventSales.Ingestion.CatalogChangeDispatch do
         {:snooze, 1}
 
       {:error, :not_found} ->
-        :discard
+        continue_source(target.source_system_id)
 
       {:error, reason} when reason in [:invalid_scope, :source_not_eligible] ->
         fail(target, opts)
@@ -128,12 +128,18 @@ defmodule EventSales.Ingestion.CatalogChangeDispatch do
 
   defp fail(target, opts),
     do:
-      transition_result(
+      transition_and_continue(
         target,
         %{state: :failed, recheck_at: nil, last_error: "catalog_change_dispatch_failed"},
-        opts,
-        :discard
+        opts
       )
+
+  defp transition_and_continue(target, attrs, opts) do
+    case update(target, attrs, opts) do
+      {:ok, _updated} -> continue_source(target.source_system_id)
+      {:error, reason} -> {:error, reason}
+    end
+  end
 
   defp transition_result(target, attrs, opts, success_result) do
     case update(target, attrs, opts) do
@@ -146,6 +152,14 @@ defmodule EventSales.Ingestion.CatalogChangeDispatch do
     case Keyword.get(opts, :transition_fun) do
       fun when is_function(fun, 2) -> fun.(target, attrs)
       nil -> Ash.update(target, attrs, action: :transition, domain: Ingestion)
+    end
+  end
+
+  defp continue_source(source_system_id) do
+    case next_target(source_system_id) do
+      {:ok, nil} -> :ok
+      {:ok, _next_target} -> {:snooze, 1}
+      {:error, reason} -> {:error, reason}
     end
   end
 

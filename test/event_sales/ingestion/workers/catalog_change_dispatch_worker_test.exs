@@ -127,8 +127,44 @@ defmodule EventSales.Ingestion.Workers.CatalogChangeDispatchWorkerTest do
              )
   end
 
-  defp create_target!(source_id) do
-    now = DateTime.add(DateTime.utc_now(), -10, :second)
+  test "previewing one target keeps the source dispatcher live for another target" do
+    source = SalesHelpers.create_source_system!()
+    first = create_target!(source.id, 20)
+    second = create_target!(source.id, 10)
+    configure_dispatcher(true)
+
+    assert {:snooze, 60} = CatalogChangeDispatch.perform(source.id)
+    first = Ash.get!(CatalogChangePendingTarget, first.id, domain: Ingestion)
+    set_run_status!(first.catalog_sync_run_id, :dry_run_ready)
+
+    assert {:snooze, 1} = CatalogChangeDispatch.perform(source.id)
+
+    assert Ash.get!(CatalogChangePendingTarget, first.id, domain: Ingestion).state ==
+             :preview_ready
+
+    assert {:snooze, 60} = CatalogChangeDispatch.perform(source.id)
+    assert Ash.get!(CatalogChangePendingTarget, second.id, domain: Ingestion).state == :deferred
+  end
+
+  test "settling one target keeps the source dispatcher live to queue the next target" do
+    source = SalesHelpers.create_source_system!()
+    first = create_target!(source.id, 20)
+    second = create_target!(source.id, 10)
+    configure_dispatcher(true)
+
+    assert {:snooze, 60} = CatalogChangeDispatch.perform(source.id)
+    first = Ash.get!(CatalogChangePendingTarget, first.id, domain: Ingestion)
+    set_run_status!(first.catalog_sync_run_id, :failed)
+
+    assert {:snooze, 1} = CatalogChangeDispatch.perform(source.id)
+    assert Ash.get!(CatalogChangePendingTarget, first.id, domain: Ingestion).state == :settled
+
+    assert {:snooze, 60} = CatalogChangeDispatch.perform(source.id)
+    assert Ash.get!(CatalogChangePendingTarget, second.id, domain: Ingestion).state == :queued
+  end
+
+  defp create_target!(source_id, age_seconds \\ 10) do
+    now = DateTime.add(DateTime.utc_now(), -age_seconds, :second)
 
     Ash.create!(
       CatalogChangePendingTarget,
@@ -144,6 +180,13 @@ defmodule EventSales.Ingestion.Workers.CatalogChangeDispatchWorkerTest do
       },
       action: :create,
       domain: Ingestion
+    )
+  end
+
+  defp set_run_status!(run_id, status) do
+    EventSales.Repo.query!(
+      "UPDATE ingestion_tickera_catalog_sync_runs SET status = $1 WHERE id = $2",
+      [Atom.to_string(status), Ecto.UUID.dump!(run_id)]
     )
   end
 
