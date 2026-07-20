@@ -66,9 +66,13 @@ TIMESTAMP
 Headers:
 
 ```text
+Accept: application/json
+User-Agent: EventSales/1.0 (+https://voelgoed.co.za)
 X-EventSales-Timestamp: <unix timestamp>
 X-EventSales-Signature: v1=<hex_hmac_sha256>
 ```
+
+The `Accept` and `User-Agent` headers identify the EventSales feed client but are not included in the canonical HMAC string. The timestamp and signature contract remains unchanged.
 
 Canonical query params are scalar-only, nil values are dropped, keys are sorted, and values are RFC3986 percent-encoded. `page` and `per_page` are included in the signature.
 
@@ -96,12 +100,13 @@ Errors never include URLs, secrets, signatures, headers, or raw response bodies.
 
 1. Disable `TICKERA_CATALOG_FEED_ENABLED` and confirm manual JSON dry-runs still queue.
 2. Enable the feed with matching WordPress/EventSales secrets.
-3. Queue a WordPress feed product dry-run for a known product ID.
-4. Queue a variation dry-run for a known variation ID.
-5. Queue an updated-since dry-run with a strict RFC3339 timestamp.
-6. Confirm a bad secret produces `catalog_feed_unauthorized`.
-7. Confirm the dry-run preview uses the existing planner output and apply button.
-8. Confirm no order/customer/payment/token/raw payload fields appear in logs or previews.
+3. Confirm the signed request includes the EventSales `User-Agent` and receives an accepted response through Cloudflare.
+4. Queue a WordPress feed product dry-run for a known product ID.
+5. Queue a variation dry-run for a known variation ID.
+6. Queue an updated-since dry-run with a strict RFC3339 timestamp.
+7. Confirm a bad secret produces `catalog_feed_unauthorized`.
+8. Confirm the dry-run preview uses the existing planner output and apply button.
+9. Confirm no order/customer/payment/token/raw payload fields appear in logs or previews.
 
 ## Rollback
 

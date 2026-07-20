@@ -11,6 +11,7 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedClient do
   @default_per_page 100
   @default_max_pages 50
   @default_path "/wp-json/eventsales/v1/tickera-catalog"
+  @user_agent "EventSales/1.0 (+https://voelgoed.co.za)"
 
   @type query :: %{optional(String.t() | atom()) => term()} | keyword()
 
@@ -53,8 +54,10 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedClient do
     query = page_query(query, page, config.per_page)
 
     with {:ok, canonical_query} <- WordPressFeedSignature.canonical_query(query),
-         {:ok, headers} <- WordPressFeedSignature.headers(:get, config.path, query, config.secret) do
+         {:ok, signature_headers} <-
+           WordPressFeedSignature.headers(:get, config.path, query, config.secret) do
       url = config.base_url <> config.path <> "?" <> canonical_query
+      headers = request_headers(signature_headers)
       started_at = System.monotonic_time()
 
       case transport_request(config.transport, url, headers, timeout_ms: config.timeout_ms) do
@@ -112,6 +115,14 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedClient do
   catch
     :exit, _reason -> {:error, :transport_failure}
     :throw, _value -> {:error, :transport_failure}
+  end
+
+  defp request_headers(signature_headers) do
+    [
+      {"accept", "application/json"},
+      {"user-agent", @user_agent}
+      | signature_headers
+    ]
   end
 
   defp config(opts) do
