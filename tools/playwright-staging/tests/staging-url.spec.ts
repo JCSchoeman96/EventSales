@@ -38,6 +38,37 @@ test.describe("staging URL validation", () => {
     ).toThrow(/wpstage\.net/);
   });
 
+  test("rejects embedded URL credentials without echoing them", () => {
+    const withUserInfo = [
+      "https://user:secret@example.e.wpstage.net/w/",
+      "https://onlyuser@example.e.wpstage.net/w/",
+    ];
+
+    for (const url of withUserInfo) {
+      try {
+        normalizeAndValidateBaseUrl(url);
+        throw new Error("expected rejection");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        expect(message).toMatch(/must not contain credentials/);
+        expect(message).not.toMatch(/user:secret|onlyuser|secret/i);
+        expect(message).not.toContain("@");
+      }
+    }
+  });
+
+  test("rejects query strings and fragments", () => {
+    expect(() =>
+      normalizeAndValidateBaseUrl(
+        "https://example.e.wpstage.net/w/?utm=1",
+      ),
+    ).toThrow(/query parameters or fragments/);
+
+    expect(() =>
+      normalizeAndValidateBaseUrl("https://example.e.wpstage.net/w/#section"),
+    ).toThrow(/query parameters or fragments/);
+  });
+
   test("error messages never include credential-like values", () => {
     try {
       normalizeAndValidateBaseUrl("https://voelgoed.co.za/");

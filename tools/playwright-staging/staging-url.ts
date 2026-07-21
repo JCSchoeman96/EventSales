@@ -20,6 +20,16 @@ export function normalizeAndValidateBaseUrl(raw: string): string {
     throw new Error("STAGING_BASE_URL must use HTTPS");
   }
 
+  if (parsed.username || parsed.password) {
+    throw new Error("STAGING_BASE_URL must not contain credentials");
+  }
+
+  if (parsed.search || parsed.hash) {
+    throw new Error(
+      "STAGING_BASE_URL must not contain query parameters or fragments",
+    );
+  }
+
   const hostname = parsed.hostname.toLowerCase();
   const productionHostnames = new Set([
     "voelgoed.co.za",

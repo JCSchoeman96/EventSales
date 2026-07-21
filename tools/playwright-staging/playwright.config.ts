@@ -51,9 +51,7 @@ export default defineConfig({
     {
       name: "unit",
       testMatch: /staging-url\.spec\.ts/,
-      use: {
-        ...devices["Desktop Chrome"],
-      },
+      // Pure URL validation — no browser fixtures required.
     },
     {
       name: "access",

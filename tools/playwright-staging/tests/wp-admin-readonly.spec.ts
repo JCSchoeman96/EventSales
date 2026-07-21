@@ -1,9 +1,10 @@
-import { expect, test, type Page, type Response } from "@playwright/test";
+import { expect, test, type ConsoleMessage, type Page, type Response } from "@playwright/test";
 
 type Monitor = {
   firstParty5xx: Array<{ path: string; status: number }>;
   firstPartyFailures: Array<{ path: string; error: string }>;
-  consoleErrors: string[];
+  firstPartyConsoleErrors: string[];
+  thirdPartyConsoleErrors: number;
   consoleWarnings: string[];
   pageExceptions: string[];
 };
@@ -18,6 +19,14 @@ const ERROR_SNIPPETS = [
   "504 Gateway Timeout",
 ] as const;
 
+/** Explicitly identified non-blocking console noise (deprecations + known staging plugins). */
+const BENIGN_CONSOLE =
+  /deprecated|deprecation|Download the React DevTools|third-party cookie/i;
+
+/** Known same-origin plugin noise that is not EventSales-owned. */
+const BENIGN_FIRST_PARTY_CONSOLE =
+  /astra-sites.*fetch_error|astra-sites.*Could not get a valid response from the server/i;
+
 function annotate(type: string, description: string): void {
   test.info().annotations.push({ type, description });
 }
@@ -30,20 +39,33 @@ function isFirstParty(url: string, origin: string): boolean {
   }
 }
 
+/** Pathname only — never query strings (nonces/tokens/redirects). */
 function safePath(url: string): string {
   try {
-    const parsed = new URL(url);
-    return `${parsed.pathname}${parsed.search}`;
+    return new URL(url).pathname;
   } catch {
     return "(unparseable)";
   }
+}
+
+function sanitizeConsoleText(text: string): string {
+  return text
+    .replace(/https?:\/\/[^\s)'"]+/gi, (match) => {
+      try {
+        return new URL(match).pathname;
+      } catch {
+        return "(url)";
+      }
+    })
+    .slice(0, 200);
 }
 
 function attachMonitor(page: Page, origin: string): Monitor {
   const monitor: Monitor = {
     firstParty5xx: [],
     firstPartyFailures: [],
-    consoleErrors: [],
+    firstPartyConsoleErrors: [],
+    thirdPartyConsoleErrors: 0,
     consoleWarnings: [],
     pageExceptions: [],
   };
@@ -85,20 +107,40 @@ function attachMonitor(page: Page, origin: string): Monitor {
     });
   });
 
-  page.on("console", (message) => {
-    const text = message.text().slice(0, 200);
-    if (message.type() === "error") {
-      monitor.consoleErrors.push(text);
-    } else if (
-      message.type() === "warning" &&
-      /deprecated|deprecation/i.test(text)
-    ) {
-      monitor.consoleWarnings.push(text);
+  page.on("console", (message: ConsoleMessage) => {
+    if (message.type() === "warning" && BENIGN_CONSOLE.test(message.text())) {
+      monitor.consoleWarnings.push(sanitizeConsoleText(message.text()));
+      return;
     }
+    if (message.type() !== "error") {
+      return;
+    }
+    if (BENIGN_CONSOLE.test(message.text())) {
+      monitor.consoleWarnings.push(sanitizeConsoleText(message.text()));
+      return;
+    }
+
+    const locationUrl = message.location().url || "";
+    const sanitized = sanitizeConsoleText(message.text());
+    const pathAndText = `${safePath(locationUrl)}: ${sanitized}`;
+    if (BENIGN_FIRST_PARTY_CONSOLE.test(pathAndText)) {
+      monitor.consoleWarnings.push(pathAndText);
+      return;
+    }
+    if (locationUrl && isFirstParty(locationUrl, origin)) {
+      monitor.firstPartyConsoleErrors.push(pathAndText);
+      return;
+    }
+    if (!locationUrl) {
+      // Unknown location — treat as first-party to fail closed.
+      monitor.firstPartyConsoleErrors.push(sanitized);
+      return;
+    }
+    monitor.thirdPartyConsoleErrors += 1;
   });
 
   page.on("pageerror", (error) => {
-    monitor.pageExceptions.push(error.message.slice(0, 200));
+    monitor.pageExceptions.push(sanitizeConsoleText(error.message));
   });
 
   return monitor;
@@ -133,7 +175,6 @@ async function assertStillAuthenticated(page: Page, origin: string): Promise<voi
         if (await adminMenu.isVisible().catch(() => false)) {
           return true;
         }
-        // Gutenberg fullscreen can hide admin chrome while remaining authenticated.
         if (
           /\/wp-admin\//.test(current.pathname) &&
           ((await adminBody.count()) > 0 ||
@@ -157,9 +198,9 @@ async function gotoAdmin(
   const origin = new URL(baseURL).origin;
   const target = new URL(relativePath, baseURL).toString();
   const response = await page.goto(target, { waitUntil: "commit" });
-  expect(response, `response must exist for ${relativePath}`).not.toBeNull();
+  expect(response, "admin navigation response must exist").not.toBeNull();
   const status = response!.status();
-  expect(status, `${relativePath} must be below 500`).toBeLessThan(500);
+  expect(status, "admin navigation must be below 500").toBeLessThan(500);
 
   await page.locator("body").waitFor({ state: "attached" });
   await assertStillAuthenticated(page, origin);
@@ -167,7 +208,7 @@ async function gotoAdmin(
   const body = await page.content();
   expect(
     looksLikeErrorSurface(body),
-    `${relativePath} must not show critical error surfaces`,
+    "admin page must not show critical error surfaces",
   ).toBe(false);
 
   return {
@@ -280,7 +321,7 @@ async function assertEditorTitleVisible(page: Page): Promise<void> {
 }
 
 async function assertTickeraPanelsVisible(page: Page): Promise<boolean> {
-  const panels = page.locator(
+  const tickeraPanels = page.locator(
     [
       "#tc_event_meta",
       "#tc_event_data",
@@ -288,30 +329,30 @@ async function assertTickeraPanelsVisible(page: Page): Promise<boolean> {
       "#tickera_event_data",
       "[id*='tc_event' i]",
       "[class*='tc_event' i]",
-      "#postbox-container-2 .postbox",
-      "#yoast_wpseo_metabox, .yoast",
+      "[id*='tickera' i]",
+      "[class*='tickera' i]",
     ].join(", "),
   );
   const eventsTab = page.getByRole("tab", { name: /^Events$/i });
   const eventsPanel = page.getByRole("tabpanel", { name: /^Events$/i });
-  const metaBoxes = page.getByRole("heading", { name: /Meta Boxes/i });
+  const eventsTitleChip = page.getByRole("button", { name: /·\s*Events/i });
 
   await expect
     .poll(
       async () =>
-        (await panels.count()) > 0 ||
+        (await tickeraPanels.count()) > 0 ||
         (await eventsTab.count()) > 0 ||
         (await eventsPanel.count()) > 0 ||
-        (await metaBoxes.count()) > 0,
+        (await eventsTitleChip.count()) > 0,
       { timeout: 60_000 },
     )
     .toBe(true);
 
   return (
-    (await panels.count()) > 0 ||
+    (await tickeraPanels.count()) > 0 ||
     (await eventsTab.isVisible().catch(() => false)) ||
     (await eventsPanel.isVisible().catch(() => false)) ||
-    (await metaBoxes.isVisible().catch(() => false))
+    (await eventsTitleChip.isVisible().catch(() => false))
   );
 }
 
@@ -337,6 +378,62 @@ async function openRowEdit(
   await page.locator("body").waitFor({ state: "attached" });
 }
 
+async function countActionSchedulerMatches(
+  page: Page,
+  baseURL: string,
+  discoveredHref: string,
+  status: "pending" | "in-progress" | "failed",
+): Promise<number> {
+  const origin = new URL(baseURL).origin;
+  const filtered = new URL(discoveredHref);
+  expect(filtered.origin).toBe(origin);
+
+  if (filtered.searchParams.get("page") === "wc-status") {
+    filtered.searchParams.set("tab", "action-scheduler");
+  } else if (!filtered.searchParams.get("page")) {
+    filtered.searchParams.set("page", "action-scheduler");
+  }
+  filtered.searchParams.set("status", status);
+  filtered.searchParams.set("s", "eventsales-catalog-change");
+
+  const nav = await page.goto(filtered.toString(), { waitUntil: "commit" });
+  expect(nav, `Action Scheduler ${status} response`).not.toBeNull();
+  expect(
+    nav!.status(),
+    `Action Scheduler ${status} must be below 500`,
+  ).toBeLessThan(500);
+  await page.locator("body").waitFor({ state: "attached" });
+  await assertStillAuthenticated(page, origin);
+  expect(looksLikeErrorSurface(await page.content())).toBe(false);
+
+  const matchingRows = page.locator("table.wp-list-table tbody tr").filter({
+    hasText: /eventsales-catalog-change/i,
+  });
+
+  let total = 0;
+  for (let pageIndex = 0; pageIndex < 20; pageIndex += 1) {
+    total += await matchingRows.count();
+
+    const next = page
+      .locator(".tablenav-pages a.next-page:not(.disabled)")
+      .first();
+    if ((await next.count()) === 0) {
+      break;
+    }
+    const href = await next.getAttribute("href");
+    if (!href) {
+      break;
+    }
+    const nextUrl = new URL(href, page.url());
+    expect(nextUrl.origin).toBe(origin);
+    await page.goto(nextUrl.toString(), { waitUntil: "commit" });
+    await page.locator("body").waitFor({ state: "attached" });
+    await assertStillAuthenticated(page, origin);
+  }
+
+  return total;
+}
+
 test.describe("read-only WordPress admin smoke baseline", () => {
   test.describe.configure({ timeout: 300_000 });
 
@@ -348,9 +445,11 @@ test.describe("read-only WordPress admin smoke baseline", () => {
     const origin = new URL(baseURL!).origin;
     const monitor = attachMonitor(page, origin);
 
-    // --- Phase 4: Dashboard ---
+    // --- Dashboard ---
     const dashboard = await gotoAdmin(page, baseURL!, "wp-admin/");
-    await expect(page.locator("#dashboard-widgets, #dashboard-widgets-wrap, .wrap h1").first()).toBeVisible();
+    await expect(
+      page.locator("#dashboard-widgets, #dashboard-widgets-wrap, .wrap h1").first(),
+    ).toBeVisible();
 
     await page.reload({ waitUntil: "commit" });
     await page.locator("body").waitFor({ state: "attached" });
@@ -360,9 +459,11 @@ test.describe("read-only WordPress admin smoke baseline", () => {
     annotate("dashboard_pathname", new URL(page.url()).pathname);
     annotate("dashboard_status", String(dashboard.status));
 
-    // --- Phase 5: Plugins ---
+    // --- Plugins ---
     const plugins = await gotoAdmin(page, baseURL!, "wp-admin/plugins.php");
-    await expect(page.locator("#the-list, table.wp-list-table.plugins").first()).toBeVisible();
+    await expect(
+      page.locator("#the-list, table.wp-list-table.plugins").first(),
+    ).toBeVisible();
 
     const pluginRow = page
       .locator("#the-list tr")
@@ -374,7 +475,11 @@ test.describe("read-only WordPress admin smoke baseline", () => {
 
     if (pluginPresent) {
       const versionText =
-        (await pluginRow.locator(".plugin-version-author-uri, .plugin-version").first().textContent().catch(() => null)) ||
+        (await pluginRow
+          .locator(".plugin-version-author-uri, .plugin-version")
+          .first()
+          .textContent()
+          .catch(() => null)) ||
         (await pluginRow.textContent()) ||
         "";
       const versionMatch = /Version\s+([0-9][^\s|<]*)/i.exec(versionText);
@@ -395,7 +500,12 @@ test.describe("read-only WordPress admin smoke baseline", () => {
     annotate("plugin_active_state", pluginActiveState);
     annotate("plugins_status", String(plugins.status));
 
-    // --- Phase 6: WooCommerce product list ---
+    expect(pluginPresent, "EventSales plugin must be installed").toBe(true);
+    expect(pluginActiveState, "EventSales plugin must remain active").toBe(
+      "active",
+    );
+
+    // --- WooCommerce product list ---
     const productList = await gotoAdmin(
       page,
       baseURL!,
@@ -410,7 +520,7 @@ test.describe("read-only WordPress admin smoke baseline", () => {
     annotate("product_count", productCountText);
     annotate("product_id", preferredProduct!.id);
 
-    // --- Phase 7: Product edit (read-only) ---
+    // --- Product edit (read-only) ---
     await openRowEdit(page, preferredProduct!.row, origin);
     await assertStillAuthenticated(page, origin);
 
@@ -429,15 +539,17 @@ test.describe("read-only WordPress admin smoke baseline", () => {
       .toBe(true);
     const wooPanelsVisible = (await wooPanels.count()) > 0;
 
-    annotate("product_edit_pathname", productEditUrl.pathname + productEditUrl.search);
+    annotate("product_edit_pathname", productEditUrl.pathname);
     annotate("woo_panels_visible", wooPanelsVisible ? "yes" : "no");
 
-    // --- Phase 8: Tickera event list discovery ---
+    // --- Tickera event list discovery ---
     await gotoAdmin(page, baseURL!, "wp-admin/");
 
     const tickeraHref = await page.evaluate((stagingOrigin) => {
       const anchors = Array.from(
-        document.querySelectorAll<HTMLAnchorElement>("#adminmenu a[href], #wpadminbar a[href]"),
+        document.querySelectorAll<HTMLAnchorElement>(
+          "#adminmenu a[href], #wpadminbar a[href]",
+        ),
       );
       const sameOrigin = anchors
         .map((a) => a.href)
@@ -488,17 +600,17 @@ test.describe("read-only WordPress admin smoke baseline", () => {
     await expect(page.locator("#the-list, table.wp-list-table").first()).toBeVisible();
     const eventCountText = await readDisplayedItemCount(page);
     const preferredEvent = await findPreferredRow(page);
-    expect(preferredEvent, "at least one non-trashed Tickera event row").not.toBeNull();
+    expect(
+      preferredEvent,
+      "at least one non-trashed Tickera event row",
+    ).not.toBeNull();
 
-    annotate(
-      "tickera_list_pathname",
-      tickeraListUrl.pathname + tickeraListUrl.search,
-    );
+    annotate("tickera_list_pathname", tickeraListUrl.pathname);
     annotate("tickera_list_status", String(tickeraList.status));
     annotate("event_count", eventCountText);
     annotate("event_id", preferredEvent!.id);
 
-    // --- Phase 9: Tickera event edit ---
+    // --- Tickera event edit ---
     await openRowEdit(page, preferredEvent!.row, origin);
     await assertStillAuthenticated(page, origin);
 
@@ -512,13 +624,10 @@ test.describe("read-only WordPress admin smoke baseline", () => {
     const tickeraPanelsVisible = await assertTickeraPanelsVisible(page);
     expect(tickeraPanelsVisible, "Tickera event panels must render").toBe(true);
 
-    annotate(
-      "event_edit_pathname",
-      eventEditUrl.pathname + eventEditUrl.search,
-    );
+    annotate("event_edit_pathname", eventEditUrl.pathname);
     annotate("tickera_panels_visible", tickeraPanelsVisible ? "yes" : "no");
 
-    // --- Phase 10: Action Scheduler ---
+    // --- Action Scheduler ---
     await gotoAdmin(page, baseURL!, "wp-admin/");
     const actionSchedulerHref = await page.evaluate((stagingOrigin) => {
       const known = [
@@ -565,37 +674,26 @@ test.describe("read-only WordPress admin smoke baseline", () => {
         .first(),
     ).toBeVisible({ timeout: 20_000 });
 
-    const asBodyText = await page.locator("body").innerText();
-    const eventsalesMentions = [
-      ...asBodyText.matchAll(/eventsales-catalog-change/gi),
-    ];
+    const pending = await countActionSchedulerMatches(
+      page,
+      baseURL!,
+      actionSchedulerHref!,
+      "pending",
+    );
+    const inProgress = await countActionSchedulerMatches(
+      page,
+      baseURL!,
+      actionSchedulerHref!,
+      "in-progress",
+    );
+    const failed = await countActionSchedulerMatches(
+      page,
+      baseURL!,
+      actionSchedulerHref!,
+      "failed",
+    );
 
-    let pending = 0;
-    let inProgress = 0;
-    let failed = 0;
-
-    if (eventsalesMentions.length > 0) {
-      // Count rows mentioning the hook/group in the scheduler table.
-      const rows = page.locator("table.wp-list-table tbody tr").filter({
-        hasText: /eventsales-catalog-change/i,
-      });
-      const rowCount = await rows.count();
-      for (let index = 0; index < rowCount; index += 1) {
-        const rowText = ((await rows.nth(index).innerText()) || "").toLowerCase();
-        if (/failed/.test(rowText)) {
-          failed += 1;
-        } else if (/in[- ]progress|running/.test(rowText)) {
-          inProgress += 1;
-        } else if (/pending|queued/.test(rowText)) {
-          pending += 1;
-        } else {
-          // Treat unknown status rows for this hook as unexpected baseline noise.
-          pending += 1;
-        }
-      }
-    }
-
-    annotate("action_scheduler_pathname", asUrl.pathname + asUrl.search);
+    annotate("action_scheduler_pathname", asUrl.pathname);
     annotate("action_scheduler_status", String(actionScheduler.status));
     annotate("eventsales_pending", String(pending));
     annotate("eventsales_in_progress", String(inProgress));
@@ -606,10 +704,11 @@ test.describe("read-only WordPress admin smoke baseline", () => {
       "unexpected EventSales catalog-trigger actions must be 0",
     ).toBe(0);
 
-    // --- Phase 11: Network / console review ---
-    // Soften console error gating: WordPress admin is noisy.
-    // Keep page exceptions and first-party 5xx as hard failures.
-    const blockingConsole = [...monitor.pageExceptions];
+    // --- Network / console review ---
+    const blockingConsole = [
+      ...monitor.pageExceptions,
+      ...monitor.firstPartyConsoleErrors,
+    ];
 
     annotate("first_party_5xx_count", String(monitor.firstParty5xx.length));
     annotate(
@@ -618,14 +717,19 @@ test.describe("read-only WordPress admin smoke baseline", () => {
     );
     annotate("blocking_console_errors", String(blockingConsole.length));
     annotate("non_blocking_warnings", String(monitor.consoleWarnings.length));
-    annotate("console_error_count", String(monitor.consoleErrors.length));
+    annotate(
+      "third_party_console_errors",
+      String(monitor.thirdPartyConsoleErrors),
+    );
 
     expect(monitor.firstParty5xx, "first-party 5xx responses").toEqual([]);
     expect(
       monitor.firstPartyFailures,
       "failed first-party essential requests",
     ).toEqual([]);
-    expect(blockingConsole, "blocking first-party JS exceptions").toEqual([]);
+    expect(blockingConsole, "blocking first-party JS errors/exceptions").toEqual(
+      [],
+    );
 
     annotate("session_authenticated", "yes");
   });

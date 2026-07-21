@@ -19,7 +19,7 @@ Copy placeholders from `.env.example` into the **repository-root** `.env` only. 
 
 ```bash
 cd tools/playwright-staging
-npm install
+npm ci
 npx playwright install chromium
 ```
 
@@ -48,8 +48,10 @@ Projects:
 
 - Loads only the repository-root `.env`
 - Scopes Basic Auth credentials to the staging origin
-- Rejects non-HTTPS URLs and production hostnames
+- Rejects non-HTTPS URLs, production hostnames, embedded URL credentials, and query/fragment values
 - Stores WordPress auth state under `playwright/.auth/` with mode `600` (gitignored)
 - Read-only admin smoke never clicks Save/Update/Publish/Trash/Activate/Run/etc.
+- First-party console errors fail the smoke suite; third-party analytics/font noise stays informational
+- Action Scheduler checks use read-only status+search filters for `eventsales-catalog-change`
 - Does not use SFTP or deploy plugins
-- Does not log credentials, headers, cookies, or storage-state contents
+- Does not log credentials, headers, cookies, nonces, query values, or storage-state contents
