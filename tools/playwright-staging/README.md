@@ -53,5 +53,8 @@ Projects:
 - Read-only admin smoke never clicks Save/Update/Publish/Trash/Activate/Run/etc.
 - First-party console errors fail the smoke suite; third-party analytics/font noise stays informational
 - Action Scheduler checks use read-only status+search filters for `eventsales-catalog-change`
+- Live staging projects disable traces, screenshots, and videos because those artifacts can capture HTTP Basic Auth headers, WordPress credentials, authenticated cookies, or protected admin content
+- List and HTML reporters remain enabled; annotations and failure text stay pathname-sanitized
+- Artifact directories (`test-results/`, `playwright-report/`, `playwright/.auth/`) remain gitignored
 - Does not use SFTP or deploy plugins
 - Does not log credentials, headers, cookies, nonces, query values, or storage-state contents

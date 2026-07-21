@@ -38,9 +38,11 @@ export default defineConfig({
     headless: true,
     navigationTimeout: 30_000,
     ignoreHTTPSErrors: false,
-    trace: "retain-on-failure",
-    screenshot: "only-on-failure",
-    video: "retain-on-failure",
+    // Live staging runs must not retain media/traces: they can capture
+    // Basic Auth headers, WordPress credentials, cookies, or admin content.
+    trace: "off",
+    screenshot: "off",
+    video: "off",
     httpCredentials: {
       username: httpUsername,
       password: httpPassword,
@@ -59,6 +61,9 @@ export default defineConfig({
       timeout: 90_000,
       use: {
         ...devices["Desktop Chrome"],
+        trace: "off",
+        screenshot: "off",
+        video: "off",
       },
     },
     {
@@ -67,6 +72,9 @@ export default defineConfig({
       timeout: 60_000,
       use: {
         ...devices["Desktop Chrome"],
+        trace: "off",
+        screenshot: "off",
+        video: "off",
       },
     },
     {
@@ -77,6 +85,9 @@ export default defineConfig({
       use: {
         ...devices["Desktop Chrome"],
         storageState: authStatePath,
+        trace: "off",
+        screenshot: "off",
+        video: "off",
       },
     },
   ],
