@@ -19,6 +19,11 @@ erl_crash.dump
 # Also ignore archive artifacts (built via "mix archive.build").
 *.ez
 
+# Local secrets (never commit)
+.env
+.env.*
+!.env.example
+
 # Temporary files, for example, from tests.
 /tmp/
 
