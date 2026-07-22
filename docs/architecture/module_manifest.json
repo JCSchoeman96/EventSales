@@ -276,6 +276,7 @@
     "lib/event_sales_web/oban_web_resolver.ex",
     "lib/event_sales_web/origin_config.ex",
     "lib/event_sales_web/plugs/admin_only.ex",
+    "lib/event_sales_web/plugs/catalog_change_raw_json_parser.ex",
     "lib/event_sales_web/plugs/internal_only.ex",
     "lib/event_sales_web/plugs/load_current_user.ex",
     "lib/event_sales_web/plugs/rate_limit_catalog_change_intake.ex",
@@ -5939,6 +5940,25 @@
         {
           "arity": 2,
           "name": "call"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSalesWeb.Plugs.CatalogChangeRawJSONParser",
+      "parse_error": null,
+      "path": "lib/event_sales_web/plugs/catalog_change_raw_json_parser.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "init"
+        },
+        {
+          "arity": 5,
+          "name": "parse"
         }
       ],
       "specs?": false,

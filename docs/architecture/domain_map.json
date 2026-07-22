@@ -2312,6 +2312,25 @@
       {
         "docs_count": 0,
         "moduledoc?": true,
+        "name": "EventSalesWeb.Plugs.CatalogChangeRawJSONParser",
+        "parse_error": null,
+        "path": "lib/event_sales_web/plugs/catalog_change_raw_json_parser.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "init"
+          },
+          {
+            "arity": 5,
+            "name": "parse"
+          }
+        ],
+        "specs?": false,
+        "uses": []
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
         "name": "EventSalesWeb.Plugs.InternalOnly",
         "parse_error": null,
         "path": "lib/event_sales_web/plugs/internal_only.ex",

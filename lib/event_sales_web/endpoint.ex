@@ -41,7 +41,12 @@ defmodule EventSalesWeb.Endpoint do
   plug EventSalesWeb.Plugs.WebhookIntakePreParserGuard
 
   plug Plug.Parsers,
-    parsers: [:urlencoded, :multipart, :json],
+    parsers: [
+      :urlencoded,
+      :multipart,
+      EventSalesWeb.Plugs.CatalogChangeRawJSONParser,
+      :json
+    ],
     pass: ["*/*"],
     json_decoder: Phoenix.json_library(),
     body_reader: {EventSalesWeb.Plugs.RawBodyReader, :read_body, []}
