@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-317
+318
 
 ## Files
 
@@ -288,6 +288,7 @@ Project root: `.`
 - `lib/event_sales_web/oban_web_resolver.ex`
 - `lib/event_sales_web/origin_config.ex`
 - `lib/event_sales_web/plugs/admin_only.ex`
+- `lib/event_sales_web/plugs/catalog_change_raw_json_parser.ex`
 - `lib/event_sales_web/plugs/internal_only.ex`
 - `lib/event_sales_web/plugs/load_current_user.ex`
 - `lib/event_sales_web/plugs/rate_limit_catalog_change_intake.ex`
@@ -1946,6 +1947,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `init/1`, `call/2`
   - uses: _none_
+- `EventSalesWeb.Plugs.CatalogChangeRawJSONParser` - `lib/event_sales_web/plugs/catalog_change_raw_json_parser.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `init/1`, `parse/5`
+  - uses: _none_
 - `EventSalesWeb.Plugs.InternalOnly` - `lib/event_sales_web/plugs/internal_only.ex`
   - moduledoc?: true
   - specs?: false
@@ -2331,6 +2338,7 @@ _none_
 ### Plugs
 
 - `EventSalesWeb.Plugs.AdminOnly` - `lib/event_sales_web/plugs/admin_only.ex`
+- `EventSalesWeb.Plugs.CatalogChangeRawJSONParser` - `lib/event_sales_web/plugs/catalog_change_raw_json_parser.ex`
 - `EventSalesWeb.Plugs.InternalOnly` - `lib/event_sales_web/plugs/internal_only.ex`
 - `EventSalesWeb.Plugs.LoadCurrentUser` - `lib/event_sales_web/plugs/load_current_user.ex`
 - `EventSalesWeb.Plugs.RateLimitCatalogChangeIntake` - `lib/event_sales_web/plugs/rate_limit_catalog_change_intake.ex`
