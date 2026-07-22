@@ -1904,6 +1904,23 @@
       },
       {
         "docs_count": 0,
+        "moduledoc?": false,
+        "name": "EventSalesWeb.ReadinessController",
+        "parse_error": null,
+        "path": "lib/event_sales_web/controllers/readiness_controller.ex",
+        "public_funs": [
+          {
+            "arity": 2,
+            "name": "show"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "EventSalesWeb"
+        ]
+      },
+      {
+        "docs_count": 0,
         "moduledoc?": true,
         "name": "EventSalesWeb.WebhookController",
         "parse_error": null,

@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-315
+317
 
 ## Files
 
@@ -102,6 +102,7 @@ Project root: `.`
 - `lib/event_sales/catalog/workers/mapping_changed_worker.ex`
 - `lib/event_sales/exports/csv_stream.ex`
 - `lib/event_sales/exports/event_sales_csv.ex`
+- `lib/event_sales/health/database_readiness.ex`
 - `lib/event_sales/ingestion.ex`
 - `lib/event_sales/ingestion/admin_reconciliation_dashboard.ex`
 - `lib/event_sales/ingestion/catalog_change_contract.ex`
@@ -257,6 +258,7 @@ Project root: `.`
 - `lib/event_sales_web/controllers/page_controller.ex`
 - `lib/event_sales_web/controllers/page_html.ex`
 - `lib/event_sales_web/controllers/page_html/home.html.heex`
+- `lib/event_sales_web/controllers/readiness_controller.ex`
 - `lib/event_sales_web/controllers/webhook_controller.ex`
 - `lib/event_sales_web/endpoint.ex`
 - `lib/event_sales_web/helpers/dashboard_helpers.ex`
@@ -840,6 +842,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `summary_csv/2`, `orders_csv/2`
   - uses: _none_
+- `EventSales.Health.DatabaseReadiness` - `lib/event_sales/health/database_readiness.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 2
+  - public_funs: `start_link/1`, `status/2`, `probe_now/1`, `init/1`, `handle_continue/2`, `handle_info/2`, `handle_cast/2`
+  - uses: `GenServer`
 - `EventSales.Ingestion` - `lib/event_sales/ingestion.ex`
   - moduledoc?: true
   - specs?: false
@@ -1758,6 +1766,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: _none_
   - uses: `EventSalesWeb`
+- `EventSalesWeb.ReadinessController` - `lib/event_sales_web/controllers/readiness_controller.ex`
+  - moduledoc?: false
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `show/2`
+  - uses: `EventSalesWeb`
 - `EventSalesWeb.WebhookController` - `lib/event_sales_web/controllers/webhook_controller.ex`
   - moduledoc?: true
   - specs?: false
@@ -2281,6 +2295,7 @@ _none_
 - `EventSalesWeb.HealthController` - `lib/event_sales_web/controllers/health_controller.ex`
 - `EventSalesWeb.PageController` - `lib/event_sales_web/controllers/page_controller.ex`
 - `EventSalesWeb.PageHTML` - `lib/event_sales_web/controllers/page_html.ex`
+- `EventSalesWeb.ReadinessController` - `lib/event_sales_web/controllers/readiness_controller.ex`
 - `EventSalesWeb.WebhookController` - `lib/event_sales_web/controllers/webhook_controller.ex`
 
 ### Components
