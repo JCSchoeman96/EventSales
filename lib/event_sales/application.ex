@@ -13,6 +13,7 @@ defmodule EventSales.Application do
       [
         EventSalesWeb.Telemetry,
         repo_child(),
+        database_readiness_child(),
         EventSales.Ingestion.RestRateLimiter,
         EventSales.Ingestion.RestCircuitBreaker,
         EventSales.Catalog.ProductMetadataCache,
@@ -47,6 +48,12 @@ defmodule EventSales.Application do
   defp repo_child do
     if Application.get_env(:event_sales, :start_repo, true) do
       EventSales.Repo
+    end
+  end
+
+  defp database_readiness_child do
+    if Application.get_env(:event_sales, :start_database_readiness, true) do
+      EventSales.Health.DatabaseReadiness
     end
   end
 

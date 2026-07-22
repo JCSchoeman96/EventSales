@@ -26,6 +26,7 @@ config :event_sales, EventSalesWeb.Endpoint,
   server: false
 
 config :event_sales, :start_repo, true
+config :event_sales, :start_database_readiness, false
 
 config :event_sales, Oban, testing: :manual
 

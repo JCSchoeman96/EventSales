@@ -90,6 +90,7 @@
     "lib/event_sales/catalog/workers/mapping_changed_worker.ex",
     "lib/event_sales/exports/csv_stream.ex",
     "lib/event_sales/exports/event_sales_csv.ex",
+    "lib/event_sales/health/database_readiness.ex",
     "lib/event_sales/ingestion.ex",
     "lib/event_sales/ingestion/admin_reconciliation_dashboard.ex",
     "lib/event_sales/ingestion/catalog_change_contract.ex",
@@ -245,6 +246,7 @@
     "lib/event_sales_web/controllers/page_controller.ex",
     "lib/event_sales_web/controllers/page_html.ex",
     "lib/event_sales_web/controllers/page_html/home.html.heex",
+    "lib/event_sales_web/controllers/readiness_controller.ex",
     "lib/event_sales_web/controllers/webhook_controller.ex",
     "lib/event_sales_web/endpoint.ex",
     "lib/event_sales_web/helpers/dashboard_helpers.ex",
@@ -1871,6 +1873,47 @@
       ],
       "specs?": true,
       "uses": []
+    },
+    {
+      "docs_count": 2,
+      "moduledoc?": true,
+      "name": "EventSales.Health.DatabaseReadiness",
+      "parse_error": null,
+      "path": "lib/event_sales/health/database_readiness.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "start_link"
+        },
+        {
+          "arity": 2,
+          "name": "status"
+        },
+        {
+          "arity": 1,
+          "name": "probe_now"
+        },
+        {
+          "arity": 1,
+          "name": "init"
+        },
+        {
+          "arity": 2,
+          "name": "handle_continue"
+        },
+        {
+          "arity": 2,
+          "name": "handle_info"
+        },
+        {
+          "arity": 2,
+          "name": "handle_cast"
+        }
+      ],
+      "specs?": true,
+      "uses": [
+        "GenServer"
+      ]
     },
     {
       "docs_count": 0,
@@ -5258,6 +5301,23 @@
       "parse_error": null,
       "path": "lib/event_sales_web/controllers/page_html.ex",
       "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "EventSalesWeb"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": false,
+      "name": "EventSalesWeb.ReadinessController",
+      "parse_error": null,
+      "path": "lib/event_sales_web/controllers/readiness_controller.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "show"
+        }
+      ],
       "specs?": false,
       "uses": [
         "EventSalesWeb"

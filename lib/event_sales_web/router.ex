@@ -52,6 +52,7 @@ defmodule EventSalesWeb.Router do
 
   scope "/", EventSalesWeb do
     get "/health", HealthController, :show
+    get "/ready", ReadinessController, :show
   end
 
   scope "/webhooks", EventSalesWeb do
