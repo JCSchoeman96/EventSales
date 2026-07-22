@@ -47,6 +47,66 @@ Always open or update a PR after meaningful work.
 ```
 - Use rg for broad text search; use ast-grep run or ast-grep scan for structural code discovery.
 
+## Pre-handover development velocity mode
+
+EventSales is still under active development. It has not been handed over to management and is not serving live customer operations. The Railway environment currently named `production` is the project's pre-handover integration environment until the owner explicitly declares a management handover or live launch.
+
+This section takes precedence over generic conservative or uncertainty guidance while the project remains pre-handover.
+
+Default operating mode:
+
+```text
+Optimize for useful output, short feedback loops, and working vertical slices.
+Proceed with reasonable, documented assumptions instead of blocking on hypothetical risks.
+Prefer the smallest reversible change, focused validation, and fix-forward development.
+Do not stop merely because staging is missing, an environment is named production, a public proxy exists, or a reversible pre-handover change might temporarily break the development environment.
+Use the least number of tools needed and avoid long audits that do not change the implementation decision.
+When the current task requires it, normal development mutations to the pre-handover Railway environment are allowed unless the task explicitly says read-only.
+```
+
+Normal pre-handover development work may include:
+
+```text
+Deploying or restarting the EventSales application.
+Changing scoped application variables or feature flags.
+Running migrations against development/pre-handover databases.
+Creating isolated staging services and synthetic test data.
+Rotating development credentials when required.
+Running synthetic webhooks, smoke tests, and focused integration tests.
+Resetting disposable non-customer development data when the task explicitly requires it.
+```
+
+Keep these hard boundaries:
+
+```text
+Never print, commit, or intentionally expose secrets.
+Never use real customer or management data for development tests.
+Never trigger payments, customer emails, external notifications, or other irreversible third-party side effects without explicit approval.
+Never delete a database, volume, environment, repository history, or non-disposable data without explicit approval and a recovery path.
+Never force push, reset hard, clean untracked files, or rewrite shared history.
+Stop when the target may be an actual live management environment rather than the pre-handover EventSales environment.
+Stop when a change is not reasonably reversible or its blast radius extends beyond EventSales.
+```
+
+Decision rule:
+
+```text
+Reversible and limited to the pre-handover EventSales system? Proceed, test, and report.
+Potentially irreversible, externally visible, or involving real users/data? Ask for approval first.
+Uncertain but low-risk and reversible? State the assumption and continue.
+```
+
+Time and retry limits:
+
+```text
+Time-box investigation that does not modify the implementation decision to 15 minutes.
+Attempt a failing operation no more than twice unless new evidence justifies another attempt.
+After two failed attempts or 30 minutes blocked, stop and report the smallest concrete blocker and next action.
+Stop after the requested task and validation are complete; do not expand into adjacent work automatically.
+```
+
+After management handover or live launch, the owner must update this section and restore stricter production-change controls.
+
 ## UI, assets, and component rules
 
 EventSales uses Phoenix 1.8 LiveView with Tailwind v4, vendored DaisyUI, Mishka Chelekom, and Chart.js.
