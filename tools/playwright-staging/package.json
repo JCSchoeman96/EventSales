@@ -1,0 +1,25 @@
+{
+  "name": "playwright-staging",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Isolated Playwright staging Basic Auth and WordPress admin session checks",
+  "scripts": {
+    "test:unit": "playwright test --project=unit",
+    "test:access": "playwright test --project=access",
+    "test:access:headed": "playwright test --project=access --headed",
+    "test:auth": "playwright test --project=setup",
+    "test:session": "playwright test tests/authenticated-session.spec.ts --project=admin",
+    "test:session:headed": "playwright test tests/authenticated-session.spec.ts --project=admin --headed",
+    "test:admin-readonly": "playwright test tests/wp-admin-readonly.spec.ts --project=admin",
+    "test:admin-readonly:headed": "playwright test tests/wp-admin-readonly.spec.ts --project=admin --headed",
+    "report": "playwright show-report"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "dotenv": "^17.4.2"
+  }
+}

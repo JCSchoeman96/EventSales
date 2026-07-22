@@ -247,3 +247,28 @@ jobs:
 
       - name: Run Dialyzer
         run: mix dialyzer
+
+  playwright_unit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: tools/playwright-staging/package-lock.json
+
+      - name: Install Playwright harness dependencies
+        working-directory: tools/playwright-staging
+        run: npm ci
+
+      - name: Run secret-free staging URL unit tests
+        working-directory: tools/playwright-staging
+        env:
+          STAGING_BASE_URL: https://example.e.wpstage.net/w/
+          STAGING_HTTP_USERNAME: placeholder
+          STAGING_HTTP_PASSWORD: placeholder
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+        run: npm run test:unit

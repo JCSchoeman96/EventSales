@@ -1,0 +1,10 @@
+node_modules/
+.env
+.env.*
+!.env.example
+playwright/.auth/
+playwright-report/
+blob-report/
+test-results/
+*.webm
+trace.zip
