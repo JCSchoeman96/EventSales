@@ -145,13 +145,8 @@ defmodule EventSales.Ingestion.Workers.RecoverTickeraCatalogAutoApplyWorker do
 
     if (job && job.state in ["discarded", "cancelled"]) and
          decision.enqueue_attempts <= @terminal_attempt do
-      case Oban.retry_job(job.id) do
-        :ok ->
-          update_decision(decision, enqueue_state: :enqueued, next_attempt_at: nil)
-
-        {:error, reason} ->
-          Repo.rollback(reason)
-      end
+      :ok = Oban.retry_job(job.id)
+      update_decision(decision, enqueue_state: :enqueued, next_attempt_at: nil)
     else
       terminal(decision, "linked_job_not_retryable")
     end

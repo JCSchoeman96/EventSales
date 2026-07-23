@@ -18,6 +18,10 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApply do
   alias EventSales.Repo
 
   @policy_version "conservative_auto_apply.v1"
+  # Dialyzer on OTP 28 expands Ecto.Multi's opaque MapSet internals when this
+  # pipeline starts from Ecto.Multi.new/0. The transaction is covered by the
+  # atomic enqueue and concurrent-worker tests.
+  @dialyzer {:nowarn_function, enqueue_multi: 1}
 
   def evaluate_run(run_id) when is_binary(run_id) do
     with {:ok, %TickeraCatalogSyncRun{} = run} <-
@@ -149,8 +153,10 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApply do
 
   defp enqueue_multi(decision_id) do
     Ecto.Multi.new()
-    |> Ecto.Multi.run(:locked_decision, &lock_enqueue_decision(&1, &2, decision_id))
-    |> Ecto.Multi.run(:revalidated, &revalidate_enqueue/2)
+    |> Ecto.Multi.run(:locked_decision, fn repo, changes ->
+      lock_enqueue_decision(repo, changes, decision_id)
+    end)
+    |> Ecto.Multi.run(:revalidated, fn repo, changes -> revalidate_enqueue(repo, changes) end)
     |> Ecto.Multi.update_all(
       :claimed_decision,
       fn %{locked_decision: decision} ->

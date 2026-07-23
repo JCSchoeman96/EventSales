@@ -160,8 +160,8 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponse do
     do: positive_integer?(variation_id) and status in @statuses
 
   defp valid_product_semantics?(semantics) when is_map(semantics) do
-    MapSet.new(Map.keys(semantics)) ==
-      MapSet.new(["payment_plan", "membership", "bundle", "add_on"]) and
+    Enum.sort(Map.keys(semantics)) ==
+      Enum.sort(["payment_plan", "membership", "bundle", "add_on"]) and
       Enum.all?(Map.values(semantics), &(&1 in @semantic_values))
   end
 

@@ -8,7 +8,12 @@ defmodule EventSales.Catalog.TickeraCatalog.Normalizer do
   @published "publish"
 
   @spec normalize(DiscoveryResult.t()) ::
-          {:ok, %{rows: [CatalogRow.t()], findings: [Finding.t()]}}
+          {:ok,
+           %{
+             rows: [CatalogRow.t()],
+             findings: [Finding.t()],
+             source_risks: [SourceRisk.t()]
+           }}
   def normalize(%DiscoveryResult{} = result) do
     events = Enum.map(result.events, &string_key_map/1)
     rows = Enum.map(result.catalog_rows, &string_key_map/1)
