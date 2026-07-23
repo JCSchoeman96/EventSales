@@ -1,0 +1,125 @@
+defmodule EventSales.Catalog.TickeraCatalog.AutoApplyPolicyTest do
+  use ExUnit.Case, async: true
+
+  alias EventSales.Catalog.TickeraCatalog.AutoApplyPolicy
+
+  test "eligible additive targeted v2 plan is deterministic and pure" do
+    input = eligible_input()
+
+    assert {:ok, %{result: :eligible, reason_codes: [], summaries: summaries}} =
+             AutoApplyPolicy.evaluate(input)
+
+    assert AutoApplyPolicy.evaluate(input) == AutoApplyPolicy.evaluate(input)
+    assert summaries.action_summary["event_create"] == 1
+  end
+
+  test "rejects every manual or unsupported action for the whole run" do
+    cases = [
+      {"event_actions", "update_metadata"},
+      {"event_actions", "adopt_existing"},
+      {"event_actions", "unknown"},
+      {"ticket_type_actions", "adopt_existing"},
+      {"ticket_type_actions", "unknown"},
+      {"product_mapping_actions", "move"},
+      {"product_mapping_actions", "update"},
+      {"product_mapping_actions", "deactivate"},
+      {"product_mapping_actions", "delete"},
+      {"product_mapping_actions", "unknown"}
+    ]
+
+    for {collection, action} <- cases do
+      input = put_in(eligible_input(), [:snapshot, collection], [%{"action" => action}])
+
+      assert {:ok, %{result: :ineligible, reason_codes: reasons}} =
+               AutoApplyPolicy.evaluate(input)
+
+      assert :unsupported_action in reasons
+    end
+  end
+
+  test "any finding, risk, variation, or historical impact rejects the whole run" do
+    finding = put_in(eligible_input(), [:snapshot, "findings"], [%{"code" => "any"}])
+    risk = put_in(eligible_input(), [:snapshot, "source_risks"], [%{"code" => "private_product"}])
+
+    variation =
+      put_in(
+        eligible_input(),
+        [:snapshot, "product_mapping_actions", Access.at(0), "woo_variation_id"],
+        99
+      )
+
+    history =
+      put_in(
+        eligible_input(),
+        [:snapshot, "historical_impact", "totals", "affected_pending_lines"],
+        1
+      )
+
+    for {input, reason} <- [
+          {finding, :finding_present},
+          {risk, :source_risk_present},
+          {variation, :variation_present},
+          {history, :historical_impact_present}
+        ] do
+      assert {:ok, %{result: :ineligible, reason_codes: reasons}} =
+               AutoApplyPolicy.evaluate(input)
+
+      assert reason in reasons
+    end
+  end
+
+  test "missing or unsupported versions and origin fail closed" do
+    cases = [
+      {Map.put(eligible_input(), :policy_version, "other"), :unsupported_policy_version},
+      {put_in(eligible_input(), [:snapshot, "snapshot_schema_version"], "v1"),
+       :unsupported_snapshot_version},
+      {Map.put(eligible_input(), :origin, :human_admin), :unsupported_origin},
+      {Map.delete(eligible_input(), :dry_run_hash), :missing_policy_input}
+    ]
+
+    for {input, reason} <- cases do
+      assert {:ok, %{result: :ineligible, reason_codes: reasons}} =
+               AutoApplyPolicy.evaluate(input)
+
+      assert reason in reasons
+    end
+  end
+
+  defp eligible_input do
+    %{
+      run_id: "00000000-0000-0000-0000-000000000001",
+      dry_run_hash: String.duplicate("a", 64),
+      origin: :targeted_catalog_change,
+      findings: [],
+      policy_version: "conservative_auto_apply.v1",
+      snapshot: %{
+        "snapshot_schema_version" => "tickera_catalog_plan.v2",
+        "event_actions" => [%{"action" => "create"}],
+        "ticket_type_actions" => [%{"action" => "create", "external_variation_id" => nil}],
+        "product_mapping_actions" => [
+          %{"action" => "create", "woo_variation_id" => nil}
+        ],
+        "findings" => [],
+        "source_risks" => [],
+        "historical_impact" => %{
+          "totals" => %{
+            "affected_pending_lines" => 0,
+            "affected_quantity" => 0,
+            "eligible_lines" => 0,
+            "eligible_quantity" => 0,
+            "deferred_lines" => 0,
+            "deferred_quantity" => 0,
+            "conflicting_lines" => 0,
+            "conflicting_quantity" => 0,
+            "already_mapped_lines" => 0,
+            "already_mapped_quantity" => 0
+          },
+          "warning_count" => 0,
+          "unresolved_destination_count" => 0,
+          "unknown_classification_count" => 0,
+          "destinations" => []
+        }
+      }
+    }
+  end
+end
