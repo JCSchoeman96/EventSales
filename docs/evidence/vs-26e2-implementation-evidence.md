@@ -7,6 +7,7 @@
 - Pack SHA-256: `4b1b5cc428049690da929c30f755abf85b945f23d974ce78a50059e81e23ef30`
 - Supplement SHA-256: `61885c2bd4161bc151cef449a02e059adb081179ff9cf34cefcf1692b6a35589`
 - Branch: `feat/vs-26e2-conservative-catalog-auto-apply`
+- Implementation code head: `9b39f72` (`Satisfy catalog auto-apply type contracts`)
 
 ## Generated database artifacts
 
@@ -41,11 +42,15 @@ Hard enable defaults false; durable global mode defaults disabled; allowlists an
 - `mix project.index --check`: pass.
 - `bash scripts/check_no_web_woocommerce_refs.sh`: pass.
 - `mix assets.build`: pass.
-- Full local CI: pending final rerun after the domain inventory correction.
+- Full local CI (`bash scripts/local_ci.sh`): pass.
+  - ExUnit: 1,088 tests, 0 failures.
+  - Credo: no issues.
+  - Dialyzer: 0 errors.
+  - Ash codegen check, project index, compile/format, and WooCommerce web-boundary checks: pass.
 
 Local test-database `EXPLAIN` was captured for recovery, latest-decision-by-run, and recent-source-decision queries. The empty local tables led PostgreSQL to prefer sequential scans on cost; the migration contains the reviewed identity, source-recent, and partial recovery indexes. Non-empty staging `EXPLAIN` evidence remains a later activation requirement and was not fabricated locally.
 
-Implementation head, final commit list, full-CI result, and draft PR details are recorded after final verification.
+The draft PR records the final branch head and complete commit list. The implementation code head above is immutable; the later evidence-only commit changes no runtime behavior.
 
 ## Prohibited actions
 
