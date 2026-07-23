@@ -19,6 +19,7 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
   @run_summary_fields [
     :id,
     :source_system_id,
+    :origin,
     :scope,
     :status,
     :dry_run_hash,
@@ -75,7 +76,12 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
            true <- target.generation == expected_generation,
            :ok <- validate_trigger_source(target.source_system_id),
            {:ok, scope} <- triggered_scope(target),
-           {:ok, run, run_notifications} <- create_run(target.source_system_id, scope, opts),
+           {:ok, run, run_notifications} <-
+             create_run(
+               target.source_system_id,
+               scope,
+               Keyword.put(opts, :origin, :targeted_catalog_change)
+             ),
            {:ok, job} <- enqueue_discovery(run, opts),
            {:ok, linked, target_notifications} <- link_triggered_target(target, run.id) do
         %{
@@ -288,13 +294,15 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
 
   defp create_run(source_system_id, scope, opts) do
     actor = Keyword.get(opts, :actor)
+    origin = Keyword.get(opts, :origin, if(actor, do: :human_admin, else: :legacy_unknown))
 
     Ash.create(
       TickeraCatalogSyncRun,
       %{
         source_system_id: source_system_id,
         requested_by_user_id: actor && actor.id,
-        scope: json_safe(scope)
+        scope: json_safe(scope),
+        origin: origin
       },
       action: :create_dry_run,
       domain: Ingestion,

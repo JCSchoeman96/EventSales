@@ -150,6 +150,7 @@ defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker do
     with :ok <- broadcast(discovering.id, :catalog_sync_started),
          {:ok, discovery_result} <-
            ConfiguredDiscoverySource.discover(discovering.source_system_id, discovering.scope),
+         discovery_result <- %{discovery_result | origin: discovering.origin},
          {:ok, plan} <- Planner.plan(discovering.source_system_id, discovery_result) do
       case finalize_ready(discovering, plan, owner_attempt) do
         {:ok, ready, notifications} ->

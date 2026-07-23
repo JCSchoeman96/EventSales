@@ -27,6 +27,7 @@ defmodule EventSales.Ingestion.Resources.TickeraCatalogSyncRun do
     :operator_error,
     :other
   ]
+  @origins [:human_admin, :targeted_catalog_change, :legacy_unknown]
 
   postgres do
     table "ingestion_tickera_catalog_sync_runs"
@@ -65,7 +66,8 @@ defmodule EventSales.Ingestion.Resources.TickeraCatalogSyncRun do
       accept [
         :source_system_id,
         :requested_by_user_id,
-        :scope
+        :scope,
+        :origin
       ]
 
       validate present([:source_system_id, :scope])
@@ -149,6 +151,13 @@ defmodule EventSales.Ingestion.Resources.TickeraCatalogSyncRun do
     attribute :scope, :map do
       allow_nil? false
       default %{}
+      public? true
+    end
+
+    attribute :origin, :atom do
+      allow_nil? false
+      default :legacy_unknown
+      constraints one_of: @origins
       public? true
     end
 

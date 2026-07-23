@@ -18,12 +18,28 @@ defmodule EventSales.Catalog.Resources.SourceSystem do
     defaults [:read]
 
     create :create do
-      accept [:name, :kind, :base_url, :active]
+      accept [
+        :name,
+        :kind,
+        :base_url,
+        :active,
+        :catalog_auto_apply_mode,
+        :catalog_auto_apply_allowlisted
+      ]
+
       change NormalizeBaseUrl
     end
 
     update :update do
-      accept [:name, :kind, :base_url, :active]
+      accept [
+        :name,
+        :kind,
+        :base_url,
+        :active,
+        :catalog_auto_apply_mode,
+        :catalog_auto_apply_allowlisted
+      ]
+
       require_atomic? false
       change NormalizeBaseUrl
     end
@@ -57,6 +73,19 @@ defmodule EventSales.Catalog.Resources.SourceSystem do
     attribute :active, :boolean do
       allow_nil? false
       default true
+      public? true
+    end
+
+    attribute :catalog_auto_apply_mode, :atom do
+      allow_nil? false
+      default :inherit
+      constraints one_of: [:inherit, :disabled, :observe, :enabled]
+      public? true
+    end
+
+    attribute :catalog_auto_apply_allowlisted, :boolean do
+      allow_nil? false
+      default false
       public? true
     end
 
