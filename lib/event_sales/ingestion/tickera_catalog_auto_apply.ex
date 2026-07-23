@@ -5,7 +5,7 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApply do
   import Ecto.Query
 
   alias EventSales.Catalog.Resources.SourceSystem
-  alias EventSales.Catalog.TickeraCatalog.{AutoApplyPolicy, SnapshotCanonicalizer}
+  alias EventSales.Catalog.TickeraCatalog.{AutoApplyPolicy, PubSub, SnapshotCanonicalizer}
 
   alias EventSales.Ingestion.Resources.{
     TickeraCatalogAutoApplyConfig,
@@ -61,6 +61,16 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApply do
   end
 
   def enqueue_decision(_decision_id), do: {:error, :invalid_decision_id}
+
+  def latest_decision_for_run(run_id) when is_binary(run_id) do
+    TickeraCatalogAutoApplyDecision
+    |> Ash.Query.filter(catalog_sync_run_id == ^run_id)
+    |> Ash.Query.sort(inserted_at: :desc, id: :desc)
+    |> Ash.Query.limit(1)
+    |> Ash.read_one(domain: EventSales.Ingestion)
+  end
+
+  def latest_decision_for_run(_run_id), do: {:error, :invalid_run_id}
 
   def validate_automatic_claim(decision_id, job_id, run_id, dry_run_hash)
       when is_binary(decision_id) and is_integer(job_id) do
@@ -124,7 +134,12 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApply do
         set: updates
       )
 
-    if count == 1, do: :ok, else: {:error, :invalid_apply_audit_transition}
+    if count == 1 do
+      broadcast_decision(decision_id)
+      :ok
+    else
+      {:error, :invalid_apply_audit_transition}
+    end
   end
 
   defp maybe_completion_time(updates, :completed),
@@ -217,10 +232,10 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApply do
   end
 
   defp finalize_enqueue({:ok, _changes}, decision_id),
-    do: Ash.get(TickeraCatalogAutoApplyDecision, decision_id, domain: EventSales.Ingestion)
+    do: reload_and_broadcast(decision_id)
 
   defp finalize_enqueue({:error, _step, :already_enqueued, _changes}, decision_id),
-    do: Ash.get(TickeraCatalogAutoApplyDecision, decision_id, domain: EventSales.Ingestion)
+    do: reload_and_broadcast(decision_id)
 
   defp finalize_enqueue({:error, _step, reason, _changes}, _decision_id), do: {:error, reason}
 
@@ -334,6 +349,7 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApply do
            domain: EventSales.Ingestion
          ) do
       {:ok, decision} ->
+        notify_decision(decision)
         {:ok, decision}
 
       {:error, _conflict} ->
@@ -344,5 +360,41 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApply do
         )
         |> Ash.read_one(domain: EventSales.Ingestion)
     end
+  end
+
+  defp reload_and_broadcast(decision_id) do
+    case Ash.get(TickeraCatalogAutoApplyDecision, decision_id, domain: EventSales.Ingestion) do
+      {:ok, %TickeraCatalogAutoApplyDecision{} = decision} = result ->
+        notify_decision(decision)
+        result
+
+      result ->
+        result
+    end
+  end
+
+  defp broadcast_decision(decision_id) do
+    case Ash.get(TickeraCatalogAutoApplyDecision, decision_id, domain: EventSales.Ingestion) do
+      {:ok, %TickeraCatalogAutoApplyDecision{} = decision} -> notify_decision(decision)
+      _other -> :ok
+    end
+  end
+
+  defp notify_decision(decision) do
+    metadata = %{
+      policy_version: decision.policy_version,
+      snapshot_version: decision.snapshot_schema_version,
+      decision_result: decision.decision_result,
+      effective_mode: decision.effective_mode,
+      enqueue_outcome: decision.enqueue_state
+    }
+
+    :telemetry.execute([:event_sales, :catalog_auto_apply, :decision], %{count: 1}, metadata)
+
+    PubSub.broadcast(
+      decision.catalog_sync_run_id,
+      :catalog_auto_apply_decision_changed,
+      %{run_id: decision.catalog_sync_run_id}
+    )
   end
 end

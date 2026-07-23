@@ -9,6 +9,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
   alias EventSales.Catalog.TickeraCatalog.PubSub
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.CatalogChangePendingTarget
+  alias EventSales.Ingestion.TickeraCatalogAutoApply
   alias EventSales.Ingestion.TickeraCatalogSync
   alias EventSales.Sales.OrderAttributionCorrection
   alias EventSalesWeb.Components.AdminShell
@@ -64,6 +65,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
       |> assign(:catalog_change_targets, load_catalog_change_targets())
       |> assign(:selected_run_id, nil)
       |> assign(:selected_run, nil)
+      |> assign(:auto_apply_decision, nil)
       |> assign(:subscribed_run_ids, MapSet.new())
       |> assign(:previews, %{})
       |> assign(:mapping_conflicts, %{})
@@ -350,7 +352,8 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
              :catalog_sync_preview_ready,
              :catalog_sync_failed,
              :catalog_sync_applied,
-             :catalog_sync_cancelled
+             :catalog_sync_cancelled,
+             :catalog_auto_apply_decision_changed
            ] do
     socket = load_runs(socket, socket.assigns.selected_run_id)
     {:noreply, load_active_run(socket, socket.assigns.form)}
@@ -693,6 +696,44 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
                           Details: {run.cancellation_reason_details}
                         </div>
                       </div>
+                    </div>
+                  </section>
+
+                  <section
+                    :if={@auto_apply_decision}
+                    id={"catalog-auto-apply-decision-#{run.id}"}
+                    class="rounded border border-base-300 bg-base-100 p-3"
+                  >
+                    <h3 class="text-xs font-semibold uppercase text-base-content/70">
+                      Auto-Apply decision
+                    </h3>
+                    <dl class="mt-3 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                      <div>
+                        <dt class="text-xs text-base-content/60">Decision</dt>
+                        <dd class="font-medium">
+                          {auto_apply_state_label(@auto_apply_decision.decision_result)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt class="text-xs text-base-content/60">Enqueue</dt>
+                        <dd>{auto_apply_state_label(@auto_apply_decision.enqueue_state)}</dd>
+                      </div>
+                      <div>
+                        <dt class="text-xs text-base-content/60">Apply audit</dt>
+                        <dd>{auto_apply_state_label(@auto_apply_decision.apply_audit_state)}</dd>
+                      </div>
+                      <div>
+                        <dt class="text-xs text-base-content/60">Effective mode</dt>
+                        <dd>{auto_apply_state_label(@auto_apply_decision.effective_mode)}</dd>
+                      </div>
+                    </dl>
+                    <div :if={@auto_apply_decision.reason_codes != []} class="mt-3">
+                      <span
+                        :for={reason <- @auto_apply_decision.reason_codes}
+                        class="badge badge-outline badge-sm mr-1"
+                      >
+                        {reason}
+                      </span>
                     </div>
                   </section>
 
@@ -1464,6 +1505,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
         |> assign(:runs, runs)
         |> assign(:selected_run_id, selected_run && selected_run.id)
         |> assign(:selected_run, selected_run)
+        |> assign(:auto_apply_decision, load_auto_apply_decision(selected_run))
         |> assign(:previews, previews)
         |> assign(:mapping_conflicts, mapping_conflicts)
         |> assign(:mapping_conflict_errors, mapping_conflict_errors)
@@ -1474,6 +1516,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
         |> assign(:runs, [])
         |> assign(:selected_run_id, nil)
         |> assign(:selected_run, nil)
+        |> assign(:auto_apply_decision, nil)
         |> assign(:previews, %{})
         |> assign(:mapping_conflicts, %{})
         |> assign(:mapping_conflict_errors, %{})
@@ -1481,6 +1524,22 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
   end
 
   defp reload_selected_run(socket), do: load_runs(socket, socket.assigns.selected_run_id)
+
+  defp load_auto_apply_decision(nil), do: nil
+
+  defp load_auto_apply_decision(run) do
+    case TickeraCatalogAutoApply.latest_decision_for_run(run.id) do
+      {:ok, decision} -> decision
+      {:error, _reason} -> nil
+    end
+  end
+
+  defp auto_apply_state_label(state) when is_atom(state) do
+    state
+    |> Atom.to_string()
+    |> String.replace("_", " ")
+    |> String.capitalize()
+  end
 
   defp load_order_correction_preview(socket) do
     case correction_source_system_id(socket) do

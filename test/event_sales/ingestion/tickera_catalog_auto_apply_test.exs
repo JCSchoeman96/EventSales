@@ -36,6 +36,20 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApplyTest do
   end
 
   test "evaluation persists one idempotent fail-closed decision" do
+    handler_id = "auto-apply-decision-#{System.unique_integer([:positive])}"
+    test_pid = self()
+
+    :telemetry.attach(
+      handler_id,
+      [:event_sales, :catalog_auto_apply, :decision],
+      fn _event, measurements, metadata, _config ->
+        send(test_pid, {:decision_telemetry, measurements, metadata})
+      end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+
     source = SalesHelpers.create_source_system!()
     snapshot = ineligible_snapshot(source.id)
 
@@ -64,6 +78,19 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApplyTest do
     assert first.source_system_id == source.id
     assert first.decision_result == :ineligible
     assert first.effective_mode == :disabled
+    assert_receive {:decision_telemetry, %{count: 1}, metadata}
+
+    assert Map.keys(metadata) |> Enum.sort() ==
+             [
+               :decision_result,
+               :effective_mode,
+               :enqueue_outcome,
+               :policy_version,
+               :snapshot_version
+             ]
+
+    refute Map.has_key?(metadata, :run_id)
+    refute Map.has_key?(metadata, :source_system_id)
 
     assert 1 ==
              TickeraCatalogAutoApplyDecision

@@ -3,6 +3,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
   use Oban.Testing, repo: EventSales.Repo
 
   import Phoenix.LiveViewTest
+  import Ecto.Query
 
   require Ash.Query
 
@@ -11,7 +12,12 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
   alias EventSales.Catalog
   alias EventSales.Catalog.Resources.ProductMapping
   alias EventSales.Ingestion
-  alias EventSales.Ingestion.Resources.TickeraCatalogSyncRun
+
+  alias EventSales.Ingestion.Resources.{
+    TickeraCatalogAutoApplyDecision,
+    TickeraCatalogSyncRun
+  }
+
   alias EventSales.Ingestion.TickeraCatalogSync
   alias EventSales.Ingestion.Workers.{ApplyTickeraCatalogWorker, DiscoverTickeraCatalogWorker}
   alias EventSales.Sales
@@ -40,6 +46,62 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
       |> get("/admin/catalog-sync")
 
     assert html_response(conn, 403) =~ "Admin role required"
+  end
+
+  test "selected run renders only bounded auto-Apply decision state and refreshes by PubSub", %{
+    conn: conn,
+    admin: admin,
+    source: source
+  } do
+    hash = String.duplicate("a", 64)
+    run = create_ready_run!(source, hash, "auto-apply-decision")
+
+    decision =
+      Ash.create!(
+        TickeraCatalogAutoApplyDecision,
+        %{
+          catalog_sync_run_id: run.id,
+          dry_run_hash: hash,
+          snapshot_schema_version: "tickera_catalog_plan.v2",
+          policy_version: "conservative_auto_apply.v1",
+          decision_result: :ineligible,
+          enqueue_state: :not_applicable,
+          apply_audit_state: :not_started,
+          reason_codes: ["finding_present"],
+          origin: :targeted_catalog_change,
+          evaluated_global_mode: :disabled,
+          evaluated_source_mode: :inherit,
+          effective_mode: :disabled,
+          configuration_revision: 1,
+          configuration_fingerprint: String.duplicate("b", 64)
+        },
+        action: :create_for_run,
+        domain: Ingestion
+      )
+
+    {:ok, view, html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/catalog-sync?run_id=#{run.id}")
+
+    assert html =~ "Auto-Apply decision"
+    assert html =~ "Ineligible"
+    assert html =~ "finding_present"
+    refute html =~ inspect(decision.finding_summary)
+
+    EventSales.Repo.update_all(
+      from(item in TickeraCatalogAutoApplyDecision, where: item.id == ^decision.id),
+      set: [enqueue_state: :terminal_failure]
+    )
+
+    :ok =
+      EventSales.Catalog.TickeraCatalog.PubSub.broadcast(
+        run.id,
+        :catalog_auto_apply_decision_changed,
+        %{run_id: run.id}
+      )
+
+    assert render(view) =~ "Terminal failure"
   end
 
   test "mount keeps every run summary but loads details for only the latest run", %{
