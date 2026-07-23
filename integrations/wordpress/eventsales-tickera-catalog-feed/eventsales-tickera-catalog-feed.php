@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('EVENTSALES_TICKERA_CATALOG_SCHEMA_VERSION')) {
-    define('EVENTSALES_TICKERA_CATALOG_SCHEMA_VERSION', '2026-07-08.v1');
+    define('EVENTSALES_TICKERA_CATALOG_SCHEMA_VERSION', '2026-07-22.v2');
 }
 
 if (!defined('EVENTSALES_TICKERA_CATALOG_NAMESPACE')) {
@@ -718,11 +718,16 @@ final class EventSales_Tickera_Catalog_Feed
         }
 
         return array_map(function (array $row): array {
+            $event_status = $this->status_classification($row['event_status'] ?? null);
+
             return [
                 'tickera_event_id' => $this->nullable_int($row['tickera_event_id'] ?? null),
                 'event_title' => $this->nullable_string($row['event_title'] ?? null),
                 'event_slug' => $this->nullable_string($row['event_slug'] ?? null),
                 'event_status' => $this->nullable_string($row['event_status'] ?? null),
+                'event_status_classification' => $event_status,
+                'target_observation' => $this->target_observation($event_status),
+                'risk_codes' => $this->event_risk_codes($event_status),
                 'event_source_updated_at' => $this->sql_datetime_to_iso8601($row['event_source_updated_at'] ?? null),
                 'event_start_at' => $this->event_datetime_to_iso8601($row['event_start_at'] ?? null),
                 'event_end_at' => $this->event_datetime_to_iso8601($row['event_end_at'] ?? null),
@@ -753,6 +758,17 @@ final class EventSales_Tickera_Catalog_Feed
         ]);
         $is_subscription = $this->is_subscription_product($product_type, $row, $subscription_period, $subscription_length);
         $review_reasons = $this->review_reasons($row, $variation_id, $is_subscription);
+        $product_status = $this->status_classification($row['product_status'] ?? null);
+        $variation_status = $this->status_classification($row['variation_status'] ?? null);
+        $target_observation = $this->target_observation($product_status);
+        $unknown_semantics = [
+            'payment_plan' => 'unknown',
+            'membership' => 'unknown',
+            'bundle' => 'unknown',
+            'add_on' => 'unknown',
+        ];
+        $review_reasons[] = 'unknown_product_semantics';
+        $review_reasons = array_values(array_unique($review_reasons));
 
         return [
             'tickera_event_id' => $this->nullable_int($row['tickera_event_id'] ?? null),
@@ -764,6 +780,7 @@ final class EventSales_Tickera_Catalog_Feed
             'product_title' => $this->nullable_string($row['product_title'] ?? null),
             'product_slug' => $this->nullable_string($row['product_slug'] ?? null),
             'product_status' => $this->nullable_string($row['product_status'] ?? null),
+            'product_status_classification' => $product_status,
             'product_source_updated_at' => $this->sql_datetime_to_iso8601($row['product_source_updated_at'] ?? null),
             'ticket_display_name' => $this->nullable_string($row['ticket_display_name'] ?? null),
             'price' => $this->nullable_string($row['price'] ?? null),
@@ -772,8 +789,14 @@ final class EventSales_Tickera_Catalog_Feed
             'woo_variation_id' => $variation_id,
             'variation_title' => $this->nullable_string($row['variation_title'] ?? null),
             'variation_status' => $this->nullable_string($row['variation_status'] ?? null),
+            'variation_status_classification' => $variation_id === null ? null : $variation_status,
             'variation_source_updated_at' => $this->sql_datetime_to_iso8601($row['variation_source_updated_at'] ?? null),
             'product_type' => $product_type,
+            'ticket_template_present' => $this->nullable_string($row['ticket_template_id'] ?? null) !== null,
+            'subscription_classification' => $is_subscription ? 'subscription' : 'not_subscription',
+            'product_semantics' => $unknown_semantics,
+            'target_observation' => $target_observation,
+            'risk_codes' => $review_reasons,
             'is_subscription' => $is_subscription,
             'subscription_period' => $this->nullable_string($subscription_period),
             'subscription_length' => $this->nullable_string($subscription_length),
@@ -860,6 +883,42 @@ final class EventSales_Tickera_Catalog_Feed
         }
 
         return array_values(array_unique($reasons));
+    }
+
+    private function status_classification($value): string
+    {
+        $status = $this->nullable_string($value);
+
+        if (in_array($status, ['publish', 'private', 'draft', 'trash'], true)) {
+            return $status;
+        }
+
+        return 'unknown';
+    }
+
+    private function target_observation(string $status): string
+    {
+        if ($status === 'trash') {
+            return 'trashed';
+        }
+
+        if ($status === 'unknown') {
+            return 'unknown';
+        }
+
+        return 'present';
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function event_risk_codes(string $status): array
+    {
+        if ($status === 'publish') {
+            return [];
+        }
+
+        return [$status === 'unknown' ? 'missing_source_risk_data' : $status . '_event'];
     }
 
     private function error_response(string $error, int $status, ?string $message = null): WP_REST_Response
