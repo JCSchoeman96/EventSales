@@ -8,13 +8,22 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
   alias EventSales.Catalog
   alias EventSales.Catalog.EventLifecycle
   alias EventSales.Catalog.Resources.{Event, ProductMapping, TicketType}
-  alias EventSales.Catalog.TickeraCatalog.{CatalogRow, DiscoveryResult, Finding, Normalizer, Plan}
+
+  alias EventSales.Catalog.TickeraCatalog.{
+    CatalogRow,
+    DiscoveryResult,
+    Finding,
+    Normalizer,
+    Plan,
+    SnapshotCanonicalizer
+  }
+
   alias EventSales.Ingestion.TickeraCatalogHistoricalImpact
 
   @spec plan(Ecto.UUID.t(), DiscoveryResult.t(), keyword()) :: {:ok, Plan.t()} | {:error, term()}
   def plan(source_system_id, %DiscoveryResult{} = discovery_result, opts \\ [])
       when is_binary(source_system_id) do
-    with {:ok, %{rows: rows, findings: normalizer_findings}} <-
+    with {:ok, %{rows: rows, findings: normalizer_findings, source_risks: source_risks}} <-
            Normalizer.normalize(discovery_result),
          {:ok, planned} <- plan_rows(source_system_id, rows),
          {:ok, historical_impact} <-
@@ -28,19 +37,15 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
         |> Enum.concat(planned.findings)
         |> maybe_vwg_preserved(rows, planned)
 
-      snapshot =
-        snapshot(%{
-          source_system_id: source_system_id,
-          event_changes: planned.event_changes,
-          ticket_type_changes: planned.ticket_type_changes,
-          product_mapping_changes: planned.product_mapping_changes,
-          findings: Enum.map(findings, &finding_snapshot/1),
-          touched_event_ids: planned.touched_event_ids,
-          touched_product_keys: planned.touched_product_keys,
-          historical_impact: historical_impact
-        })
-
-      hash = hash_snapshot(snapshot)
+      {snapshot, hash} =
+        build_snapshot(
+          source_system_id,
+          discovery_result,
+          planned,
+          findings,
+          source_risks,
+          historical_impact
+        )
 
       {:ok,
        %Plan{
@@ -53,7 +58,7 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
          historical_impact: historical_impact,
          summary: summary(snapshot),
          dry_run_hash: hash,
-         plan_snapshot: Map.put(snapshot, "dry_run_hash", hash)
+         plan_snapshot: snapshot
        }}
     end
   end
@@ -349,10 +354,194 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
 
   defp summary(snapshot) do
     %{
-      "event_change_count" => length(snapshot["event_changes"]),
-      "ticket_type_change_count" => length(snapshot["ticket_type_changes"]),
-      "product_mapping_change_count" => length(snapshot["product_mapping_changes"]),
+      "event_change_count" => length(snapshot["event_actions"] || snapshot["event_changes"]),
+      "ticket_type_change_count" =>
+        length(snapshot["ticket_type_actions"] || snapshot["ticket_type_changes"]),
+      "product_mapping_change_count" =>
+        length(snapshot["product_mapping_actions"] || snapshot["product_mapping_changes"]),
       "finding_count" => length(snapshot["findings"])
+    }
+  end
+
+  defp build_snapshot(
+         source_system_id,
+         %DiscoveryResult{schema_version: "2026-07-22.v2"} = discovery,
+         planned,
+         findings,
+         source_risks,
+         historical_impact
+       ) do
+    snapshot = %{
+      "snapshot_schema_version" => "tickera_catalog_plan.v2",
+      "source_system_id" => source_system_id,
+      "origin" => Atom.to_string(discovery.origin),
+      "event_actions" => json_safe(planned.event_changes),
+      "ticket_type_actions" => json_safe(planned.ticket_type_changes),
+      "product_mapping_actions" => json_safe(planned.product_mapping_changes),
+      "findings" => Enum.map(findings, &v2_finding_snapshot/1),
+      "source_risks" => Enum.map(source_risks, &v2_source_risk_snapshot/1),
+      "historical_impact" => v2_historical_impact(historical_impact),
+      "identity_membership_proof" => identity_membership_proof(planned),
+      "touched_identifiers" => touched_identifiers(planned)
+    }
+
+    {:ok, _bytes, hash} = SnapshotCanonicalizer.canonicalize(snapshot)
+    {snapshot, hash}
+  end
+
+  defp build_snapshot(
+         source_system_id,
+         _discovery,
+         planned,
+         findings,
+         _source_risks,
+         historical_impact
+       ) do
+    snapshot =
+      snapshot(%{
+        source_system_id: source_system_id,
+        event_changes: planned.event_changes,
+        ticket_type_changes: planned.ticket_type_changes,
+        product_mapping_changes: planned.product_mapping_changes,
+        findings: Enum.map(findings, &finding_snapshot/1),
+        touched_event_ids: planned.touched_event_ids,
+        touched_product_keys: planned.touched_product_keys,
+        historical_impact: historical_impact
+      })
+
+    hash = hash_snapshot(snapshot)
+    {Map.put(snapshot, "dry_run_hash", hash), hash}
+  end
+
+  defp v2_finding_snapshot(%Finding{} = finding) do
+    {target_type, target_id} =
+      cond do
+        finding.woo_variation_id -> {"variation", finding.woo_variation_id}
+        finding.woo_product_id -> {"product", finding.woo_product_id}
+        finding.tickera_event_id -> {"event", finding.tickera_event_id}
+        true -> {"run", nil}
+      end
+
+    context =
+      case finding.metadata["event_lifecycle"] do
+        value when value in ["past", "current", "future", "unknown"] ->
+          %{"event_lifecycle" => value}
+
+        _other ->
+          %{}
+      end
+
+    %{
+      "severity" => Atom.to_string(finding.severity),
+      "code" => Atom.to_string(finding.code),
+      "target_type" => target_type,
+      "target_id" => target_id,
+      "context" => context
+    }
+  end
+
+  defp v2_source_risk_snapshot(risk) do
+    %{
+      "target_type" => Atom.to_string(risk.target_type),
+      "target_id" => risk.target_id,
+      "code" => Atom.to_string(risk.code),
+      "evidence_classification" => Atom.to_string(risk.evidence_classification),
+      "evidence_source" => Atom.to_string(risk.evidence_source),
+      "evidence_value" => risk.evidence_value
+    }
+  end
+
+  defp v2_historical_impact(impact) do
+    destinations =
+      Enum.map(impact["proposed_destinations"] || [], fn destination ->
+        %{
+          "woo_product_id" => destination["woo_product_id"],
+          "woo_variation_id" => destination["woo_variation_id"],
+          "proposed_event_external_id" => destination["proposed_event_external_id"],
+          "proposed_ticket_type_external_id" => destination["proposed_ticket_type_external_id"],
+          "resolution" => destination["resolution"],
+          "pending_line_count" => 0,
+          "quantity" => 0,
+          "eligible_line_count" => 0,
+          "deferred_line_count" => 0,
+          "conflicting_line_count" => 0,
+          "conflicting_quantity" => 0,
+          "already_mapped_line_count" => 0,
+          "already_mapped_quantity" => 0,
+          "unknown_classification_count" => 0
+        }
+      end)
+
+    %{
+      "totals" => impact["totals"],
+      "warning_count" => length(impact["warnings"] || []),
+      "unresolved_destination_count" =>
+        Enum.count(destinations, &(&1["resolution"] in ["missing_destination", "conflict"])),
+      "unknown_classification_count" => 0,
+      "destinations" => destinations
+    }
+  end
+
+  defp identity_membership_proof(planned) do
+    %{
+      "events" => Enum.map(planned.event_changes, &event_proof/1),
+      "ticket_types" => Enum.map(planned.ticket_type_changes, &ticket_type_proof/1),
+      "product_mappings" => Enum.map(planned.product_mapping_changes, &mapping_proof/1)
+    }
+    |> json_safe()
+  end
+
+  defp event_proof(change) do
+    %{
+      source_system_id: change[:source_system_id],
+      external_event_kind: change[:external_event_kind],
+      external_event_id: change[:external_event_id],
+      event_id: change[:event_id],
+      action: change.action,
+      no_mutation: change.action == :reuse
+    }
+  end
+
+  defp ticket_type_proof(change) do
+    %{
+      external_ticket_type_kind: change[:external_ticket_type_kind],
+      external_ticket_type_id: change[:external_ticket_type_id],
+      external_product_id: change[:external_product_id],
+      external_variation_id: change[:external_variation_id],
+      ticket_type_id: change[:ticket_type_id],
+      event_id: change[:event_id],
+      event_ref: change[:event_ref],
+      action: change.action,
+      no_mutation: change.action == :reuse
+    }
+  end
+
+  defp mapping_proof(change) do
+    %{
+      source_system_id: change.source_system_id,
+      woo_product_id: change.woo_product_id,
+      woo_variation_id: change.woo_variation_id,
+      event_ref: change.event_ref,
+      ticket_type_ref: change.ticket_type_ref,
+      action: change.action,
+      no_existing_conflict: true,
+      no_movement: true
+    }
+  end
+
+  defp touched_identifiers(planned) do
+    %{
+      "event_ids" => planned.touched_event_ids,
+      "ticket_type_ids" =>
+        planned.ticket_type_changes
+        |> Enum.map(& &1[:ticket_type_id])
+        |> Enum.reject(&is_nil/1)
+        |> Enum.uniq(),
+      "mapping_ids" => [],
+      "product_keys" =>
+        Enum.map(planned.touched_product_keys, fn {product_id, variation_id} ->
+          %{"woo_product_id" => product_id, "woo_variation_id" => variation_id}
+        end)
     }
   end
 

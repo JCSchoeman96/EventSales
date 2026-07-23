@@ -21,7 +21,10 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskTest do
   end
 
   test "unknown codes fail closed as missing source-risk data" do
-    assert %SourceRisk{code: :missing_source_risk_data, evidence: :missing} =
+    assert %SourceRisk{
+             code: :missing_source_risk_data,
+             evidence_classification: :missing
+           } =
              SourceRisk.from_code(:product, 42, "unreviewed_code")
   end
 end
