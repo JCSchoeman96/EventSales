@@ -39,29 +39,33 @@ defmodule EventSales.Catalog.TickeraCatalog.SnapshotCanonicalizer do
   def canonicalize(_snapshot), do: {:error, :invalid_snapshot_schema}
 
   defp validate_schema(snapshot) do
-    historical = snapshot["historical_impact"]
-    proof = snapshot["identity_membership_proof"]
-    touched = snapshot["touched_identifiers"]
-
-    if exact_keys?(snapshot, @top_level_keys) and
-         snapshot["snapshot_schema_version"] == "tickera_catalog_plan.v2" and
-         uuid?(snapshot["source_system_id"]) and snapshot["origin"] in @origins and
-         lists?(
-           snapshot,
-           ~w(event_actions ticket_type_actions product_mapping_actions findings source_risks)
-         ) and
-         exact_keys?(historical, @historical_keys) and
-         exact_non_negative_integers?(historical["totals"], @total_keys) and
-         non_negative_integer?(historical["warning_count"]) and
-         non_negative_integer?(historical["unresolved_destination_count"]) and
-         non_negative_integer?(historical["unknown_classification_count"]) and
-         is_list(historical["destinations"]) and
-         exact_list_container?(proof, @proof_keys) and
-         exact_list_container?(touched, @touched_keys) do
+    if valid_root?(snapshot) and valid_historical?(snapshot["historical_impact"]) and
+         exact_list_container?(snapshot["identity_membership_proof"], @proof_keys) and
+         exact_list_container?(snapshot["touched_identifiers"], @touched_keys) do
       :ok
     else
       {:error, :invalid_snapshot_schema}
     end
+  end
+
+  defp valid_root?(snapshot) do
+    exact_keys?(snapshot, @top_level_keys) and
+      snapshot["snapshot_schema_version"] == "tickera_catalog_plan.v2" and
+      uuid?(snapshot["source_system_id"]) and snapshot["origin"] in @origins and
+      lists?(
+        snapshot,
+        ~w(event_actions ticket_type_actions product_mapping_actions findings source_risks)
+      )
+  end
+
+  defp valid_historical?(historical) do
+    exact_keys?(historical, @historical_keys) and
+      exact_non_negative_integers?(historical["totals"], @total_keys) and
+      Enum.all?(
+        ~w(warning_count unresolved_destination_count unknown_classification_count),
+        &non_negative_integer?(historical[&1])
+      ) and
+      is_list(historical["destinations"])
   end
 
   defp normalize(%Decimal{} = value) do
@@ -110,11 +114,9 @@ defmodule EventSales.Catalog.TickeraCatalog.SnapshotCanonicalizer do
   defp normalize(_value), do: {:error, :invalid_snapshot_value}
 
   defp encode(value) do
-    try do
-      {:ok, IO.iodata_to_binary(encode_iodata(value))}
-    rescue
-      Protocol.UndefinedError -> {:error, :invalid_snapshot_value}
-    end
+    {:ok, IO.iodata_to_binary(encode_iodata(value))}
+  rescue
+    Protocol.UndefinedError -> {:error, :invalid_snapshot_value}
   end
 
   defp encode_iodata(%{} = map) do

@@ -512,6 +512,44 @@
       {
         "docs_count": 0,
         "moduledoc?": true,
+        "name": "EventSales.Ingestion.Resources.TickeraCatalogAutoApplyConfig",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/resources/tickera_catalog_auto_apply_config.ex",
+        "public_funs": [
+          {
+            "arity": 2,
+            "name": "increment_revision_if_changed"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Ingestion.Resources.TickeraCatalogAutoApplyDecision",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/resources/tickera_catalog_auto_apply_decision.ex",
+        "public_funs": [
+          {
+            "arity": 2,
+            "name": "copy_locked_run_source"
+          },
+          {
+            "arity": 2,
+            "name": "set_evaluated_at"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
         "name": "EventSales.Ingestion.Resources.TickeraCatalogSyncFinding",
         "parse_error": null,
         "path": "lib/event_sales/ingestion/resources/tickera_catalog_sync_finding.ex",
@@ -856,6 +894,23 @@
       {
         "docs_count": 0,
         "moduledoc?": true,
+        "name": "EventSales.Ingestion.Workers.EvaluateTickeraCatalogAutoApplyWorker",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/workers/evaluate_tickera_catalog_auto_apply_worker.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "perform"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Oban.Worker"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
         "name": "EventSales.Ingestion.Workers.MissingCatalogResolutionWorker",
         "parse_error": null,
         "path": "lib/event_sales/ingestion/workers/missing_catalog_resolution_worker.ex",
@@ -935,6 +990,31 @@
           {
             "arity": 1,
             "name": "perform"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Oban.Worker"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Ingestion.Workers.RecoverTickeraCatalogAutoApplyWorker",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/workers/recover_tickera_catalog_auto_apply_worker.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "perform"
+          },
+          {
+            "arity": 1,
+            "name": "run_batch"
+          },
+          {
+            "arity": 2,
+            "name": "reconcile_decision"
           }
         ],
         "specs?": false,

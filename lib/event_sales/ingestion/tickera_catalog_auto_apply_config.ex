@@ -3,17 +3,25 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApplyConfig do
 
   @spec effective_mode(map()) :: :disabled | :observe | :enabled
   def effective_mode(config) do
-    cond do
-      config.hard_kill_enabled != true -> :disabled
-      config.global_mode == :disabled -> :disabled
-      config.source_mode == :disabled -> :disabled
-      config.global_mode == :observe -> :observe
-      config.source_mode == :observe -> :observe
-      config.source_allowlisted != true -> :disabled
-      config.global_mode == :enabled and config.source_mode in [:enabled, :inherit] -> :enabled
-      true -> :disabled
-    end
+    effective_mode(
+      config.hard_kill_enabled == true,
+      config.global_mode,
+      config.source_mode,
+      config.source_allowlisted == true
+    )
   end
+
+  defp effective_mode(false, _global, _source, _allowlisted), do: :disabled
+  defp effective_mode(true, :disabled, _source, _allowlisted), do: :disabled
+  defp effective_mode(true, _global, :disabled, _allowlisted), do: :disabled
+  defp effective_mode(true, :observe, _source, _allowlisted), do: :observe
+  defp effective_mode(true, _global, :observe, _allowlisted), do: :observe
+  defp effective_mode(true, _global, _source, false), do: :disabled
+
+  defp effective_mode(true, :enabled, source, true) when source in [:enabled, :inherit],
+    do: :enabled
+
+  defp effective_mode(true, _global, _source, _allowlisted), do: :disabled
 
   @spec fingerprint(map()) :: String.t()
   def fingerprint(config) do

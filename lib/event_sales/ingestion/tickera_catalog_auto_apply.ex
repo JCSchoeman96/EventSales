@@ -149,57 +149,8 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApply do
 
   defp enqueue_multi(decision_id) do
     Ecto.Multi.new()
-    |> Ecto.Multi.run(:locked_decision, fn repo, _changes ->
-      decision =
-        repo.one(
-          from decision in "ingestion_tickera_catalog_auto_apply_decisions",
-            where: decision.id == type(^decision_id, :binary_id),
-            lock: "FOR UPDATE",
-            select: %{
-              id: fragment("?::text", decision.id),
-              catalog_sync_run_id: fragment("?::text", decision.catalog_sync_run_id),
-              dry_run_hash: decision.dry_run_hash,
-              policy_version: decision.policy_version,
-              snapshot_schema_version: decision.snapshot_schema_version,
-              enqueue_state: decision.enqueue_state,
-              decision_result: decision.decision_result,
-              effective_mode: decision.effective_mode,
-              apply_job_id: decision.apply_job_id
-            }
-        )
-
-      case decision do
-        %{
-          enqueue_state: "pending",
-          decision_result: "eligible",
-          effective_mode: "enabled",
-          apply_job_id: nil
-        } ->
-          {:ok, decision}
-
-        %{enqueue_state: "enqueued"} ->
-          {:error, :already_enqueued}
-
-        nil ->
-          {:error, :not_found}
-
-        _decision ->
-          {:error, :not_enqueueable}
-      end
-    end)
-    |> Ecto.Multi.run(:revalidated, fn repo, %{locked_decision: decision} ->
-      run =
-        repo.one(
-          from run in "ingestion_tickera_catalog_sync_runs",
-            where:
-              run.id == type(^decision.catalog_sync_run_id, :binary_id) and
-                run.status == "dry_run_ready" and run.dry_run_hash == ^decision.dry_run_hash,
-            lock: "FOR UPDATE",
-            select: fragment("?::text", run.id)
-        )
-
-      if run, do: {:ok, decision}, else: {:error, :stale_run}
-    end)
+    |> Ecto.Multi.run(:locked_decision, &lock_enqueue_decision(&1, &2, decision_id))
+    |> Ecto.Multi.run(:revalidated, &revalidate_enqueue/2)
     |> Ecto.Multi.update_all(
       :claimed_decision,
       fn %{locked_decision: decision} ->
@@ -229,6 +180,56 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApply do
 
       if count == 1, do: {:ok, job.id}, else: {:error, :linkage_failed}
     end)
+  end
+
+  defp lock_enqueue_decision(repo, _changes, decision_id) do
+    decision =
+      repo.one(
+        from decision in "ingestion_tickera_catalog_auto_apply_decisions",
+          where: decision.id == type(^decision_id, :binary_id),
+          lock: "FOR UPDATE",
+          select: %{
+            id: fragment("?::text", decision.id),
+            catalog_sync_run_id: fragment("?::text", decision.catalog_sync_run_id),
+            dry_run_hash: decision.dry_run_hash,
+            policy_version: decision.policy_version,
+            snapshot_schema_version: decision.snapshot_schema_version,
+            enqueue_state: decision.enqueue_state,
+            decision_result: decision.decision_result,
+            effective_mode: decision.effective_mode,
+            apply_job_id: decision.apply_job_id
+          }
+      )
+
+    classify_enqueue_decision(decision)
+  end
+
+  defp classify_enqueue_decision(
+         %{
+           enqueue_state: "pending",
+           decision_result: "eligible",
+           effective_mode: "enabled",
+           apply_job_id: nil
+         } = decision
+       ),
+       do: {:ok, decision}
+
+  defp classify_enqueue_decision(%{enqueue_state: "enqueued"}), do: {:error, :already_enqueued}
+  defp classify_enqueue_decision(nil), do: {:error, :not_found}
+  defp classify_enqueue_decision(_decision), do: {:error, :not_enqueueable}
+
+  defp revalidate_enqueue(repo, %{locked_decision: decision}) do
+    run =
+      repo.one(
+        from run in "ingestion_tickera_catalog_sync_runs",
+          where:
+            run.id == type(^decision.catalog_sync_run_id, :binary_id) and
+              run.status == "dry_run_ready" and run.dry_run_hash == ^decision.dry_run_hash,
+          lock: "FOR UPDATE",
+          select: fragment("?::text", run.id)
+      )
+
+    if run, do: {:ok, decision}, else: {:error, :stale_run}
   end
 
   defp finalize_enqueue({:ok, _changes}, decision_id),

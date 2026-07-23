@@ -8,8 +8,8 @@ defmodule EventSales.Catalog.TickeraCatalog.Applier do
   alias EventSales.Catalog.Resources.{Event, ProductMapping, TicketType}
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.TickeraCatalogSyncRun
-  alias EventSales.Ingestion.TickeraCatalogSync
   alias EventSales.Ingestion.TickeraCatalogAutoApply
+  alias EventSales.Ingestion.TickeraCatalogSync
   alias EventSales.Ingestion.Workers.MissingCatalogResolutionWorker
   alias EventSales.Repo
 

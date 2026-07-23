@@ -3,8 +3,8 @@ defmodule EventSales.Ingestion.Workers.RecoverTickeraCatalogAutoApplyWorkerTest 
 
   import Ecto.Query
 
-  alias EventSales.Ingestion.TickeraCatalogAutoApply
   alias EventSales.Ingestion.Resources.{TickeraCatalogAutoApplyDecision, TickeraCatalogSyncRun}
+  alias EventSales.Ingestion.TickeraCatalogAutoApply
   alias EventSales.Ingestion.Workers.RecoverTickeraCatalogAutoApplyWorker
   alias EventSales.Repo
   alias EventSales.TestSupport.SalesHelpers

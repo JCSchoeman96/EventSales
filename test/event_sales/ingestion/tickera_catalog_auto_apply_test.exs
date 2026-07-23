@@ -1,9 +1,9 @@
 defmodule EventSales.Ingestion.TickeraCatalogAutoApplyTest do
   use EventSales.DataCase, async: false
 
+  alias EventSales.Ingestion.Resources.{TickeraCatalogAutoApplyDecision, TickeraCatalogSyncRun}
   alias EventSales.Ingestion.TickeraCatalogAutoApply
   alias EventSales.Ingestion.TickeraCatalogAutoApplyConfig
-  alias EventSales.Ingestion.Resources.{TickeraCatalogAutoApplyDecision, TickeraCatalogSyncRun}
   alias EventSales.Ingestion.Workers.ApplyTickeraCatalogWorker
   alias EventSales.TestSupport.SalesHelpers
 

@@ -155,17 +155,13 @@ defmodule EventSales.Catalog.TickeraCatalog.AutoApplyPolicy do
     do: %{action_summary: %{}, finding_summary: %{}, historical_summary: %{}}
 
   defp history_summary(%{"totals" => totals} = historical) do
-    %{
-      "affected_pending_lines" => totals["affected_pending_lines"] || 0,
-      "affected_quantity" => totals["affected_quantity"] || 0,
-      "eligible_lines" => totals["eligible_lines"] || 0,
-      "deferred_lines" => totals["deferred_lines"] || 0,
-      "conflicting_lines" => totals["conflicting_lines"] || 0,
-      "already_mapped_lines" => totals["already_mapped_lines"] || 0,
-      "warning_count" => historical["warning_count"] || 0,
-      "unresolved_destination_count" => historical["unresolved_destination_count"] || 0,
-      "unknown_classification_count" => historical["unknown_classification_count"] || 0
-    }
+    total_keys =
+      ~w(affected_pending_lines affected_quantity eligible_lines deferred_lines conflicting_lines already_mapped_lines)
+
+    historical_keys =
+      ~w(warning_count unresolved_destination_count unknown_classification_count)
+
+    Map.merge(summary_values(totals, total_keys), summary_values(historical, historical_keys))
   end
 
   defp history_summary(_historical), do: %{}
@@ -174,6 +170,7 @@ defmodule EventSales.Catalog.TickeraCatalog.AutoApplyPolicy do
     do: Enum.count(values, &(&1["action"] == action))
 
   defp count_action(_values, _action), do: 0
+  defp summary_values(values, keys), do: Map.new(keys, &{&1, values[&1] || 0})
   defp present?(value), do: value not in [nil, ""]
   defp maybe_add(reasons, true, reason), do: [reason | reasons]
   defp maybe_add(reasons, false, _reason), do: reasons

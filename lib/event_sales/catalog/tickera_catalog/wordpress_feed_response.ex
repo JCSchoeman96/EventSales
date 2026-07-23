@@ -118,6 +118,12 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponse do
   defp valid_v2_event?(_event), do: false
 
   defp valid_v2_row?(row) when is_map(row) do
+    valid_v2_row_shape?(row) and valid_v2_row_identity?(row) and valid_v2_row_risk?(row)
+  end
+
+  defp valid_v2_row?(_row), do: false
+
+  defp valid_v2_row_shape?(row) do
     has_exact_required_keys?(row, [
       "woo_product_id",
       "woo_variation_id",
@@ -129,20 +135,24 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponse do
       "product_semantics",
       "target_observation",
       "risk_codes"
-    ]) and
-      positive_integer?(row["woo_product_id"]) and
+    ])
+  end
+
+  defp valid_v2_row_identity?(row) do
+    positive_integer?(row["woo_product_id"]) and
       optional_positive_integer?(row["woo_variation_id"]) and
-      row["product_status_classification"] in @statuses and
-      valid_variation_status?(row["woo_variation_id"], row["variation_status_classification"]) and
-      is_binary(row["product_type"]) and row["product_type"] != "" and
+      valid_variation_status?(row["woo_variation_id"], row["variation_status_classification"])
+  end
+
+  defp valid_v2_row_risk?(row) do
+    row["product_status_classification"] in @statuses and
+      present_binary?(row["product_type"]) and
       is_boolean(row["ticket_template_present"]) and
       row["subscription_classification"] in @subscription_values and
       valid_product_semantics?(row["product_semantics"]) and
       row["target_observation"] in @observations and
       string_list?(row["risk_codes"])
   end
-
-  defp valid_v2_row?(_row), do: false
 
   defp valid_variation_status?(nil, nil), do: true
 
@@ -160,6 +170,7 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponse do
   defp positive_integer?(value), do: is_integer(value) and value > 0
   defp optional_positive_integer?(nil), do: true
   defp optional_positive_integer?(value), do: positive_integer?(value)
+  defp present_binary?(value), do: is_binary(value) and value != ""
   defp string_list?(value), do: is_list(value) and Enum.all?(value, &is_binary/1)
   defp has_exact_required_keys?(map, keys), do: Enum.all?(keys, &Map.has_key?(map, &1))
 
