@@ -105,6 +105,10 @@ config :event_sales, :catalog_change_trigger,
   active_run_recheck_seconds: 60,
   max_dispatch_attempts: 100
 
+config :event_sales, :catalog_auto_apply,
+  hard_enabled: false,
+  health_error: nil
+
 config :event_sales, :admin_http_rate_limit,
   window_ms: 30_000,
   max_requests: 10

@@ -1,5 +1,14 @@
 import Config
 
+catalog_auto_apply_hard =
+  case System.get_env("CATALOG_AUTO_APPLY_HARD_ENABLED") do
+    value when value in [nil, "", "false", "0"] -> [hard_enabled: false, health_error: nil]
+    value when value in ["true", "1"] -> [hard_enabled: true, health_error: nil]
+    _malformed -> [hard_enabled: false, health_error: :malformed_hard_kill]
+  end
+
+config :event_sales, :catalog_auto_apply, catalog_auto_apply_hard
+
 # config/runtime.exs is executed for all environments, including
 # during releases. It is executed after compilation and before the
 # system starts, so it is typically used to load production configuration
