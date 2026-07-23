@@ -13,6 +13,8 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedDiscoverySource do
          {:ok, response} <- WordPressFeedClient.fetch(query) do
       {:ok,
        %DiscoveryResult{
+         schema_version: response.schema_version,
+         auto_apply_proof_complete?: response.auto_apply_proof_complete?,
          events: response.events,
          catalog_rows: response.catalog_rows,
          source_snapshot_at: response.source_snapshot_at

@@ -3,7 +3,7 @@ defmodule EventSales.Catalog.TickeraCatalog.Normalizer do
   Pure normalization for Tickera Bridge catalog discovery results.
   """
 
-  alias EventSales.Catalog.TickeraCatalog.{CatalogRow, DiscoveryResult, Finding}
+  alias EventSales.Catalog.TickeraCatalog.{CatalogRow, DiscoveryResult, Finding, SourceRisk}
 
   @published "publish"
 
@@ -21,6 +21,8 @@ defmodule EventSales.Catalog.TickeraCatalog.Normalizer do
       |> dedupe_rows()
       |> drop_parent_rows_when_variations_exist()
 
+    source_risks = source_risks(result, events, rows)
+
     findings =
       []
       |> Enum.concat(non_published_event_findings(events))
@@ -29,8 +31,10 @@ defmodule EventSales.Catalog.TickeraCatalog.Normalizer do
       |> Enum.concat(variation_findings(normalized_rows))
       |> Enum.concat(variation_name_findings(normalized_rows))
       |> Enum.concat(duplicate_ticket_type_name_findings(normalized_rows))
+      |> Enum.concat(source_risk_findings(source_risks))
+      |> Enum.uniq_by(&{&1.code, &1.tickera_event_id, &1.woo_product_id, &1.woo_variation_id})
 
-    {:ok, %{rows: normalized_rows, findings: findings}}
+    {:ok, %{rows: normalized_rows, findings: findings, source_risks: source_risks}}
   end
 
   defp published_row?(row) do
@@ -72,9 +76,61 @@ defmodule EventSales.Catalog.TickeraCatalog.Normalizer do
       woo_variation_id: variation_id,
       variation_title: source_display_text(row["variation_title"]),
       variation_status: clean(row["variation_status"]),
-      variation_source_updated_at: parse_datetime(row["variation_source_updated_at"])
+      variation_source_updated_at: parse_datetime(row["variation_source_updated_at"]),
+      risk_codes: string_list(row["risk_codes"])
     }
   end
+
+  defp source_risks(%DiscoveryResult{auto_apply_proof_complete?: false}, _events, _rows), do: []
+
+  defp source_risks(%DiscoveryResult{}, events, rows) do
+    event_risks =
+      Enum.flat_map(events, fn event ->
+        risk_facts(:event, int(event["tickera_event_id"]), event["risk_codes"])
+      end)
+
+    row_risks =
+      Enum.flat_map(rows, fn row ->
+        target_type = if int(row["woo_variation_id"]), do: :variation, else: :product
+        target_id = int(row["woo_variation_id"]) || int(row["woo_product_id"])
+
+        risk_facts(target_type, target_id, row["risk_codes"])
+      end)
+
+    risks = event_risks ++ row_risks
+
+    Enum.sort_by(risks, &{&1.target_type, &1.target_id, &1.code})
+  end
+
+  defp risk_facts(_target_type, nil, _codes), do: []
+
+  defp risk_facts(target_type, target_id, codes) when is_list(codes) do
+    Enum.map(codes, &SourceRisk.from_code(target_type, target_id, &1))
+  end
+
+  defp risk_facts(target_type, target_id, _codes) do
+    [SourceRisk.from_code(target_type, target_id, "missing_source_risk_data")]
+  end
+
+  defp source_risk_findings(risks) do
+    Enum.map(risks, fn risk ->
+      finding(
+        :blocking,
+        risk.code,
+        "Persisted source risk makes automatic catalog apply ineligible.",
+        risk_finding_ids(risk)
+      )
+    end)
+  end
+
+  defp risk_finding_ids(%SourceRisk{target_type: :event, target_id: id}),
+    do: [tickera_event_id: id]
+
+  defp risk_finding_ids(%SourceRisk{target_type: :product, target_id: id}),
+    do: [woo_product_id: id]
+
+  defp risk_finding_ids(%SourceRisk{target_type: :variation, target_id: id}),
+    do: [woo_variation_id: id]
 
   defp event_metadata_by_id(events) do
     Map.new(events, fn event ->
@@ -322,6 +378,9 @@ defmodule EventSales.Catalog.TickeraCatalog.Normalizer do
   end
 
   defp clean(value), do: value
+
+  defp string_list(value) when is_list(value), do: Enum.filter(value, &is_binary/1)
+  defp string_list(_value), do: []
 
   defp source_display_text(value) when is_binary(value) do
     value

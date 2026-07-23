@@ -4,10 +4,16 @@ defmodule EventSales.Catalog.TickeraCatalog.DiscoveryResult do
   """
 
   @type t :: %__MODULE__{
+          schema_version: String.t() | nil,
+          auto_apply_proof_complete?: boolean(),
           events: [map()],
           catalog_rows: [map()],
           source_snapshot_at: DateTime.t() | nil
         }
 
-  defstruct events: [], catalog_rows: [], source_snapshot_at: nil
+  defstruct schema_version: nil,
+            auto_apply_proof_complete?: false,
+            events: [],
+            catalog_rows: [],
+            source_snapshot_at: nil
 end

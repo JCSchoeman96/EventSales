@@ -1,8 +1,73 @@
 defmodule EventSales.Catalog.TickeraCatalog.NormalizerTest do
   use ExUnit.Case, async: true
 
-  alias EventSales.Catalog.TickeraCatalog.{DiscoveryResult, Normalizer}
+  alias EventSales.Catalog.TickeraCatalog.{DiscoveryResult, Normalizer, SourceRisk}
   alias EventSales.TestSupport.TickeraCatalogFixtures
+
+  test "persists sorted v2 source risks for rows that are filtered from candidates" do
+    event =
+      TickeraCatalogFixtures.vwg_event()
+      |> Map.merge(%{
+        "event_status_classification" => "publish",
+        "target_observation" => "present",
+        "risk_codes" => []
+      })
+
+    row =
+      TickeraCatalogFixtures.vwg_row()
+      |> Map.merge(%{
+        "product_status" => "private",
+        "product_status_classification" => "private",
+        "variation_status_classification" => nil,
+        "product_type" => "simple",
+        "ticket_template_present" => true,
+        "subscription_classification" => "not_subscription",
+        "product_semantics" => %{
+          "payment_plan" => "unknown",
+          "membership" => "unknown",
+          "bundle" => "unknown",
+          "add_on" => "unknown"
+        },
+        "target_observation" => "present",
+        "risk_codes" => ["unknown_product_semantics", "private_product"]
+      })
+
+    result = %DiscoveryResult{
+      schema_version: "2026-07-22.v2",
+      auto_apply_proof_complete?: true,
+      events: [event],
+      catalog_rows: [row]
+    }
+
+    assert {:ok, %{rows: [], source_risks: risks, findings: findings}} =
+             Normalizer.normalize(result)
+
+    assert [
+             %SourceRisk{code: :private_product},
+             %SourceRisk{code: :unknown_product_semantics}
+           ] = risks
+
+    assert Enum.any?(findings, &(&1.code == :private_product))
+  end
+
+  test "missing v2 row risk proof fails closed with an explicit risk and finding" do
+    result = %DiscoveryResult{
+      schema_version: "2026-07-22.v2",
+      auto_apply_proof_complete?: true,
+      events: [TickeraCatalogFixtures.vwg_event()],
+      catalog_rows: [TickeraCatalogFixtures.vwg_row()]
+    }
+
+    assert {:ok, %{source_risks: risks, findings: findings}} =
+             Normalizer.normalize(result)
+
+    assert Enum.map(risks, & &1.code) == [
+             :missing_source_risk_data,
+             :missing_source_risk_data
+           ]
+
+    assert Enum.any?(findings, &(&1.code == :missing_source_risk_data))
+  end
 
   test "normalizes VWG Pretoria as one product-level candidate" do
     result = %DiscoveryResult{
