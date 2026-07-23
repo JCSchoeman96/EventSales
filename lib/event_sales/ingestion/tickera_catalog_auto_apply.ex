@@ -62,6 +62,76 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApply do
 
   def enqueue_decision(_decision_id), do: {:error, :invalid_decision_id}
 
+  def validate_automatic_claim(decision_id, job_id, run_id, dry_run_hash)
+      when is_binary(decision_id) and is_integer(job_id) do
+    with {:ok, %TickeraCatalogAutoApplyDecision{} = decision} <-
+           Ash.get(TickeraCatalogAutoApplyDecision, decision_id, domain: EventSales.Ingestion),
+         true <- decision.catalog_sync_run_id == run_id,
+         true <- decision.dry_run_hash == dry_run_hash,
+         true <- decision.apply_job_id == job_id,
+         true <- decision.decision_result == :eligible,
+         true <- decision.enqueue_state == :enqueued,
+         true <- decision.apply_audit_state == :not_started,
+         true <- decision.origin == :targeted_catalog_change,
+         {:ok, projection} <- current_configuration(decision.source_system_id),
+         true <- projection.effective_mode == :enabled,
+         true <- projection.configuration_revision == decision.configuration_revision,
+         true <- projection.fingerprint == decision.configuration_fingerprint,
+         true <- decision.policy_version in projection.enabled_policy_versions,
+         true <- decision.snapshot_schema_version in projection.supported_snapshot_versions do
+      {:ok, decision}
+    else
+      {:ok, nil} -> {:error, :missing_auto_apply_decision}
+      false -> {:error, :automatic_claim_rejected}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def validate_automatic_claim(_decision_id, _job_id, _run_id, _dry_run_hash),
+    do: {:error, :invalid_automatic_claim}
+
+  def current_configuration(source_system_id) do
+    with {:ok, %SourceSystem{} = source} <-
+           Ash.get(SourceSystem, source_system_id, domain: EventSales.Catalog),
+         {:ok, config} <- load_or_bootstrap_config() do
+      {:ok, configuration_projection(config, source)}
+    else
+      {:ok, nil} -> {:error, :not_found}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def record_apply_audit(decision_id, state)
+      when state in [:claim_rejected, :claimed, :completed, :failed] do
+    allowed_from = %{
+      claim_rejected: [:not_started],
+      claimed: [:not_started],
+      completed: [:claimed],
+      failed: [:claimed]
+    }
+
+    updates =
+      [apply_audit_state: state, updated_at: DateTime.utc_now()]
+      |> maybe_completion_time(state)
+
+    {count, _rows} =
+      Repo.update_all(
+        from(decision in TickeraCatalogAutoApplyDecision,
+          where:
+            decision.id == ^decision_id and
+              decision.apply_audit_state in ^Map.fetch!(allowed_from, state)
+        ),
+        set: updates
+      )
+
+    if count == 1, do: :ok, else: {:error, :invalid_apply_audit_transition}
+  end
+
+  defp maybe_completion_time(updates, :completed),
+    do: Keyword.put(updates, :completed_at, DateTime.utc_now())
+
+  defp maybe_completion_time(updates, _state), do: updates
+
   defp enqueue_multi(decision_id) do
     Ecto.Multi.new()
     |> Ecto.Multi.run(:locked_decision, fn repo, _changes ->

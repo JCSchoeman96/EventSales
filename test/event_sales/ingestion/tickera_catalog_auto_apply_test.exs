@@ -4,6 +4,7 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApplyTest do
   alias EventSales.Ingestion.TickeraCatalogAutoApply
   alias EventSales.Ingestion.TickeraCatalogAutoApplyConfig
   alias EventSales.Ingestion.Resources.{TickeraCatalogAutoApplyDecision, TickeraCatalogSyncRun}
+  alias EventSales.Ingestion.Workers.ApplyTickeraCatalogWorker
   alias EventSales.TestSupport.SalesHelpers
 
   test "mode composition is conservative and configuration fingerprints are deterministic" do
@@ -120,6 +121,17 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApplyTest do
     assert {:ok, same} = TickeraCatalogAutoApply.enqueue_decision(decision.id)
     assert same.apply_job_id == linked.apply_job_id
     assert EventSales.Repo.aggregate(Oban.Job, :count) == 1
+
+    job = EventSales.Repo.get!(Oban.Job, linked.apply_job_id)
+    assert :discard = ApplyTickeraCatalogWorker.perform(job)
+
+    rejected =
+      Ash.get!(TickeraCatalogAutoApplyDecision, linked.id, domain: EventSales.Ingestion)
+
+    assert rejected.apply_audit_state == :claim_rejected
+
+    assert Ash.get!(TickeraCatalogSyncRun, run.id, domain: EventSales.Ingestion).status ==
+             :dry_run_ready
   end
 
   test "two enqueue processes converge on the same linked job" do
