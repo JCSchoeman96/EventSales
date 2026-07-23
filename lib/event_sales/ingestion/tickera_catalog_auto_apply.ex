@@ -2,6 +2,7 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApply do
   @moduledoc "Durable orchestration for pure catalog auto-Apply evaluation."
 
   require Ash.Query
+  import Ecto.Query
 
   alias EventSales.Catalog.Resources.SourceSystem
   alias EventSales.Catalog.TickeraCatalog.{AutoApplyPolicy, SnapshotCanonicalizer}
@@ -13,6 +14,8 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApply do
   }
 
   alias EventSales.Ingestion.TickeraCatalogAutoApplyConfig, as: Configuration
+  alias EventSales.Ingestion.Workers.ApplyTickeraCatalogWorker
+  alias EventSales.Repo
 
   @policy_version "conservative_auto_apply.v1"
 
@@ -37,6 +40,119 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApply do
   end
 
   def evaluate_run(_run_id), do: {:error, :invalid_run_id}
+
+  def enqueue_decision(decision_id) when is_binary(decision_id) do
+    case Ash.get(TickeraCatalogAutoApplyDecision, decision_id, domain: EventSales.Ingestion) do
+      {:ok, %{enqueue_state: :enqueued} = decision} ->
+        {:ok, decision}
+
+      {:ok, %TickeraCatalogAutoApplyDecision{}} ->
+        decision_id
+        |> enqueue_multi()
+        |> Repo.transaction()
+        |> finalize_enqueue(decision_id)
+
+      {:ok, nil} ->
+        {:error, :not_found}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  def enqueue_decision(_decision_id), do: {:error, :invalid_decision_id}
+
+  defp enqueue_multi(decision_id) do
+    Ecto.Multi.new()
+    |> Ecto.Multi.run(:locked_decision, fn repo, _changes ->
+      decision =
+        repo.one(
+          from decision in "ingestion_tickera_catalog_auto_apply_decisions",
+            where: decision.id == type(^decision_id, :binary_id),
+            lock: "FOR UPDATE",
+            select: %{
+              id: fragment("?::text", decision.id),
+              catalog_sync_run_id: fragment("?::text", decision.catalog_sync_run_id),
+              dry_run_hash: decision.dry_run_hash,
+              policy_version: decision.policy_version,
+              snapshot_schema_version: decision.snapshot_schema_version,
+              enqueue_state: decision.enqueue_state,
+              decision_result: decision.decision_result,
+              effective_mode: decision.effective_mode,
+              apply_job_id: decision.apply_job_id
+            }
+        )
+
+      case decision do
+        %{
+          enqueue_state: "pending",
+          decision_result: "eligible",
+          effective_mode: "enabled",
+          apply_job_id: nil
+        } ->
+          {:ok, decision}
+
+        %{enqueue_state: "enqueued"} ->
+          {:error, :already_enqueued}
+
+        nil ->
+          {:error, :not_found}
+
+        _decision ->
+          {:error, :not_enqueueable}
+      end
+    end)
+    |> Ecto.Multi.run(:revalidated, fn repo, %{locked_decision: decision} ->
+      run =
+        repo.one(
+          from run in "ingestion_tickera_catalog_sync_runs",
+            where:
+              run.id == type(^decision.catalog_sync_run_id, :binary_id) and
+                run.status == "dry_run_ready" and run.dry_run_hash == ^decision.dry_run_hash,
+            lock: "FOR UPDATE",
+            select: fragment("?::text", run.id)
+        )
+
+      if run, do: {:ok, decision}, else: {:error, :stale_run}
+    end)
+    |> Ecto.Multi.update_all(
+      :claimed_decision,
+      fn %{locked_decision: decision} ->
+        from row in "ingestion_tickera_catalog_auto_apply_decisions",
+          where: row.id == type(^decision.id, :binary_id) and row.enqueue_state == "pending",
+          update: [
+            set: [enqueue_state: "claimed", enqueue_attempts: 1, updated_at: fragment("now()")]
+          ]
+      end,
+      []
+    )
+    |> Oban.insert(:apply_job, fn %{locked_decision: decision} ->
+      ApplyTickeraCatalogWorker.new(%{
+        "run_id" => decision.catalog_sync_run_id,
+        "dry_run_hash" => decision.dry_run_hash,
+        "decision_id" => decision.id
+      })
+    end)
+    |> Ecto.Multi.run(:linked_decision, fn repo, %{locked_decision: decision, apply_job: job} ->
+      {count, _rows} =
+        repo.update_all(
+          from(row in "ingestion_tickera_catalog_auto_apply_decisions",
+            where: row.id == type(^decision.id, :binary_id) and row.enqueue_state == "claimed"
+          ),
+          set: [enqueue_state: "enqueued", apply_job_id: job.id, updated_at: DateTime.utc_now()]
+        )
+
+      if count == 1, do: {:ok, job.id}, else: {:error, :linkage_failed}
+    end)
+  end
+
+  defp finalize_enqueue({:ok, _changes}, decision_id),
+    do: Ash.get(TickeraCatalogAutoApplyDecision, decision_id, domain: EventSales.Ingestion)
+
+  defp finalize_enqueue({:error, _step, :already_enqueued, _changes}, decision_id),
+    do: Ash.get(TickeraCatalogAutoApplyDecision, decision_id, domain: EventSales.Ingestion)
+
+  defp finalize_enqueue({:error, _step, reason, _changes}, _decision_id), do: {:error, reason}
 
   defp verify_snapshot_hash(
          %{plan_snapshot: %{"snapshot_schema_version" => "tickera_catalog_plan.v2"}} = run

@@ -69,11 +69,130 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApplyTest do
              |> Ash.count!(domain: EventSales.Ingestion)
   end
 
+  test "atomic enqueue links exactly one Apply job and consumes attempt one" do
+    source = SalesHelpers.create_source_system!()
+    snapshot = ineligible_snapshot(source.id)
+
+    run =
+      Ash.create!(
+        TickeraCatalogSyncRun,
+        %{source_system_id: source.id, scope: %{}, origin: :targeted_catalog_change},
+        action: :create_dry_run,
+        domain: EventSales.Ingestion
+      )
+      |> Ash.Changeset.for_update(:mark_discovering, %{owner_attempt: 1, owner_max_attempts: 3})
+      |> Ash.update!(domain: EventSales.Ingestion)
+      |> Ash.Changeset.for_update(:mark_dry_run_ready, %{
+        dry_run_hash: hash(snapshot),
+        summary: %{},
+        plan_snapshot: snapshot
+      })
+      |> Ash.update!(domain: EventSales.Ingestion)
+
+    decision =
+      Ash.create!(
+        TickeraCatalogAutoApplyDecision,
+        %{
+          catalog_sync_run_id: run.id,
+          dry_run_hash: run.dry_run_hash,
+          snapshot_schema_version: "tickera_catalog_plan.v2",
+          policy_version: "conservative_auto_apply.v1",
+          decision_result: :eligible,
+          enqueue_state: :pending,
+          apply_audit_state: :not_started,
+          origin: :targeted_catalog_change,
+          evaluated_global_mode: :enabled,
+          evaluated_source_mode: :enabled,
+          effective_mode: :enabled,
+          configuration_revision: 1,
+          configuration_fingerprint: String.duplicate("b", 64),
+          enqueue_key: "#{run.id}:#{run.dry_run_hash}:conservative_auto_apply.v1"
+        },
+        action: :create_for_run,
+        domain: EventSales.Ingestion
+      )
+
+    assert {:ok, linked} = TickeraCatalogAutoApply.enqueue_decision(decision.id)
+    assert linked.enqueue_state == :enqueued
+    assert linked.enqueue_attempts == 1
+    assert is_integer(linked.apply_job_id)
+
+    assert {:ok, same} = TickeraCatalogAutoApply.enqueue_decision(decision.id)
+    assert same.apply_job_id == linked.apply_job_id
+    assert EventSales.Repo.aggregate(Oban.Job, :count) == 1
+  end
+
+  test "two enqueue processes converge on the same linked job" do
+    source = SalesHelpers.create_source_system!()
+    snapshot = ineligible_snapshot(source.id)
+
+    run =
+      Ash.create!(
+        TickeraCatalogSyncRun,
+        %{source_system_id: source.id, scope: %{}, origin: :targeted_catalog_change},
+        action: :create_dry_run,
+        domain: EventSales.Ingestion
+      )
+      |> Ash.Changeset.for_update(:mark_discovering, %{owner_attempt: 1, owner_max_attempts: 3})
+      |> Ash.update!(domain: EventSales.Ingestion)
+      |> Ash.Changeset.for_update(:mark_dry_run_ready, %{
+        dry_run_hash: hash(snapshot),
+        summary: %{},
+        plan_snapshot: snapshot
+      })
+      |> Ash.update!(domain: EventSales.Ingestion)
+
+    decision =
+      create_pending_decision!(run)
+
+    owner = self()
+
+    tasks =
+      for _index <- 1..2 do
+        Task.async(fn ->
+          Ecto.Adapters.SQL.Sandbox.allow(EventSales.Repo, owner, self())
+          TickeraCatalogAutoApply.enqueue_decision(decision.id)
+        end)
+      end
+
+    results = Task.await_many(tasks)
+    assert Enum.all?(results, &match?({:ok, _decision}, &1))
+
+    assert results |> Enum.map(fn {:ok, item} -> item.apply_job_id end) |> Enum.uniq() |> length() ==
+             1
+
+    assert EventSales.Repo.aggregate(Oban.Job, :count) == 1
+  end
+
   defp hash(snapshot) do
     {:ok, _bytes, hash} =
       EventSales.Catalog.TickeraCatalog.SnapshotCanonicalizer.canonicalize(snapshot)
 
     hash
+  end
+
+  defp create_pending_decision!(run) do
+    Ash.create!(
+      TickeraCatalogAutoApplyDecision,
+      %{
+        catalog_sync_run_id: run.id,
+        dry_run_hash: run.dry_run_hash,
+        snapshot_schema_version: "tickera_catalog_plan.v2",
+        policy_version: "conservative_auto_apply.v1",
+        decision_result: :eligible,
+        enqueue_state: :pending,
+        apply_audit_state: :not_started,
+        origin: :targeted_catalog_change,
+        evaluated_global_mode: :enabled,
+        evaluated_source_mode: :enabled,
+        effective_mode: :enabled,
+        configuration_revision: 1,
+        configuration_fingerprint: String.duplicate("b", 64),
+        enqueue_key: "#{run.id}:#{run.dry_run_hash}:conservative_auto_apply.v1"
+      },
+      action: :create_for_run,
+      domain: EventSales.Ingestion
+    )
   end
 
   defp ineligible_snapshot(source_id) do

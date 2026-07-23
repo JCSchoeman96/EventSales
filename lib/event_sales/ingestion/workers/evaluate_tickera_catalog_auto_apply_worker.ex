@@ -18,9 +18,20 @@ defmodule EventSales.Ingestion.Workers.EvaluateTickeraCatalogAutoApplyWorker do
         args: %{"run_id" => run_id, "dry_run_hash" => dry_run_hash}
       }) do
     case TickeraCatalogAutoApply.evaluate_run(run_id) do
-      {:ok, %{dry_run_hash: ^dry_run_hash}} -> :ok
-      {:ok, _decision} -> {:discard, :stale_dry_run_hash}
-      {:error, reason} -> {:error, reason}
+      {:ok, %{dry_run_hash: ^dry_run_hash, enqueue_state: :pending} = decision} ->
+        case TickeraCatalogAutoApply.enqueue_decision(decision.id) do
+          {:ok, _linked} -> :ok
+          {:error, reason} -> {:error, reason}
+        end
+
+      {:ok, %{dry_run_hash: ^dry_run_hash}} ->
+        :ok
+
+      {:ok, _decision} ->
+        {:discard, :stale_dry_run_hash}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
