@@ -263,7 +263,8 @@ if config_env() == :prod do
       {Oban.Plugins.Cron,
        crontab: [
          {"* * * * *", EventSales.Maintenance.ObanQueueSnapshotWorker},
-         {"*/5 * * * *", EventSales.Maintenance.FailedJobAlertWorker}
+         {"*/5 * * * *", EventSales.Maintenance.FailedJobAlertWorker},
+         {"*/5 * * * *", EventSales.Ingestion.Workers.RecoverTickeraCatalogAutoApplyWorker}
        ]}
     ]
 
