@@ -6,9 +6,9 @@
 - Approved plan SHA-256: `12a6145d96abdeb4bc6e141396572f1050fae58fe95bcf3de37fab65c33efb2a`
 - Approved pack SHA-256: `4b1b5cc428049690da929c30f755abf85b945f23d974ce78a50059e81e23ef30`
 - Activation supplement SHA-256: `61885c2bd4161bc151cef449a02e059adb081179ff9cf34cefcf1692b6a35589`
-- Previous reviewed head: `6d0e1e8c8b497a828952250eb9e6564383a4b4b3`
+- Previous reviewed head: `64fda5afcb5219f43ddac3a3a287f6b596ca64ed`
 - Correction branch: `feat/vs-26e2-conservative-catalog-auto-apply`
-- Corrected implementation head before this evidence-only commit: `3f93292f63785c84334942a93833ac9448553e40`
+- Corrected implementation head before this evidence-only commit: `9ab575ec20fa54d1ed649928bdae2994b3040485`
 
 ## Correction commits
 
@@ -17,6 +17,7 @@
 | `7ef5236` | Recursive closed snapshot schema, semantic collection sorting, and complete persisted source-risk proof |
 | `ab46cf4` | Closed summaries, serialized configuration revisions, enqueue/recovery revalidation, generated migrations and snapshots |
 | `3f93292` | Source-scoped cursor decision history and generated architecture indexes |
+| `9ab575e` | Pure fail-closed Event/TicketType reuse identity, membership and no-mutation proof validation |
 
 ## File inventory
 
@@ -105,6 +106,21 @@ disabled while additive decision/configuration/audit schema is retained.
 - An empty proof collection cannot be eligible when actions require proof.
 - Legacy feed schemas remain Human-only.
 
+## Reuse identity and membership proof evidence
+
+- The pure policy derives the exact expected Event and TicketType reuse proof
+  rows from persisted reuse actions.
+- Event proof must match source system, external kind/identity and destination
+  Event identity exactly.
+- TicketType proof must match external kind/identity, product/variation,
+  destination TicketType identity and destination Event membership exactly.
+- Every reuse proof requires `no_mutation=true`.
+- Missing, extra, duplicate, conflicting and mismatched proof rows fail closed
+  with bounded deterministic reason codes.
+- Focused tests cover one valid Event/TicketType reuse plan and every rejection
+  category, including invalid Event membership.
+- Create-only policy behavior and Human Apply are unchanged.
+
 ## Closed summaries and privacy evidence
 
 - Action summary: exact six non-negative integer keys, maximum 1,024 bytes.
@@ -173,6 +189,8 @@ staging-plan success is claimed here.
 
 Focused correction validation:
 
+- Reuse-proof policy suite: 8 tests, 0 failures.
+- Affected catalog/auto-Apply/Apply-worker regression suite: 83 tests, 0 failures.
 - Catalog canonicalizer/policy/normalizer/planner suite: 42 tests, 0 failures.
 - Auto-Apply/configuration/recovery suite: 12 tests, 0 failures.
 - Admin Catalog Sync LiveView suite: 24 tests, 0 failures.
@@ -180,7 +198,7 @@ Focused correction validation:
 
 Full local CI (`bash scripts/local_ci.sh`):
 
-- ExUnit: 1,095 tests, 0 failures.
+- ExUnit: 1,098 tests, 0 failures.
 - Formatting and warnings-as-errors compilation: pass.
 - WooCommerce web boundary: pass.
 - Ash codegen drift: none.
