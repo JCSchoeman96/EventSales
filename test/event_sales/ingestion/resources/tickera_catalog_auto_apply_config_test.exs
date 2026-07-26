@@ -165,6 +165,21 @@ defmodule EventSales.Ingestion.Resources.TickeraCatalogAutoApplyConfigTest do
                  domain: EventSales.Ingestion
                )
     end
+
+    for protected_key <-
+          ~w(customer email order payment card token ticket_token wordpress_credentials raw_source exception stacktrace) do
+      assert {:error, _error} =
+               Ash.create(
+                 TickeraCatalogAutoApplyDecision,
+                 Map.put(
+                   base,
+                   :action_summary,
+                   Map.put(action_summary(), protected_key, 0)
+                 ),
+                 action: :create_for_run,
+                 domain: EventSales.Ingestion
+               )
+    end
   end
 
   defp action_summary do
