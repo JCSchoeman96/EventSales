@@ -73,7 +73,7 @@ defmodule EventSales.MixProject do
       {:telemetry_poller, "~> 1.0"},
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
-      {:bandit, "~> 1.11.1"},
+      {:bandit, "~> 1.12.1"},
       {:oban, "~> 2.22.1"},
       {:oban_web, "~> 2.12"},
       {:nimble_csv, "~> 1.3"},
