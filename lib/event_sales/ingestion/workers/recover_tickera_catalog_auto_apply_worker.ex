@@ -6,6 +6,7 @@ defmodule EventSales.Ingestion.Workers.RecoverTickeraCatalogAutoApplyWorker do
   import Ecto.Query
 
   alias EventSales.Ingestion.Resources.TickeraCatalogAutoApplyDecision
+  alias EventSales.Ingestion.TickeraCatalogAutoApply
   alias EventSales.Repo
 
   @batch_size 100
@@ -26,8 +27,12 @@ defmodule EventSales.Ingestion.Workers.RecoverTickeraCatalogAutoApplyWorker do
           from decision in TickeraCatalogAutoApplyDecision,
             where:
               decision.enqueue_state in [:enqueued, :retryable_failure, :claimed] and
-                (is_nil(decision.next_attempt_at) or decision.next_attempt_at <= ^now),
-            order_by: [asc: decision.next_attempt_at, asc: decision.id],
+                not is_nil(decision.next_attempt_at) and decision.next_attempt_at <= ^now,
+            order_by: [
+              asc: decision.next_attempt_at,
+              asc: decision.source_system_id,
+              asc: decision.id
+            ],
             limit: @batch_size,
             lock: "FOR UPDATE SKIP LOCKED",
             select: decision.id
@@ -81,7 +86,7 @@ defmodule EventSales.Ingestion.Workers.RecoverTickeraCatalogAutoApplyWorker do
         terminal(decision, "linked_job_missing")
 
       %{state: state} when state in ["available", "scheduled", "retryable", "executing"] ->
-        :active
+        update_decision(decision, next_attempt_at: DateTime.add(now, 300, :second))
 
       %{state: "completed"} ->
         reconcile_completed(decision)
@@ -143,12 +148,45 @@ defmodule EventSales.Ingestion.Workers.RecoverTickeraCatalogAutoApplyWorker do
   defp retry_same_job(decision) do
     job = Repo.get(Oban.Job, decision.apply_job_id)
 
-    if (job && job.state in ["discarded", "cancelled"]) and
+    if recovery_still_valid?(decision) and
+         (job && job.state in ["discarded", "cancelled"]) and
          decision.enqueue_attempts <= @terminal_attempt do
       :ok = Oban.retry_job(job.id)
-      update_decision(decision, enqueue_state: :enqueued, next_attempt_at: nil)
+
+      update_decision(decision,
+        enqueue_state: :enqueued,
+        next_attempt_at: DateTime.add(DateTime.utc_now(), 300, :second)
+      )
     else
       terminal(decision, "linked_job_not_retryable")
+    end
+  end
+
+  defp recovery_still_valid?(decision) do
+    run =
+      Repo.one(
+        from run in "ingestion_tickera_catalog_sync_runs",
+          where: run.id == type(^decision.catalog_sync_run_id, :binary_id),
+          select: %{status: run.status, dry_run_hash: run.dry_run_hash, origin: run.origin}
+      )
+
+    case TickeraCatalogAutoApply.current_configuration(decision.source_system_id) do
+      {:ok, projection} ->
+        Enum.all?([
+          not is_nil(run),
+          run && run.status == "dry_run_ready",
+          run && run.dry_run_hash == decision.dry_run_hash,
+          run && run.origin == "targeted_catalog_change",
+          projection.effective_mode == :enabled,
+          projection.configuration_revision == decision.configuration_revision,
+          projection.fingerprint == decision.configuration_fingerprint,
+          decision.policy_version in projection.enabled_policy_versions,
+          decision.snapshot_schema_version in projection.supported_snapshot_versions,
+          decision.apply_audit_state == :not_started
+        ])
+
+      _other ->
+        false
     end
   end
 

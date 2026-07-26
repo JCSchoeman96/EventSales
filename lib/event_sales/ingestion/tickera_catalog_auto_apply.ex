@@ -76,6 +76,44 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApply do
 
   def latest_decision_for_run(_run_id), do: {:error, :invalid_run_id}
 
+  def decisions_for_source(source_system_id, opts \\ [])
+
+  def decisions_for_source(source_system_id, opts) when is_binary(source_system_id) do
+    limit = opts |> Keyword.get(:limit, 25) |> min(100) |> max(1)
+
+    with {:ok, cursor} <- decode_decision_cursor(Keyword.get(opts, :cursor)) do
+      query =
+        from decision in TickeraCatalogAutoApplyDecision,
+          where: decision.source_system_id == ^source_system_id,
+          order_by: [desc: decision.inserted_at, desc: decision.id],
+          limit: ^(limit + 1)
+
+      query =
+        case cursor do
+          nil ->
+            query
+
+          {inserted_at, id} ->
+            from decision in query,
+              where:
+                decision.inserted_at < ^inserted_at or
+                  (decision.inserted_at == ^inserted_at and decision.id < ^id)
+        end
+
+      rows = Repo.all(query)
+      items = Enum.take(rows, limit)
+
+      next_cursor =
+        if length(rows) > limit do
+          items |> List.last() |> encode_decision_cursor()
+        end
+
+      {:ok, %{items: items, next_cursor: next_cursor}}
+    end
+  end
+
+  def decisions_for_source(_source_system_id, _opts), do: {:error, :invalid_source_system_id}
+
   def validate_automatic_claim(decision_id, job_id, run_id, dry_run_hash)
       when is_binary(decision_id) and is_integer(job_id) do
     with {:ok, %TickeraCatalogAutoApplyDecision{} = decision} <-
@@ -112,6 +150,64 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApply do
     else
       {:ok, nil} -> {:error, :not_found}
       {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def update_configuration(expected_revision, attrs)
+      when is_integer(expected_revision) and expected_revision >= 1 and is_map(attrs) do
+    normalized = normalize_configuration_attrs(attrs)
+
+    Repo.transaction(fn -> update_locked_configuration(expected_revision, normalized) end)
+    |> case do
+      {:ok, id} -> Ash.get(TickeraCatalogAutoApplyConfig, id, domain: EventSales.Ingestion)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def update_configuration(_expected_revision, _attrs), do: {:error, :invalid_configuration}
+
+  defp update_locked_configuration(expected_revision, normalized) do
+    current = locked_configuration()
+
+    cond do
+      is_nil(current) -> Repo.rollback(:configuration_missing)
+      current.revision != expected_revision -> Repo.rollback(:configuration_revision_conflict)
+      true -> persist_configuration_updates(current, normalized)
+    end
+  end
+
+  defp locked_configuration do
+    Repo.one(
+      from config in "ingestion_tickera_catalog_auto_apply_configs",
+        where: config.singleton_key == "global",
+        lock: "FOR UPDATE",
+        select: %{
+          id: fragment("?::text", config.id),
+          revision: config.revision,
+          global_mode: config.global_mode,
+          enabled_policy_versions: config.enabled_policy_versions,
+          supported_snapshot_versions: config.supported_snapshot_versions
+        }
+    )
+  end
+
+  defp persist_configuration_updates(current, normalized) do
+    case material_configuration_updates(current, normalized) do
+      [] ->
+        current.id
+
+      updates ->
+        {1, _} =
+          Repo.update_all(
+            from(config in "ingestion_tickera_catalog_auto_apply_configs",
+              where:
+                config.id == type(^current.id, :binary_id) and
+                  config.revision == ^current.revision
+            ),
+            set: updates ++ [revision: current.revision + 1, updated_at: DateTime.utc_now()]
+          )
+
+        current.id
     end
   end
 
@@ -181,7 +277,12 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApply do
           from(row in "ingestion_tickera_catalog_auto_apply_decisions",
             where: row.id == type(^decision.id, :binary_id) and row.enqueue_state == "claimed"
           ),
-          set: [enqueue_state: "enqueued", apply_job_id: job.id, updated_at: DateTime.utc_now()]
+          set: [
+            enqueue_state: "enqueued",
+            apply_job_id: job.id,
+            next_attempt_at: DateTime.add(DateTime.utc_now(), 300, :second),
+            updated_at: DateTime.utc_now()
+          ]
         )
 
       if count == 1, do: {:ok, job.id}, else: {:error, :linkage_failed}
@@ -200,6 +301,10 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApply do
             dry_run_hash: decision.dry_run_hash,
             policy_version: decision.policy_version,
             snapshot_schema_version: decision.snapshot_schema_version,
+            source_system_id: fragment("?::text", decision.source_system_id),
+            origin: decision.origin,
+            configuration_revision: decision.configuration_revision,
+            configuration_fingerprint: decision.configuration_fingerprint,
             enqueue_state: decision.enqueue_state,
             decision_result: decision.decision_result,
             effective_mode: decision.effective_mode,
@@ -228,15 +333,103 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApply do
     run =
       repo.one(
         from run in "ingestion_tickera_catalog_sync_runs",
-          where:
-            run.id == type(^decision.catalog_sync_run_id, :binary_id) and
-              run.status == "dry_run_ready" and run.dry_run_hash == ^decision.dry_run_hash,
+          where: run.id == type(^decision.catalog_sync_run_id, :binary_id),
           lock: "FOR UPDATE",
-          select: fragment("?::text", run.id)
+          select: %{
+            id: fragment("?::text", run.id),
+            status: run.status,
+            dry_run_hash: run.dry_run_hash,
+            origin: run.origin,
+            source_system_id: fragment("?::text", run.source_system_id)
+          }
       )
 
-    if run, do: {:ok, decision}, else: {:error, :stale_run}
+    config =
+      repo.one(
+        from config in "ingestion_tickera_catalog_auto_apply_configs",
+          where: config.singleton_key == "global",
+          lock: "FOR UPDATE",
+          select: %{
+            global_mode: config.global_mode,
+            enabled_policy_versions: config.enabled_policy_versions,
+            supported_snapshot_versions: config.supported_snapshot_versions,
+            revision: config.revision
+          }
+      )
+
+    source =
+      repo.one(
+        from source in "catalog_source_systems",
+          where: source.id == type(^decision.source_system_id, :binary_id),
+          select: %{
+            catalog_auto_apply_mode: source.catalog_auto_apply_mode,
+            catalog_auto_apply_allowlisted: source.catalog_auto_apply_allowlisted
+          }
+      )
+
+    with true <- not is_nil(run) and not is_nil(config) and not is_nil(source),
+         projection <- locked_configuration_projection(config, source),
+         true <- Configuration.hard_kill().enabled,
+         true <- run.status == "dry_run_ready",
+         true <- run.dry_run_hash == decision.dry_run_hash,
+         true <-
+           run.origin == "targeted_catalog_change" and
+             decision.origin == "targeted_catalog_change",
+         true <- run.source_system_id == decision.source_system_id,
+         true <- projection.effective_mode == :enabled,
+         true <- projection.configuration_revision == decision.configuration_revision,
+         true <- projection.fingerprint == decision.configuration_fingerprint,
+         true <- decision.policy_version in projection.enabled_policy_versions,
+         true <- decision.snapshot_schema_version in projection.supported_snapshot_versions do
+      {:ok, decision}
+    else
+      false -> {:error, :enqueue_revalidation_failed}
+    end
   end
+
+  defp locked_configuration_projection(config, source) do
+    projection = %{
+      hard_kill_enabled: Configuration.hard_kill().enabled,
+      global_mode: existing_atom(config.global_mode),
+      source_mode: existing_atom(source.catalog_auto_apply_mode),
+      source_allowlisted: source.catalog_auto_apply_allowlisted,
+      enabled_policy_versions: config.enabled_policy_versions,
+      supported_snapshot_versions: config.supported_snapshot_versions,
+      configuration_revision: config.revision
+    }
+
+    Map.merge(projection, %{
+      effective_mode: Configuration.effective_mode(projection),
+      fingerprint: Configuration.fingerprint(projection)
+    })
+  end
+
+  defp existing_atom(value) when is_atom(value), do: value
+  defp existing_atom("disabled"), do: :disabled
+  defp existing_atom("observe"), do: :observe
+  defp existing_atom("enabled"), do: :enabled
+  defp existing_atom("inherit"), do: :inherit
+
+  defp encode_decision_cursor(decision) do
+    [DateTime.to_iso8601(decision.inserted_at), decision.id]
+    |> Jason.encode!()
+    |> Base.url_encode64(padding: false)
+  end
+
+  defp decode_decision_cursor(nil), do: {:ok, nil}
+
+  defp decode_decision_cursor(cursor) when is_binary(cursor) do
+    with {:ok, bytes} <- Base.url_decode64(cursor, padding: false),
+         {:ok, [timestamp, id]} <- Jason.decode(bytes),
+         {:ok, inserted_at, 0} <- DateTime.from_iso8601(timestamp),
+         {:ok, _uuid} <- Ecto.UUID.cast(id) do
+      {:ok, {inserted_at, id}}
+    else
+      _error -> {:error, :invalid_cursor}
+    end
+  end
+
+  defp decode_decision_cursor(_cursor), do: {:error, :invalid_cursor}
 
   defp finalize_enqueue({:ok, _changes}, decision_id),
     do: reload_and_broadcast(decision_id)
@@ -296,6 +489,43 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApply do
       effective_mode: Configuration.effective_mode(projection),
       fingerprint: Configuration.fingerprint(projection)
     })
+  end
+
+  defp normalize_configuration_attrs(attrs) do
+    attrs
+    |> Map.take([:global_mode, :enabled_policy_versions, :supported_snapshot_versions])
+    |> normalize_version_list(:enabled_policy_versions)
+    |> normalize_version_list(:supported_snapshot_versions)
+  end
+
+  defp normalize_version_list(attrs, key) do
+    if Map.has_key?(attrs, key) do
+      Map.update!(attrs, key, &(&1 |> Enum.uniq() |> Enum.sort()))
+    else
+      attrs
+    end
+  end
+
+  defp material_configuration_updates(current, attrs) do
+    Enum.flat_map(attrs, fn
+      {:global_mode, value} when value in [:disabled, :observe, :enabled] ->
+        if value == current.global_mode or to_string(value) == current.global_mode,
+          do: [],
+          else: [global_mode: to_string(value)]
+
+      {:enabled_policy_versions, value} when is_list(value) ->
+        if value == current.enabled_policy_versions,
+          do: [],
+          else: [enabled_policy_versions: value]
+
+      {:supported_snapshot_versions, value} when is_list(value) ->
+        if value == current.supported_snapshot_versions,
+          do: [],
+          else: [supported_snapshot_versions: value]
+
+      _other ->
+        Repo.rollback(:invalid_configuration)
+    end)
   end
 
   defp evaluate_policy(run) do

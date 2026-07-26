@@ -5,6 +5,7 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApplyTest do
   alias EventSales.Ingestion.TickeraCatalogAutoApply
   alias EventSales.Ingestion.TickeraCatalogAutoApplyConfig
   alias EventSales.Ingestion.Workers.ApplyTickeraCatalogWorker
+  alias EventSales.Repo
   alias EventSales.TestSupport.SalesHelpers
 
   test "mode composition is conservative and configuration fingerprints are deterministic" do
@@ -99,6 +100,7 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApplyTest do
 
   test "atomic enqueue links exactly one Apply job and consumes attempt one" do
     source = SalesHelpers.create_source_system!()
+    projection = enable_auto_apply!(source)
     snapshot = ineligible_snapshot(source.id)
 
     run =
@@ -132,8 +134,8 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApplyTest do
           evaluated_global_mode: :enabled,
           evaluated_source_mode: :enabled,
           effective_mode: :enabled,
-          configuration_revision: 1,
-          configuration_fingerprint: String.duplicate("b", 64),
+          configuration_revision: projection.configuration_revision,
+          configuration_fingerprint: projection.fingerprint,
           enqueue_key: "#{run.id}:#{run.dry_run_hash}:conservative_auto_apply.v1"
         },
         action: :create_for_run,
@@ -150,12 +152,12 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApplyTest do
     assert EventSales.Repo.aggregate(Oban.Job, :count) == 1
 
     job = EventSales.Repo.get!(Oban.Job, linked.apply_job_id)
-    assert :discard = ApplyTickeraCatalogWorker.perform(job)
+    assert {:error, :blocking_findings} = ApplyTickeraCatalogWorker.perform(job)
 
     rejected =
       Ash.get!(TickeraCatalogAutoApplyDecision, linked.id, domain: EventSales.Ingestion)
 
-    assert rejected.apply_audit_state == :claim_rejected
+    assert rejected.apply_audit_state == :not_started
 
     assert Ash.get!(TickeraCatalogSyncRun, run.id, domain: EventSales.Ingestion).status ==
              :dry_run_ready
@@ -163,6 +165,7 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApplyTest do
 
   test "two enqueue processes converge on the same linked job" do
     source = SalesHelpers.create_source_system!()
+    projection = enable_auto_apply!(source)
     snapshot = ineligible_snapshot(source.id)
 
     run =
@@ -181,8 +184,7 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApplyTest do
       })
       |> Ash.update!(domain: EventSales.Ingestion)
 
-    decision =
-      create_pending_decision!(run)
+    decision = create_pending_decision!(run, projection)
 
     owner = self()
 
@@ -203,6 +205,60 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApplyTest do
     assert EventSales.Repo.aggregate(Oban.Job, :count) == 1
   end
 
+  test "enqueue fails atomically when configuration changes after evaluation" do
+    source = SalesHelpers.create_source_system!()
+    projection = enable_auto_apply!(source)
+    run = ready_run!(source)
+    decision = create_pending_decision!(run, projection)
+
+    config =
+      EventSales.Ingestion.Resources.TickeraCatalogAutoApplyConfig
+      |> Ash.Query.limit(1)
+      |> Ash.read_one!(domain: EventSales.Ingestion)
+
+    assert {:ok, _disabled} =
+             TickeraCatalogAutoApply.update_configuration(config.revision, %{
+               global_mode: :disabled
+             })
+
+    assert {:error, :enqueue_revalidation_failed} =
+             TickeraCatalogAutoApply.enqueue_decision(decision.id)
+
+    reloaded =
+      Ash.get!(TickeraCatalogAutoApplyDecision, decision.id, domain: EventSales.Ingestion)
+
+    assert reloaded.enqueue_state == :pending
+    assert is_nil(reloaded.apply_job_id)
+    assert Repo.aggregate(Oban.Job, :count) == 0
+  end
+
+  test "source history uses bounded stable cursor pagination without cross-source rows" do
+    source = SalesHelpers.create_source_system!()
+    other = SalesHelpers.create_source_system!(%{base_url: "https://other-history.example.test"})
+
+    run = ready_run!(source)
+    other_run = ready_run!(other)
+
+    for index <- 1..30 do
+      create_history_decision!(run, index)
+    end
+
+    create_history_decision!(other_run, 99)
+
+    assert {:ok, %{items: first, next_cursor: cursor}} =
+             TickeraCatalogAutoApply.decisions_for_source(source.id)
+
+    assert length(first) == 25
+    assert is_binary(cursor)
+    assert Enum.all?(first, &(&1.source_system_id == source.id))
+
+    assert {:ok, %{items: second}} =
+             TickeraCatalogAutoApply.decisions_for_source(source.id, cursor: cursor, limit: 1000)
+
+    assert length(second) == 5
+    assert Enum.all?(second, &(&1.source_system_id == source.id))
+  end
+
   defp hash(snapshot) do
     {:ok, _bytes, hash} =
       EventSales.Catalog.TickeraCatalog.SnapshotCanonicalizer.canonicalize(snapshot)
@@ -210,7 +266,7 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApplyTest do
     hash
   end
 
-  defp create_pending_decision!(run) do
+  defp create_pending_decision!(run, projection) do
     Ash.create!(
       TickeraCatalogAutoApplyDecision,
       %{
@@ -225,13 +281,43 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApplyTest do
         evaluated_global_mode: :enabled,
         evaluated_source_mode: :enabled,
         effective_mode: :enabled,
-        configuration_revision: 1,
-        configuration_fingerprint: String.duplicate("b", 64),
+        configuration_revision: projection.configuration_revision,
+        configuration_fingerprint: projection.fingerprint,
         enqueue_key: "#{run.id}:#{run.dry_run_hash}:conservative_auto_apply.v1"
       },
       action: :create_for_run,
       domain: EventSales.Ingestion
     )
+  end
+
+  defp enable_auto_apply!(source) do
+    previous = Application.get_env(:event_sales, :catalog_auto_apply)
+    Application.put_env(:event_sales, :catalog_auto_apply, hard_enabled: true, health_error: nil)
+    on_exit(fn -> Application.put_env(:event_sales, :catalog_auto_apply, previous || []) end)
+
+    source
+    |> Ash.Changeset.for_update(:update, %{
+      catalog_auto_apply_mode: :enabled,
+      catalog_auto_apply_allowlisted: true
+    })
+    |> Ash.update!(domain: EventSales.Catalog)
+
+    config =
+      Ash.create!(
+        EventSales.Ingestion.Resources.TickeraCatalogAutoApplyConfig,
+        %{},
+        action: :bootstrap,
+        domain: EventSales.Ingestion
+      )
+
+    {:ok, _config} =
+      TickeraCatalogAutoApply.update_configuration(config.revision, %{
+        global_mode: :enabled,
+        enabled_policy_versions: ["conservative_auto_apply.v1"]
+      })
+
+    {:ok, projection} = TickeraCatalogAutoApply.current_configuration(source.id)
+    projection
   end
 
   defp ineligible_snapshot(source_id) do
@@ -242,7 +328,15 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApplyTest do
       "event_actions" => [],
       "ticket_type_actions" => [],
       "product_mapping_actions" => [],
-      "findings" => [%{"code" => "missing_source_risk_data"}],
+      "findings" => [
+        %{
+          "severity" => "blocking",
+          "code" => "missing_source_risk_data",
+          "target_type" => "run",
+          "target_id" => nil,
+          "context" => %{}
+        }
+      ],
       "source_risks" => [],
       "historical_impact" => %{
         "totals" => %{
@@ -274,5 +368,46 @@ defmodule EventSales.Ingestion.TickeraCatalogAutoApplyTest do
         "product_keys" => []
       }
     }
+  end
+
+  defp ready_run!(source) do
+    snapshot = ineligible_snapshot(source.id)
+
+    Ash.create!(
+      TickeraCatalogSyncRun,
+      %{source_system_id: source.id, scope: %{}, origin: :targeted_catalog_change},
+      action: :create_dry_run,
+      domain: EventSales.Ingestion
+    )
+    |> Ash.Changeset.for_update(:mark_discovering, %{owner_attempt: 1, owner_max_attempts: 3})
+    |> Ash.update!(domain: EventSales.Ingestion)
+    |> Ash.Changeset.for_update(:mark_dry_run_ready, %{
+      dry_run_hash: hash(snapshot),
+      summary: %{},
+      plan_snapshot: snapshot
+    })
+    |> Ash.update!(domain: EventSales.Ingestion)
+  end
+
+  defp create_history_decision!(run, index) do
+    Ash.create!(
+      TickeraCatalogAutoApplyDecision,
+      %{
+        catalog_sync_run_id: run.id,
+        dry_run_hash:
+          String.pad_leading(Integer.to_string(index, 16), 64, "0") |> String.downcase(),
+        snapshot_schema_version: "tickera_catalog_plan.v2",
+        policy_version: "conservative_auto_apply.v#{index}",
+        decision_result: :ineligible,
+        origin: :targeted_catalog_change,
+        evaluated_global_mode: :disabled,
+        evaluated_source_mode: :inherit,
+        effective_mode: :disabled,
+        configuration_revision: 1,
+        configuration_fingerprint: String.duplicate("b", 64)
+      },
+      action: :create_for_run,
+      domain: EventSales.Ingestion
+    )
   end
 end

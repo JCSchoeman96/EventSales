@@ -69,6 +69,7 @@ defmodule EventSales.Ingestion.Workers.RecoverTickeraCatalogAutoApplyWorkerTest 
 
   defp linked_decision! do
     source = SalesHelpers.create_source_system!()
+    projection = enable_auto_apply!(source)
     snapshot = snapshot(source.id)
 
     {:ok, _bytes, hash} =
@@ -105,8 +106,8 @@ defmodule EventSales.Ingestion.Workers.RecoverTickeraCatalogAutoApplyWorkerTest 
           evaluated_global_mode: :enabled,
           evaluated_source_mode: :enabled,
           effective_mode: :enabled,
-          configuration_revision: 1,
-          configuration_fingerprint: String.duplicate("b", 64),
+          configuration_revision: projection.configuration_revision,
+          configuration_fingerprint: projection.fingerprint,
           enqueue_key: "#{run.id}:#{hash}:conservative_auto_apply.v1"
         },
         action: :create_for_run,
@@ -115,6 +116,50 @@ defmodule EventSales.Ingestion.Workers.RecoverTickeraCatalogAutoApplyWorkerTest 
 
     {:ok, linked} = TickeraCatalogAutoApply.enqueue_decision(decision.id)
     {linked, Repo.get!(Oban.Job, linked.apply_job_id)}
+  end
+
+  defp enable_auto_apply!(source) do
+    Application.put_env(:event_sales, :catalog_auto_apply, hard_enabled: true, health_error: nil)
+
+    source
+    |> Ash.Changeset.for_update(:update, %{
+      catalog_auto_apply_mode: :enabled,
+      catalog_auto_apply_allowlisted: true
+    })
+    |> Ash.update!(domain: EventSales.Catalog)
+
+    config =
+      case EventSales.Ingestion.Resources.TickeraCatalogAutoApplyConfig
+           |> Ash.Query.limit(1)
+           |> Ash.read_one!(domain: EventSales.Ingestion) do
+        nil ->
+          Ash.create!(
+            EventSales.Ingestion.Resources.TickeraCatalogAutoApplyConfig,
+            %{},
+            action: :bootstrap,
+            domain: EventSales.Ingestion
+          )
+
+        config ->
+          config
+      end
+
+    config =
+      if config.global_mode == :enabled do
+        config
+      else
+        {:ok, updated} =
+          TickeraCatalogAutoApply.update_configuration(config.revision, %{
+            global_mode: :enabled,
+            enabled_policy_versions: ["conservative_auto_apply.v1"]
+          })
+
+        updated
+      end
+
+    {:ok, projection} = TickeraCatalogAutoApply.current_configuration(source.id)
+    assert projection.configuration_revision == config.revision
+    projection
   end
 
   defp snapshot(source_id) do

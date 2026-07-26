@@ -12,6 +12,11 @@ defmodule EventSales.Ingestion.Resources.TickeraCatalogAutoApplyDecision do
     repo EventSales.Repo
     identity_index_names decision_identity: "tickera_auto_apply_decision_identity_idx"
 
+    migration_defaults finding_summary: "nil",
+                       action_summary: "nil",
+                       historical_summary:
+                         "%{\"affected_pending_lines\" => 0, \"affected_quantity\" => 0, \"eligible_lines\" => 0, \"deferred_lines\" => 0, \"conflicting_lines\" => 0, \"already_mapped_lines\" => 0, \"warning_count\" => 0, \"unresolved_destination_count\" => 0, \"unknown_classification_count\" => 0}"
+
     references do
       reference :catalog_sync_run, on_delete: :restrict, on_update: :update
       reference :source_system, on_delete: :restrict, on_update: :update
@@ -31,7 +36,8 @@ defmodule EventSales.Ingestion.Resources.TickeraCatalogAutoApplyDecision do
         name: "tickera_catalog_auto_apply_decisions_source_recent_idx"
 
       index [:next_attempt_at, :source_system_id, :id],
-        where: "enqueue_state IN ('pending', 'claimed', 'retryable_failure')",
+        where:
+          "enqueue_state IN ('claimed', 'enqueued', 'retryable_failure') AND next_attempt_at IS NOT NULL",
         name: "tickera_catalog_auto_apply_decisions_recovery_idx"
 
       index [:policy_version, :snapshot_schema_version, :evaluated_at],
@@ -66,6 +72,7 @@ defmodule EventSales.Ingestion.Resources.TickeraCatalogAutoApplyDecision do
 
       change &__MODULE__.copy_locked_run_source/2
       change &__MODULE__.set_evaluated_at/2
+      change &__MODULE__.validate_closed_summaries/2
     end
   end
 
@@ -129,19 +136,40 @@ defmodule EventSales.Ingestion.Resources.TickeraCatalogAutoApplyDecision do
 
     attribute :finding_summary, :map do
       allow_nil? false
-      default %{}
+      default %{"total" => 0, "info" => 0, "warning" => 0, "blocking" => 0, "unknown" => 0}
       public? true
     end
 
     attribute :action_summary, :map do
       allow_nil? false
-      default %{}
+
+      default %{
+        "event_create" => 0,
+        "event_reuse" => 0,
+        "ticket_type_create" => 0,
+        "ticket_type_reuse" => 0,
+        "product_mapping_create" => 0,
+        "total" => 0
+      }
+
       public? true
     end
 
     attribute :historical_summary, :map do
       allow_nil? false
-      default %{}
+
+      default %{
+        "affected_pending_lines" => 0,
+        "affected_quantity" => 0,
+        "eligible_lines" => 0,
+        "deferred_lines" => 0,
+        "conflicting_lines" => 0,
+        "already_mapped_lines" => 0,
+        "warning_count" => 0,
+        "unresolved_destination_count" => 0,
+        "unknown_classification_count" => 0
+      }
+
       public? true
     end
 
@@ -247,4 +275,38 @@ defmodule EventSales.Ingestion.Resources.TickeraCatalogAutoApplyDecision do
   def set_evaluated_at(changeset, _context) do
     Ash.Changeset.force_change_attribute(changeset, :evaluated_at, DateTime.utc_now())
   end
+
+  @action_summary_keys ~w(event_create event_reuse ticket_type_create ticket_type_reuse product_mapping_create total)
+  @finding_summary_keys ~w(total info warning blocking unknown)
+  @historical_summary_keys ~w(affected_pending_lines affected_quantity eligible_lines deferred_lines conflicting_lines already_mapped_lines warning_count unresolved_destination_count unknown_classification_count)
+
+  def validate_closed_summaries(changeset, _context) do
+    [
+      {:action_summary, @action_summary_keys, 1_024},
+      {:finding_summary, @finding_summary_keys, 1_024},
+      {:historical_summary, @historical_summary_keys, 2_048}
+    ]
+    |> Enum.reduce(changeset, fn {attribute, keys, max_bytes}, changeset ->
+      value = Ash.Changeset.get_attribute(changeset, attribute)
+
+      if valid_summary?(value, keys, max_bytes) do
+        changeset
+      else
+        Ash.Changeset.add_error(changeset,
+          field: attribute,
+          message: "must match the closed bounded summary schema"
+        )
+      end
+    end)
+  end
+
+  defp valid_summary?(value, keys, max_bytes) when is_map(value) do
+    normalized_keys = value |> Map.keys() |> Enum.map(&to_string/1) |> Enum.sort()
+
+    normalized_keys == Enum.sort(keys) and
+      Enum.all?(value, fn {_key, count} -> is_integer(count) and count >= 0 end) and
+      byte_size(Jason.encode!(value)) <= max_bytes
+  end
+
+  defp valid_summary?(_value, _keys, _max_bytes), do: false
 end
