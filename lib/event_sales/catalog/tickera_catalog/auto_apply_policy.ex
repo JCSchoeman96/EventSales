@@ -21,6 +21,7 @@ defmodule EventSales.Catalog.TickeraCatalog.AutoApplyPolicy do
       |> require_version(input, snapshot)
       |> require_origin(input)
       |> require_actions(snapshot)
+      |> require_reuse_proof(snapshot)
       |> require_no_findings(input, snapshot)
       |> require_complete_safe_risks(snapshot)
       |> require_no_variations(snapshot)
@@ -87,6 +88,113 @@ defmodule EventSales.Catalog.TickeraCatalog.AutoApplyPolicy do
       [:unsupported_action | reasons]
     end
   end
+
+  defp require_reuse_proof(reasons, snapshot) do
+    proof = snapshot["identity_membership_proof"]
+    event_actions = reuse_entries(snapshot["event_actions"])
+    ticket_actions = reuse_entries(snapshot["ticket_type_actions"])
+    event_proofs = reuse_entries(is_map(proof) && proof["events"])
+    ticket_proofs = reuse_entries(is_map(proof) && proof["ticket_types"])
+
+    event_ids =
+      event_actions
+      |> Enum.map(& &1["event_id"])
+      |> MapSet.new()
+
+    reasons
+    |> add_reuse_proof_reasons(
+      event_actions,
+      event_proofs,
+      &expected_event_proof/1,
+      &event_reuse_identity/1
+    )
+    |> add_reuse_proof_reasons(
+      ticket_actions,
+      ticket_proofs,
+      &expected_ticket_proof/1,
+      &ticket_reuse_identity/1
+    )
+    |> maybe_add(
+      Enum.any?(ticket_proofs, &(&1["event_id"] not in event_ids)),
+      :invalid_reuse_membership
+    )
+  end
+
+  defp add_reuse_proof_reasons(
+         reasons,
+         actions,
+         proofs,
+         expected_proof,
+         identity
+       ) do
+    expected = Enum.map(actions, expected_proof)
+    expected_by_identity = Enum.group_by(expected, identity)
+    proofs_by_identity = Enum.group_by(proofs, identity)
+
+    expected_identities = MapSet.new(Map.keys(expected_by_identity))
+    proof_identities = MapSet.new(Map.keys(proofs_by_identity))
+
+    duplicate? =
+      Enum.any?(proofs_by_identity, fn {_key, entries} ->
+        length(entries) != MapSet.size(MapSet.new(entries))
+      end)
+
+    conflicting? =
+      Enum.any?(expected_by_identity, fn {_key, entries} ->
+        length(entries) > 1
+      end) or
+        Enum.any?(proofs_by_identity, fn {_key, entries} ->
+          MapSet.size(MapSet.new(entries)) > 1
+        end)
+
+    mismatched? =
+      expected_identities
+      |> MapSet.intersection(proof_identities)
+      |> Enum.any?(fn key ->
+        MapSet.new(Map.fetch!(expected_by_identity, key)) !=
+          MapSet.new(Map.fetch!(proofs_by_identity, key))
+      end)
+
+    reasons
+    |> maybe_add(
+      not MapSet.subset?(expected_identities, proof_identities),
+      :missing_reuse_proof
+    )
+    |> maybe_add(
+      not MapSet.subset?(proof_identities, expected_identities),
+      :extra_reuse_proof
+    )
+    |> maybe_add(duplicate?, :duplicate_reuse_proof)
+    |> maybe_add(conflicting?, :conflicting_reuse_proof)
+    |> maybe_add(mismatched?, :mismatched_reuse_proof)
+    |> maybe_add(Enum.any?(proofs, &(&1["no_mutation"] != true)), :reuse_mutation_present)
+  end
+
+  defp reuse_entries(entries) when is_list(entries),
+    do: Enum.filter(entries, &(is_map(&1) and &1["action"] == "reuse"))
+
+  defp reuse_entries(_entries), do: []
+
+  defp expected_event_proof(action) do
+    action
+    |> Map.take(~w(source_system_id external_event_kind external_event_id event_id action))
+    |> Map.put("no_mutation", true)
+  end
+
+  defp event_reuse_identity(value),
+    do: {value["external_event_kind"], value["external_event_id"]}
+
+  defp expected_ticket_proof(action) do
+    action
+    |> Map.take(
+      ~w(external_ticket_type_kind external_ticket_type_id external_product_id external_variation_id ticket_type_id event_id action)
+    )
+    |> Map.put("event_ref", nil)
+    |> Map.put("no_mutation", true)
+  end
+
+  defp ticket_reuse_identity(value),
+    do: {value["external_ticket_type_kind"], value["external_ticket_type_id"]}
 
   defp require_no_findings(reasons, input, snapshot) do
     if input[:findings] == [] and snapshot["findings"] == [],

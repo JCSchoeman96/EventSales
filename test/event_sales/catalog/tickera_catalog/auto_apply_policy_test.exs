@@ -122,6 +122,92 @@ defmodule EventSales.Catalog.TickeraCatalog.AutoApplyPolicyTest do
     end
   end
 
+  test "accepts exact one-to-one Event and TicketType reuse proof" do
+    assert {:ok, %{result: :eligible, reason_codes: []}} =
+             reuse_input()
+             |> AutoApplyPolicy.evaluate()
+  end
+
+  test "rejects reuse proof with mutation or missing, extra, or mismatched identity" do
+    cases = [
+      {:reuse_mutation_present,
+       put_in(
+         reuse_input(),
+         [:snapshot, "identity_membership_proof", "events", Access.at(0), "no_mutation"],
+         false
+       )},
+      {:missing_reuse_proof,
+       put_in(reuse_input(), [:snapshot, "identity_membership_proof", "events"], [])},
+      {:extra_reuse_proof,
+       update_in(
+         reuse_input(),
+         [:snapshot, "identity_membership_proof", "events"],
+         fn [proof] -> [proof, Map.put(proof, "external_event_id", 2)] end
+       )},
+      {:mismatched_reuse_proof,
+       put_in(
+         reuse_input(),
+         [:snapshot, "identity_membership_proof", "events", Access.at(0), "event_id"],
+         "00000000-0000-0000-0000-000000000099"
+       )},
+      {:mismatched_reuse_proof,
+       put_in(
+         reuse_input(),
+         [
+           :snapshot,
+           "identity_membership_proof",
+           "ticket_types",
+           Access.at(0),
+           "ticket_type_id"
+         ],
+         "00000000-0000-0000-0000-000000000099"
+       )},
+      {:invalid_reuse_membership,
+       put_in(
+         reuse_input(),
+         [:snapshot, "identity_membership_proof", "ticket_types", Access.at(0), "event_id"],
+         "00000000-0000-0000-0000-000000000099"
+       )}
+    ]
+
+    for {reason, input} <- cases do
+      assert {:ok, %{result: :ineligible, reason_codes: reasons}} =
+               AutoApplyPolicy.evaluate(input)
+
+      assert reason in reasons
+    end
+  end
+
+  test "rejects duplicate and conflicting reuse proof" do
+    event_proof =
+      reuse_input().snapshot["identity_membership_proof"]["events"]
+      |> List.first()
+
+    duplicate =
+      update_in(
+        reuse_input(),
+        [:snapshot, "identity_membership_proof", "events"],
+        &[event_proof | &1]
+      )
+
+    conflicting =
+      update_in(
+        reuse_input(),
+        [:snapshot, "identity_membership_proof", "events"],
+        &[Map.put(event_proof, "event_id", "00000000-0000-0000-0000-000000000099") | &1]
+      )
+
+    for {input, reason} <- [
+          {duplicate, :duplicate_reuse_proof},
+          {conflicting, :conflicting_reuse_proof}
+        ] do
+      assert {:ok, %{result: :ineligible, reason_codes: reasons}} =
+               AutoApplyPolicy.evaluate(input)
+
+      assert reason in reasons
+    end
+  end
+
   defp eligible_input do
     %{
       run_id: "00000000-0000-0000-0000-000000000001",
@@ -157,9 +243,79 @@ defmodule EventSales.Catalog.TickeraCatalog.AutoApplyPolicyTest do
           "unresolved_destination_count" => 0,
           "unknown_classification_count" => 0,
           "destinations" => []
+        },
+        "identity_membership_proof" => %{
+          "events" => [],
+          "ticket_types" => [],
+          "product_mappings" => []
         }
       }
     }
+  end
+
+  defp reuse_input do
+    event_id = "00000000-0000-0000-0000-000000000011"
+    ticket_type_id = "00000000-0000-0000-0000-000000000012"
+    source_system_id = "00000000-0000-0000-0000-000000000001"
+
+    eligible_input()
+    |> put_in(
+      [:snapshot, "event_actions"],
+      [
+        %{
+          "action" => "reuse",
+          "ref" => "event:1",
+          "event_id" => event_id,
+          "source_system_id" => source_system_id,
+          "external_event_kind" => "tickera_event",
+          "external_event_id" => 1
+        }
+      ]
+    )
+    |> put_in(
+      [:snapshot, "ticket_type_actions"],
+      [
+        %{
+          "action" => "reuse",
+          "ref" => "ticket:10",
+          "ticket_type_id" => ticket_type_id,
+          "event_id" => event_id,
+          "external_ticket_type_kind" => "woo_product",
+          "external_ticket_type_id" => 10,
+          "external_product_id" => 10,
+          "external_variation_id" => nil
+        }
+      ]
+    )
+    |> put_in(
+      [:snapshot, "identity_membership_proof"],
+      %{
+        "events" => [
+          %{
+            "source_system_id" => source_system_id,
+            "external_event_kind" => "tickera_event",
+            "external_event_id" => 1,
+            "event_id" => event_id,
+            "action" => "reuse",
+            "no_mutation" => true
+          }
+        ],
+        "ticket_types" => [
+          %{
+            "external_ticket_type_kind" => "woo_product",
+            "external_ticket_type_id" => 10,
+            "external_product_id" => 10,
+            "external_variation_id" => nil,
+            "ticket_type_id" => ticket_type_id,
+            "event_id" => event_id,
+            "event_ref" => nil,
+            "action" => "reuse",
+            "no_mutation" => true
+          }
+        ],
+        "product_mappings" => []
+      }
+    )
   end
 
   defp safe_source_risks do
