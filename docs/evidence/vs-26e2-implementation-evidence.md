@@ -22,7 +22,7 @@
 
 Created/generated:
 
-- `priv/repo/migrations/20260726144348_vs_26e2_catalog_auto_apply.exs`
+- `priv/repo/migrations/20260726144348_vs_26e2_catalog_auto_apply_recovery_summaries.exs`
 - `priv/repo/migrations/20260726144601_vs_26e2_catalog_auto_apply_defaults.exs`
 - `priv/resource_snapshots/repo/ingestion_tickera_catalog_auto_apply_decisions/20260726144349.json`
 - `priv/resource_snapshots/repo/ingestion_tickera_catalog_auto_apply_decisions/20260726144602.json`
@@ -60,8 +60,8 @@ Generated architecture inventory:
   `priv/repo/migrations/20260723065153_vs_26e2_catalog_auto_apply.exs`
   SHA-256 `ad0570ba2111498048890005c8f3634774ef57b54b079c2b0a97c89a25c8e58e`.
 - Recovery-index migration:
-  `priv/repo/migrations/20260726144348_vs_26e2_catalog_auto_apply.exs`
-  SHA-256 `0656f5368a75099302841ddd7ce1daa21e2239d6a50309d21a4c8136ab366d6a`.
+  `priv/repo/migrations/20260726144348_vs_26e2_catalog_auto_apply_recovery_summaries.exs`
+  SHA-256 `1203a87049fb1c49d7697ed0cc613ac56365ab810a4cf80846854a8537649f38`.
 - Closed-default/audit-preserving rollback migration:
   `priv/repo/migrations/20260726144601_vs_26e2_catalog_auto_apply_defaults.exs`
   SHA-256 `730b04709e0abaa94a80cacbaaf485c0f0e6496ab9ebb7aa35821cd6736acd82`.
@@ -69,6 +69,8 @@ Generated architecture inventory:
   `28b7cce8e391e69876d47293a2d494ac43dc4b5202983cd725c4e2a16924b441`.
 - `mix ash.codegen --check`: no drift.
 - Migrations were executed only against local/test PostgreSQL.
+- A fresh local test database migrated from zero through all migrations,
+  including the uniquely named recovery-summary and defaults migrations.
 
 The follow-up migration changes the recovery partial index to the exact due,
 nonterminal state set and prevents rollback from reaching the predecessor's
@@ -93,8 +95,8 @@ disabled while additive decision/configuration/audit schema is retained.
 
 - Normalizer projects explicit safe, risky, missing, unknown and unsupported
   facts through the existing `source_risks` key.
-- Product semantic facts are grounded in closed v2 fields; absent is safe,
-  present is risky, and missing/unknown stays ineligible.
+- Product semantic facts are grounded in closed v2 fields; explicit false is
+  safe, explicit true is risky, and missing/unknown stays ineligible.
 - No title, slug, description, category or arbitrary metadata-name inference is
   used.
 - Policy derives the expected event/product/variation dimension set, rejects

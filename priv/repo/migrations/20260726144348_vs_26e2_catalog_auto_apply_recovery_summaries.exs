@@ -1,4 +1,4 @@
-defmodule EventSales.Repo.Migrations.Vs26e2CatalogAutoApply do
+defmodule EventSales.Repo.Migrations.Vs26e2CatalogAutoApplyRecoverySummaries do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 
