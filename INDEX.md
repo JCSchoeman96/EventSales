@@ -820,7 +820,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: true
   - docs_count: 0
-  - public_funs: `from_code/3`
+  - public_funs: `from_code/3`, `explicit_safe/5`, `classified/6`
   - uses: _none_
 - `EventSales.Catalog.TickeraCatalog.WordPressFeedClient` - `lib/event_sales/catalog/tickera_catalog/wordpress_feed_client.ex`
   - moduledoc?: true
@@ -1102,7 +1102,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: `copy_locked_run_source/2`, `set_evaluated_at/2`
+  - public_funs: `copy_locked_run_source/2`, `set_evaluated_at/2`, `validate_closed_summaries/2`
   - uses: `Ash.Resource`
 - `EventSales.Ingestion.Resources.TickeraCatalogSyncFinding` - `lib/event_sales/ingestion/resources/tickera_catalog_sync_finding.ex`
   - moduledoc?: true
@@ -1228,7 +1228,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: `evaluate_run/1`, `enqueue_decision/1`, `latest_decision_for_run/1`, `validate_automatic_claim/4`, `current_configuration/1`, `record_apply_audit/2`
+  - public_funs: `evaluate_run/1`, `enqueue_decision/1`, `latest_decision_for_run/1`, `decisions_for_source/2`, `validate_automatic_claim/4`, `current_configuration/1`, `update_configuration/2`, `record_apply_audit/2`
   - uses: _none_
 - `EventSales.Ingestion.TickeraCatalogAutoApplyConfig` - `lib/event_sales/ingestion/tickera_catalog_auto_apply_config.ex`
   - moduledoc?: true

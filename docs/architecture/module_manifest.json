@@ -1786,6 +1786,14 @@
         {
           "arity": 3,
           "name": "from_code"
+        },
+        {
+          "arity": 5,
+          "name": "explicit_safe"
+        },
+        {
+          "arity": 6,
+          "name": "classified"
         }
       ],
       "specs?": true,
@@ -2738,6 +2746,10 @@
         {
           "arity": 2,
           "name": "set_evaluated_at"
+        },
+        {
+          "arity": 2,
+          "name": "validate_closed_summaries"
         }
       ],
       "specs?": false,
@@ -3240,12 +3252,20 @@
           "name": "latest_decision_for_run"
         },
         {
+          "arity": 2,
+          "name": "decisions_for_source"
+        },
+        {
           "arity": 4,
           "name": "validate_automatic_claim"
         },
         {
           "arity": 1,
           "name": "current_configuration"
+        },
+        {
+          "arity": 2,
+          "name": "update_configuration"
         },
         {
           "arity": 2,

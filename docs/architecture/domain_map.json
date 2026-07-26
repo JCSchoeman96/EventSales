@@ -540,6 +540,10 @@
           {
             "arity": 2,
             "name": "set_evaluated_at"
+          },
+          {
+            "arity": 2,
+            "name": "validate_closed_summaries"
           }
         ],
         "specs?": false,
