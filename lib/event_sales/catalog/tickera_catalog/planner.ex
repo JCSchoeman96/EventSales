@@ -381,7 +381,7 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
       "findings" => Enum.map(findings, &v2_finding_snapshot/1),
       "source_risks" => Enum.map(source_risks, &v2_source_risk_snapshot/1),
       "historical_impact" => v2_historical_impact(historical_impact),
-      "identity_membership_proof" => identity_membership_proof(planned),
+      "identity_membership_proof" => identity_membership_proof(source_system_id, planned),
       "touched_identifiers" => touched_identifiers(planned)
     }
 
@@ -482,18 +482,18 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
     }
   end
 
-  defp identity_membership_proof(planned) do
+  defp identity_membership_proof(source_system_id, planned) do
     %{
-      "events" => Enum.map(planned.event_changes, &event_proof/1),
+      "events" => Enum.map(planned.event_changes, &event_proof(&1, source_system_id)),
       "ticket_types" => Enum.map(planned.ticket_type_changes, &ticket_type_proof/1),
       "product_mappings" => Enum.map(planned.product_mapping_changes, &mapping_proof/1)
     }
     |> json_safe()
   end
 
-  defp event_proof(change) do
+  defp event_proof(change, source_system_id) do
     %{
-      source_system_id: change[:source_system_id],
+      source_system_id: change[:source_system_id] || source_system_id,
       external_event_kind: change[:external_event_kind],
       external_event_id: change[:external_event_id],
       event_id: change[:event_id],
@@ -643,6 +643,7 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
   defp json_safe(nil), do: nil
   defp json_safe(%Decimal{} = decimal), do: Decimal.to_string(decimal, :normal)
   defp json_safe(%DateTime{} = datetime), do: DateTime.to_iso8601(datetime)
+  defp json_safe(value) when is_boolean(value), do: value
 
   defp json_safe(%{} = map),
     do: Map.new(map, fn {key, value} -> {to_string(key), json_safe(value)} end)

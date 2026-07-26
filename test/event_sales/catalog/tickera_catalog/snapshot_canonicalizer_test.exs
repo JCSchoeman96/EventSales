@@ -37,17 +37,58 @@ defmodule EventSales.Catalog.TickeraCatalog.SnapshotCanonicalizerTest do
 
     snapshot =
       valid_snapshot()
-      |> put_in(["event_actions"], [
-        %{
-          "action" => "update_metadata",
-          "booking_fee_value" => Decimal.new("-0.000"),
-          "source_updated_at" => ~U[2026-07-22 10:00:00.123456Z]
-        }
-      ])
+      |> put_in(
+        ["event_actions", Access.at(0), "booking_fee_value"],
+        Decimal.new("-0.000")
+      )
+      |> put_in(
+        ["event_actions", Access.at(0), "source_updated_at"],
+        ~U[2026-07-22 10:00:00.123456Z]
+      )
 
     assert {:ok, bytes, _hash} = canonicalize(snapshot)
     assert bytes =~ ~s("booking_fee_value":"0")
     assert bytes =~ ~s("source_updated_at":"2026-07-22T10:00:00.123456Z")
+  end
+
+  test "rejects unknown keys recursively in every nested object" do
+    paths = [
+      ["event_actions", Access.at(0)],
+      ["ticket_type_actions", Access.at(0)],
+      ["product_mapping_actions", Access.at(0)],
+      ["findings", Access.at(0)],
+      ["source_risks", Access.at(0)],
+      ["historical_impact", "destinations", Access.at(0)],
+      ["identity_membership_proof", "events", Access.at(0)],
+      ["identity_membership_proof", "ticket_types", Access.at(0)],
+      ["identity_membership_proof", "product_mappings", Access.at(0)],
+      ["touched_identifiers", "product_keys", Access.at(0)]
+    ]
+
+    for path <- paths do
+      invalid = update_in(valid_snapshot(), path, &Map.put(&1, "unexpected", "unsafe"))
+      assert {:error, :invalid_snapshot_schema} = canonicalize(invalid)
+    end
+  end
+
+  test "uses semantic collection keys so input permutations have identical bytes and hash" do
+    snapshot = valid_snapshot()
+
+    reversed =
+      snapshot
+      |> Map.update!("event_actions", &Enum.reverse/1)
+      |> Map.update!("ticket_type_actions", &Enum.reverse/1)
+      |> Map.update!("product_mapping_actions", &Enum.reverse/1)
+      |> Map.update!("findings", &Enum.reverse/1)
+      |> Map.update!("source_risks", &Enum.reverse/1)
+      |> update_in(["historical_impact", "destinations"], &Enum.reverse/1)
+      |> update_in(["identity_membership_proof", "events"], &Enum.reverse/1)
+      |> update_in(["identity_membership_proof", "ticket_types"], &Enum.reverse/1)
+      |> update_in(["identity_membership_proof", "product_mappings"], &Enum.reverse/1)
+      |> update_in(["touched_identifiers", "product_keys"], &Enum.reverse/1)
+
+    assert {:ok, bytes, hash} = canonicalize(snapshot)
+    assert {:ok, ^bytes, ^hash} = canonicalize(reversed)
   end
 
   defp canonicalize(snapshot), do: SnapshotCanonicalizer.canonicalize(snapshot)
@@ -57,11 +98,26 @@ defmodule EventSales.Catalog.TickeraCatalog.SnapshotCanonicalizerTest do
       "snapshot_schema_version" => "tickera_catalog_plan.v2",
       "source_system_id" => "00000000-0000-0000-0000-000000000001",
       "origin" => "targeted_catalog_change",
-      "event_actions" => [],
-      "ticket_type_actions" => [],
-      "product_mapping_actions" => [],
-      "findings" => [],
-      "source_risks" => [],
+      "event_actions" => [
+        event_create(2),
+        event_create(1)
+      ],
+      "ticket_type_actions" => [
+        ticket_create(20),
+        ticket_create(10)
+      ],
+      "product_mapping_actions" => [
+        mapping_create(20),
+        mapping_create(10)
+      ],
+      "findings" => [
+        finding("warning", 20),
+        finding("info", 10)
+      ],
+      "source_risks" => [
+        risk("product", 20),
+        risk("event", 10)
+      ],
       "historical_impact" => %{
         "totals" => %{
           "affected_pending_lines" => 0,
@@ -78,19 +134,153 @@ defmodule EventSales.Catalog.TickeraCatalog.SnapshotCanonicalizerTest do
         "warning_count" => 0,
         "unresolved_destination_count" => 0,
         "unknown_classification_count" => 0,
-        "destinations" => []
+        "destinations" => [
+          destination(20),
+          destination(10)
+        ]
       },
       "identity_membership_proof" => %{
-        "events" => [],
-        "ticket_types" => [],
-        "product_mappings" => []
+        "events" => [event_proof(2), event_proof(1)],
+        "ticket_types" => [ticket_proof(20), ticket_proof(10)],
+        "product_mappings" => [mapping_proof(20), mapping_proof(10)]
       },
       "touched_identifiers" => %{
         "event_ids" => [],
         "ticket_type_ids" => [],
         "mapping_ids" => [],
-        "product_keys" => []
+        "product_keys" => [
+          %{"woo_product_id" => 20, "woo_variation_id" => nil},
+          %{"woo_product_id" => 10, "woo_variation_id" => nil}
+        ]
       }
+    }
+  end
+
+  defp event_create(id) do
+    %{
+      "action" => "create",
+      "ref" => "event:#{id}",
+      "source_system_id" => "00000000-0000-0000-0000-000000000001",
+      "name" => "Event #{id}",
+      "slug" => "event-#{id}",
+      "status" => "active",
+      "external_event_id" => id,
+      "external_event_kind" => "tickera_event",
+      "source_status" => "publish",
+      "source_updated_at" => nil,
+      "starts_at" => nil,
+      "ends_at" => nil,
+      "venue_name" => nil,
+      "booking_fee_type" => nil,
+      "booking_fee_value" => nil
+    }
+  end
+
+  defp ticket_create(id) do
+    %{
+      "action" => "create",
+      "ref" => "ticket:#{id}",
+      "event_ref" => "event:1",
+      "name" => "Ticket #{id}",
+      "active" => true,
+      "external_ticket_type_id" => id,
+      "external_ticket_type_kind" => "woo_product",
+      "external_product_id" => id,
+      "external_variation_id" => nil,
+      "source_status" => "publish",
+      "source_updated_at" => nil
+    }
+  end
+
+  defp mapping_create(id) do
+    %{
+      "action" => "create",
+      "event_ref" => "event:1",
+      "ticket_type_ref" => "ticket:#{id}",
+      "source_system_id" => "00000000-0000-0000-0000-000000000001",
+      "woo_product_id" => id,
+      "woo_variation_id" => nil,
+      "original_label" => "Ticket #{id}",
+      "current_label" => "Ticket #{id}",
+      "active" => true
+    }
+  end
+
+  defp finding(severity, id) do
+    %{
+      "severity" => severity,
+      "code" => "missing_source_risk_data",
+      "target_type" => "product",
+      "target_id" => id,
+      "context" => %{}
+    }
+  end
+
+  defp risk(target_type, id) do
+    %{
+      "target_type" => target_type,
+      "target_id" => id,
+      "code" => "missing_source_risk_data",
+      "evidence_classification" => "missing",
+      "evidence_source" => "planner_identity_query",
+      "evidence_value" => nil
+    }
+  end
+
+  defp destination(id) do
+    %{
+      "woo_product_id" => id,
+      "woo_variation_id" => nil,
+      "proposed_event_external_id" => 1,
+      "proposed_ticket_type_external_id" => id,
+      "resolution" => "proposed",
+      "pending_line_count" => 0,
+      "quantity" => 0,
+      "eligible_line_count" => 0,
+      "deferred_line_count" => 0,
+      "conflicting_line_count" => 0,
+      "conflicting_quantity" => 0,
+      "already_mapped_line_count" => 0,
+      "already_mapped_quantity" => 0,
+      "unknown_classification_count" => 0
+    }
+  end
+
+  defp event_proof(id) do
+    %{
+      "source_system_id" => "00000000-0000-0000-0000-000000000001",
+      "external_event_kind" => "tickera_event",
+      "external_event_id" => id,
+      "event_id" => nil,
+      "action" => "create",
+      "no_mutation" => false
+    }
+  end
+
+  defp ticket_proof(id) do
+    %{
+      "external_ticket_type_kind" => "woo_product",
+      "external_ticket_type_id" => id,
+      "external_product_id" => id,
+      "external_variation_id" => nil,
+      "ticket_type_id" => nil,
+      "event_id" => nil,
+      "event_ref" => "event:1",
+      "action" => "create",
+      "no_mutation" => false
+    }
+  end
+
+  defp mapping_proof(id) do
+    %{
+      "source_system_id" => "00000000-0000-0000-0000-000000000001",
+      "woo_product_id" => id,
+      "woo_variation_id" => nil,
+      "event_ref" => "event:1",
+      "ticket_type_ref" => "ticket:#{id}",
+      "action" => "create",
+      "no_existing_conflict" => true,
+      "no_movement" => true
     }
   end
 end

@@ -91,21 +91,131 @@ defmodule EventSales.Catalog.TickeraCatalog.Normalizer do
   defp source_risks(%DiscoveryResult{}, events, rows) do
     event_risks =
       Enum.flat_map(events, fn event ->
-        risk_facts(:event, int(event["tickera_event_id"]), event["risk_codes"])
+        id = int(event["tickera_event_id"])
+        explicit = risk_facts(:event, id, event["risk_codes"])
+
+        ensure_dimension(
+          explicit,
+          SourceRisk.explicit_safe(:event, id, :private_event, :wp_post_status, "publish")
+        )
       end)
 
     row_risks =
       Enum.flat_map(rows, fn row ->
         target_type = if int(row["woo_variation_id"]), do: :variation, else: :product
         target_id = int(row["woo_variation_id"]) || int(row["woo_product_id"])
+        explicit = risk_facts(target_type, target_id, row["risk_codes"])
 
-        risk_facts(target_type, target_id, row["risk_codes"])
+        if target_type == :variation do
+          explicit
+          |> ensure_dimension(
+            SourceRisk.explicit_safe(
+              :variation,
+              target_id,
+              :private_variation,
+              :wp_post_status,
+              "publish"
+            )
+          )
+          |> ensure_dimension(
+            SourceRisk.explicit_safe(
+              :variation,
+              target_id,
+              :variation_mapping_required,
+              :planner_identity_query,
+              "exact"
+            )
+          )
+        else
+          explicit
+          |> ensure_dimension(
+            SourceRisk.explicit_safe(
+              :product,
+              target_id,
+              :private_product,
+              :wp_post_status,
+              "publish"
+            )
+          )
+          |> ensure_dimension(
+            SourceRisk.explicit_safe(
+              :product,
+              target_id,
+              :subscription,
+              :subscription_meta,
+              "absent"
+            )
+          )
+          |> ensure_dimension(
+            product_semantic_fact(row, target_id, "payment_plan", :payment_plan)
+          )
+          |> ensure_dimension(product_semantic_fact(row, target_id, "membership", :membership))
+          |> ensure_dimension(product_semantic_fact(row, target_id, "bundle", :bundle))
+          |> ensure_dimension(product_semantic_fact(row, target_id, "add_on", :add_on))
+          |> ensure_dimension(
+            SourceRisk.explicit_safe(
+              :product,
+              target_id,
+              :missing_ticket_template,
+              :ticket_template_meta,
+              "present"
+            )
+          )
+          |> ensure_dimension(
+            SourceRisk.explicit_safe(
+              :product,
+              target_id,
+              :unsupported_product_type,
+              :wc_product_type,
+              "simple"
+            )
+          )
+        end
       end)
 
     risks = event_risks ++ row_risks
 
     Enum.sort_by(risks, &{&1.target_type, &1.target_id, &1.code})
   end
+
+  defp product_semantic_fact(row, id, key, code) do
+    case get_in(row, ["product_semantics", key]) do
+      "absent" ->
+        SourceRisk.explicit_safe(:product, id, code, :planner_identity_query, "exact")
+
+      "present" ->
+        SourceRisk.classified(
+          :product,
+          id,
+          code,
+          :explicit_risky,
+          :planner_identity_query,
+          "mismatch"
+        )
+
+      nil ->
+        SourceRisk.classified(:product, id, code, :missing, :planner_identity_query, nil)
+
+      _unknown ->
+        SourceRisk.classified(
+          :product,
+          id,
+          code,
+          :unknown,
+          :planner_identity_query,
+          "ambiguous"
+        )
+    end
+  end
+
+  defp ensure_dimension(risks, safe_fact) do
+    if Enum.any?(risks, &same_dimension?(&1, safe_fact)), do: risks, else: [safe_fact | risks]
+  end
+
+  defp same_dimension?(left, right),
+    do:
+      left.target_type == right.target_type and left.target_id == right.target_id and
+        left.code == right.code
 
   defp risk_facts(_target_type, nil, _codes), do: []
 
@@ -118,7 +228,9 @@ defmodule EventSales.Catalog.TickeraCatalog.Normalizer do
   end
 
   defp source_risk_findings(risks) do
-    Enum.map(risks, fn risk ->
+    risks
+    |> Enum.reject(&(&1.evidence_classification == :explicit_safe))
+    |> Enum.map(fn risk ->
       finding(
         :blocking,
         risk.code,

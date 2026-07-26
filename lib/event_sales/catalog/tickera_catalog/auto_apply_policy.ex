@@ -22,7 +22,7 @@ defmodule EventSales.Catalog.TickeraCatalog.AutoApplyPolicy do
       |> require_origin(input)
       |> require_actions(snapshot)
       |> require_no_findings(input, snapshot)
-      |> require_no_risks(snapshot)
+      |> require_complete_safe_risks(snapshot)
       |> require_no_variations(snapshot)
       |> require_zero_history(snapshot)
       |> Enum.uniq()
@@ -94,8 +94,68 @@ defmodule EventSales.Catalog.TickeraCatalog.AutoApplyPolicy do
       else: [:finding_present | reasons]
   end
 
-  defp require_no_risks(reasons, snapshot) do
-    if snapshot["source_risks"] == [], do: reasons, else: [:source_risk_present | reasons]
+  defp require_complete_safe_risks(reasons, snapshot) do
+    facts = snapshot["source_risks"]
+    expected = expected_risk_keys(snapshot)
+
+    cond do
+      not is_list(facts) ->
+        [:missing_source_risk_proof | reasons]
+
+      duplicate_risk_keys?(facts) ->
+        [:duplicate_source_risk_proof | reasons]
+
+      MapSet.new(Enum.map(facts, &risk_key/1)) != expected ->
+        [:missing_source_risk_proof | reasons]
+
+      Enum.any?(facts, &(&1["evidence_classification"] != "explicit_safe")) ->
+        [:source_risk_present | reasons]
+
+      true ->
+        reasons
+    end
+  end
+
+  defp expected_risk_keys(snapshot) do
+    event_keys =
+      snapshot["event_actions"]
+      |> List.wrap()
+      |> Enum.map(& &1["external_event_id"])
+      |> Enum.filter(&is_integer/1)
+      |> Enum.map(&{"event", &1, "private_event"})
+
+    product_ids =
+      snapshot["product_mapping_actions"]
+      |> List.wrap()
+      |> Enum.map(& &1["woo_product_id"])
+      |> Enum.filter(&is_integer/1)
+      |> Enum.uniq()
+
+    product_codes =
+      ~w(private_product subscription payment_plan membership bundle add_on missing_ticket_template unsupported_product_type)
+
+    product_keys = for id <- product_ids, code <- product_codes, do: {"product", id, code}
+
+    variation_keys =
+      snapshot["product_mapping_actions"]
+      |> List.wrap()
+      |> Enum.map(& &1["woo_variation_id"])
+      |> Enum.filter(&is_integer/1)
+      |> Enum.flat_map(fn id ->
+        [
+          {"variation", id, "private_variation"},
+          {"variation", id, "variation_mapping_required"}
+        ]
+      end)
+
+    MapSet.new(event_keys ++ product_keys ++ variation_keys)
+  end
+
+  defp risk_key(fact), do: {fact["target_type"], fact["target_id"], fact["code"]}
+
+  defp duplicate_risk_keys?(facts) do
+    keys = Enum.map(facts, &risk_key/1)
+    length(keys) != MapSet.size(MapSet.new(keys))
   end
 
   defp require_no_variations(reasons, snapshot) do

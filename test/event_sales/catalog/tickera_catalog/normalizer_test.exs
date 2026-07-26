@@ -1,7 +1,7 @@
 defmodule EventSales.Catalog.TickeraCatalog.NormalizerTest do
   use ExUnit.Case, async: true
 
-  alias EventSales.Catalog.TickeraCatalog.{DiscoveryResult, Normalizer, SourceRisk}
+  alias EventSales.Catalog.TickeraCatalog.{DiscoveryResult, Normalizer}
   alias EventSales.TestSupport.TickeraCatalogFixtures
 
   test "persists sorted v2 source risks for rows that are filtered from candidates" do
@@ -42,10 +42,20 @@ defmodule EventSales.Catalog.TickeraCatalog.NormalizerTest do
     assert {:ok, %{rows: [], source_risks: risks, findings: findings}} =
              Normalizer.normalize(result)
 
-    assert [
-             %SourceRisk{code: :private_product},
-             %SourceRisk{code: :unknown_product_semantics}
-           ] = risks
+    assert Enum.any?(
+             risks,
+             &(&1.code == :private_event and &1.evidence_classification == :explicit_safe)
+           )
+
+    assert Enum.any?(
+             risks,
+             &(&1.code == :private_product and &1.evidence_classification == :explicit_risky)
+           )
+
+    assert Enum.any?(
+             risks,
+             &(&1.code == :unknown_product_semantics and &1.evidence_classification == :unknown)
+           )
 
     assert Enum.any?(findings, &(&1.code == :private_product))
   end
@@ -61,10 +71,17 @@ defmodule EventSales.Catalog.TickeraCatalog.NormalizerTest do
     assert {:ok, %{source_risks: risks, findings: findings}} =
              Normalizer.normalize(result)
 
-    assert Enum.map(risks, & &1.code) == [
-             :missing_source_risk_data,
-             :missing_source_risk_data
-           ]
+    assert Enum.count(risks, &(&1.code == :missing_source_risk_data)) == 2
+
+    assert Enum.any?(
+             risks,
+             &(&1.code == :private_event and &1.evidence_classification == :explicit_safe)
+           )
+
+    assert Enum.any?(
+             risks,
+             &(&1.code == :private_product and &1.evidence_classification == :explicit_safe)
+           )
 
     assert Enum.any?(findings, &(&1.code == :missing_source_risk_data))
   end

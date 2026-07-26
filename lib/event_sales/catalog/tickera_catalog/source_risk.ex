@@ -47,7 +47,8 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRisk do
           target_type: :event | :product | :variation,
           target_id: pos_integer(),
           code: atom(),
-          evidence_classification: :explicit_risky | :missing | :unknown | :unsupported,
+          evidence_classification:
+            :explicit_safe | :explicit_risky | :missing | :unknown | :unsupported,
           evidence_source: atom(),
           evidence_value: String.t() | nil
         }
@@ -63,6 +64,32 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRisk do
       evidence_classification: evidence(normalized_code),
       evidence_source: evidence_source(normalized_code),
       evidence_value: evidence_value(normalized_code)
+    }
+  end
+
+  @spec explicit_safe(atom(), pos_integer(), atom(), atom(), String.t()) :: t()
+  def explicit_safe(target_type, target_id, code, evidence_source, evidence_value)
+      when code in @codes do
+    %__MODULE__{
+      target_type: target_type,
+      target_id: target_id,
+      code: code,
+      evidence_classification: :explicit_safe,
+      evidence_source: evidence_source,
+      evidence_value: evidence_value
+    }
+  end
+
+  def classified(target_type, target_id, code, classification, evidence_source, evidence_value)
+      when code in @codes and
+             classification in [:explicit_risky, :missing, :unknown, :unsupported] do
+    %__MODULE__{
+      target_type: target_type,
+      target_id: target_id,
+      code: code,
+      evidence_classification: classification,
+      evidence_source: evidence_source,
+      evidence_value: evidence_value
     }
   end
 

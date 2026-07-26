@@ -39,7 +39,15 @@ defmodule EventSales.Catalog.TickeraCatalog.AutoApplyPolicyTest do
 
   test "any finding, risk, variation, or historical impact rejects the whole run" do
     finding = put_in(eligible_input(), [:snapshot, "findings"], [%{"code" => "any"}])
-    risk = put_in(eligible_input(), [:snapshot, "source_risks"], [%{"code" => "private_product"}])
+
+    risk =
+      update_in(
+        eligible_input(),
+        [:snapshot, "source_risks"],
+        fn [first | rest] ->
+          [Map.put(first, "evidence_classification", "explicit_risky") | rest]
+        end
+      )
 
     variation =
       put_in(
@@ -65,6 +73,35 @@ defmodule EventSales.Catalog.TickeraCatalog.AutoApplyPolicyTest do
                AutoApplyPolicy.evaluate(input)
 
       assert reason in reasons
+    end
+  end
+
+  test "source proof must be complete, unique, and explicitly safe" do
+    assert {:ok, %{result: :ineligible, reason_codes: empty_reasons}} =
+             eligible_input()
+             |> put_in([:snapshot, "source_risks"], [])
+             |> AutoApplyPolicy.evaluate()
+
+    assert :missing_source_risk_proof in empty_reasons
+
+    [first | rest] = eligible_input().snapshot["source_risks"]
+
+    for risks <- [
+          rest,
+          [Map.put(first, "evidence_classification", "missing") | rest],
+          [Map.put(first, "evidence_classification", "unknown") | rest],
+          [Map.put(first, "evidence_classification", "explicit_risky") | rest],
+          [first, first | rest]
+        ] do
+      assert {:ok, %{result: :ineligible, reason_codes: reasons}} =
+               eligible_input()
+               |> put_in([:snapshot, "source_risks"], risks)
+               |> AutoApplyPolicy.evaluate()
+
+      assert Enum.any?(
+               [:missing_source_risk_proof, :source_risk_present, :duplicate_source_risk_proof],
+               &(&1 in reasons)
+             )
     end
   end
 
@@ -94,13 +131,15 @@ defmodule EventSales.Catalog.TickeraCatalog.AutoApplyPolicyTest do
       policy_version: "conservative_auto_apply.v1",
       snapshot: %{
         "snapshot_schema_version" => "tickera_catalog_plan.v2",
-        "event_actions" => [%{"action" => "create"}],
-        "ticket_type_actions" => [%{"action" => "create", "external_variation_id" => nil}],
+        "event_actions" => [%{"action" => "create", "external_event_id" => 1}],
+        "ticket_type_actions" => [
+          %{"action" => "create", "external_product_id" => 10, "external_variation_id" => nil}
+        ],
         "product_mapping_actions" => [
-          %{"action" => "create", "woo_variation_id" => nil}
+          %{"action" => "create", "woo_product_id" => 10, "woo_variation_id" => nil}
         ],
         "findings" => [],
-        "source_risks" => [],
+        "source_risks" => safe_source_risks(),
         "historical_impact" => %{
           "totals" => %{
             "affected_pending_lines" => 0,
@@ -120,6 +159,40 @@ defmodule EventSales.Catalog.TickeraCatalog.AutoApplyPolicyTest do
           "destinations" => []
         }
       }
+    }
+  end
+
+  defp safe_source_risks do
+    event = [
+      safe_risk("event", 1, "private_event", "wp_post_status", "publish")
+    ]
+
+    product =
+      [
+        {"private_product", "wp_post_status", "publish"},
+        {"subscription", "subscription_meta", "absent"},
+        {"payment_plan", "planner_identity_query", "exact"},
+        {"membership", "planner_identity_query", "exact"},
+        {"bundle", "planner_identity_query", "exact"},
+        {"add_on", "planner_identity_query", "exact"},
+        {"missing_ticket_template", "ticket_template_meta", "present"},
+        {"unsupported_product_type", "wc_product_type", "simple"}
+      ]
+      |> Enum.map(fn {code, source, value} ->
+        safe_risk("product", 10, code, source, value)
+      end)
+
+    event ++ product
+  end
+
+  defp safe_risk(target_type, target_id, code, source, value) do
+    %{
+      "target_type" => target_type,
+      "target_id" => target_id,
+      "code" => code,
+      "evidence_classification" => "explicit_safe",
+      "evidence_source" => source,
+      "evidence_value" => value
     }
   end
 end
