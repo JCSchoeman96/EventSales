@@ -8,13 +8,14 @@ defmodule EventSales.Catalog.TickeraCatalog.Applier do
   alias EventSales.Catalog.Resources.{Event, ProductMapping, TicketType}
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.TickeraCatalogSyncRun
+  alias EventSales.Ingestion.TickeraCatalogAutoApply
   alias EventSales.Ingestion.TickeraCatalogSync
   alias EventSales.Ingestion.Workers.MissingCatalogResolutionWorker
   alias EventSales.Repo
 
   @spec apply(Ecto.UUID.t(), String.t(), keyword()) ::
           {:ok, TickeraCatalogSyncRun.t()} | {:error, term()}
-  def apply(run_id, expected_dry_run_hash, _opts \\ [])
+  def apply(run_id, expected_dry_run_hash, opts \\ [])
       when is_binary(run_id) and is_binary(expected_dry_run_hash) do
     with {:ok, %TickeraCatalogSyncRun{} = run} <-
            Ash.get(TickeraCatalogSyncRun, run_id, domain: Ingestion),
@@ -23,7 +24,7 @@ defmodule EventSales.Catalog.TickeraCatalog.Applier do
          {:ok, snapshot} <- fetch_snapshot(run),
          :ok <- validate_no_blocking(snapshot),
          {:ok, {applied, touched, notifications}} <-
-           apply_transaction(run.id, expected_dry_run_hash, snapshot) do
+           apply_transaction(run.id, expected_dry_run_hash, snapshot, opts) do
       Ash.Notifier.notify(notifications)
       after_apply(run.source_system_id, touched)
       {:ok, applied}
@@ -50,9 +51,9 @@ defmodule EventSales.Catalog.TickeraCatalog.Applier do
     end
   end
 
-  defp apply_transaction(run_id, expected_dry_run_hash, snapshot) do
+  defp apply_transaction(run_id, expected_dry_run_hash, snapshot, opts) do
     Repo.transaction(fn ->
-      case do_apply_transaction(run_id, expected_dry_run_hash, snapshot) do
+      case do_apply_transaction(run_id, expected_dry_run_hash, snapshot, opts) do
         {:ok, result} -> result
         {:error, reason} -> Repo.rollback(reason)
       end
@@ -61,13 +62,15 @@ defmodule EventSales.Catalog.TickeraCatalog.Applier do
     error -> {:error, error}
   end
 
-  defp do_apply_transaction(run_id, expected_dry_run_hash, snapshot) do
+  defp do_apply_transaction(run_id, expected_dry_run_hash, snapshot, opts) do
     with {:ok, applying, applying_notifications} <-
            TickeraCatalogSync.claim_for_apply(run_id, expected_dry_run_hash,
              return_notifications?: true
            ),
+         :ok <- mark_automatic_audit(opts, :claimed),
          {:ok, touched, snapshot_notifications} <- apply_snapshot(snapshot),
-         {:ok, applied, applied_notifications} <- mark_applied(applying) do
+         {:ok, applied, applied_notifications} <- mark_applied(applying),
+         :ok <- mark_automatic_audit(opts, :completed) do
       {:ok,
        {applied, touched,
         applying_notifications ++ snapshot_notifications ++ applied_notifications}}
@@ -75,20 +78,45 @@ defmodule EventSales.Catalog.TickeraCatalog.Applier do
   end
 
   defp apply_snapshot(snapshot) do
+    v2? = value(snapshot, "snapshot_schema_version") == "tickera_catalog_plan.v2"
+
+    event_changes = list(snapshot, if(v2?, do: "event_actions", else: "event_changes"))
+
+    ticket_changes =
+      list(snapshot, if(v2?, do: "ticket_type_actions", else: "ticket_type_changes"))
+
+    mapping_changes =
+      list(snapshot, if(v2?, do: "product_mapping_actions", else: "product_mapping_changes"))
+
     refs =
       %{}
-      |> apply_events(list(snapshot, "event_changes"))
-      |> apply_ticket_types(list(snapshot, "ticket_type_changes"))
-      |> apply_mappings(list(snapshot, "product_mapping_changes"))
+      |> apply_events(event_changes)
+      |> apply_ticket_types(ticket_changes)
+      |> apply_mappings(mapping_changes)
+
+    touched =
+      if v2?,
+        do: value(snapshot, "touched_identifiers") || %{},
+        else: snapshot
 
     {:ok,
      %{
        event_ids:
-         Enum.uniq(list(snapshot, "touched_event_ids") ++ Map.get(refs, :created_event_ids, [])),
-       product_keys: list(snapshot, "touched_product_keys")
+         Enum.uniq(
+           list(touched, if(v2?, do: "event_ids", else: "touched_event_ids")) ++
+             Map.get(refs, :created_event_ids, [])
+         ),
+       product_keys: list(touched, if(v2?, do: "product_keys", else: "touched_product_keys"))
      }, Map.get(refs, :notifications, [])}
   rescue
     error -> {:error, error}
+  end
+
+  defp mark_automatic_audit(opts, state) do
+    case Keyword.get(opts, :automatic_decision_id) do
+      nil -> :ok
+      decision_id -> TickeraCatalogAutoApply.record_apply_audit(decision_id, state)
+    end
   end
 
   defp apply_events(refs, changes) do

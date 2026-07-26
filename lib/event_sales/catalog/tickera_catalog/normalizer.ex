@@ -3,12 +3,17 @@ defmodule EventSales.Catalog.TickeraCatalog.Normalizer do
   Pure normalization for Tickera Bridge catalog discovery results.
   """
 
-  alias EventSales.Catalog.TickeraCatalog.{CatalogRow, DiscoveryResult, Finding}
+  alias EventSales.Catalog.TickeraCatalog.{CatalogRow, DiscoveryResult, Finding, SourceRisk}
 
   @published "publish"
 
   @spec normalize(DiscoveryResult.t()) ::
-          {:ok, %{rows: [CatalogRow.t()], findings: [Finding.t()]}}
+          {:ok,
+           %{
+             rows: [CatalogRow.t()],
+             findings: [Finding.t()],
+             source_risks: [SourceRisk.t()]
+           }}
   def normalize(%DiscoveryResult{} = result) do
     events = Enum.map(result.events, &string_key_map/1)
     rows = Enum.map(result.catalog_rows, &string_key_map/1)
@@ -21,6 +26,8 @@ defmodule EventSales.Catalog.TickeraCatalog.Normalizer do
       |> dedupe_rows()
       |> drop_parent_rows_when_variations_exist()
 
+    source_risks = source_risks(result, events, rows)
+
     findings =
       []
       |> Enum.concat(non_published_event_findings(events))
@@ -29,8 +36,10 @@ defmodule EventSales.Catalog.TickeraCatalog.Normalizer do
       |> Enum.concat(variation_findings(normalized_rows))
       |> Enum.concat(variation_name_findings(normalized_rows))
       |> Enum.concat(duplicate_ticket_type_name_findings(normalized_rows))
+      |> Enum.concat(source_risk_findings(source_risks))
+      |> Enum.uniq_by(&{&1.code, &1.tickera_event_id, &1.woo_product_id, &1.woo_variation_id})
 
-    {:ok, %{rows: normalized_rows, findings: findings}}
+    {:ok, %{rows: normalized_rows, findings: findings, source_risks: source_risks}}
   end
 
   defp published_row?(row) do
@@ -72,9 +81,173 @@ defmodule EventSales.Catalog.TickeraCatalog.Normalizer do
       woo_variation_id: variation_id,
       variation_title: source_display_text(row["variation_title"]),
       variation_status: clean(row["variation_status"]),
-      variation_source_updated_at: parse_datetime(row["variation_source_updated_at"])
+      variation_source_updated_at: parse_datetime(row["variation_source_updated_at"]),
+      risk_codes: string_list(row["risk_codes"])
     }
   end
+
+  defp source_risks(%DiscoveryResult{auto_apply_proof_complete?: false}, _events, _rows), do: []
+
+  defp source_risks(%DiscoveryResult{}, events, rows) do
+    event_risks =
+      Enum.flat_map(events, fn event ->
+        id = int(event["tickera_event_id"])
+        explicit = risk_facts(:event, id, event["risk_codes"])
+
+        ensure_dimension(
+          explicit,
+          SourceRisk.explicit_safe(:event, id, :private_event, :wp_post_status, "publish")
+        )
+      end)
+
+    row_risks =
+      Enum.flat_map(rows, fn row ->
+        target_type = if int(row["woo_variation_id"]), do: :variation, else: :product
+        target_id = int(row["woo_variation_id"]) || int(row["woo_product_id"])
+        explicit = risk_facts(target_type, target_id, row["risk_codes"])
+
+        if target_type == :variation do
+          explicit
+          |> ensure_dimension(
+            SourceRisk.explicit_safe(
+              :variation,
+              target_id,
+              :private_variation,
+              :wp_post_status,
+              "publish"
+            )
+          )
+          |> ensure_dimension(
+            SourceRisk.explicit_safe(
+              :variation,
+              target_id,
+              :variation_mapping_required,
+              :planner_identity_query,
+              "exact"
+            )
+          )
+        else
+          explicit
+          |> ensure_dimension(
+            SourceRisk.explicit_safe(
+              :product,
+              target_id,
+              :private_product,
+              :wp_post_status,
+              "publish"
+            )
+          )
+          |> ensure_dimension(
+            SourceRisk.explicit_safe(
+              :product,
+              target_id,
+              :subscription,
+              :subscription_meta,
+              "absent"
+            )
+          )
+          |> ensure_dimension(
+            product_semantic_fact(row, target_id, "payment_plan", :payment_plan)
+          )
+          |> ensure_dimension(product_semantic_fact(row, target_id, "membership", :membership))
+          |> ensure_dimension(product_semantic_fact(row, target_id, "bundle", :bundle))
+          |> ensure_dimension(product_semantic_fact(row, target_id, "add_on", :add_on))
+          |> ensure_dimension(
+            SourceRisk.explicit_safe(
+              :product,
+              target_id,
+              :missing_ticket_template,
+              :ticket_template_meta,
+              "present"
+            )
+          )
+          |> ensure_dimension(
+            SourceRisk.explicit_safe(
+              :product,
+              target_id,
+              :unsupported_product_type,
+              :wc_product_type,
+              "simple"
+            )
+          )
+        end
+      end)
+
+    risks = event_risks ++ row_risks
+
+    Enum.sort_by(risks, &{&1.target_type, &1.target_id, &1.code})
+  end
+
+  defp product_semantic_fact(row, id, key, code) do
+    case get_in(row, ["product_semantics", key]) do
+      "absent" ->
+        SourceRisk.explicit_safe(:product, id, code, :planner_identity_query, "exact")
+
+      "present" ->
+        SourceRisk.classified(
+          :product,
+          id,
+          code,
+          :explicit_risky,
+          :planner_identity_query,
+          "mismatch"
+        )
+
+      nil ->
+        SourceRisk.classified(:product, id, code, :missing, :planner_identity_query, nil)
+
+      _unknown ->
+        SourceRisk.classified(
+          :product,
+          id,
+          code,
+          :unknown,
+          :planner_identity_query,
+          "ambiguous"
+        )
+    end
+  end
+
+  defp ensure_dimension(risks, safe_fact) do
+    if Enum.any?(risks, &same_dimension?(&1, safe_fact)), do: risks, else: [safe_fact | risks]
+  end
+
+  defp same_dimension?(left, right),
+    do:
+      left.target_type == right.target_type and left.target_id == right.target_id and
+        left.code == right.code
+
+  defp risk_facts(_target_type, nil, _codes), do: []
+
+  defp risk_facts(target_type, target_id, codes) when is_list(codes) do
+    Enum.map(codes, &SourceRisk.from_code(target_type, target_id, &1))
+  end
+
+  defp risk_facts(target_type, target_id, _codes) do
+    [SourceRisk.from_code(target_type, target_id, "missing_source_risk_data")]
+  end
+
+  defp source_risk_findings(risks) do
+    risks
+    |> Enum.reject(&(&1.evidence_classification == :explicit_safe))
+    |> Enum.map(fn risk ->
+      finding(
+        :blocking,
+        risk.code,
+        "Persisted source risk makes automatic catalog apply ineligible.",
+        risk_finding_ids(risk)
+      )
+    end)
+  end
+
+  defp risk_finding_ids(%SourceRisk{target_type: :event, target_id: id}),
+    do: [tickera_event_id: id]
+
+  defp risk_finding_ids(%SourceRisk{target_type: :product, target_id: id}),
+    do: [woo_product_id: id]
+
+  defp risk_finding_ids(%SourceRisk{target_type: :variation, target_id: id}),
+    do: [woo_variation_id: id]
 
   defp event_metadata_by_id(events) do
     Map.new(events, fn event ->
@@ -322,6 +495,9 @@ defmodule EventSales.Catalog.TickeraCatalog.Normalizer do
   end
 
   defp clean(value), do: value
+
+  defp string_list(value) when is_list(value), do: Enum.filter(value, &is_binary/1)
+  defp string_list(_value), do: []
 
   defp source_display_text(value) when is_binary(value) do
     value

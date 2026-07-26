@@ -41,6 +41,8 @@ defmodule EventSales.DomainBoundariesTest do
     EventSales.Ingestion.Resources.TickeraReconciliationFinding,
     EventSales.Ingestion.Resources.TickeraCatalogSyncRun,
     EventSales.Ingestion.Resources.TickeraCatalogSyncFinding,
+    EventSales.Ingestion.Resources.TickeraCatalogAutoApplyConfig,
+    EventSales.Ingestion.Resources.TickeraCatalogAutoApplyDecision,
     EventSales.Ingestion.Resources.CatalogChangePendingTarget,
     EventSales.Ingestion.Resources.CatalogChangeSignal,
     EventSales.Ingestion.Resources.CsvImportBatch,

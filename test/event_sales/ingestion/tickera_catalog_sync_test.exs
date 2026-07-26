@@ -40,6 +40,7 @@ defmodule EventSales.Ingestion.TickeraCatalogSyncTest do
              )
 
     assert run.status == :queued
+    assert run.origin == :human_admin
     assert job.queue == "tickera_sync"
 
     assert_enqueued(
@@ -75,10 +76,28 @@ defmodule EventSales.Ingestion.TickeraCatalogSyncTest do
              TickeraCatalogSync.queue_triggered_dry_run(target.id, 1)
 
     assert run.scope == %{"kind" => "wordpress_feed", "product_id" => 321}
+    assert run.origin == :targeted_catalog_change
     assert is_nil(run.requested_by_user_id)
     assert linked.catalog_sync_run_id == run.id
     assert linked.dispatched_generation == 1
     assert linked.state == :queued
+  end
+
+  test "browser-supplied origin cannot forge automation eligibility", %{
+    admin: admin,
+    source: source
+  } do
+    assert {:ok, %{run: run}} =
+             TickeraCatalogSync.queue_dry_run(
+               %{
+                 source_system_id: source.id,
+                 scope: manual_scope(),
+                 origin: :targeted_catalog_change
+               },
+               actor: admin
+             )
+
+    assert run.origin == :human_admin
   end
 
   test "queue_dry_run commits one queued run and one real Oban job", %{

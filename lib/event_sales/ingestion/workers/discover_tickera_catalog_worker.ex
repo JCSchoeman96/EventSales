@@ -20,6 +20,7 @@ defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker do
   alias EventSales.Catalog.TickeraCatalog.{Cache, ConfiguredDiscoverySource, Planner, PubSub}
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.{TickeraCatalogSyncFinding, TickeraCatalogSyncRun}
+  alias EventSales.Ingestion.Workers.EvaluateTickeraCatalogAutoApplyWorker
   alias EventSales.Repo
 
   @safe_error_strings %{
@@ -150,6 +151,7 @@ defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker do
     with :ok <- broadcast(discovering.id, :catalog_sync_started),
          {:ok, discovery_result} <-
            ConfiguredDiscoverySource.discover(discovering.source_system_id, discovering.scope),
+         discovery_result <- %{discovery_result | origin: discovering.origin},
          {:ok, plan} <- Planner.plan(discovering.source_system_id, discovery_result) do
       case finalize_ready(discovering, plan, owner_attempt) do
         {:ok, ready, notifications} ->
@@ -177,11 +179,18 @@ defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker do
   defp finalize_ready_transaction(run, plan, owner_attempt) do
     with {:ok, destroy_notifications} <- destroy_existing_findings(run.id),
          {:ok, create_notifications} <- create_findings(run.id, plan.findings),
-         {:ok, ready, ready_notifications} <- mark_ready(run, plan, owner_attempt) do
+         {:ok, ready, ready_notifications} <- mark_ready(run, plan, owner_attempt),
+         {:ok, _job} <- enqueue_auto_apply_evaluation(ready) do
       {:ok, ready, destroy_notifications ++ create_notifications ++ ready_notifications}
     else
       {:error, reason} -> Repo.rollback(reason)
     end
+  end
+
+  defp enqueue_auto_apply_evaluation(ready) do
+    %{"run_id" => ready.id, "dry_run_hash" => ready.dry_run_hash}
+    |> EvaluateTickeraCatalogAutoApplyWorker.new()
+    |> Oban.insert()
   end
 
   defp destroy_existing_findings(run_id) do

@@ -82,6 +82,39 @@ defmodule EventSales.Catalog.TickeraCatalog.PlannerApplierTest do
     assert plan.product_mapping_changes == []
   end
 
+  test "v2 planner stores an exact eleven-key snapshot with an external hash", %{source: source} do
+    discovery =
+      discovery_result()
+      |> Map.put(:schema_version, "2026-07-22.v2")
+      |> Map.put(:auto_apply_proof_complete?, true)
+      |> Map.put(:origin, :targeted_catalog_change)
+      |> Map.update!(:events, fn events ->
+        Enum.map(events, &Map.put(&1, "risk_codes", []))
+      end)
+      |> Map.update!(:catalog_rows, fn rows ->
+        Enum.map(rows, &Map.put(&1, "risk_codes", ["unknown_product_semantics"]))
+      end)
+
+    assert {:ok, plan} = Planner.plan(source.id, discovery)
+
+    assert Map.keys(plan.plan_snapshot) |> Enum.sort() ==
+             ~w(
+               event_actions findings historical_impact identity_membership_proof origin
+               product_mapping_actions snapshot_schema_version source_risks source_system_id
+               ticket_type_actions touched_identifiers
+             )
+
+    refute Map.has_key?(plan.plan_snapshot, "dry_run_hash")
+    assert plan.plan_snapshot["snapshot_schema_version"] == "tickera_catalog_plan.v2"
+
+    assert {:ok, _bytes, recomputed_hash} =
+             EventSales.Catalog.TickeraCatalog.SnapshotCanonicalizer.canonicalize(
+               plan.plan_snapshot
+             )
+
+    assert recomputed_hash == plan.dry_run_hash
+  end
+
   test "applier adopts existing records idempotently from durable plan snapshot", %{
     source: source,
     event: event,

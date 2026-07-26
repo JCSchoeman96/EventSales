@@ -28,7 +28,8 @@ defmodule EventSales.Catalog.TickeraCatalog.CatalogRow do
           woo_variation_id: integer() | nil,
           variation_title: String.t() | nil,
           variation_status: String.t() | nil,
-          variation_source_updated_at: DateTime.t() | nil
+          variation_source_updated_at: DateTime.t() | nil,
+          risk_codes: [String.t()]
         }
 
   defstruct [
@@ -56,6 +57,7 @@ defmodule EventSales.Catalog.TickeraCatalog.CatalogRow do
     :woo_variation_id,
     :variation_title,
     :variation_status,
-    :variation_source_updated_at
+    :variation_source_updated_at,
+    risk_codes: []
   ]
 end

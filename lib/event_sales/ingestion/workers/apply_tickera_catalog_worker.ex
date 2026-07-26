@@ -18,11 +18,55 @@ defmodule EventSales.Ingestion.Workers.ApplyTickeraCatalogWorker do
   alias EventSales.Catalog.TickeraCatalog.{Applier, PubSub}
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.TickeraCatalogSyncRun
+  alias EventSales.Ingestion.TickeraCatalogAutoApply
 
   @failure_transition_statuses [:queued, :discovering, :dry_run_ready]
   @terminal_statuses [:cancelled, :applying, :applied, :failed]
 
   @impl Oban.Worker
+  def perform(%Oban.Job{
+        id: job_id,
+        args: %{
+          "run_id" => run_id,
+          "dry_run_hash" => dry_run_hash,
+          "decision_id" => decision_id
+        }
+      })
+      when is_integer(job_id) and is_binary(run_id) and is_binary(dry_run_hash) and
+             is_binary(decision_id) do
+    with {:ok, _decision} <-
+           TickeraCatalogAutoApply.validate_automatic_claim(
+             decision_id,
+             job_id,
+             run_id,
+             dry_run_hash
+           ),
+         {:ok, %TickeraCatalogSyncRun{} = run} <-
+           Ash.get(TickeraCatalogSyncRun, run_id, domain: Ingestion),
+         {:ok, _applied} <-
+           Applier.apply(run.id, dry_run_hash, automatic_decision_id: decision_id),
+         :ok <- PubSub.broadcast(run.id, :catalog_sync_applied, %{run_id: run.id}) do
+      :ok
+    else
+      {:error, reason}
+      when reason in [
+             :automatic_claim_rejected,
+             :missing_auto_apply_decision,
+             :invalid_automatic_claim
+           ] ->
+        _result = TickeraCatalogAutoApply.record_apply_audit(decision_id, :claim_rejected)
+        :discard
+
+      {:ok, nil} ->
+        _result = TickeraCatalogAutoApply.record_apply_audit(decision_id, :claim_rejected)
+        :discard
+
+      {:error, reason} ->
+        _result = TickeraCatalogAutoApply.record_apply_audit(decision_id, :failed)
+        {:error, bounded_error(reason)}
+    end
+  end
+
   def perform(%Oban.Job{args: %{"run_id" => run_id, "dry_run_hash" => dry_run_hash}})
       when is_binary(run_id) and is_binary(dry_run_hash) do
     with {:ok, %TickeraCatalogSyncRun{} = run} <-
@@ -109,6 +153,7 @@ defmodule EventSales.Ingestion.Workers.ApplyTickeraCatalogWorker do
   defp sanitize_error(:blocking_findings), do: "blocking_findings"
   defp sanitize_error(:run_not_ready), do: "run_not_ready"
   defp sanitize_error(:not_found), do: "not_found"
+  defp sanitize_error(:automatic_claim_rejected), do: "automatic_claim_rejected"
   defp sanitize_error(_reason), do: "catalog_sync_apply_failed"
 
   defp bounded_error(reason)
@@ -117,7 +162,8 @@ defmodule EventSales.Ingestion.Workers.ApplyTickeraCatalogWorker do
               :missing_plan_snapshot,
               :blocking_findings,
               :run_not_ready,
-              :not_found
+              :not_found,
+              :automatic_claim_rejected
             ],
        do: reason
 

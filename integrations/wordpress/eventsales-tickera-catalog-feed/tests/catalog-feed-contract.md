@@ -72,7 +72,11 @@ events
 catalog_rows
 ```
 
-Every `catalog_rows` item must include the VS-26A fields:
+Schema `2026-07-22.v2` is the only feed version capable of supplying
+auto-Apply risk proof. The Human-only `2026-07-08.v1` and `2026-07-05.v1`
+schemas remain parseable but are never automation eligible.
+
+Every `catalog_rows` item must include the existing VS-26A fields:
 
 ```text
 tickera_event_id
@@ -95,6 +99,25 @@ variation_status
 variation_source_updated_at
 ```
 
+Every v2 catalog row also contains deterministic, bounded risk fields:
+
+```text
+product_status_classification
+variation_status_classification
+product_type
+ticket_template_present
+subscription_classification
+product_semantics
+target_observation
+risk_codes
+```
+
+`product_semantics` contains the closed keys `payment_plan`, `membership`,
+`bundle`, and `add_on`. Until a deterministic reviewed source exists, each is
+`unknown` and `risk_codes` includes `unknown_product_semantics`; names, slugs,
+descriptions, categories, and arbitrary metadata keys are never used to infer
+them.
+
 Every `events` item must include the safe event metadata fields:
 
 ```text
@@ -103,6 +126,9 @@ event_end_at
 event_location
 booking_fee_type
 booking_fee_value
+event_status_classification
+target_observation
+risk_codes
 ```
 
 ## Targeted Lookup Checks
