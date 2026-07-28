@@ -1,117 +1,580 @@
-# AGENTS.md - EventSales
+# AGENTS.md — EventSales
+
+## Authority and precedence
+
+This file defines how coding agents must work in the EventSales repository.
+
+When instructions conflict, use this order:
+
+```text
+1. Explicit current user instruction
+2. This AGENTS.md
+3. Current vertical-slice specification
+4. Canonical architecture documentation
+5. Older planning and historical documentation
+```
+
+Do not let obsolete Railway-first, mandatory-PR, or broad-audit instructions override this local-first workflow.
+
+---
 
 ## Mission
 
-Build **EventSales** as a flash-sale-safe, observable, Ash-native sales intelligence layer for WooCommerce + Tickera.
+Build **EventSales** as a flash-sale-safe, observable, Ash-native operational and sales-intelligence layer for WooCommerce and Tickera.
 
 ```text
-WooCommerce sells tickets
-|> EventSales ingests webhooks
-|> Oban processes async work
+WooCommerce and Tickera
+|> EventSales receives catalogue and order data
+|> raw webhook signatures are verified
+|> Oban processes asynchronous work
 |> Ash/Postgres stores durable truth
-|> Redis/ETS/Cachex serve hot/warm reads
-|> LiveView displays internal admin dashboards
-|> REST/CSV reconciliation repairs gaps
+|> Redis/ETS/Cachex serve hot and shared state
+|> PubSub and LiveView push operational updates
+|> REST and reconciliation repair missed changes
 ```
 
-## Canonical docs
+---
 
-Use these files as the source of truth:
+## Canonical documentation
+
+Use these as architecture references:
 
 ```text
 docs/EventSales_Hardened_V2_1_Vertical_Slice_Roadmap.md
 docs/EventSales_Hardened_V2_1_Folder_Structure.md
 docs/EventSales_Hardened_V2_1_Domain_Mapping_Ash_Resource_Dossiers.md
+docs/agent/01_PROJECT_WIDE_RULES.md
 ```
 
-Older roadmap/folder/domain docs are superseded.
+Older roadmap, folder, domain, deployment, or workflow documents are superseded where they conflict with this file or current user direction.
 
-## Project-wide rules
+---
 
-Full source of truth: [`docs/agent/01_PROJECT_WIDE_RULES.md`](docs/agent/01_PROJECT_WIDE_RULES.md)
-
-Non-negotiable summary:
+## Core project rules
 
 ```text
 Build one vertical slice at a time.
-Use factual backing: existing code, canonical docs, official package docs, or explicit user direction.
-Write or adjust tests before business logic.
-Keep LiveView, components, controllers, and MappingResolver away from WooCommerce REST.
-Only Oban workers and approved ingestion services may call WooCommerceClient.
-Postgres/AshPostgres is durable truth; Redis/ETS/Cachex/HotStateAggregator are read models only.
-Webhook intake must verify exact raw-body signatures before JSON parsing.
-WooCommerce REST max concurrency is 2.
-No secrets or real customer data in code, tests, logs, fixtures, or docs.
-Task is not complete unless required checks pass.
-Always open or update a PR after meaningful work.
+Use Ash 3.x and the existing Ash domains and resources.
+Inspect existing code before creating new abstractions.
+Use the smallest change that completes the slice.
+Write or adjust focused tests with the implementation.
+Do not repeat broad repository, infrastructure, or architecture audits.
+Do not rebuild EventSales functionality that already exists.
+Do not perform unrelated refactors or dependency upgrades.
+Do not expose secrets or real customer data.
+Task completion requires focused validation and a clear result.
 ```
-- Use rg for broad text search; use ast-grep run or ast-grep scan for structural code discovery.
 
-## Pre-handover development velocity mode
-
-EventSales is still under active development. It has not been handed over to management and is not serving live customer operations. The Railway environment currently named `production` is the project's pre-handover integration environment until the owner explicitly declares a management handover or live launch.
-
-This section takes precedence over generic conservative or uncertainty guidance while the project remains pre-handover.
-
-Default operating mode:
+Use factual backing from:
 
 ```text
-Optimize for useful output, short feedback loops, and working vertical slices.
-Proceed with reasonable, documented assumptions instead of blocking on hypothetical risks.
-Prefer the smallest reversible change, focused validation, and fix-forward development.
-Do not stop merely because staging is missing, an environment is named production, a public proxy exists, or a reversible pre-handover change might temporarily break the development environment.
-Use the least number of tools needed and avoid long audits that do not change the implementation decision.
-When the current task requires it, normal development mutations to the pre-handover Railway environment are allowed unless the task explicitly says read-only.
+existing code
+current tests
+canonical documentation
+official package documentation
+explicit user direction
 ```
 
-Normal pre-handover development work may include:
+Use `rg` for broad text search.
+
+Use `ast-grep run` or `ast-grep scan` when structural code discovery is materially better than text search.
+
+---
+
+## Local-first development environment
+
+EventSales is currently developed and certified through a local integration environment.
+
+Repository:
 
 ```text
-Deploying or restarting the EventSales application.
-Changing scoped application variables or feature flags.
-Running migrations against development/pre-handover databases.
-Creating isolated staging services and synthetic test data.
-Rotating development credentials when required.
-Running synthetic webhooks, smoke tests, and focused integration tests.
-Resetting disposable non-customer development data when the task explicitly requires it.
+/home/jcschoeman96/projects/current/EventSales
 ```
 
-Keep these hard boundaries:
+Application data flow:
 
 ```text
-Never print, commit, or intentionally expose secrets.
-Never use real customer or management data for development tests.
-Never trigger payments, customer emails, external notifications, or other irreversible third-party side effects without explicit approval.
-Never delete a database, volume, environment, repository history, or non-disposable data without explicit approval and a recovery path.
-Never force push, reset hard, clean untracked files, or rewrite shared history.
-Stop when the target may be an actual live management environment rather than the pre-handover EventSales environment.
-Stop when a change is not reasonably reversible or its blast radius extends beyond EventSales.
+Local WordPress
+http://localhost:10059
+        ↓ authenticated catalogue, webhook, or REST traffic
+Native Phoenix / EventSales
+http://127.0.0.1:4000
+        ↓
+Docker Compose infrastructure
+PostgreSQL: 127.0.0.1:5432
+Redis:      127.0.0.1:6379
 ```
 
-Decision rule:
+Agent access flow:
 
 ```text
-Reversible and limited to the pre-handover EventSales system? Proceed, test, and report.
-Potentially irreversible, externally visible, or involving real users/data? Ask for approval first.
-Uncertain but low-risk and reversible? State the assumption and continue.
+Coding agent
+├── EventSales repository and local shell
+├── voelgoed-staging MCP
+│   └── only after confirming its target is http://localhost:10059
+└── GitHub
+    └── source-control and review checkpoint after local validation
 ```
 
-Time and retry limits:
+### Environment authority
+
+During normal development:
 
 ```text
-Time-box investigation that does not modify the implementation decision to 15 minutes.
-Attempt a failing operation no more than twice unless new evidence justifies another attempt.
-After two failed attempts or 30 minutes blocked, stop and report the smallest concrete blocker and next action.
-Stop after the requested task and validation are complete; do not expand into adjacent work automatically.
+Local WordPress
+|> source WooCommerce and Tickera system
+
+Local Phoenix
+|> active EventSales runtime
+
+Local PostgreSQL
+|> durable development truth
+
+Local Redis
+|> shared or high-velocity development state when explicitly enabled
+
+GitHub
+|> source control, backup, collaboration, review, and merge checkpoint
+
+Railway / VPS / production WordPress
+|> later staging or deployment targets only
+|> out of scope without explicit authorisation
 ```
 
-After management handover or live launch, the owner must update this section and restore stricter production-change controls.
+Do not require a remote environment before implementing or validating a local vertical slice.
+
+Do not use public tunnels during normal local development.
+
+---
+
+## WordPress access
+
+Use `voelgoed-staging MCP` for local WordPress inspection and supported controlled changes only after confirming that its active target is:
+
+```text
+http://localhost:10059
+```
+
+Do not assume the MCP name proves its target.
+
+Before any MCP mutation, verify the target.
+
+STOP if it resolves to:
+
+```text
+a wpstage.net address
+the production Voelgoed domain
+a public staging domain
+an unknown WordPress installation
+```
+
+If the MCP does not support the required local operation, use the smallest explicitly local alternative:
+
+```text
+local WP-CLI
+local curl
+the signed EventSales catalogue client
+another verified localhost-only tool
+```
+
+Do not activate unrelated WordPress functionality, including:
+
+```text
+copied staging webhooks
+Payfast or other payments
+SMTP or customer email
+CRM
+SMS or WhatsApp
+marketing integrations
+CDN integrations
+cache or optimisation plugins
+production API connectors
+```
+
+---
+
+## Implementation workflow
+
+The default operating mode is implementation-focused.
+
+```text
+understand the current vertical slice
+|> inspect only directly relevant files
+|> identify the smallest viable change
+|> implement the change
+|> run the focused test
+|> fix concrete failures
+|> run mix quality.fast at slice completion
+|> perform one relevant local integration check
+|> create a coherent local commit
+|> push when ready to share, review, back up, or merge
+|> STOP
+```
+
+Priorities:
+
+```text
+1. Working local vertical slice
+2. Focused automated tests
+3. Local integration proof
+4. Coherent local commit
+5. GitHub checkpoint when ready to share or merge
+```
+
+Avoid:
+
+```text
+broad repository audits
+rechecking settled architecture
+speculative hardening
+unrelated refactors
+unnecessary abstractions
+dependency upgrades without a concrete need
+production infrastructure work
+Railway or VPS work
+public tunnels
+rebuilding existing EventSales features
+over-engineering the local environment
+```
+
+Use the least number of tools and commands needed to complete the task.
+
+---
+
+## Targeted verification
+
+Verify only what is necessary for the current change.
+
+Appropriate targeted checks include:
+
+```text
+reading the directly affected module
+reading its focused tests
+checking one required environment variable
+checking one local service health endpoint
+checking one relevant database record
+checking one MCP target before a WordPress mutation
+checking one local HTTP or catalogue request
+```
+
+Do not turn a focused implementation task into another architecture, security, infrastructure, WordPress, or repository audit.
+
+---
+
+## Local service rules
+
+Run Phoenix natively on Kubuntu.
+
+Use Docker Compose for local PostgreSQL and Redis.
+
+Expected services:
+
+```text
+WordPress:  http://localhost:10059
+Phoenix:    http://127.0.0.1:4000
+PostgreSQL: 127.0.0.1:5432
+Redis:      127.0.0.1:6379
+```
+
+PostgreSQL and Redis must bind to loopback only.
+
+Do not add Phoenix or WordPress to Docker Compose during normal development.
+
+Do not use:
+
+```text
+production databases
+Railway databases
+VPS databases
+production secrets
+production WordPress endpoints
+remote staging endpoints during ordinary local work
+```
+
+---
+
+## Architecture boundaries
+
+### Durable truth
+
+```text
+Postgres and AshPostgres
+|> durable source of truth
+```
+
+Redis, ETS, Cachex, and hot-state processes are not replacements for durable Postgres truth.
+
+### WooCommerce access
+
+```text
+LiveView
+components
+controllers
+MappingResolver
+|> must not call WooCommerce REST
+```
+
+Only approved ingestion services and Oban workers may call `WooCommerceClient`.
+
+WooCommerce REST maximum concurrency remains `2`.
+
+REST is for:
+
+```text
+bounded catch-up
+reconciliation
+metadata recovery
+repairing missed webhook changes
+```
+
+### Webhook intake
+
+Webhook intake must:
+
+```text
+read exact raw request bytes
+|> verify WooCommerce HMAC before JSON parsing
+|> persist durable intake
+|> enqueue asynchronous processing
+|> return quickly
+```
+
+Do not verify signatures against decoded and re-encoded JSON.
+
+Return success only after:
+
+```text
+Postgres persistence
+or
+explicitly authorised Redis degraded-mode acceptance
+```
+
+### Orders and revenue
+
+```text
+order and order-item writes must be idempotent
+stale source updates must not regress current state
+duplicate source events must not create duplicate orders
+exact WooCommerce variation IDs must be preserved
+completed WooCommerce orders recognise sales and revenue
+non-completed states remain visible but unrecognised
+```
+
+### Real-time behaviour
+
+Use:
+
+```text
+Phoenix PubSub
+LiveView push updates
+Oban for heavy asynchronous work
+GenServers for appropriate hot aggregation
+cached aggregates or materialised views for analytics
+```
+
+Avoid browser polling when PubSub or LiveView push is appropriate.
+
+---
+
+## Local configuration and secret safety
+
+Local secrets belong in ignored files:
+
+```text
+.env
+.env.local
+```
+
+Tracked example files may contain placeholders only:
+
+```text
+.env.example
+.env.local.example
+```
+
+Never print, commit, paste into logs, or expose:
+
+```text
+catalogue signing secrets
+WooCommerce webhook secrets
+WordPress credentials
+SFTP credentials
+database passwords
+API credentials
+real customer information
+```
+
+The existing root `.env` may contain staging administration credentials.
+
+During normal local EventSales development:
+
+```text
+do not source it
+do not modify it
+do not print its values
+do not reuse its credentials
+```
+
+Catalogue auto-Apply must remain disabled unless a specific task explicitly enables and tests it.
+
+Redis webhook degraded-mode buffering must remain disabled unless a specific durability task explicitly enables and tests it.
+
+Catalogue change receivers, live cutover flags, and copied WordPress webhooks must remain disabled unless explicitly required by the current slice.
+
+---
+
+## Development and test sequence
+
+During implementation, prefer:
+
+```bash
+mix test path/to/focused_test.exs
+mix compile --warnings-as-errors
+mix format
+```
+
+After UI or asset changes, run only the relevant checks:
+
+```bash
+mix format
+mix compile --warnings-as-errors
+mix assets.build
+mix test test/event_sales/assets_pipeline_config_test.exs
+mix test path/to/directly_affected_test.exs
+```
+
+At vertical-slice completion:
+
+```bash
+mix quality.fast
+```
+
+Before meaningful merge or review:
+
+```bash
+mix quality.pr
+```
+
+Use `mix quality.ci` only when required by:
+
+```text
+the release process
+remote deployment
+merge policy
+an explicit user instruction
+```
+
+Do not run every expensive test or CI-equivalent gate after every small edit.
+
+Do not claim checks passed unless they were actually run.
+
+---
+
+## Git and GitHub workflow
+
+GitHub must support development rather than block the local implementation loop.
+
+Preferred workflow:
+
+```text
+start from a known commit
+|> create or use a focused feature branch
+|> implement locally
+|> run focused validation
+|> commit a coherent working checkpoint
+|> push when ready to share, review, back up, or merge
+|> open or update a PR when preparing meaningful work for merge or review
+```
+
+A GitHub connection, PR, or remote CI result is not required before local implementation begins.
+
+Do not stop merely because:
+
+```text
+the branch has unpushed commits
+GitHub is not yet updated
+a PR does not yet exist
+remote CI has not yet run
+```
+
+A dirty working tree is not automatically a STOP condition.
+
+Inspect changed paths:
+
+```text
+all changes belong to the current task
+|> continue carefully
+
+unrelated or unexplained changes are present
+|> STOP before overwriting or committing them
+```
+
+Never:
+
+```text
+reset hard
+clean untracked files
+force push
+rewrite shared history
+auto-resolve conflicts
+overwrite unrelated work
+commit secrets
+push directly to main without explicit authorisation
+```
+
+---
+
+## Repository helper scripts
+
+Use existing repository scripts only when they directly support the task.
+
+Prefer:
+
+```text
+Architecture boundary check
+|> bash scripts/check_no_web_woocommerce_refs.sh
+
+Git hooks
+|> bash scripts/install_git_hooks.sh
+
+Broader local validation before meaningful merge or review
+|> bash scripts/local_ci.sh
+```
+
+Local infrastructure:
+
+```bash
+docker compose up -d --wait
+docker compose ps
+docker compose down
+```
+
+Do not use `docker compose down -v` during normal development.
+
+Do not require GitHub synchronisation before beginning local implementation.
+
+Use `scripts/sync_with_origin_main.sh` only when intentionally synchronising with remote `main`.
+
+Once root `compose.yaml` is established, use it as the canonical PostgreSQL and Redis workflow instead of `scripts/dev_postgres.sh`.
+
+Do not use Railway smoke-test or deployment scripts during normal local development.
+
+---
 
 ## UI, assets, and component rules
 
-EventSales uses Phoenix 1.8 LiveView with Tailwind v4, vendored DaisyUI, Mishka Chelekom, and Chart.js.
+EventSales uses:
 
-Source of truth:
+```text
+Phoenix 1.8
+LiveView
+Tailwind v4
+vendored DaisyUI
+Mishka Chelekom
+Chart.js
+```
+
+Canonical asset files:
 
 ```text
 assets/css/app.css
@@ -128,121 +591,144 @@ Rules:
 
 ```text
 Do not add assets/tailwind.config.js.
-Do not reintroduce Tailwind v3 config patterns.
-Do not install DaisyUI through npm unless the asset strategy is intentionally changed.
-Do not add a second DaisyUI plugin source.
-Do not remove or reorder the Mishka CSS import before Tailwind in assets/css/app.css.
-Do not overwrite Mishka LiveView hooks in assets/js/app.js.
-Do not import Chart.js again in assets/js/app.js while it is loaded globally in root.html.heex.
+Do not reintroduce Tailwind v3 configuration.
+Do not install a second DaisyUI source.
+Do not remove or reorder required Mishka CSS imports.
+Do not replace the existing Mishka LiveView hook map.
+Do not import Chart.js again when it is already loaded globally.
 ```
 
-Use this UI priority:
+UI priority:
 
 ```text
 1. Existing EventSales component
 2. DaisyUI primitive
 3. Mishka Chelekom component or hook
 4. Small local Phoenix function component
-5. Custom JavaScript only for browser-owned behavior
+5. Custom JavaScript only for browser-owned behaviour
 ```
 
-DaisyUI is preferred for generic UI primitives:
+When adding hooks:
 
-```text
-btn, card, alert, badge, table, tabs, modal, dropdown, stat, skeleton, loading
-```
-
-Mishka is preferred when the component needs existing Mishka design tokens, CSS variables, or LiveView hooks.
-
-When adding LiveView hooks, always merge with Mishka hooks:
-
-```js
+```javascript
 hooks: { ...MishkaComponents, ...NewHooks }
 ```
 
-Never replace the existing hook map with only the new hooks.
-
-Chart.js rules:
+Chart.js components must:
 
 ```text
-Use lib/event_sales_web/live/admin/components/sales_chart.ex as the canonical pattern.
-Use a stable unique canvas id.
-Pass server data through data-* attributes as JSON.
-Use phx-update="ignore" on the chart canvas or wrapper.
-Destroy an existing chart instance before recreating it.
-Do not let LiveView patch an active Chart.js canvas.
-Use cached aggregates/read models for chart data; do not trigger large table scans from UI components.
+use a stable unique canvas ID
+pass server data through data attributes as JSON
+use phx-update="ignore"
+destroy an existing chart before recreating it
+avoid LiveView patching an active canvas
+use cached aggregates rather than peak-time table scans
 ```
 
-Dynamic Tailwind classes:
+Use stable literal Tailwind classes where possible.
+
+Add unavoidable dynamic classes to:
 
 ```text
-Prefer stable literal classes in HEEx.
-If a class must be generated dynamically, add it to assets/css/safelist.txt.
+assets/css/safelist.txt
 ```
 
-Required checks after UI or asset changes:
+---
 
-```bash
-mix format --check-formatted
-mix compile --warnings-as-errors
-mix assets.build
-mix test test/event_sales/assets_pipeline_config_test.exs
-mix test
-```
+## Performance and scaling guardrails
 
-## Repo helper scripts
-
-Use repo scripts instead of inventing ad-hoc commands.
-
-Prefer `bash scripts/<name>.sh ...` so commands work even when executable bits are not preserved across machines, worktrees, zip downloads, or Windows tooling.
+Preserve these design principles:
 
 ```text
-Before starting work
-|> bash scripts/sync_with_origin_main.sh --check
-|> if clean and safe: bash scripts/sync_with_origin_main.sh --sync
-
-Local Postgres
-|> bash scripts/dev_postgres.sh start
-|> bash scripts/dev_postgres.sh status
-|> bash scripts/dev_postgres.sh logs
-|> bash scripts/dev_postgres.sh stop
-|> bash scripts/dev_postgres.sh reset only when data loss is intended
-
-Git hooks
-|> bash scripts/install_git_hooks.sh
-|> installs .githooks as the repo-local hooks path
-
-Before meaningful PR push
-|> bash scripts/local_ci.sh
-
-Architecture guardrail
-|> bash scripts/check_no_web_woocommerce_refs.sh
-|> verifies LiveView/controllers/components/MappingResolver do not call WooCommerce REST or direct HTTP clients
-
-Railway smoke test
-|> scripts/smoke_test_railway_release.sh is currently a placeholder for Slice 24.0
-|> do not rely on it until that slice implements the real smoke test
+Postgres is durable truth.
+Redis is shared high-velocity state.
+Oban performs asynchronous work.
+PubSub and LiveView push updates.
+GenServers aggregate appropriate hot state.
+Critical writes are idempotent and concurrency-safe.
+Exact variation IDs are never collapsed into product IDs.
+Catalogue pages are fully aggregated before planning.
+Large datasets are streamed or paginated.
+Analytics avoid peak-time table scans.
 ```
 
-## Git safety
+Current targets:
 
 ```text
-ONLY use subagents if/when the user explicitly asks requests them
-Never reset hard.
-Never clean files.
-Never force push.
-Never auto-resolve conflicts.
-Never rebase pushed/shared branches without approval.
-Stop if the working tree is dirty.
+sub-100 ms common API latency
+sub-5 second checkout p99
+zero overselling
+no duplicate order attribution
+horizontal scalability
 ```
 
-If unsure:
+Do not add infrastructure merely to satisfy theoretical future scale when it is not required by the current slice.
+
+---
+
+## STOP conditions
+
+Stop immediately when:
 
 ```text
-say unsure
-|> explain risk
-|> ask concise question
-|> do not invent architecture
+the WordPress target is not confirmed as localhost:10059
+a command would contact production WordPress
+a command would contact Railway or the VPS without explicit authorisation
+a database URL is not local
+PostgreSQL or Redis is exposed beyond loopback
+a production or staging secret is about to be used locally
+a secret is about to be committed or printed
+unrelated local changes would be overwritten
+a destructive database command targets an unverified database
+catalogue auto-Apply becomes enabled unintentionally
+Redis webhook degraded buffering becomes enabled unintentionally
+copied WordPress webhooks become active
+payments, email, CRM, SMS, or marketing side effects could occur
+Phoenix or WordPress is being containerised without a demonstrated need
+the task expands beyond the current vertical slice
+a focused test fails and the cause is not understood
+the same failing operation has been attempted twice without new evidence
 ```
-- Use rg for broad text search; use ast-grep run or ast-grep scan for structural code discovery.
+
+When a STOP condition occurs:
+
+```text
+1. Stop running commands.
+2. State the exact failed command or unsafe target.
+3. Preserve and show the relevant non-secret output.
+4. Recommend only the smallest next diagnostic step.
+5. Wait for explicit direction.
+```
+
+---
+
+## Completion definition
+
+A local vertical slice is complete when:
+
+```text
+scope implemented
+|> focused tests pass
+|> relevant local services are healthy
+|> one local integration check passes
+|> mix quality.fast passes
+|> no architecture boundary is violated
+|> no unrelated changes were introduced
+|> no secrets or customer data were exposed
+|> a coherent local commit exists
+|> GitHub is updated when ready to share, review, or merge
+|> the result is reported briefly
+|> STOP
+```
+
+Report completion using:
+
+```text
+Done
+|> what changed
+|> tests and checks run
+|> local integration result
+|> remaining risks or blockers
+```
+
+Do not sugar-coat failures. If a test was not run or did not pass, state that plainly.
