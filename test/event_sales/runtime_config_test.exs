@@ -20,6 +20,12 @@ defmodule EventSales.RuntimeConfigTest do
     "TICKERA_DEFAULT_SITE_URL",
     "TICKERA_TIMEOUT_MS",
     "TICKERA_CONNECT_TIMEOUT_MS",
+    "TICKERA_CATALOG_FEED_ENABLED",
+    "TICKERA_CATALOG_FEED_BASE_URL",
+    "TICKERA_CATALOG_FEED_SECRET",
+    "TICKERA_CATALOG_FEED_TIMEOUT_MS",
+    "TICKERA_CATALOG_FEED_PER_PAGE",
+    "TICKERA_CATALOG_FEED_MAX_PAGES",
     "TICKERA_RECEIVE_TIMEOUT_MS",
     "TICKERA_PER_PAGE",
     "TICKERA_PAGE_DELAY_MS"
@@ -30,6 +36,8 @@ defmodule EventSales.RuntimeConfigTest do
       for key <- @managed_env_keys, into: %{} do
         {key, System.get_env(key)}
       end
+
+    Enum.each(@managed_env_keys, &System.delete_env/1)
 
     on_exit(fn ->
       Enum.each(original_env, fn {key, value} -> restore_env(key, value) end)
@@ -132,6 +140,74 @@ defmodule EventSales.RuntimeConfigTest do
     assert Keyword.fetch!(tickera_config, :page_delay_ms) == 125
     refute Keyword.has_key?(tickera_config, :api_key)
     refute Keyword.has_key?(tickera_config, :max_pages)
+  end
+
+  test "dev runtime config enables the Tickera catalogue feed from env" do
+    System.put_env("TICKERA_CATALOG_FEED_ENABLED", "true")
+    System.put_env("TICKERA_CATALOG_FEED_BASE_URL", "http://localhost:10059")
+    System.put_env("TICKERA_CATALOG_FEED_SECRET", "test-only-catalogue-secret")
+    System.put_env("TICKERA_CATALOG_FEED_TIMEOUT_MS", "6100")
+    System.put_env("TICKERA_CATALOG_FEED_PER_PAGE", "80")
+    System.put_env("TICKERA_CATALOG_FEED_MAX_PAGES", "40")
+
+    app_config =
+      @runtime_config_path
+      |> Config.Reader.read!(env: :dev)
+      |> Keyword.get(:event_sales, [])
+
+    feed_config = Keyword.fetch!(app_config, :tickera_catalog_feed)
+
+    assert Keyword.fetch!(feed_config, :base_url) == "http://localhost:10059"
+    assert Keyword.fetch!(feed_config, :secret) == "test-only-catalogue-secret"
+    assert Keyword.fetch!(feed_config, :timeout_ms) == 6_100
+    assert Keyword.fetch!(feed_config, :per_page) == 80
+    assert Keyword.fetch!(feed_config, :max_pages) == 40
+
+    assert Keyword.fetch!(app_config, :tickera_catalog_discovery_source) ==
+             EventSales.Catalog.TickeraCatalog.WordPressFeedDiscoverySource
+  end
+
+  test "dev runtime config leaves the Tickera catalogue feed disabled by default" do
+    app_config =
+      @runtime_config_path
+      |> Config.Reader.read!(env: :dev)
+      |> Keyword.get(:event_sales, [])
+
+    refute Keyword.has_key?(app_config, :tickera_catalog_feed)
+    refute Keyword.has_key?(app_config, :tickera_catalog_discovery_source)
+  end
+
+  test "dev runtime config names both required variables when the feed secret is missing" do
+    System.put_env("TICKERA_CATALOG_FEED_ENABLED", "true")
+    System.put_env("TICKERA_CATALOG_FEED_BASE_URL", "http://localhost:10059")
+
+    error =
+      assert_raise RuntimeError, fn ->
+        Config.Reader.read!(@runtime_config_path, env: :dev)
+      end
+
+    assert error.message =~ "TICKERA_CATALOG_FEED_BASE_URL"
+    assert error.message =~ "TICKERA_CATALOG_FEED_SECRET"
+  end
+
+  test "prod runtime config still enables the Tickera catalogue feed" do
+    put_required_prod_env()
+    System.put_env("TICKERA_CATALOG_FEED_ENABLED", "1")
+    System.put_env("TICKERA_CATALOG_FEED_BASE_URL", "https://catalogue.example.test")
+    System.put_env("TICKERA_CATALOG_FEED_SECRET", "test-only-prod-catalogue-secret")
+
+    app_config =
+      @runtime_config_path
+      |> Config.Reader.read!(env: :prod)
+      |> Keyword.get(:event_sales, [])
+
+    feed_config = Keyword.fetch!(app_config, :tickera_catalog_feed)
+
+    assert Keyword.fetch!(feed_config, :base_url) == "https://catalogue.example.test"
+    assert Keyword.fetch!(feed_config, :secret) == "test-only-prod-catalogue-secret"
+
+    assert Keyword.fetch!(app_config, :tickera_catalog_discovery_source) ==
+             EventSales.Catalog.TickeraCatalog.WordPressFeedDiscoverySource
   end
 
   defp restore_env(key, nil), do: System.delete_env(key)

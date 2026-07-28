@@ -11,7 +11,19 @@ HEX_HTTP_CONCURRENCY ?= 1
 export HEX_HTTP_TIMEOUT
 export HEX_HTTP_CONCURRENCY
 
-.PHONY: ready ready-local doctor sync toolchain deps infra db db-test quality test index index-check reset-db stop-db logs-db
+.PHONY: ready ready-local doctor sync toolchain deps infra db db-test quality test index index-check reset-db stop-db logs-db dev dev-doctor dev-status dev-stop
+
+dev:
+	@bash scripts/dev_local.sh
+
+dev-doctor:
+	@bash scripts/dev_local.sh doctor
+
+dev-status:
+	@bash scripts/dev_local.sh status
+
+dev-stop:
+	@bash scripts/dev_local.sh stop
 
 ready: doctor sync toolchain deps infra db db-test quality test
 	@echo ""
@@ -61,12 +73,8 @@ deps:
 
 infra:
 	@echo ""
-	@echo "=== 7. Starting EventSales Dev Postgres ==="
-	@bash scripts/dev_postgres.sh start
-
-	@echo ""
-	@echo "=== 8. Checking EventSales Dev Postgres Status ==="
-	@bash scripts/dev_postgres.sh status
+	@echo "=== 7. Starting EventSales PostgreSQL and Redis ==="
+	@docker compose --env-file /dev/null up -d --wait
 
 db:
 	@echo ""
@@ -99,15 +107,13 @@ index-check:
 reset-db:
 	@echo ""
 	@echo "=== Resetting EventSales Dev Postgres ==="
-	@bash scripts/dev_postgres.sh reset
-	@bash scripts/dev_postgres.sh start
-	@$(MAKE) db
-	@$(MAKE) db-test
+	@echo "Use an explicitly approved database maintenance workflow; no reset is provided here."
+	@exit 1
 
 stop-db:
 	@echo ""
-	@echo "=== Stopping EventSales Dev Postgres ==="
-	@bash scripts/dev_postgres.sh stop
+	@echo "=== Stopping EventSales PostgreSQL and Redis ==="
+	@docker compose --env-file /dev/null down
 
 logs-db:
-	@bash scripts/dev_postgres.sh logs
+	@docker compose --env-file /dev/null logs postgres

@@ -23,6 +23,7 @@ erl_crash.dump
 .env
 .env.*
 !.env.example
+!.env.local.example
 
 # Temporary files, for example, from tests.
 /tmp/

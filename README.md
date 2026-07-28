@@ -1,18 +1,26 @@
 # EventSales
 
-To start your Phoenix server:
+## Local development
 
-* Run `mix setup` to install and setup dependencies
-* Start Phoenix endpoint with `mix phx.server` or inside IEx with `iex -S mix phx.server`
+```bash
+bash scripts/dev_local.sh
+```
 
-Now you can visit [`localhost:4000`](http://localhost:4000) from your browser.
+This verifies local WordPress, starts PostgreSQL and Redis through Docker Compose,
+applies database migrations, and starts native Phoenix at
+[`127.0.0.1:4001`](http://127.0.0.1:4001).
 
-Ready to run in production? Please [check our deployment guides](https://hexdocs.pm/phoenix/deployment.html).
+Operational commands:
 
-## Learn more
+```bash
+bash scripts/dev_local.sh status
+bash scripts/dev_local.sh doctor
+bash scripts/dev_local.sh stop
+```
 
-* Official website: https://www.phoenixframework.org/
-* Guides: https://hexdocs.pm/phoenix/overview.html
-* Docs: https://hexdocs.pm/phoenix
-* Forum: https://elixirforum.com/c/phoenix-forum
-* Source: https://github.com/phoenixframework/phoenix
+`Ctrl+C` stops Phoenix. PostgreSQL and Redis remain available for a quick
+restart. Run `bash scripts/dev_local.sh stop` to stop the Compose services.
+The script loads only `.env.local` and never sources the root `.env`.
+
+`scripts/dev_postgres.sh` is deprecated for normal EventSales development.
+Use `bash scripts/dev_local.sh`.

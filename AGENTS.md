@@ -98,7 +98,7 @@ Local WordPress
 http://localhost:10059
         ↓ authenticated catalogue, webhook, or REST traffic
 Native Phoenix / EventSales
-http://127.0.0.1:4000
+http://127.0.0.1:4001
         ↓
 Docker Compose infrastructure
 PostgreSQL: 127.0.0.1:5432
@@ -271,7 +271,7 @@ Expected services:
 
 ```text
 WordPress:  http://localhost:10059
-Phoenix:    http://127.0.0.1:4000
+Phoenix:    http://127.0.0.1:4001
 PostgreSQL: 127.0.0.1:5432
 Redis:      127.0.0.1:6379
 ```
@@ -544,12 +544,16 @@ Broader local validation before meaningful merge or review
 Local infrastructure:
 
 ```bash
-docker compose up -d --wait
-docker compose ps
-docker compose down
+bash scripts/dev_local.sh
+bash scripts/dev_local.sh status
+bash scripts/dev_local.sh doctor
+bash scripts/dev_local.sh stop
 ```
 
 Do not use `docker compose down -v` during normal development.
+
+`scripts/dev_local.sh` is the canonical local startup workflow. It must use
+`docker compose --env-file /dev/null` so Compose never reads the root `.env`.
 
 Do not require GitHub synchronisation before beginning local implementation.
 

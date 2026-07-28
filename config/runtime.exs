@@ -39,6 +39,34 @@ config :event_sales,
 config :event_sales, EventSalesWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
+if config_env() in [:dev, :prod] do
+  tickera_catalog_feed_enabled? = System.get_env("TICKERA_CATALOG_FEED_ENABLED") in ~w(true 1)
+
+  if tickera_catalog_feed_enabled? do
+    tickera_catalog_feed_base_url = System.get_env("TICKERA_CATALOG_FEED_BASE_URL")
+    tickera_catalog_feed_secret = System.get_env("TICKERA_CATALOG_FEED_SECRET")
+
+    if tickera_catalog_feed_base_url in [nil, ""] or tickera_catalog_feed_secret in [nil, ""] do
+      raise """
+      TICKERA_CATALOG_FEED_BASE_URL and TICKERA_CATALOG_FEED_SECRET are required when \
+      TICKERA_CATALOG_FEED_ENABLED=true.
+      """
+    end
+
+    config :event_sales, :tickera_catalog_feed,
+      base_url: tickera_catalog_feed_base_url,
+      secret: tickera_catalog_feed_secret,
+      timeout_ms: String.to_integer(System.get_env("TICKERA_CATALOG_FEED_TIMEOUT_MS", "5000")),
+      per_page: String.to_integer(System.get_env("TICKERA_CATALOG_FEED_PER_PAGE", "100")),
+      max_pages: String.to_integer(System.get_env("TICKERA_CATALOG_FEED_MAX_PAGES", "50")),
+      transport: EventSales.Ingestion.Clients.HttpcTransport
+
+    config :event_sales,
+      tickera_catalog_discovery_source:
+        EventSales.Catalog.TickeraCatalog.WordPressFeedDiscoverySource
+  end
+end
+
 if config_env() == :prod do
   catalog_change_enabled? =
     System.get_env("CATALOG_CHANGE_RECEIVER_ENABLED", "false") in ~w(true 1)
@@ -97,32 +125,6 @@ if config_env() == :prod do
     per_page: String.to_integer(System.get_env("TICKERA_PER_PAGE", "50")),
     page_delay_ms: String.to_integer(System.get_env("TICKERA_PAGE_DELAY_MS", "100")),
     transport: EventSales.Ingestion.Clients.HttpcTransport
-
-  tickera_catalog_feed_enabled? = System.get_env("TICKERA_CATALOG_FEED_ENABLED") in ~w(true 1)
-
-  if tickera_catalog_feed_enabled? do
-    tickera_catalog_feed_base_url = System.get_env("TICKERA_CATALOG_FEED_BASE_URL")
-    tickera_catalog_feed_secret = System.get_env("TICKERA_CATALOG_FEED_SECRET")
-
-    if tickera_catalog_feed_base_url in [nil, ""] or tickera_catalog_feed_secret in [nil, ""] do
-      raise """
-      TICKERA_CATALOG_FEED_BASE_URL and TICKERA_CATALOG_FEED_SECRET are required when \
-      TICKERA_CATALOG_FEED_ENABLED=true.
-      """
-    end
-
-    config :event_sales, :tickera_catalog_feed,
-      base_url: tickera_catalog_feed_base_url,
-      secret: tickera_catalog_feed_secret,
-      timeout_ms: String.to_integer(System.get_env("TICKERA_CATALOG_FEED_TIMEOUT_MS", "5000")),
-      per_page: String.to_integer(System.get_env("TICKERA_CATALOG_FEED_PER_PAGE", "100")),
-      max_pages: String.to_integer(System.get_env("TICKERA_CATALOG_FEED_MAX_PAGES", "50")),
-      transport: EventSales.Ingestion.Clients.HttpcTransport
-
-    config :event_sales,
-      tickera_catalog_discovery_source:
-        EventSales.Catalog.TickeraCatalog.WordPressFeedDiscoverySource
-  end
 
   database_url =
     System.get_env("DATABASE_URL") ||
