@@ -87,11 +87,15 @@ defmodule EventSales.Maintenance.LocalCatalogDryRunTest do
                LocalCatalogDryRun.run(
                  operator: operator,
                  source_system_id: source.id,
-                 expected_variation_ids: [400_741, 400_742]
+                 expected_variation_ids: [400_741, 400_742],
+                 fresh?: true
                )
              end)
 
     assert result.status == :dry_run_ready
+    assert result.fresh_requested
+    assert result.superseded_run_id == nil
+    refute result.reused_existing_run
     assert result.expected_variation_ids_present?
     assert result.variation_ids == [400_741, 400_742]
     assert result.finding_count > 0
@@ -166,6 +170,8 @@ defmodule EventSales.Maintenance.LocalCatalogDryRunTest do
              )
 
     assert result.run_id == run.id
+    refute result.fresh_requested
+    assert result.superseded_run_id == nil
     assert result.reused_existing_run
     assert result.finding_summary == %{blocking: 1, warning: 1, info: 1, total: 3}
 
@@ -207,6 +213,87 @@ defmodule EventSales.Maintenance.LocalCatalogDryRunTest do
       assert run_count() == run_count
       assert discovery_job_count() == job_count
     end
+
+    test "fresh mode reuses and polls an existing #{status} run" do
+      status = unquote(status)
+      operator = create_admin!()
+      source = create_local_source!()
+      run = create_run_in_status!(source.id, status)
+      run_count = run_count()
+
+      poll_run = fn _run_id ->
+        {:ok, transition_to_ready!(Ash.get!(TickeraCatalogSyncRun, run.id, domain: Ingestion))}
+      end
+
+      assert {:ok, result} =
+               LocalCatalogDryRun.run(
+                 operator: operator,
+                 source_system_id: source.id,
+                 expected_variation_ids: [400_741, 400_742],
+                 fresh?: true,
+                 poll_run: poll_run
+               )
+
+      assert result.run_id == run.id
+      assert result.fresh_requested
+      assert result.superseded_run_id == nil
+      assert result.reused_existing_run
+      assert Ash.get!(TickeraCatalogSyncRun, run.id, domain: Ingestion).status == :dry_run_ready
+      assert run_count() == run_count
+    end
+  end
+
+  test "fresh mode supersedes a ready run, preserves its audit, and creates a new run" do
+    operator = create_admin!()
+    source = create_local_source!()
+    old_run = create_ready_run!(source.id)
+
+    finding =
+      Ash.create!(
+        TickeraCatalogSyncFinding,
+        %{
+          run_id: old_run.id,
+          severity: :warning,
+          code: "preserved_finding",
+          message: "Preserve this finding"
+        },
+        action: :create,
+        domain: Ingestion
+      )
+
+    before_counts = catalogue_counts()
+
+    assert {:ok, result} =
+             Oban.Testing.with_testing_mode(:inline, fn ->
+               LocalCatalogDryRun.run(
+                 operator: operator,
+                 source_system_id: source.id,
+                 expected_variation_ids: [400_741, 400_742],
+                 fresh?: true
+               )
+             end)
+
+    assert result.fresh_requested
+    assert result.superseded_run_id == old_run.id
+    refute result.reused_existing_run
+    refute result.run_id == old_run.id
+
+    superseded = Ash.get!(TickeraCatalogSyncRun, old_run.id, domain: Ingestion)
+    assert superseded.status == :cancelled
+    assert superseded.cancelled_by_user_id == operator.id
+    assert superseded.cancellation_reason_code == :superseded
+    assert superseded.cancellation_reason_details == "Explicit local catalogue refresh"
+    assert superseded.requested_by_user_id == old_run.requested_by_user_id
+    assert superseded.dry_run_hash == old_run.dry_run_hash
+    assert superseded.plan_snapshot == old_run.plan_snapshot
+    assert Ash.get!(TickeraCatalogSyncFinding, finding.id, domain: Ingestion).run_id == old_run.id
+
+    new_run = Ash.get!(TickeraCatalogSyncRun, result.run_id, domain: Ingestion)
+    assert new_run.source_system_id == old_run.source_system_id
+    assert new_run.scope == %{"kind" => "wordpress_feed", "mode" => "full"}
+    assert new_run.status == :dry_run_ready
+    assert catalogue_counts() == before_counts
+    refute_enqueued(worker: ApplyTickeraCatalogWorker)
   end
 
   test "returns apply_in_progress without mutating an applying run" do
@@ -217,7 +304,11 @@ defmodule EventSales.Maintenance.LocalCatalogDryRunTest do
     job_count = discovery_job_count()
 
     assert {:error, :apply_in_progress} =
-             LocalCatalogDryRun.run(operator: operator, source_system_id: source.id)
+             LocalCatalogDryRun.run(
+               operator: operator,
+               source_system_id: source.id,
+               fresh?: true
+             )
 
     assert Ash.get!(TickeraCatalogSyncRun, applying.id, domain: Ingestion).status == :applying
     assert run_count() == run_count
@@ -268,6 +359,136 @@ defmodule EventSales.Maintenance.LocalCatalogDryRunTest do
     assert result.run_id == ready.id
     assert result.reused_existing_run
     assert Agent.get(calls, & &1) == 2
+  end
+
+  test "fresh revocation race reloads once and reuses the winner's run" do
+    operator = create_admin!()
+    source = create_local_source!()
+    old_run = create_ready_run!(source.id)
+    {:ok, calls} = Agent.start_link(fn -> 0 end)
+
+    revoke_ready_run = fn run_id, actor ->
+      assert run_id == old_run.id
+
+      assert {:ok, _cancelled} =
+               EventSales.Ingestion.TickeraCatalogSync.revoke_ready_dry_run(
+                 run_id,
+                 %{
+                   cancellation_reason_code: :superseded,
+                   cancellation_reason_details: "Concurrent refresh"
+                 },
+                 actor: actor
+               )
+
+      create_ready_run!(source.id)
+      {:error, :already_cancelled}
+    end
+
+    active_run_for_source = fn _source_id, _operator ->
+      Agent.update(calls, &(&1 + 1))
+      EventSales.Ingestion.TickeraCatalogSync.active_run_for_source(source.id, actor: operator)
+    end
+
+    assert {:ok, result} =
+             LocalCatalogDryRun.run(
+               operator: operator,
+               source_system_id: source.id,
+               expected_variation_ids: [400_741, 400_742],
+               fresh?: true,
+               active_run_for_source: active_run_for_source,
+               revoke_ready_run: revoke_ready_run
+             )
+
+    assert result.superseded_run_id == old_run.id
+    assert result.reused_existing_run
+    refute result.run_id == old_run.id
+    assert Agent.get(calls, & &1) == 2
+  end
+
+  test "fresh queue race reloads once and reuses the winning run" do
+    operator = create_admin!()
+    source = create_local_source!()
+    old_run = create_ready_run!(source.id)
+    {:ok, calls} = Agent.start_link(fn -> 0 end)
+
+    queue_dry_run = fn source_id, _operator ->
+      create_ready_run!(source_id)
+      {:error, :catalog_sync_already_active}
+    end
+
+    active_run_for_source = fn _source_id, _operator ->
+      Agent.update(calls, &(&1 + 1))
+      EventSales.Ingestion.TickeraCatalogSync.active_run_for_source(source.id, actor: operator)
+    end
+
+    assert {:ok, result} =
+             LocalCatalogDryRun.run(
+               operator: operator,
+               source_system_id: source.id,
+               expected_variation_ids: [400_741, 400_742],
+               fresh?: true,
+               active_run_for_source: active_run_for_source,
+               queue_dry_run: queue_dry_run
+             )
+
+    assert result.superseded_run_id == old_run.id
+    assert result.reused_existing_run
+    refute result.run_id == old_run.id
+    assert Agent.get(calls, & &1) == 2
+  end
+
+  test "fresh mode changes only the requested source" do
+    operator = create_admin!()
+    source_a = create_local_source!()
+
+    source_b =
+      Ash.create!(
+        SourceSystem,
+        %{
+          name: "Other local source",
+          kind: :woocommerce,
+          base_url: "http://other.localhost:10059",
+          active: true,
+          catalog_auto_apply_mode: :disabled,
+          catalog_auto_apply_allowlisted: false
+        },
+        action: :create,
+        domain: Catalog
+      )
+
+    run_a = create_ready_run!(source_a.id)
+    run_b = create_ready_run!(source_b.id)
+
+    assert {:ok, result} =
+             Oban.Testing.with_testing_mode(:inline, fn ->
+               LocalCatalogDryRun.run(
+                 operator: operator,
+                 source_system_id: source_a.id,
+                 expected_variation_ids: [400_741, 400_742],
+                 fresh?: true
+               )
+             end)
+
+    assert result.superseded_run_id == run_a.id
+    assert Ash.get!(TickeraCatalogSyncRun, run_a.id, domain: Ingestion).status == :cancelled
+    assert Ash.get!(TickeraCatalogSyncRun, run_b.id, domain: Ingestion).status == :dry_run_ready
+  end
+
+  test "fresh mode rejects a non-admin before revoking a ready run" do
+    operator = create_user!()
+    source = create_local_source!()
+    ready = create_ready_run!(source.id)
+    job_count = discovery_job_count()
+
+    assert {:error, :local_operator_not_authorized} =
+             LocalCatalogDryRun.run(
+               operator: operator,
+               source_system_id: source.id,
+               fresh?: true
+             )
+
+    assert Ash.get!(TickeraCatalogSyncRun, ready.id, domain: Ingestion).status == :dry_run_ready
+    assert discovery_job_count() == job_count
   end
 
   defp catalogue_counts do
@@ -358,20 +579,7 @@ defmodule EventSales.Maintenance.LocalCatalogDryRunTest do
   end
 
   defp create_admin! do
-    password = "Local-test-password-123!"
-
-    user =
-      Ash.create!(
-        User,
-        %{
-          email: "local-dry-run-#{System.unique_integer([:positive])}@example.com",
-          name: "Local Dry Run",
-          password: password,
-          password_confirmation: password
-        },
-        action: :register_with_password,
-        domain: Accounts
-      )
+    user = create_user!()
 
     role =
       Role
@@ -388,6 +596,22 @@ defmodule EventSales.Maintenance.LocalCatalogDryRunTest do
     )
 
     user
+  end
+
+  defp create_user! do
+    password = "Local-test-password-123!"
+
+    Ash.create!(
+      User,
+      %{
+        email: "local-dry-run-#{System.unique_integer([:positive])}@example.com",
+        name: "Local Dry Run",
+        password: password,
+        password_confirmation: password
+      },
+      action: :register_with_password,
+      domain: Accounts
+    )
   end
 
   defp run_count, do: TickeraCatalogSyncRun |> Ash.read!(domain: Ingestion) |> length()

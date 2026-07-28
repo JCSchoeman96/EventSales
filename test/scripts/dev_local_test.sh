@@ -108,6 +108,21 @@ if grep -Fq 'phx.server' "${tmp_dir}/mix-calls"; then
   fail "catalogue dry-run must not start Phoenix"
 fi
 
+: >"${tmp_dir}/mix-calls"
+PATH="${tmp_dir}/bin:${PATH}" bash "${tmp_dir}/repo/scripts/dev_local.sh" \
+  catalogue-dry-run --fresh --source-system-id source-123
+
+grep -Fxq 'eventsales.catalog.dry_run --fresh --source-system-id source-123' \
+  "${tmp_dir}/mix-calls" ||
+  fail "catalogue dry-run must forward trailing arguments in order"
+
+: >"${tmp_dir}/mix-calls"
+PATH="${tmp_dir}/bin:${PATH}" bash "${tmp_dir}/repo/scripts/dev_local.sh" \
+  catalog-dry-run --fresh
+
+grep -Fxq 'eventsales.catalog.dry_run --fresh' "${tmp_dir}/mix-calls" ||
+  fail "catalog-dry-run alias must forward --fresh exactly once"
+
 set +e
 invalid_output="$(bash "${SCRIPT}" invalid 2>&1)"
 invalid_status=$?

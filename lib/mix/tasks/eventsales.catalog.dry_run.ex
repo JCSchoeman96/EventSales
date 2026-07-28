@@ -19,6 +19,10 @@ defmodule Mix.Tasks.Eventsales.Catalog.DryRun do
 
     case LocalCatalogDryRun.run(opts) do
       {:ok, result} ->
+        Mix.shell().info("Mode: #{if(opts[:fresh?], do: "fresh", else: "reuse")}")
+
+        Mix.shell().info("Superseded run ID: #{Map.get(result, :superseded_run_id) || "none"}")
+
         Mix.shell().info("Run ID: #{result.run_id}")
 
         Mix.shell().info(
@@ -54,13 +58,13 @@ defmodule Mix.Tasks.Eventsales.Catalog.DryRun do
   defp parse_args(args) do
     {parsed, remaining, invalid} =
       OptionParser.parse(args,
-        strict: [source_system_id: :string, expected_variation_ids: :string]
+        strict: [fresh: :boolean, source_system_id: :string, expected_variation_ids: :string]
       )
 
     if remaining != [] or invalid != [] do
       Mix.raise(
         "usage: mix eventsales.catalog.dry_run [--source-system-id UUID] " <>
-          "[--expected-variation-ids ID,ID]"
+          "[--expected-variation-ids ID,ID] [--fresh]"
       )
     end
 
@@ -74,6 +78,8 @@ defmodule Mix.Tasks.Eventsales.Catalog.DryRun do
 
     parsed
     |> Keyword.delete(:expected_variation_ids)
+    |> Keyword.put(:fresh?, Keyword.get(parsed, :fresh, false))
+    |> Keyword.delete(:fresh)
     |> Keyword.put(:expected_variation_ids, expected_ids)
   end
 

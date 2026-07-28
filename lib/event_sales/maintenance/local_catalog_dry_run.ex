@@ -28,10 +28,10 @@ defmodule EventSales.Maintenance.LocalCatalogDryRun do
          :ok <- validate_auto_apply_disabled(),
          {:ok, source} <- source_system(opts),
          {:ok, operator} <- resolve_operator(opts),
-         {:ok, run, reused?} <- obtain_run(source.id, operator, opts),
+         {:ok, run, reused?, superseded_run_id} <- obtain_run(source.id, operator, opts),
          {:ok, ready} <- await_ready(run, opts),
          :ok <- validate_ready(ready),
-         {:ok, result} <- build_result(ready, reused?, opts) do
+         {:ok, result} <- build_result(ready, reused?, superseded_run_id, opts) do
       {:ok, result}
     end
   end
@@ -215,10 +215,34 @@ defmodule EventSales.Maintenance.LocalCatalogDryRun do
   end
 
   defp obtain_run(source_system_id, operator, opts) do
+    if Keyword.get(opts, :fresh?, false) == true do
+      obtain_fresh_run(source_system_id, operator, opts)
+    else
+      obtain_default_run(source_system_id, operator, opts)
+    end
+  end
+
+  defp obtain_default_run(source_system_id, operator, opts) do
     case active_run_for_source(source_system_id, operator, opts) do
-      {:ok, nil} -> queue_or_recover(source_system_id, operator, opts)
-      {:ok, run} -> classify_active_run(run, true)
+      {:ok, nil} -> queue_or_recover(source_system_id, operator, opts, nil)
+      {:ok, run} -> classify_active_run(run, true, nil)
       {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp obtain_fresh_run(source_system_id, operator, opts) do
+    case active_run_for_source(source_system_id, operator, opts) do
+      {:ok, nil} ->
+        queue_or_recover(source_system_id, operator, opts, nil)
+
+      {:ok, %{status: :dry_run_ready} = run} ->
+        refresh_ready_run(run, source_system_id, operator, opts)
+
+      {:ok, run} ->
+        classify_active_run(run, true, nil)
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -229,17 +253,61 @@ defmodule EventSales.Maintenance.LocalCatalogDryRun do
     end
   end
 
-  defp queue_or_recover(source_system_id, operator, opts) do
+  defp queue_or_recover(source_system_id, operator, opts, superseded_run_id) do
     case queue_dry_run(source_system_id, operator, opts) do
       {:ok, %{run: run}} ->
-        {:ok, run, false}
+        {:ok, run, false, superseded_run_id}
 
       {:error, :catalog_sync_already_active} ->
         case active_run_for_source(source_system_id, operator, opts) do
           {:ok, nil} -> {:error, :active_run_not_found_after_queue_race}
-          {:ok, run} -> classify_active_run(run, true)
+          {:ok, run} -> classify_active_run(run, true, superseded_run_id)
           {:error, reason} -> {:error, reason}
         end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp refresh_ready_run(run, source_system_id, operator, opts) do
+    case revoke_ready_run(run.id, operator, opts) do
+      {:ok, _revoked} ->
+        queue_or_recover(source_system_id, operator, opts, run.id)
+
+      {:error, reason}
+      when reason in [:already_cancelled, :run_not_revokeable, :run_already_claimed, :not_found] ->
+        reload_after_refresh_race(source_system_id, operator, run.id, opts)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp revoke_ready_run(run_id, operator, opts) do
+    case Keyword.get(opts, :revoke_ready_run) do
+      callback when is_function(callback, 2) ->
+        callback.(run_id, operator)
+
+      nil ->
+        TickeraCatalogSync.revoke_ready_dry_run(
+          run_id,
+          %{
+            cancellation_reason_code: :superseded,
+            cancellation_reason_details: "Explicit local catalogue refresh"
+          },
+          actor: operator
+        )
+    end
+  end
+
+  defp reload_after_refresh_race(source_system_id, operator, superseded_run_id, opts) do
+    case active_run_for_source(source_system_id, operator, opts) do
+      {:ok, nil} ->
+        queue_or_recover(source_system_id, operator, opts, superseded_run_id)
+
+      {:ok, run} ->
+        classify_active_run(run, true, superseded_run_id)
 
       {:error, reason} ->
         {:error, reason}
@@ -259,14 +327,17 @@ defmodule EventSales.Maintenance.LocalCatalogDryRun do
     end
   end
 
-  defp classify_active_run(%{status: status} = run, reused?)
+  defp classify_active_run(%{status: status} = run, reused?, superseded_run_id)
        when status in [:queued, :discovering, :retry_scheduled, :dry_run_ready],
-       do: {:ok, run, reused?}
+       do: {:ok, run, reused?, superseded_run_id}
 
-  defp classify_active_run(%{status: :applying}, _reused?), do: {:error, :apply_in_progress}
-  defp classify_active_run(%{status: :applied}, _reused?), do: {:error, :unexpected_apply_state}
+  defp classify_active_run(%{status: :applying}, _reused?, _superseded_run_id),
+    do: {:error, :apply_in_progress}
 
-  defp classify_active_run(%{status: status}, _reused?),
+  defp classify_active_run(%{status: :applied}, _reused?, _superseded_run_id),
+    do: {:error, :unexpected_apply_state}
+
+  defp classify_active_run(%{status: status}, _reused?, _superseded_run_id),
     do: {:error, {:unexpected_run_state, status}}
 
   defp await_ready(%{status: :dry_run_ready, id: run_id}, _opts), do: load_run(run_id)
@@ -317,7 +388,7 @@ defmodule EventSales.Maintenance.LocalCatalogDryRun do
 
   defp validate_ready(nil), do: {:error, :run_not_found}
 
-  defp build_result(run, reused?, opts) do
+  defp build_result(run, reused?, superseded_run_id, opts) do
     variation_ids =
       run.plan_snapshot
       |> collect_variation_ids()
@@ -339,6 +410,8 @@ defmodule EventSales.Maintenance.LocalCatalogDryRun do
        %{
          run_id: run.id,
          status: run.status,
+         fresh_requested: Keyword.get(opts, :fresh?, false) == true,
+         superseded_run_id: superseded_run_id,
          reused_existing_run: reused?,
          dry_run_hash: run.dry_run_hash,
          summary: run.summary,

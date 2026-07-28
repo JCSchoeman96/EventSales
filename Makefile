@@ -11,7 +11,7 @@ HEX_HTTP_CONCURRENCY ?= 1
 export HEX_HTTP_TIMEOUT
 export HEX_HTTP_CONCURRENCY
 
-.PHONY: ready ready-local doctor sync toolchain deps infra db db-test quality test index index-check reset-db stop-db logs-db dev dev-doctor dev-status dev-stop
+.PHONY: ready ready-local doctor sync toolchain deps infra db db-test quality test index index-check reset-db stop-db logs-db dev dev-doctor dev-status dev-stop catalogue-dry-run catalogue-dry-run-fresh
 
 dev:
 	@bash scripts/dev_local.sh
@@ -24,6 +24,12 @@ dev-status:
 
 dev-stop:
 	@bash scripts/dev_local.sh stop
+
+catalogue-dry-run:
+	@bash scripts/dev_local.sh catalogue-dry-run
+
+catalogue-dry-run-fresh:
+	@bash scripts/dev_local.sh catalogue-dry-run --fresh
 
 ready: doctor sync toolchain deps infra db db-test quality test
 	@echo ""

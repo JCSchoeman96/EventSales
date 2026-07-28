@@ -1,16 +1,39 @@
 defmodule Mix.Tasks.Eventsales.Catalog.DryRunTest do
   use EventSales.DataCase, async: false
+  use Oban.Testing, repo: EventSales.Repo
 
   import ExUnit.CaptureIO
   import ExUnit.CaptureLog
 
   alias EventSales.Catalog
   alias EventSales.Catalog.Resources.SourceSystem
+  alias EventSales.Catalog.TickeraCatalog.DiscoveryResult
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.TickeraCatalogSyncFinding
-  alias EventSales.TestSupport.CatalogSyncRunHelpers
+  alias EventSales.TestSupport.{CatalogSyncRunHelpers, TickeraCatalogFixtures}
+
+  defmodule FixtureDiscoverySource do
+    @behaviour EventSales.Catalog.TickeraCatalog.DiscoverySource
+
+    @impl true
+    def discover(_source_system_id, %{"kind" => "wordpress_feed", "mode" => "full"}) do
+      rows = TickeraCatalogFixtures.variation_rows()
+      event = rows |> hd() |> Map.take(Map.keys(TickeraCatalogFixtures.vwg_event()))
+
+      {:ok,
+       %DiscoveryResult{
+         schema_version: "2026-07-08.v1",
+         events: [event],
+         catalog_rows: rows,
+         source_snapshot_at: ~U[2026-07-28 10:00:00Z]
+       }}
+    end
+  end
 
   setup do
+    original_discovery_source =
+      Application.get_env(:event_sales, :tickera_catalog_discovery_source)
+
     original_feed = Application.get_env(:event_sales, :tickera_catalog_feed)
     original_auto_apply = Application.get_env(:event_sales, :catalog_auto_apply)
     original_env = Application.get_env(:event_sales, :env)
@@ -25,11 +48,13 @@ defmodule Mix.Tasks.Eventsales.Catalog.DryRunTest do
     )
 
     Application.put_env(:event_sales, :catalog_auto_apply, hard_enabled: false)
+    Application.put_env(:event_sales, :tickera_catalog_discovery_source, FixtureDiscoverySource)
     System.delete_env("CATALOG_AUTO_APPLY_HARD_ENABLED")
 
     on_exit(fn ->
       restore_env(:tickera_catalog_feed, original_feed)
       restore_env(:catalog_auto_apply, original_auto_apply)
+      restore_env(:tickera_catalog_discovery_source, original_discovery_source)
       restore_env(:env, original_env)
       restore_env(EventSales.Repo, original_repo)
       Logger.configure(level: original_log_level)
@@ -101,6 +126,8 @@ defmodule Mix.Tasks.Eventsales.Catalog.DryRunTest do
       end)
 
     assert output =~ "Run ID: #{run.id}"
+    assert output =~ "Mode: reuse"
+    assert output =~ "Superseded run ID: none"
     assert output =~ "Run source: reused"
     assert output =~ "Status: dry_run_ready"
     assert output =~ "Findings: 3"
@@ -113,6 +140,38 @@ defmodule Mix.Tasks.Eventsales.Catalog.DryRunTest do
 
     refute output =~ "must_not_appear"
     refute output =~ "private-source-payload"
+  end
+
+  test "rejects unknown and Apply-related arguments" do
+    for args <- [["--unknown"], ["--apply"]] do
+      assert_raise Mix.Error, ~r/usage: mix eventsales\.catalog\.dry_run/, fn ->
+        Mix.Tasks.Eventsales.Catalog.DryRun.run(args)
+      end
+    end
+  end
+
+  test "--fresh reports the superseded and new run IDs" do
+    source = create_local_source!()
+    old_run = create_ready_run!(source.id)
+
+    output =
+      capture_io(fn ->
+        Oban.Testing.with_testing_mode(:inline, fn ->
+          Mix.Tasks.Eventsales.Catalog.DryRun.run([
+            "--fresh",
+            "--source-system-id",
+            source.id,
+            "--expected-variation-ids",
+            "400741,400742"
+          ])
+        end)
+      end)
+
+    assert output =~ "Mode: fresh"
+    assert output =~ "Superseded run ID: #{old_run.id}"
+    assert output =~ "Run source: new"
+    refute output =~ "Run ID: #{old_run.id}\n"
+    assert output =~ "Apply: not invoked"
   end
 
   test "reserved local operator creation never logs credential or SQL material" do

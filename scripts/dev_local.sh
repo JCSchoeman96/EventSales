@@ -200,7 +200,7 @@ start_command() {
 
 catalogue_dry_run_command() {
   prepare_runtime
-  mix eventsales.catalog.dry_run
+  mix eventsales.catalog.dry_run "$@"
 }
 
 compose_service_health() {
@@ -304,6 +304,7 @@ doctor_command() {
 
 main() {
   local command="${1:-start}"
+  shift || true
 
   case "${command}" in
     start)
@@ -319,7 +320,7 @@ main() {
       doctor_command
       ;;
     catalogue-dry-run | catalog-dry-run)
-      catalogue_dry_run_command
+      catalogue_dry_run_command "$@"
       ;;
     -h | --help | help)
       usage
