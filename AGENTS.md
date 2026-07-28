@@ -85,6 +85,35 @@ Use `ast-grep run` or `ast-grep scan` when structural code discovery is material
 
 EventSales is currently developed and certified through a local integration environment.
 
+### Agent local-runtime rule
+
+When a task requires any part of the local EventSales runtime, agents must use
+the canonical setup script from the repository root:
+
+```bash
+bash scripts/dev_local.sh
+```
+
+This single command verifies local WordPress, safely starts PostgreSQL and
+Redis, applies migrations, loads the local catalogue secret without printing
+it, and starts native Phoenix. Agents must not replace this workflow with
+manual `source`, secret-export, Compose, migration, or Phoenix startup commands
+unless they are performing a narrowly scoped diagnostic that the script does
+not support.
+
+Before changing local-runtime configuration or diagnosing startup failures, use:
+
+```bash
+bash scripts/dev_local.sh doctor
+bash scripts/dev_local.sh status
+```
+
+When a task is finished and the local services are no longer needed, use:
+
+```bash
+bash scripts/dev_local.sh stop
+```
+
 Repository:
 
 ```text
@@ -266,6 +295,11 @@ Do not turn a focused implementation task into another architecture, security, i
 Run Phoenix natively on Kubuntu.
 
 Use Docker Compose for local PostgreSQL and Redis.
+
+Agents must start the integrated local runtime with
+`bash scripts/dev_local.sh`. Do not manually reproduce its setup sequence
+during normal development. Use its `doctor`, `status`, and `stop` commands for
+the corresponding lifecycle operations.
 
 Expected services:
 
@@ -554,6 +588,10 @@ Do not use `docker compose down -v` during normal development.
 
 `scripts/dev_local.sh` is the canonical local startup workflow. It must use
 `docker compose --env-file /dev/null` so Compose never reads the root `.env`.
+All coding agents must use this script whenever their task needs the integrated
+local runtime. Direct Compose or Mix lifecycle commands are reserved for
+focused diagnostics, validation explicitly required by a slice, or maintenance
+that `scripts/dev_local.sh` does not provide.
 
 Do not require GitHub synchronisation before beginning local implementation.
 
