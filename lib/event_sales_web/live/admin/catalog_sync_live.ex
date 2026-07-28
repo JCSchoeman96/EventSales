@@ -6,6 +6,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
   use EventSalesWeb, :live_view
 
   alias EventSales.Catalog.MappingConflictResolver
+  alias EventSales.Catalog.{VariationMappingResolver, VariationMappingReview}
   alias EventSales.Catalog.TickeraCatalog.PubSub
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.CatalogChangePendingTarget
@@ -72,6 +73,8 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
       |> assign(:previews, %{})
       |> assign(:mapping_conflicts, %{})
       |> assign(:mapping_conflict_errors, %{})
+      |> assign(:variation_review, nil)
+      |> assign(:variation_review_error, nil)
       |> assign(:revoke_modal_run_id, nil)
       |> assign(:revoke_form, %{
         "cancellation_reason_code" => "",
@@ -276,6 +279,43 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
          socket
          |> assign(:revoke_form, form)
          |> put_flash(:error, "Catalog dry-run could not be revoked")}
+    end
+  end
+
+  def handle_event("prepare_variation_resolution", params, socket) do
+    run_id = value(params, "run_id")
+    dry_run_hash = value(params, "dry_run_hash")
+    product_id = value(params, "woo_product_id")
+    variation_id = value(params, "woo_variation_id")
+
+    case VariationMappingResolver.prepare(run_id, dry_run_hash,
+           actor: socket.assigns.current_user
+         ) do
+      {:ok, _revoked} ->
+        query =
+          URI.encode_query(%{
+            "run_id" => run_id,
+            "dry_run_hash" => dry_run_hash,
+            "woo_product_id" => product_id,
+            "woo_variation_id" => variation_id
+          })
+
+        {:noreply,
+         socket
+         |> put_flash(
+           :info,
+           "The selected dry-run was revoked before manual catalogue changes."
+         )
+         |> push_navigate(to: "/admin/mappings?#{query}")}
+
+      {:error, :already_cancelled} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "This dry-run was already revoked")
+         |> reload_selected_run()}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Manual resolution could not start: #{reason}")}
     end
   end
 
@@ -1203,6 +1243,120 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
                     </div>
                   </div>
 
+                  <section
+                    :if={@variation_review}
+                    id="variation-mapping-review"
+                    class="rounded border border-base-300 bg-base-100 p-4"
+                  >
+                    <div class="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h3 class="text-sm font-semibold">Variation mapping review</h3>
+                        <p class="mt-1 text-xs text-base-content/70">
+                          Structural variable-product warnings remain valid context. Each exact
+                          Woo variation is classified independently.
+                        </p>
+                      </div>
+                      <span class="badge badge-outline">
+                        Exact variations: {@variation_review.exact_variation_count}
+                      </span>
+                    </div>
+
+                    <div
+                      :if={
+                        run.status == :cancelled and
+                          run.cancellation_reason_code == :mapping_resolution_started
+                      }
+                      class="alert alert-warning mt-3 text-sm"
+                    >
+                      The selected dry-run was revoked before manual catalogue changes. After
+                      resolving mappings, run catalogue-dry-run --fresh.
+                    </div>
+
+                    <dl class="mt-3 grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4">
+                      <div>
+                        <dt class="font-semibold">Structural warnings</dt>
+                        <dd>{@variation_review.structural_warning_count}</dd>
+                      </div>
+                      <div :for={{classification, count} <- @variation_review.classification_summary}>
+                        <dt class="font-semibold">{classification_label(classification)}</dt>
+                        <dd>{count}</dd>
+                      </div>
+                    </dl>
+
+                    <div class="mt-4 overflow-x-auto">
+                      <table class="table table-zebra table-sm text-xs">
+                        <thead>
+                          <tr>
+                            <th>Woo product</th>
+                            <th>Woo variation</th>
+                            <th>Tickera event</th>
+                            <th>Destination</th>
+                            <th>Current mapping</th>
+                            <th>Planner action</th>
+                            <th>Classification</th>
+                            <th>Reasons</th>
+                            <th>Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr :for={row <- @variation_review.rows}>
+                            <td class="font-mono">{row.woo_product_id}</td>
+                            <td class="font-mono">{row.woo_variation_id}</td>
+                            <td class="font-mono">{display_value(row.tickera_event_id)}</td>
+                            <td>
+                              {display_value(row.proposed_event_external_id)} / {display_value(
+                                row.proposed_ticket_type_external_id
+                              )}
+                            </td>
+                            <td>{display_value(row.existing_ticket_type_name)}</td>
+                            <td>{classification_label(row.proposed_mapping_action)}</td>
+                            <td>
+                              <span class="badge badge-outline badge-sm">
+                                {classification_label(row.classification)}
+                              </span>
+                            </td>
+                            <td>{Enum.join(row.reason_codes, ", ")}</td>
+                            <td>
+                              <button
+                                :if={
+                                  run.status == :dry_run_ready and
+                                    row.classification == :manual_resolution_required
+                                }
+                                id={"prepare-variation-resolution-#{row.woo_product_id}-#{row.woo_variation_id}"}
+                                type="button"
+                                phx-click="prepare_variation_resolution"
+                                phx-value-run_id={row.run_id}
+                                phx-value-dry_run_hash={row.dry_run_hash}
+                                phx-value-woo_product_id={row.woo_product_id}
+                                phx-value-woo_variation_id={row.woo_variation_id}
+                                class="btn btn-warning btn-xs"
+                              >
+                                Prepare manual resolution
+                              </button>
+                              <span
+                                :if={row.classification == :stale_mapping_conflict}
+                                class="text-base-content/70"
+                              >
+                                Use conflict resolver
+                              </span>
+                              <span
+                                :if={
+                                  row.classification not in [
+                                    :manual_resolution_required,
+                                    :stale_mapping_conflict
+                                  ]
+                                }
+                                class="text-base-content/70"
+                              >
+                                Review only
+                              </span>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+
                   <div :if={preview_event_groups(preview(@previews, run.id)) != []}>
                     <h3 class="mb-2 text-xs font-semibold uppercase text-base-content/70">
                       Proposed Catalog Changes
@@ -1557,6 +1711,9 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
         {mapping_conflicts, mapping_conflict_errors} =
           load_selected_mapping_conflicts(selected_run, previews, socket.assigns.current_user)
 
+        {variation_review, variation_review_error} =
+          load_variation_review(selected_run, socket.assigns.current_user)
+
         {auto_apply_history, auto_apply_history_cursor} =
           load_auto_apply_history(selected_run)
 
@@ -1571,6 +1728,8 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
         |> assign(:previews, previews)
         |> assign(:mapping_conflicts, mapping_conflicts)
         |> assign(:mapping_conflict_errors, mapping_conflict_errors)
+        |> assign(:variation_review, variation_review)
+        |> assign(:variation_review_error, variation_review_error)
 
       {:error, _reason} ->
         socket
@@ -1584,6 +1743,8 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
         |> assign(:previews, %{})
         |> assign(:mapping_conflicts, %{})
         |> assign(:mapping_conflict_errors, %{})
+        |> assign(:variation_review, nil)
+        |> assign(:variation_review_error, nil)
     end
   end
 
@@ -1740,6 +1901,18 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
   defp mapping_conflict_rows(conflicts, run_id), do: Map.get(conflicts, run_id, [])
   defp mapping_conflict_error(errors, run_id), do: Map.get(errors, run_id)
 
+  defp load_variation_review(nil, _current_user), do: {nil, nil}
+
+  defp load_variation_review(%{dry_run_hash: hash} = run, current_user)
+       when is_binary(hash) and hash != "" do
+    case VariationMappingReview.list(run, hash, actor: current_user) do
+      {:ok, review} -> {review, nil}
+      {:error, reason} -> {nil, reason}
+    end
+  end
+
+  defp load_variation_review(_run, _current_user), do: {nil, nil}
+
   defp cutover_confirmation_placeholder(product_id, variation_id, stale_event_id, feed_event_id) do
     "CUTOVER #{product_id}/#{variation_id || "none"} FROM #{stale_event_id} TO #{feed_event_id}"
   end
@@ -1771,6 +1944,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
       {"unexpected_changes", "Proposed changes are unexpected or too broad"},
       {"superseded", "Superseded by another dry-run"},
       {"operator_error", "Operator error"},
+      {"mapping_resolution_started", "Manual variation mapping resolution started"},
       {"other", "Other"}
     ]
   end
@@ -1783,6 +1957,14 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
       {^reason, label} -> label
       _option -> nil
     end)
+  end
+
+  defp classification_label(nil), do: "-"
+
+  defp classification_label(classification) when is_atom(classification) do
+    classification
+    |> Atom.to_string()
+    |> String.replace("_", " ")
   end
 
   defp cancelled_by_name(%{cancelled_by_user: %{name: name}})

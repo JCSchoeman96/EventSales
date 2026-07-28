@@ -10,7 +10,10 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLiveTest do
   alias EventSales.Audit
   alias EventSales.Audit.Resources.AuditLog
   alias EventSales.Catalog
+  alias EventSales.Catalog.TickeraCatalog.SnapshotCanonicalizer
+  alias EventSales.Catalog.VariationMappingResolver
   alias EventSales.Catalog.Resources.{ProductMapping, TicketType}
+  alias EventSales.TestSupport.CatalogSyncRunHelpers
   alias EventSales.TestSupport.SalesHelpers
 
   setup do
@@ -120,6 +123,52 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLiveTest do
     assert audit.metadata["reason"] == "VIP exception"
   end
 
+  test "prepared deep link locks exact identity and revalidates tampered submission", %{
+    conn: conn,
+    admin: admin,
+    source: source,
+    event: event,
+    ticket: ticket
+  } do
+    {run, hash} = create_resolution_run!(source, 104_324, 501)
+    assert {:ok, _revoked} = VariationMappingResolver.prepare(run.id, hash, actor: admin)
+
+    path =
+      "/admin/mappings?dry_run_hash=#{hash}&run_id=#{run.id}&woo_product_id=104324&woo_variation_id=501"
+
+    {:ok, view, html} = conn |> sign_in_as(admin) |> live(path)
+
+    assert html =~ "The selected dry-run was revoked before manual catalogue changes."
+    assert html =~ "Reviewed variation"
+    assert html =~ ~s(readonly)
+
+    html =
+      render_submit(view, "create_manual_mapping", %{
+        "manual_mapping" => %{
+          "source_system_id" => Ecto.UUID.generate(),
+          "event_id" => event.id,
+          "ticket_type_mode" => "existing",
+          "ticket_type_id" => ticket.id,
+          "ticket_type_name" => "",
+          "woo_product_id" => "999999",
+          "woo_variation_id" => "999999",
+          "label" => "Tampered",
+          "source_status" => "manual",
+          "reason" => "Reviewed exact variation"
+        }
+      })
+
+    assert html =~ "Mapping created and audited."
+    assert html =~ "catalogue-dry-run --fresh"
+
+    assert [mapping] =
+             ProductMapping
+             |> Ash.Query.filter(woo_product_id == 104_324 and woo_variation_id == 501)
+             |> Ash.read!(domain: Catalog)
+
+    assert mapping.source_system_id == source.id
+  end
+
   test "admin creates new ticket type and mapping", %{
     conn: conn,
     admin: admin,
@@ -226,7 +275,7 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLiveTest do
     source = File.read!("lib/event_sales_web/live/admin/product_mappings_live.ex")
 
     for forbidden <- [
-          "MappingResolver",
+          "EventSales.Catalog.MappingResolver",
           "WooCommerceClient",
           "OrderUpserter",
           "Repo",
@@ -244,6 +293,7 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLiveTest do
     end
 
     assert source =~ "ManualMappingCreator.create"
+    assert source =~ "VariationMappingResolver.resolve"
   end
 
   test "internal mappings route remains read-only and internal-only" do
@@ -302,5 +352,75 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLiveTest do
     AuditLog
     |> Ash.Query.filter(event_type == ^event_type)
     |> Ash.read!(domain: Audit)
+  end
+
+  defp create_resolution_run!(source, product_id, variation_id) do
+    snapshot = resolution_snapshot(source.id, product_id, variation_id)
+    {:ok, _bytes, hash} = SnapshotCanonicalizer.canonicalize(snapshot)
+
+    run =
+      CatalogSyncRunHelpers.create_ready_catalog_sync_run!(
+        source.id,
+        %{"kind" => "wordpress_feed", "mode" => "full"},
+        %{dry_run_hash: hash, summary: %{}, plan_snapshot: snapshot}
+      )
+
+    {run, hash}
+  end
+
+  defp resolution_snapshot(source_system_id, product_id, variation_id) do
+    %{
+      "snapshot_schema_version" => "tickera_catalog_plan.v2",
+      "source_system_id" => source_system_id,
+      "origin" => "human_admin",
+      "event_actions" => [],
+      "ticket_type_actions" => [],
+      "product_mapping_actions" => [
+        %{
+          "action" => "create",
+          "event_ref" => "tickera_event:109120",
+          "ticket_type_ref" => "woo_variation:#{variation_id}",
+          "source_system_id" => source_system_id,
+          "woo_product_id" => product_id,
+          "woo_variation_id" => variation_id,
+          "original_label" => "Reviewed variation",
+          "current_label" => "Reviewed variation",
+          "active" => true
+        }
+      ],
+      "findings" => [],
+      "source_risks" => [],
+      "historical_impact" => %{
+        "totals" => %{
+          "affected_pending_lines" => 0,
+          "affected_quantity" => 0,
+          "eligible_lines" => 0,
+          "eligible_quantity" => 0,
+          "deferred_lines" => 0,
+          "deferred_quantity" => 0,
+          "conflicting_lines" => 0,
+          "conflicting_quantity" => 0,
+          "already_mapped_lines" => 0,
+          "already_mapped_quantity" => 0
+        },
+        "warning_count" => 0,
+        "unresolved_destination_count" => 1,
+        "unknown_classification_count" => 0,
+        "destinations" => []
+      },
+      "identity_membership_proof" => %{
+        "events" => [],
+        "ticket_types" => [],
+        "product_mappings" => []
+      },
+      "touched_identifiers" => %{
+        "event_ids" => [],
+        "ticket_type_ids" => [],
+        "mapping_ids" => [],
+        "product_keys" => [
+          %{"woo_product_id" => product_id, "woo_variation_id" => variation_id}
+        ]
+      }
+    }
   end
 end

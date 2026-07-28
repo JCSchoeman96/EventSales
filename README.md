@@ -27,6 +27,14 @@ be rediscovered. Fresh mode supersedes only a ready dry run, preserves its
 history and findings, reuses any discovery already in progress, and never
 interrupts an applying run or Applies catalogue changes.
 
+`variation_mapping_required` is a structural warning for a variable product,
+not a count of unresolved variations. Review the exact product/variation rows
+in Catalog Sync to determine whether each identity is already mapped, safely
+planned, conflicting, ambiguous, or requires a manual exception. Manual
+variation resolution revokes the ready plan before writing a mapping; always
+run `bash scripts/dev_local.sh catalogue-dry-run --fresh` afterward. This
+review workflow never queues Apply.
+
 `Ctrl+C` stops Phoenix. PostgreSQL and Redis remain available for a quick
 restart. Run `bash scripts/dev_local.sh stop` to stop the Compose services.
 The script loads only `.env.local` and never sources the root `.env`.

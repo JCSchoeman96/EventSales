@@ -394,6 +394,7 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
         :unexpected_changes,
         :superseded,
         :operator_error,
+        :mapping_resolution_started,
         :other
       ] ->
         {:error, :invalid_reason_code}
@@ -470,6 +471,7 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
   defp cancellation_reason_code("unexpected_changes"), do: :unexpected_changes
   defp cancellation_reason_code("superseded"), do: :superseded
   defp cancellation_reason_code("operator_error"), do: :operator_error
+  defp cancellation_reason_code("mapping_resolution_started"), do: :mapping_resolution_started
   defp cancellation_reason_code("other"), do: :other
   defp cancellation_reason_code(_code), do: nil
 
