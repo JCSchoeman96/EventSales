@@ -20,7 +20,7 @@ problem() {
 }
 
 usage() {
-  printf 'Usage: bash scripts/dev_local.sh [start|status|stop|doctor]\n'
+  printf 'Usage: bash scripts/dev_local.sh [start|status|stop|doctor|catalogue-dry-run]\n'
 }
 
 compose() {
@@ -145,12 +145,11 @@ phoenix_is_reachable() {
   curl --fail --silent --show-error --output /dev/null "${PHOENIX_URL}" 2>/dev/null
 }
 
-start_command() {
+prepare_runtime() {
   log "Checking local configuration"
   check_tools
   prepare_local_env
   load_local_env
-  configure_phoenix
   validate_local_configuration
   load_catalogue_secret
   export TICKERA_CATALOG_FEED_ENABLED=true
@@ -175,6 +174,11 @@ start_command() {
   log "Applying migrations"
   mix ecto.create
   mix ecto.migrate
+}
+
+start_command() {
+  prepare_runtime
+  configure_phoenix
 
   if ss -ltn "sport = :${PHOENIX_PORT}" | grep -q LISTEN; then
     if curl --fail --silent --max-time 2 "${PHOENIX_URL}/" >/dev/null 2>&1; then
@@ -192,6 +196,11 @@ start_command() {
   log "Starting Phoenix at ${PHOENIX_URL}"
   export PORT="${PHOENIX_PORT}"
   exec mix phx.server
+}
+
+catalogue_dry_run_command() {
+  prepare_runtime
+  mix eventsales.catalog.dry_run
 }
 
 compose_service_health() {
@@ -308,6 +317,9 @@ main() {
       ;;
     doctor)
       doctor_command
+      ;;
+    catalogue-dry-run | catalog-dry-run)
+      catalogue_dry_run_command
       ;;
     -h | --help | help)
       usage

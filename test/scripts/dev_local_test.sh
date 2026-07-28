@@ -25,6 +25,8 @@ assert_absent() {
 bash -n "${SCRIPT}"
 
 assert_contains 'local command="${1:-start}"'
+assert_contains 'catalogue-dry-run'
+assert_contains 'mix eventsales.catalog.dry_run'
 assert_contains 'readonly PHOENIX_PORT="${PORT:-4001}"'
 assert_contains 'readonly PHOENIX_URL="${EVENTSALES_LOCAL_URL:-http://127.0.0.1:${PHOENIX_PORT}}"'
 assert_contains 'export PORT="${PHOENIX_PORT}"'
@@ -53,6 +55,58 @@ assert_absent 'echo "${TICKERA_CATALOG_FEED_SECRET}"'
 assert_absent 'printf "${TICKERA_CATALOG_FEED_SECRET}"'
 assert_absent 'down -v'
 assert_absent 'reset)'
+assert_absent 'queue_apply'
+assert_absent 'ApplyTickeraCatalogWorker'
+
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "${tmp_dir}"' EXIT
+
+mkdir -p "${tmp_dir}/repo/scripts" "${tmp_dir}/repo/deps" "${tmp_dir}/bin"
+cp "${SCRIPT}" "${tmp_dir}/repo/scripts/dev_local.sh"
+printf 'local-test-secret' >"${tmp_dir}/catalog-secret"
+
+sed \
+  -e "s|^EVENTSALES_CATALOG_SECRET_FILE=.*$|EVENTSALES_CATALOG_SECRET_FILE=${tmp_dir}/catalog-secret|" \
+  "${REPO_ROOT}/.env.local.example" >"${tmp_dir}/repo/.env.local"
+chmod 600 "${tmp_dir}/repo/.env.local"
+
+for command in elixir ss; do
+  printf '#!/usr/bin/env bash\nexit 0\n' >"${tmp_dir}/bin/${command}"
+  chmod +x "${tmp_dir}/bin/${command}"
+done
+
+cat >"${tmp_dir}/bin/curl" <<'EOF'
+#!/usr/bin/env bash
+if [[ " $* " == *" --write-out "* ]]; then
+  printf '401'
+fi
+EOF
+chmod +x "${tmp_dir}/bin/curl"
+
+cat >"${tmp_dir}/bin/docker" <<'EOF'
+#!/usr/bin/env bash
+if [[ " $* " == *" redis-cli ping "* ]]; then
+  printf 'PONG\n'
+fi
+EOF
+chmod +x "${tmp_dir}/bin/docker"
+
+cat >"${tmp_dir}/bin/mix" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >>"${tmp_dir}/mix-calls"
+EOF
+chmod +x "${tmp_dir}/bin/mix"
+
+PATH="${tmp_dir}/bin:${PATH}" bash "${tmp_dir}/repo/scripts/dev_local.sh" catalogue-dry-run
+
+grep -Fxq 'ecto.create' "${tmp_dir}/mix-calls" || fail "catalogue dry-run must create the database"
+grep -Fxq 'ecto.migrate' "${tmp_dir}/mix-calls" || fail "catalogue dry-run must migrate the database"
+grep -Fxq 'eventsales.catalog.dry_run' "${tmp_dir}/mix-calls" ||
+  fail "catalogue dry-run must dispatch to the Mix task"
+
+if grep -Fq 'phx.server' "${tmp_dir}/mix-calls"; then
+  fail "catalogue dry-run must not start Phoenix"
+fi
 
 set +e
 invalid_output="$(bash "${SCRIPT}" invalid 2>&1)"

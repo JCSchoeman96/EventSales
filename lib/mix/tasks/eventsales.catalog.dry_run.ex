@@ -12,22 +12,43 @@ defmodule Mix.Tasks.Eventsales.Catalog.DryRun do
 
   @impl Mix.Task
   def run(args) do
+    configure_safe_operator_logging()
     Mix.Task.run("app.start")
 
     opts = parse_args(args)
 
     case LocalCatalogDryRun.run(opts) do
       {:ok, result} ->
-        Mix.shell().info("catalogue dry run: ready")
-        Mix.shell().info("run id: #{result.run_id}")
-        Mix.shell().info("findings: #{result.finding_count}")
-        Mix.shell().info("variation ids: #{length(result.variation_ids)}")
-        Mix.shell().info("expected variation ids: present")
+        Mix.shell().info("Run ID: #{result.run_id}")
+
+        Mix.shell().info(
+          "Run source: #{if(result.reused_existing_run, do: "reused", else: "new")}"
+        )
+
+        Mix.shell().info("Status: #{result.status}")
+        Mix.shell().info("Findings: #{result.finding_summary.total}")
+        Mix.shell().info("Blocking: #{result.finding_summary.blocking}")
+        Mix.shell().info("Warnings: #{result.finding_summary.warning}")
+        Mix.shell().info("Info: #{result.finding_summary.info}")
+        Mix.shell().info("Finding codes:")
+        Enum.each(result.finding_codes, &Mix.shell().info("- #{&1}"))
+        Mix.shell().info("Variation IDs: #{length(result.variation_ids)}")
+        Mix.shell().info("Expected variation IDs: present")
         Mix.shell().info("Apply: not invoked")
 
       {:error, reason} ->
         Mix.raise("catalogue dry run failed: #{format_error(reason)}")
     end
+  end
+
+  defp configure_safe_operator_logging do
+    repo_config =
+      Application.get_env(:event_sales, EventSales.Repo, [])
+      |> Keyword.put(:log, false)
+      |> Keyword.put(:show_sensitive_data_on_connection_error, false)
+
+    Application.put_env(:event_sales, EventSales.Repo, repo_config)
+    Logger.configure(level: :warning)
   end
 
   defp parse_args(args) do

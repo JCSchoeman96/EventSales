@@ -106,6 +106,7 @@ Before changing local-runtime configuration or diagnosing startup failures, use:
 ```bash
 bash scripts/dev_local.sh doctor
 bash scripts/dev_local.sh status
+bash scripts/dev_local.sh catalogue-dry-run
 ```
 
 When a task is finished and the local services are no longer needed, use:
@@ -581,6 +582,7 @@ Local infrastructure:
 bash scripts/dev_local.sh
 bash scripts/dev_local.sh status
 bash scripts/dev_local.sh doctor
+bash scripts/dev_local.sh catalogue-dry-run
 bash scripts/dev_local.sh stop
 ```
 

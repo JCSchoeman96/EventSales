@@ -2,6 +2,10 @@ defmodule EventSales.Maintenance.LocalCatalogDryRunTest do
   use EventSales.DataCase, async: false
   use Oban.Testing, repo: EventSales.Repo
 
+  require Ash.Query
+
+  alias EventSales.Accounts
+  alias EventSales.Accounts.Resources.{Role, User, UserRole}
   alias EventSales.Catalog
   alias EventSales.Catalog.Resources.{Event, ProductMapping, SourceSystem, TicketType}
   alias EventSales.Catalog.TickeraCatalog.DiscoveryResult
@@ -9,7 +13,7 @@ defmodule EventSales.Maintenance.LocalCatalogDryRunTest do
   alias EventSales.Ingestion.Resources.{TickeraCatalogSyncFinding, TickeraCatalogSyncRun}
   alias EventSales.Ingestion.Workers.ApplyTickeraCatalogWorker
   alias EventSales.Maintenance.LocalCatalogDryRun
-  alias EventSales.TestSupport.TickeraCatalogFixtures
+  alias EventSales.TestSupport.{CatalogSyncRunHelpers, TickeraCatalogFixtures}
 
   defmodule FixtureDiscoverySource do
     @behaviour EventSales.Catalog.TickeraCatalog.DiscoverySource
@@ -59,6 +63,8 @@ defmodule EventSales.Maintenance.LocalCatalogDryRunTest do
   end
 
   test "persists a full-feed dry run with exact variations and never applies catalogue changes" do
+    operator = create_admin!()
+
     source =
       Ash.create!(
         SourceSystem,
@@ -77,10 +83,13 @@ defmodule EventSales.Maintenance.LocalCatalogDryRunTest do
     before_counts = catalogue_counts()
 
     assert {:ok, result} =
-             LocalCatalogDryRun.run(
-               source_system_id: source.id,
-               expected_variation_ids: [400_741, 400_742]
-             )
+             Oban.Testing.with_testing_mode(:inline, fn ->
+               LocalCatalogDryRun.run(
+                 operator: operator,
+                 source_system_id: source.id,
+                 expected_variation_ids: [400_741, 400_742]
+               )
+             end)
 
     assert result.status == :dry_run_ready
     assert result.expected_variation_ids_present?
@@ -122,12 +131,274 @@ defmodule EventSales.Maintenance.LocalCatalogDryRunTest do
     assert Ash.read!(TickeraCatalogSyncRun, domain: Ingestion) == []
   end
 
+  test "reuses a ready run with persisted finding summary and no new job" do
+    operator = create_admin!()
+    source = create_local_source!()
+    run = create_ready_run!(source.id)
+
+    for {severity, code} <- [
+          {:warning, "source_metadata_changed"},
+          {:blocking, "malformed_identity"},
+          {:info, "existing_mapping_adopted"}
+        ] do
+      Ash.create!(
+        TickeraCatalogSyncFinding,
+        %{
+          run_id: run.id,
+          severity: severity,
+          code: code,
+          message: "Safe test finding",
+          metadata: %{"must_not_appear" => "private"}
+        },
+        action: :create,
+        domain: Ingestion
+      )
+    end
+
+    run_count = run_count()
+    job_count = discovery_job_count()
+
+    assert {:ok, result} =
+             LocalCatalogDryRun.run(
+               operator: operator,
+               source_system_id: source.id,
+               expected_variation_ids: [400_741, 400_742]
+             )
+
+    assert result.run_id == run.id
+    assert result.reused_existing_run
+    assert result.finding_summary == %{blocking: 1, warning: 1, info: 1, total: 3}
+
+    assert result.finding_codes == [
+             "existing_mapping_adopted",
+             "malformed_identity",
+             "source_metadata_changed"
+           ]
+
+    refute Map.has_key?(result, :finding_metadata)
+    assert run_count() == run_count
+    assert discovery_job_count() == job_count
+  end
+
+  for status <- [:queued, :discovering, :retry_scheduled] do
+    test "reuses and polls an existing #{status} run" do
+      status = unquote(status)
+      operator = create_admin!()
+      source = create_local_source!()
+      run = create_run_in_status!(source.id, status)
+      run_count = run_count()
+      job_count = discovery_job_count()
+
+      poll_run = fn run_id ->
+        assert run_id == run.id
+        {:ok, transition_to_ready!(Ash.get!(TickeraCatalogSyncRun, run.id, domain: Ingestion))}
+      end
+
+      assert {:ok, result} =
+               LocalCatalogDryRun.run(
+                 operator: operator,
+                 source_system_id: source.id,
+                 expected_variation_ids: [400_741, 400_742],
+                 poll_run: poll_run
+               )
+
+      assert result.run_id == run.id
+      assert result.reused_existing_run
+      assert run_count() == run_count
+      assert discovery_job_count() == job_count
+    end
+  end
+
+  test "returns apply_in_progress without mutating an applying run" do
+    operator = create_admin!()
+    source = create_local_source!()
+    applying = source.id |> create_ready_run!() |> CatalogSyncRunHelpers.claim_applying!()
+    run_count = run_count()
+    job_count = discovery_job_count()
+
+    assert {:error, :apply_in_progress} =
+             LocalCatalogDryRun.run(operator: operator, source_system_id: source.id)
+
+    assert Ash.get!(TickeraCatalogSyncRun, applying.id, domain: Ingestion).status == :applying
+    assert run_count() == run_count
+    assert discovery_job_count() == job_count
+  end
+
+  test "rejects an unexpected applied run returned by the active-run reader" do
+    operator = create_admin!()
+    source = create_local_source!()
+
+    active_run_for_source = fn _source_id, _operator ->
+      {:ok, %{id: Ash.UUID.generate(), status: :applied}}
+    end
+
+    assert {:error, :unexpected_apply_state} =
+             LocalCatalogDryRun.run(
+               operator: operator,
+               source_system_id: source.id,
+               active_run_for_source: active_run_for_source
+             )
+
+    assert run_count() == 0
+    assert discovery_job_count() == 0
+  end
+
+  test "recovers one queue race by reloading and reusing the active run" do
+    operator = create_admin!()
+    source = create_local_source!()
+    ready = create_ready_run!(source.id)
+    {:ok, calls} = Agent.start_link(fn -> 0 end)
+
+    active_run_for_source = fn _source_id, _operator ->
+      call = Agent.get_and_update(calls, &{&1, &1 + 1})
+      if call == 0, do: {:ok, nil}, else: {:ok, ready}
+    end
+
+    queue_dry_run = fn _source_id, _operator -> {:error, :catalog_sync_already_active} end
+
+    assert {:ok, result} =
+             LocalCatalogDryRun.run(
+               operator: operator,
+               source_system_id: source.id,
+               expected_variation_ids: [400_741, 400_742],
+               active_run_for_source: active_run_for_source,
+               queue_dry_run: queue_dry_run
+             )
+
+    assert result.run_id == ready.id
+    assert result.reused_existing_run
+    assert Agent.get(calls, & &1) == 2
+  end
+
   defp catalogue_counts do
     %{
       events: Event |> Ash.read!(domain: Catalog) |> length(),
       ticket_types: TicketType |> Ash.read!(domain: Catalog) |> length(),
       product_mappings: ProductMapping |> Ash.read!(domain: Catalog) |> length()
     }
+  end
+
+  defp create_local_source! do
+    Ash.create!(
+      SourceSystem,
+      %{
+        name: "Local WordPress",
+        kind: :woocommerce,
+        base_url: "http://localhost:10059",
+        active: true,
+        catalog_auto_apply_mode: :disabled,
+        catalog_auto_apply_allowlisted: false
+      },
+      action: :create,
+      domain: Catalog
+    )
+  end
+
+  defp create_ready_run!(source_system_id) do
+    CatalogSyncRunHelpers.create_ready_catalog_sync_run!(
+      source_system_id,
+      %{"kind" => "wordpress_feed", "mode" => "full"},
+      ready_attrs()
+    )
+  end
+
+  defp create_run_in_status!(source_system_id, :queued),
+    do:
+      CatalogSyncRunHelpers.create_queued_catalog_sync_run!(
+        source_system_id,
+        %{"kind" => "wordpress_feed", "mode" => "full"}
+      )
+
+  defp create_run_in_status!(source_system_id, :discovering),
+    do:
+      CatalogSyncRunHelpers.create_discovering_catalog_sync_run!(
+        source_system_id,
+        %{"kind" => "wordpress_feed", "mode" => "full"}
+      )
+
+  defp create_run_in_status!(source_system_id, :retry_scheduled) do
+    CatalogSyncRunHelpers.create_retry_scheduled_catalog_sync_run!(
+      source_system_id,
+      %{"kind" => "wordpress_feed", "mode" => "full"},
+      %{last_error: "catalog_feed_timeout", retry_attempt: 1, retry_max_attempts: 3}
+    )
+  end
+
+  defp transition_to_ready!(%{status: :queued} = run),
+    do: run |> CatalogSyncRunHelpers.mark_discovering!() |> transition_to_ready!()
+
+  defp transition_to_ready!(%{status: :retry_scheduled} = run),
+    do: run |> CatalogSyncRunHelpers.mark_discovering!() |> transition_to_ready!()
+
+  defp transition_to_ready!(%{status: :discovering} = run),
+    do: CatalogSyncRunHelpers.mark_ready!(run, ready_attrs())
+
+  defp ready_attrs do
+    snapshot = %{
+      "dry_run_hash" => "local-ready-hash",
+      "event_changes" => [],
+      "ticket_type_changes" => [
+        %{"external_variation_id" => 400_741},
+        %{"external_variation_id" => 400_742}
+      ],
+      "product_mapping_changes" => [
+        %{"woo_variation_id" => 400_741},
+        %{"woo_variation_id" => 400_742}
+      ],
+      "findings" => [],
+      "touched_event_ids" => [],
+      "touched_product_keys" => [[400_740, 400_741], [400_740, 400_742]]
+    }
+
+    %{
+      dry_run_hash: "local-ready-hash",
+      summary: %{"finding_count" => 0},
+      plan_snapshot: snapshot
+    }
+  end
+
+  defp create_admin! do
+    password = "Local-test-password-123!"
+
+    user =
+      Ash.create!(
+        User,
+        %{
+          email: "local-dry-run-#{System.unique_integer([:positive])}@example.com",
+          name: "Local Dry Run",
+          password: password,
+          password_confirmation: password
+        },
+        action: :register_with_password,
+        domain: Accounts
+      )
+
+    role =
+      Role
+      |> Ash.Query.filter(name == :admin)
+      |> Ash.read_one!(domain: Accounts)
+      |> case do
+        nil -> Ash.create!(Role, %{name: :admin}, action: :create, domain: Accounts)
+        role -> role
+      end
+
+    Ash.create!(UserRole, %{user_id: user.id, role_id: role.id},
+      action: :create,
+      domain: Accounts
+    )
+
+    user
+  end
+
+  defp run_count, do: TickeraCatalogSyncRun |> Ash.read!(domain: Ingestion) |> length()
+
+  defp discovery_job_count do
+    Repo.aggregate(
+      from(job in Oban.Job,
+        where: job.worker == "EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker"
+      ),
+      :count
+    )
   end
 
   defp restore_env(key, nil), do: Application.delete_env(:event_sales, key)

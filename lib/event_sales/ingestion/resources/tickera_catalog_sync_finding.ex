@@ -50,8 +50,9 @@ defmodule EventSales.Ingestion.Resources.TickeraCatalogSyncFinding do
       public? true
     end
 
-    attribute :code, :atom do
+    attribute :code, :string do
       allow_nil? false
+      constraints min_length: 1, max_length: 120
       public? true
     end
 

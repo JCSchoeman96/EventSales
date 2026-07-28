@@ -15,8 +15,12 @@ Operational commands:
 ```bash
 bash scripts/dev_local.sh status
 bash scripts/dev_local.sh doctor
+bash scripts/dev_local.sh catalogue-dry-run
 bash scripts/dev_local.sh stop
 ```
+
+`catalogue-dry-run` prepares the local infrastructure and runs the signed,
+full-feed catalogue dry run without starting Phoenix or applying changes.
 
 `Ctrl+C` stops Phoenix. PostgreSQL and Redis remain available for a quick
 restart. Run `bash scripts/dev_local.sh stop` to stop the Compose services.
