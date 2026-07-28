@@ -63,6 +63,7 @@ Do not rebuild EventSales functionality that already exists.
 Do not perform unrelated refactors or dependency upgrades.
 Do not expose secrets or real customer data.
 Task completion requires focused validation and a clear result.
+ALWAYS keep Linear up to date as well
 ```
 
 Use factual backing from:
