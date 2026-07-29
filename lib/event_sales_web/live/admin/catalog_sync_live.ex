@@ -6,8 +6,8 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
   use EventSalesWeb, :live_view
 
   alias EventSales.Catalog.MappingConflictResolver
-  alias EventSales.Catalog.{VariationMappingResolver, VariationMappingReview}
   alias EventSales.Catalog.TickeraCatalog.PubSub
+  alias EventSales.Catalog.{VariationMappingResolver, VariationMappingReview}
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.CatalogChangePendingTarget
   alias EventSales.Ingestion.TickeraCatalogAutoApply

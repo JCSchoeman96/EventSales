@@ -202,60 +202,134 @@ defmodule EventSales.Catalog.VariationMappingReview do
   end
 
   defp build_row(run, {product_id, variation_id} = key, indexes) do
-    mapping_action = Map.get(indexes.mapping_by_identity, key)
-    ticket_action = ticket_action(key, mapping_action, indexes)
-    event_action = event_action(mapping_action, ticket_action, indexes)
-    mapping = Map.get(indexes.mapping, key)
-
-    tickera_event_id =
-      proposed_event_external_id(event_action) ||
-        event_id_from_ref(mapping_action && value(mapping_action, "event_ref")) ||
-        event_id_from_ref(ticket_action && value(ticket_action, "event_ref")) ||
-        (mapping && mapping.event.external_event_id) ||
-        structural_event_id(product_id, indexes)
-
-    exact_findings = Map.get(indexes.findings, key, [])
-    structural_findings = Map.get(indexes.structural_findings, product_id, [])
-    reason_codes = Enum.map(exact_findings ++ structural_findings, & &1.code) |> Enum.uniq()
-
-    classification =
-      classify(
-        mapping,
-        mapping_action,
-        ticket_action,
-        event_action,
-        tickera_event_id,
-        exact_findings
-      )
+    context = row_context(product_id, key, indexes)
+    classification = reviewed_classification(context)
+    existing_destination = reviewed_existing_destination(context.mapping)
 
     %{
       run_id: run.id,
       dry_run_hash: run.dry_run_hash,
       source_system_id: run.source_system_id,
-      tickera_event_id: tickera_event_id,
+      tickera_event_id: context.tickera_event_id,
       woo_product_id: product_id,
       woo_variation_id: variation_id,
-      source_label: source_label(mapping_action, ticket_action, mapping),
-      proposed_event_action: action(event_action),
-      proposed_event_id: value(event_action, "event_id"),
-      proposed_event_external_id: proposed_event_external_id(event_action) || tickera_event_id,
-      proposed_ticket_type_action: action(ticket_action),
-      proposed_ticket_type_id: value(ticket_action, "ticket_type_id"),
+      source_label: source_label(context.mapping_action, context.ticket_action, context.mapping),
+      proposed_event_action: action(context.event_action),
+      proposed_event_id: value(context.event_action, "event_id"),
+      proposed_event_external_id:
+        reviewed_event_external_id(context.event_action, context.tickera_event_id),
+      proposed_ticket_type_action: action(context.ticket_action),
+      proposed_ticket_type_id: value(context.ticket_action, "ticket_type_id"),
       proposed_ticket_type_external_id:
-        value(ticket_action, "external_ticket_type_id") || variation_id,
-      proposed_ticket_type_name: value(ticket_action, "name"),
-      proposed_mapping_action: action(mapping_action),
-      existing_mapping_id: mapping && mapping.id,
-      existing_event_id: mapping && mapping.event_id,
-      existing_event_external_id: mapping && mapping.event.external_event_id,
-      existing_ticket_type_id: mapping && mapping.ticket_type_id,
-      existing_ticket_type_name: mapping && mapping.ticket_type.name,
+        reviewed_ticket_external_id(context.ticket_action, variation_id),
+      proposed_ticket_type_name: value(context.ticket_action, "name"),
+      proposed_mapping_action: action(context.mapping_action),
+      existing_mapping_id: existing_destination.mapping_id,
+      existing_event_id: existing_destination.event_id,
+      existing_event_external_id: existing_destination.event_external_id,
+      existing_ticket_type_id: existing_destination.ticket_type_id,
+      existing_ticket_type_name: existing_destination.ticket_type_name,
       classification: classification,
-      reason_codes: reason_codes,
-      manual_action_allowed:
-        classification == :manual_resolution_required and run.status == :cancelled and
-          run.cancellation_reason_code == :mapping_resolution_started
+      reason_codes: context.reason_codes,
+      manual_action_allowed: manual_action_allowed?(classification, run)
     }
+  end
+
+  defp row_context(product_id, key, indexes) do
+    mapping_action = Map.get(indexes.mapping_by_identity, key)
+    ticket_action = ticket_action(key, mapping_action, indexes)
+    event_action = event_action(mapping_action, ticket_action, indexes)
+    mapping = Map.get(indexes.mapping, key)
+
+    exact_findings = Map.get(indexes.findings, key, [])
+    structural_findings = Map.get(indexes.structural_findings, product_id, [])
+
+    %{
+      mapping_action: mapping_action,
+      ticket_action: ticket_action,
+      event_action: event_action,
+      mapping: mapping,
+      tickera_event_id:
+        reviewed_tickera_event_id(
+          product_id,
+          mapping_action,
+          ticket_action,
+          event_action,
+          mapping,
+          indexes
+        ),
+      exact_findings: exact_findings,
+      reason_codes: reviewed_reason_codes(exact_findings, structural_findings)
+    }
+  end
+
+  defp reviewed_tickera_event_id(
+         product_id,
+         mapping_action,
+         ticket_action,
+         event_action,
+         mapping,
+         indexes
+       ) do
+    proposed_event_external_id(event_action) ||
+      event_id_from_ref(value(mapping_action, "event_ref")) ||
+      event_id_from_ref(value(ticket_action, "event_ref")) ||
+      existing_event_external_id(mapping) ||
+      structural_event_id(product_id, indexes)
+  end
+
+  defp existing_event_external_id(nil), do: nil
+  defp existing_event_external_id(mapping), do: mapping.event.external_event_id
+
+  defp reviewed_reason_codes(exact_findings, structural_findings) do
+    exact_findings
+    |> Kernel.++(structural_findings)
+    |> Enum.map(& &1.code)
+    |> Enum.uniq()
+  end
+
+  defp reviewed_classification(context) do
+    classify(
+      context.mapping,
+      context.mapping_action,
+      context.ticket_action,
+      context.event_action,
+      context.tickera_event_id,
+      context.exact_findings
+    )
+  end
+
+  defp reviewed_existing_destination(nil) do
+    %{
+      mapping_id: nil,
+      event_id: nil,
+      event_external_id: nil,
+      ticket_type_id: nil,
+      ticket_type_name: nil
+    }
+  end
+
+  defp reviewed_existing_destination(mapping) do
+    %{
+      mapping_id: mapping.id,
+      event_id: mapping.event_id,
+      event_external_id: mapping.event.external_event_id,
+      ticket_type_id: mapping.ticket_type_id,
+      ticket_type_name: mapping.ticket_type.name
+    }
+  end
+
+  defp reviewed_event_external_id(event_action, fallback) do
+    proposed_event_external_id(event_action) || fallback
+  end
+
+  defp reviewed_ticket_external_id(ticket_action, fallback) do
+    value(ticket_action, "external_ticket_type_id") || fallback
+  end
+
+  defp manual_action_allowed?(classification, run) do
+    classification == :manual_resolution_required and run.status == :cancelled and
+      run.cancellation_reason_code == :mapping_resolution_started
   end
 
   defp finding_classification(findings) do

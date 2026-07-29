@@ -5,9 +5,9 @@ defmodule EventSales.Catalog.VariationMappingReviewTest do
 
   alias EventSales.Accounts
   alias EventSales.Accounts.Resources.{Role, User, UserRole}
+  alias EventSales.Catalog.Resources.ProductMapping
   alias EventSales.Catalog.TickeraCatalog.SnapshotCanonicalizer
   alias EventSales.Catalog.VariationMappingReview
-  alias EventSales.Catalog.Resources.ProductMapping
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.TickeraCatalogSyncFinding
   alias EventSales.TestSupport.{CatalogSyncRunHelpers, SalesHelpers}

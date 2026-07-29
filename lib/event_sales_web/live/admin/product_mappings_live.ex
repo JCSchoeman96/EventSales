@@ -10,8 +10,8 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLive do
   alias EventSales.Analytics.EventDetail
   alias EventSales.Catalog
   alias EventSales.Catalog.ManualMappingCreator
-  alias EventSales.Catalog.{VariationMappingResolver, VariationMappingReview}
   alias EventSales.Catalog.Resources.{Event, ProductMapping, SourceSystem, TicketType}
+  alias EventSales.Catalog.{VariationMappingResolver, VariationMappingReview}
   alias EventSalesWeb.Components.AdminShell
   alias EventSalesWeb.Live.Admin.Session, as: AdminSession
 

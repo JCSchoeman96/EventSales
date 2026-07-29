@@ -10,9 +10,9 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLiveTest do
   alias EventSales.Audit
   alias EventSales.Audit.Resources.AuditLog
   alias EventSales.Catalog
+  alias EventSales.Catalog.Resources.{ProductMapping, TicketType}
   alias EventSales.Catalog.TickeraCatalog.SnapshotCanonicalizer
   alias EventSales.Catalog.VariationMappingResolver
-  alias EventSales.Catalog.Resources.{ProductMapping, TicketType}
   alias EventSales.TestSupport.CatalogSyncRunHelpers
   alias EventSales.TestSupport.SalesHelpers
 
