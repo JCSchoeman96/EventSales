@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-327
+329
 
 ## Files
 
@@ -201,6 +201,7 @@ Project root: `.`
 - `lib/event_sales/maintenance/cutover_dry_run.ex`
 - `lib/event_sales/maintenance/db_topology_check_worker.ex`
 - `lib/event_sales/maintenance/failed_job_alert_worker.ex`
+- `lib/event_sales/maintenance/local_catalog_dry_run.ex`
 - `lib/event_sales/maintenance/oban_queue_snapshot_worker.ex`
 - `lib/event_sales/maintenance/oban_topology_smoke_worker.ex`
 - `lib/event_sales/maintenance/production_smoke.ex`
@@ -310,6 +311,7 @@ Project root: `.`
 - `lib/event_sales_web/router.ex`
 - `lib/event_sales_web/telemetry.ex`
 - `lib/mix/tasks/eventsales.admin.bootstrap.ex`
+- `lib/mix/tasks/eventsales.catalog.dry_run.ex`
 - `lib/mix/tasks/eventsales.source_system.bootstrap.ex`
 - `lib/mix/tasks/project.index.ex`
 - `lib/project_index/elixir_file.ex`
@@ -1458,6 +1460,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `perform/1`
   - uses: `Oban.Worker`
+- `EventSales.Maintenance.LocalCatalogDryRun` - `lib/event_sales/maintenance/local_catalog_dry_run.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `run/1`
+  - uses: _none_
 - `EventSales.Maintenance.ObanQueueSnapshotWorker` - `lib/event_sales/maintenance/oban_queue_snapshot_worker.ex`
   - moduledoc?: true
   - specs?: false
@@ -2083,6 +2091,12 @@ Project root: `.`
   - public_funs: `start_link/1`, `init/1`, `metrics/0`
   - uses: `Supervisor`
 - `Mix.Tasks.Eventsales.Admin.Bootstrap` - `lib/mix/tasks/eventsales.admin.bootstrap.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `run/1`
+  - uses: `Mix.Task`
+- `Mix.Tasks.Eventsales.Catalog.DryRun` - `lib/mix/tasks/eventsales.catalog.dry_run.ex`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0

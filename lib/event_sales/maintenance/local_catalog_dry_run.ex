@@ -30,9 +30,8 @@ defmodule EventSales.Maintenance.LocalCatalogDryRun do
          {:ok, operator} <- resolve_operator(opts),
          {:ok, run, reused?, superseded_run_id} <- obtain_run(source.id, operator, opts),
          {:ok, ready} <- await_ready(run, opts),
-         :ok <- validate_ready(ready),
-         {:ok, result} <- build_result(ready, reused?, superseded_run_id, opts) do
-      {:ok, result}
+         :ok <- validate_ready(ready) do
+      build_result(ready, reused?, superseded_run_id, opts)
     end
   end
 
@@ -355,27 +354,31 @@ defmodule EventSales.Maintenance.LocalCatalogDryRun do
   defp poll_run(_run_id, 0), do: {:error, :dry_run_poll_timeout}
 
   defp poll_run(run_id, attempts_left) do
-    with {:ok, %TickeraCatalogSyncRun{} = run} <- load_run(run_id) do
-      case run.status do
-        :dry_run_ready ->
-          {:ok, run}
+    case load_run(run_id) do
+      {:ok, %TickeraCatalogSyncRun{} = run} ->
+        case run.status do
+          :dry_run_ready ->
+            {:ok, run}
 
-        status when status in [:queued, :discovering, :retry_scheduled] ->
-          Process.sleep(@poll_interval_ms)
-          poll_run(run_id, attempts_left - 1)
+          status when status in [:queued, :discovering, :retry_scheduled] ->
+            Process.sleep(@poll_interval_ms)
+            poll_run(run_id, attempts_left - 1)
 
-        :applying ->
-          {:error, :apply_in_progress}
+          :applying ->
+            {:error, :apply_in_progress}
 
-        :applied ->
-          {:error, :unexpected_apply_state}
+          :applied ->
+            {:error, :unexpected_apply_state}
 
-        status ->
-          {:error, {:dry_run_not_ready, status, run.last_error}}
-      end
-    else
-      {:ok, nil} -> {:error, :run_not_found}
-      {:error, reason} -> {:error, reason}
+          status ->
+            {:error, {:dry_run_not_ready, status, run.last_error}}
+        end
+
+      {:ok, nil} ->
+        {:error, :run_not_found}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
