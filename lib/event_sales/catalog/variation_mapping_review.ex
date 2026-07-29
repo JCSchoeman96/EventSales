@@ -37,7 +37,10 @@ defmodule EventSales.Catalog.VariationMappingReview do
          source_system_id: run.source_system_id,
          run_status: run.status,
          structural_warning_count:
-           Enum.count(findings, &(&1.code == "variation_mapping_required")),
+           Enum.count(
+             findings,
+             &(&1.code == "variation_mapping_required" and &1.severity == :warning)
+           ),
          exact_variation_count: length(rows),
          classification_summary: Enum.frequencies_by(rows, & &1.classification),
          rows: rows

@@ -60,6 +60,32 @@ defmodule EventSales.Catalog.VariationMappingReviewTest do
       )
     end
 
+    for _offset <- 1..14 do
+      create_finding!(
+        run,
+        "variation_mapping_required",
+        :blocking,
+        nil,
+        nil,
+        nil
+      )
+    end
+
+    create_finding!(run, "another_warning", :warning, nil, nil, nil)
+
+    findings =
+      TickeraCatalogSyncFinding
+      |> Ash.Query.filter(run_id == ^run.id)
+      |> Ash.read!(domain: Ingestion)
+
+    variation_findings =
+      Enum.filter(findings, &(&1.code == "variation_mapping_required"))
+
+    assert length(variation_findings) == 21
+    assert Enum.count(variation_findings, &(&1.severity == :warning)) == 7
+    assert Enum.count(variation_findings, &(&1.severity == :blocking)) == 14
+    assert Enum.all?(variation_findings, &(is_binary(&1.code) and is_atom(&1.severity)))
+
     assert {:ok, review} = VariationMappingReview.list(run.id, hash, actor: admin)
     assert review.structural_warning_count == 7
     assert review.exact_variation_count == 14
@@ -72,6 +98,51 @@ defmodule EventSales.Catalog.VariationMappingReviewTest do
                {product_id, variation_id}
              end)
              |> Enum.sort()
+  end
+
+  test "returns zero structural warnings for an empty finding collection", %{
+    admin: admin,
+    source: source
+  } do
+    snapshot = planned_create_snapshot(source.id, [{109_120, 104_324, 501}])
+    {run, hash} = create_ready_run!(source, snapshot)
+
+    assert {:ok, review} = VariationMappingReview.list(run.id, hash, actor: admin)
+    assert review.structural_warning_count == 0
+  end
+
+  test "finding severity normalizes a valid string and rejects an unknown atom", %{
+    source: source
+  } do
+    run = CatalogSyncRunHelpers.create_queued_catalog_sync_run!(source.id)
+
+    assert {:ok, finding} =
+             Ash.create(
+               TickeraCatalogSyncFinding,
+               %{
+                 run_id: run.id,
+                 severity: "warning",
+                 code: "variation_mapping_required",
+                 message: "Valid string severity."
+               },
+               action: :create,
+               domain: Ingestion
+             )
+
+    assert finding.severity == :warning
+
+    assert {:error, _error} =
+             Ash.create(
+               TickeraCatalogSyncFinding,
+               %{
+                 run_id: run.id,
+                 severity: :unknown,
+                 code: "variation_mapping_required",
+                 message: "Unknown severity must not become a warning."
+               },
+               action: :create,
+               domain: Ingestion
+             )
   end
 
   test "classifies an active source-scoped exact mapping", %{admin: admin, source: source} do
