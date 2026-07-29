@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-329
+331
 
 ## Files
 
@@ -102,6 +102,8 @@ Project root: `.`
 - `lib/event_sales/catalog/tickera_catalog/wordpress_feed_error.ex`
 - `lib/event_sales/catalog/tickera_catalog/wordpress_feed_response.ex`
 - `lib/event_sales/catalog/tickera_catalog/wordpress_feed_signature.ex`
+- `lib/event_sales/catalog/variation_mapping_resolver.ex`
+- `lib/event_sales/catalog/variation_mapping_review.ex`
 - `lib/event_sales/catalog/workers/mapping_changed_worker.ex`
 - `lib/event_sales/exports/csv_stream.ex`
 - `lib/event_sales/exports/event_sales_csv.ex`
@@ -853,6 +855,18 @@ Project root: `.`
   - specs?: true
   - docs_count: 0
   - public_funs: `headers/5`, `canonical_query/1`
+  - uses: _none_
+- `EventSales.Catalog.VariationMappingResolver` - `lib/event_sales/catalog/variation_mapping_resolver.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `prepare/3`, `resolve/6`
+  - uses: _none_
+- `EventSales.Catalog.VariationMappingReview` - `lib/event_sales/catalog/variation_mapping_review.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `list/3`
   - uses: _none_
 - `EventSales.Catalog.Workers.MappingChangedWorker` - `lib/event_sales/catalog/workers/mapping_changed_worker.ex`
   - moduledoc?: true
