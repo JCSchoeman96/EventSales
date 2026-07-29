@@ -189,6 +189,7 @@
     "lib/event_sales/maintenance/cutover_dry_run.ex",
     "lib/event_sales/maintenance/db_topology_check_worker.ex",
     "lib/event_sales/maintenance/failed_job_alert_worker.ex",
+    "lib/event_sales/maintenance/local_catalog_dry_run.ex",
     "lib/event_sales/maintenance/oban_queue_snapshot_worker.ex",
     "lib/event_sales/maintenance/oban_topology_smoke_worker.ex",
     "lib/event_sales/maintenance/production_smoke.ex",
@@ -298,6 +299,7 @@
     "lib/event_sales_web/router.ex",
     "lib/event_sales_web/telemetry.ex",
     "lib/mix/tasks/eventsales.admin.bootstrap.ex",
+    "lib/mix/tasks/eventsales.catalog.dry_run.ex",
     "lib/mix/tasks/eventsales.source_system.bootstrap.ex",
     "lib/mix/tasks/project.index.ex",
     "lib/project_index/elixir_file.ex",
@@ -4054,6 +4056,21 @@
     {
       "docs_count": 0,
       "moduledoc?": true,
+      "name": "EventSales.Maintenance.LocalCatalogDryRun",
+      "parse_error": null,
+      "path": "lib/event_sales/maintenance/local_catalog_dry_run.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "run"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
       "name": "EventSales.Maintenance.ObanQueueSnapshotWorker",
       "parse_error": null,
       "path": "lib/event_sales/maintenance/oban_queue_snapshot_worker.ex",
@@ -6386,6 +6403,23 @@
       "name": "Mix.Tasks.Eventsales.Admin.Bootstrap",
       "parse_error": null,
       "path": "lib/mix/tasks/eventsales.admin.bootstrap.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "run"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Mix.Task"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "Mix.Tasks.Eventsales.Catalog.DryRun",
+      "parse_error": null,
+      "path": "lib/mix/tasks/eventsales.catalog.dry_run.ex",
       "public_funs": [
         {
           "arity": 1,
