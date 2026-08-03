@@ -37,7 +37,7 @@ defmodule EventSales.Catalog.VariationMappingResolver do
           String.t(),
           integer() | String.t(),
           integer() | String.t(),
-          map(),
+          term(),
           keyword()
         ) :: ManualMappingCreator.result()
   def resolve(run_id, dry_run_hash, woo_product_id, woo_variation_id, params, opts \\ []) do
@@ -47,7 +47,7 @@ defmodule EventSales.Catalog.VariationMappingResolver do
          {:ok, product_id} <- positive_integer(woo_product_id, :invalid_woo_product_id),
          {:ok, variation_id} <-
            positive_integer(woo_variation_id, :invalid_woo_variation_id),
-         true <- is_map(params) or {:error, :invalid_params},
+         :ok <- validate_params(params),
          {:ok, review} <- VariationMappingReview.list(run_id, dry_run_hash, actor: actor),
          :ok <- require_prepared_run(review),
          {:ok, row} <- find_row(review.rows, product_id, variation_id),
@@ -60,9 +60,6 @@ defmodule EventSales.Catalog.VariationMappingResolver do
            ) do
       {:ok, result}
     else
-      false ->
-        {:error, :invalid_params}
-
       {:error, :duplicate_mapping} ->
         duplicate_result(
           run_id,
@@ -80,6 +77,9 @@ defmodule EventSales.Catalog.VariationMappingResolver do
   defp authorize(actor) do
     if Policies.global_admin?(actor), do: :ok, else: {:error, :forbidden}
   end
+
+  defp validate_params(params) when is_map(params), do: :ok
+  defp validate_params(_params), do: {:error, :invalid_params}
 
   defp require_ready(:dry_run_ready), do: :ok
   defp require_ready(:cancelled), do: {:error, :already_cancelled}

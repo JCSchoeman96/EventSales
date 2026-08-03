@@ -78,6 +78,26 @@ defmodule EventSales.Catalog.VariationMappingResolverTest do
     assert Ash.count!(ProductMapping, domain: Catalog) == 0
   end
 
+  test "admin resolve rejects non-map params without mutation", %{
+    admin: admin,
+    run: run,
+    hash: hash
+  } do
+    assert {:error, :invalid_params} =
+             VariationMappingResolver.resolve(
+               run.id,
+               hash,
+               104_324,
+               501,
+               :not_a_map,
+               actor: admin
+             )
+
+    assert Ash.get!(TickeraCatalogSyncRun, run.id, domain: Ingestion).status == :dry_run_ready
+    assert Ash.count!(ProductMapping, domain: Catalog) == 0
+    refute_enqueued(worker: EventSales.Ingestion.Workers.ApplyTickeraCatalogWorker)
+  end
+
   test "resolution requires prepared exact run hash and identity", %{
     admin: admin,
     run: run,
