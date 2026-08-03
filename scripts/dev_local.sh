@@ -280,12 +280,23 @@ doctor_command() {
   log "Checking local configuration"
   check_tools
 
-  [[ -f "${REPO_ROOT}/.env.local" ]] ||
+  local env_file="${REPO_ROOT}/.env.local"
+
+  if [[ -L "${env_file}" && ! -e "${env_file}" ]]; then
+    problem ".env.local symlink target is unavailable" "Doctor cannot validate a dangling symlink." \
+      "Point .env.local at an existing regular file with permissions set to 600."
+  fi
+
+  [[ -e "${env_file}" ]] ||
     problem ".env.local is missing" "Doctor does not create local configuration." \
       "Copy .env.local.example to .env.local and set permissions to 600."
 
+  [[ -f "${env_file}" ]] ||
+    problem ".env.local is not a regular file" "Local configuration must resolve to a regular file." \
+      "Replace .env.local with a regular file or a symlink to one."
+
   local permissions
-  permissions="$(stat -c '%a' "${REPO_ROOT}/.env.local")"
+  permissions="$(stat -L -c '%a' "${env_file}")"
   [[ "${permissions}" == "600" ]] ||
     problem ".env.local permissions are ${permissions}" "Local configuration must be private." \
       "Run chmod 600 .env.local."
