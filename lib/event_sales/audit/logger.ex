@@ -22,6 +22,10 @@ defmodule EventSales.Audit.Logger do
     label
     source_status
     reason
+    catalog_sync_run_id
+    dry_run_hash
+    tickera_event_id
+    resolution_source
   )
 
   @product_mapping_cutover_metadata_keys ~w(

@@ -102,6 +102,39 @@ defmodule EventSales.Catalog.ManualMappingCreatorTest do
     assert audit.metadata["source_status"] == "pre_sale"
   end
 
+  test "optional review provenance is allowlisted and existing callers remain unchanged", %{
+    admin: admin,
+    source: source,
+    event: event,
+    ticket: ticket
+  } do
+    params =
+      source
+      |> existing_ticket_params(event, ticket)
+      |> Map.put("woo_variation_id", "501")
+
+    assert {:ok, _result} =
+             ManualMappingCreator.create(params,
+               actor: admin,
+               provenance: %{
+                 catalog_sync_run_id: Ecto.UUID.generate(),
+                 dry_run_hash: String.duplicate("a", 64),
+                 tickera_event_id: 109_120,
+                 woo_product_id: 104_324,
+                 woo_variation_id: 501,
+                 resolution_source: "variation_mapping_review",
+                 payload: %{"secret" => true},
+                 secret: "hidden"
+               }
+             )
+
+    assert [audit] = audit_logs(:manual_mapping_created)
+    assert audit.metadata["resolution_source"] == "variation_mapping_review"
+    assert audit.metadata["tickera_event_id"] == 109_120
+    refute Map.has_key?(audit.metadata, "payload")
+    refute Map.has_key?(audit.metadata, "secret")
+  end
+
   test "rejects non-admin and nil actors", %{
     staff: staff,
     source: source,

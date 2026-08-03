@@ -11,6 +11,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
   alias EventSales.Accounts.Resources.{Role, User, UserRole}
   alias EventSales.Catalog
   alias EventSales.Catalog.Resources.ProductMapping
+  alias EventSales.Catalog.TickeraCatalog.SnapshotCanonicalizer
   alias EventSales.Ingestion
 
   alias EventSales.Ingestion.Resources.{
@@ -46,6 +47,38 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
       |> get("/admin/catalog-sync")
 
     assert html_response(conn, 403) =~ "Admin role required"
+  end
+
+  test "admin reviews and prepares one exact manual variation resolution", %{
+    conn: conn,
+    admin: admin,
+    source: source
+  } do
+    {run, hash} = create_variation_review_run!(source, 104_324, 501)
+
+    {:ok, view, html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/catalog-sync?run_id=#{run.id}")
+
+    assert html =~ "Variation mapping review"
+    assert html =~ "Exact variations"
+    assert html =~ "manual resolution required"
+    assert has_element?(view, "#prepare-variation-resolution-104324-501")
+
+    view
+    |> element("#prepare-variation-resolution-104324-501")
+    |> render_click()
+
+    assert_redirect(
+      view,
+      "/admin/mappings?dry_run_hash=#{hash}&run_id=#{run.id}&woo_product_id=104324&woo_variation_id=501"
+    )
+
+    revoked = Ash.get!(TickeraCatalogSyncRun, run.id, domain: Ingestion)
+    assert revoked.status == :cancelled
+    assert revoked.cancellation_reason_code == :mapping_resolution_started
+    refute_enqueued(worker: ApplyTickeraCatalogWorker)
   end
 
   test "selected run renders only bounded auto-Apply decision state and refreshes by PubSub", %{
@@ -1130,7 +1163,7 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
     for forbidden <- [
           "WooCommerceClient",
           "WordPressFeedClient",
-          "MappingResolver",
+          "EventSales.Catalog.MappingResolver",
           "OrderUpserter",
           "Req",
           "Finch",
@@ -1174,6 +1207,80 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
       %{"kind" => "wordpress_feed", "mode" => "full"},
       %{dry_run_hash: hash, summary: %{"finding_count" => 1}, plan_snapshot: snapshot}
     )
+  end
+
+  defp create_variation_review_run!(source, product_id, variation_id) do
+    snapshot = variation_review_snapshot(source.id, product_id, variation_id)
+    {:ok, _bytes, hash} = SnapshotCanonicalizer.canonicalize(snapshot)
+
+    run =
+      CatalogSyncRunHelpers.create_ready_catalog_sync_run!(
+        source.id,
+        %{"kind" => "wordpress_feed", "mode" => "full"},
+        %{dry_run_hash: hash, summary: %{}, plan_snapshot: snapshot}
+      )
+
+    {run, hash}
+  end
+
+  defp variation_review_snapshot(source_system_id, product_id, variation_id) do
+    %{
+      "snapshot_schema_version" => "tickera_catalog_plan.v2",
+      "source_system_id" => source_system_id,
+      "origin" => "human_admin",
+      "event_actions" => [],
+      "ticket_type_actions" => [],
+      "product_mapping_actions" => [
+        %{
+          "action" => "create",
+          "event_ref" => "tickera_event:109120",
+          "ticket_type_ref" => "woo_variation:#{variation_id}",
+          "source_system_id" => source_system_id,
+          "woo_product_id" => product_id,
+          "woo_variation_id" => variation_id,
+          "original_label" => "Reviewed variation",
+          "current_label" => "Reviewed variation",
+          "active" => true
+        }
+      ],
+      "findings" => [],
+      "source_risks" => [],
+      "historical_impact" => empty_v2_historical_impact(),
+      "identity_membership_proof" => %{
+        "events" => [],
+        "ticket_types" => [],
+        "product_mappings" => []
+      },
+      "touched_identifiers" => %{
+        "event_ids" => [],
+        "ticket_type_ids" => [],
+        "mapping_ids" => [],
+        "product_keys" => [
+          %{"woo_product_id" => product_id, "woo_variation_id" => variation_id}
+        ]
+      }
+    }
+  end
+
+  defp empty_v2_historical_impact do
+    %{
+      "totals" => %{
+        "affected_pending_lines" => 0,
+        "affected_quantity" => 0,
+        "eligible_lines" => 0,
+        "eligible_quantity" => 0,
+        "deferred_lines" => 0,
+        "deferred_quantity" => 0,
+        "conflicting_lines" => 0,
+        "conflicting_quantity" => 0,
+        "already_mapped_lines" => 0,
+        "already_mapped_quantity" => 0
+      },
+      "warning_count" => 0,
+      "unresolved_destination_count" => 1,
+      "unknown_classification_count" => 0,
+      "destinations" => []
+    }
   end
 
   defp preview_marker(run) do

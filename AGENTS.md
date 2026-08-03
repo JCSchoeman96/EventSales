@@ -593,6 +593,12 @@ rediscovered. Do not use it as a generic recovery command. Fresh mode may
 supersede only a ready dry run; it must reuse queued, discovering, or
 retry-scheduled runs and must never revoke an applying run.
 
+Do not treat `variation_mapping_required` count as unresolved mapping count.
+Review exact source/product/variation identities instead. Never create a manual
+variation mapping while its source dry run remains ready: validate the exact
+run, hash, and variation, revoke the plan first, and run `--fresh` after the
+explicit mapping change. Never Apply during local mapping certification.
+
 Do not use `docker compose down -v` during normal development.
 
 `scripts/dev_local.sh` is the canonical local startup workflow. It must use

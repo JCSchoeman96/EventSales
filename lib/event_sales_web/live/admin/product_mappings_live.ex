@@ -11,6 +11,7 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLive do
   alias EventSales.Catalog
   alias EventSales.Catalog.ManualMappingCreator
   alias EventSales.Catalog.Resources.{Event, ProductMapping, SourceSystem, TicketType}
+  alias EventSales.Catalog.{VariationMappingResolver, VariationMappingReview}
   alias EventSalesWeb.Components.AdminShell
   alias EventSalesWeb.Live.Admin.Session, as: AdminSession
 
@@ -29,7 +30,7 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLive do
   }
 
   @impl true
-  def mount(_params, session, socket) do
+  def mount(params, session, socket) do
     filters = %{"event_id" => "", "woo_product_id" => ""}
 
     socket =
@@ -39,6 +40,8 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLive do
       |> assign(:filters, filters)
       |> assign(:manual_form, @empty_manual_form)
       |> assign(:manual_form_error, nil)
+      |> assign(:resolution, nil)
+      |> assign(:resolution_error, nil)
       |> assign(:source_systems, [])
       |> assign(:events, [])
       |> assign(:catalog_events, [])
@@ -47,6 +50,7 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLive do
       |> load_source_systems()
       |> load_events()
       |> load_catalog_events()
+      |> load_resolution(params)
       |> load_ticket_types()
       |> load_mappings()
 
@@ -62,7 +66,7 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLive do
   end
 
   def handle_event("update_manual_form", %{"manual_mapping" => form}, socket) do
-    form = normalize_manual_form(form)
+    form = form |> normalize_manual_form() |> lock_resolution_identity(socket.assigns.resolution)
 
     {:noreply,
      socket
@@ -72,13 +76,19 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLive do
   end
 
   def handle_event("create_manual_mapping", %{"manual_mapping" => form}, socket) do
-    form = normalize_manual_form(form)
+    form = form |> normalize_manual_form() |> lock_resolution_identity(socket.assigns.resolution)
 
-    case ManualMappingCreator.create(form, actor: socket.assigns.current_user) do
+    case create_mapping(socket, form) do
       {:ok, _result} ->
+        message =
+          if socket.assigns.resolution,
+            do:
+              "Mapping created and audited. Run catalogue-dry-run --fresh before reviewing or applying catalogue changes.",
+            else: "Manual mapping created"
+
         {:noreply,
          socket
-         |> put_flash(:info, "Manual mapping created")
+         |> put_flash(:info, message)
          |> assign(:manual_form, reset_manual_form(form))
          |> assign(:manual_form_error, nil)
          |> load_ticket_types()
@@ -105,6 +115,20 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLive do
       <section class="card mb-6 border border-base-300 bg-base-100 shadow-sm">
         <div class="card-body">
           <h2 class="mb-4 text-base font-semibold text-base-content">Create manual mapping</h2>
+          <div
+            :if={@resolution}
+            class="alert alert-warning mb-4 items-start py-3 text-sm"
+          >
+            <div>
+              <div class="font-semibold">
+                The selected dry-run was revoked before manual catalogue changes.
+              </div>
+              <div>After resolving mappings, run a fresh catalogue dry-run.</div>
+            </div>
+          </div>
+          <div :if={@resolution_error} class="alert alert-error mb-4 py-3 text-sm">
+            {@resolution_error}
+          </div>
           <div :if={@manual_form_error} class="alert alert-error mb-4 py-3 text-sm">
             {@manual_form_error}
           </div>
@@ -120,6 +144,7 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLive do
               </span>
               <select
                 name="manual_mapping[source_system_id]"
+                disabled={!is_nil(@resolution)}
                 class="select select-bordered w-full bg-base-200 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60"
               >
                 <option value="" selected={@manual_form["source_system_id"] == ""}>
@@ -133,6 +158,12 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLive do
                   {source.name}
                 </option>
               </select>
+              <input
+                :if={@resolution}
+                type="hidden"
+                name="manual_mapping[source_system_id]"
+                value={@manual_form["source_system_id"]}
+              />
             </label>
 
             <label class="form-control w-full">
@@ -214,6 +245,7 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLive do
                 type="text"
                 name="manual_mapping[woo_product_id]"
                 value={@manual_form["woo_product_id"]}
+                readonly={!is_nil(@resolution)}
                 placeholder="e.g. 104324"
                 class="input input-bordered w-full bg-base-200 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60"
               />
@@ -227,6 +259,7 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLive do
                 type="text"
                 name="manual_mapping[woo_variation_id]"
                 value={@manual_form["woo_variation_id"]}
+                readonly={!is_nil(@resolution)}
                 placeholder="Optional"
                 class="input input-bordered w-full bg-base-200 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60"
               />
@@ -240,6 +273,7 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLive do
                 type="text"
                 name="manual_mapping[label]"
                 value={@manual_form["label"]}
+                readonly={!is_nil(@resolution)}
                 class="input input-bordered w-full bg-base-200 text-base-content focus:outline-none focus:ring-2 focus:ring-primary/60"
               />
             </label>
@@ -405,6 +439,69 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLive do
     end
   end
 
+  defp load_resolution(socket, params) when is_map(params) do
+    keys = ~w(run_id dry_run_hash woo_product_id woo_variation_id)
+
+    if Enum.any?(keys, &present?(Map.get(params, &1))) do
+      with true <- Enum.all?(keys, &present?(Map.get(params, &1))),
+           {:ok, review} <-
+             VariationMappingReview.list(params["run_id"], params["dry_run_hash"],
+               actor: socket.assigns.current_user
+             ),
+           {:ok, product_id} <- cast_positive_integer(params["woo_product_id"]),
+           {:ok, variation_id} <- cast_positive_integer(params["woo_variation_id"]),
+           %{} = row <-
+             Enum.find(
+               review.rows,
+               &(&1.woo_product_id == product_id and &1.woo_variation_id == variation_id)
+             ),
+           true <- row.manual_action_allowed do
+        resolution = %{
+          run_id: review.run_id,
+          dry_run_hash: review.dry_run_hash,
+          woo_product_id: product_id,
+          woo_variation_id: variation_id
+        }
+
+        form =
+          @empty_manual_form
+          |> Map.merge(%{
+            "source_system_id" => review.source_system_id,
+            "woo_product_id" => Integer.to_string(product_id),
+            "woo_variation_id" => Integer.to_string(variation_id),
+            "label" => row.source_label || ""
+          })
+
+        socket
+        |> assign(:resolution, resolution)
+        |> assign(:resolution_error, nil)
+        |> assign(:manual_form, form)
+      else
+        _other ->
+          socket
+          |> assign(:resolution, nil)
+          |> assign(:resolution_error, "The variation resolution link is stale or invalid.")
+      end
+    else
+      socket
+    end
+  end
+
+  defp create_mapping(%{assigns: %{resolution: nil}} = socket, form) do
+    ManualMappingCreator.create(form, actor: socket.assigns.current_user)
+  end
+
+  defp create_mapping(%{assigns: %{resolution: resolution}} = socket, form) do
+    VariationMappingResolver.resolve(
+      resolution.run_id,
+      resolution.dry_run_hash,
+      resolution.woo_product_id,
+      resolution.woo_variation_id,
+      form,
+      actor: socket.assigns.current_user
+    )
+  end
+
   defp load_mappings(socket) do
     query =
       ProductMapping
@@ -460,6 +557,14 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLive do
   end
 
   defp normalize_manual_selection(form), do: Map.put(form, "ticket_type_mode", "existing")
+
+  defp lock_resolution_identity(form, nil), do: form
+
+  defp lock_resolution_identity(form, resolution) do
+    form
+    |> Map.put("woo_product_id", Integer.to_string(resolution.woo_product_id))
+    |> Map.put("woo_variation_id", Integer.to_string(resolution.woo_variation_id))
+  end
 
   defp reset_manual_form(form) do
     @empty_manual_form
@@ -522,4 +627,15 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLive do
 
   defp source_system_name(%{source_system: %{name: name}}), do: name
   defp source_system_name(_mapping), do: "-"
+
+  defp cast_positive_integer(value) when is_binary(value) do
+    case Integer.parse(String.trim(value)) do
+      {integer, ""} when integer > 0 -> {:ok, integer}
+      _other -> {:error, :invalid_integer}
+    end
+  end
+
+  defp cast_positive_integer(_value), do: {:error, :invalid_integer}
+
+  defp present?(value), do: is_binary(value) and String.trim(value) != ""
 end

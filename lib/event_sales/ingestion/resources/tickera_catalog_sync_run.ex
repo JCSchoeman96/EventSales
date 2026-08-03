@@ -25,6 +25,7 @@ defmodule EventSales.Ingestion.Resources.TickeraCatalogSyncRun do
     :unexpected_changes,
     :superseded,
     :operator_error,
+    :mapping_resolution_started,
     :other
   ]
   @origins [:human_admin, :targeted_catalog_change, :legacy_unknown]

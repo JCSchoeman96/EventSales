@@ -90,6 +90,8 @@
     "lib/event_sales/catalog/tickera_catalog/wordpress_feed_error.ex",
     "lib/event_sales/catalog/tickera_catalog/wordpress_feed_response.ex",
     "lib/event_sales/catalog/tickera_catalog/wordpress_feed_signature.ex",
+    "lib/event_sales/catalog/variation_mapping_resolver.ex",
+    "lib/event_sales/catalog/variation_mapping_review.ex",
     "lib/event_sales/catalog/workers/mapping_changed_worker.ex",
     "lib/event_sales/exports/csv_stream.ex",
     "lib/event_sales/exports/event_sales_csv.ex",
@@ -1883,6 +1885,40 @@
         {
           "arity": 1,
           "name": "canonical_query"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.VariationMappingResolver",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/variation_mapping_resolver.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "prepare"
+        },
+        {
+          "arity": 6,
+          "name": "resolve"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.VariationMappingReview",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/variation_mapping_review.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "list"
         }
       ],
       "specs?": true,

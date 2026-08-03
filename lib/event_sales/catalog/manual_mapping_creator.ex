@@ -32,10 +32,11 @@ defmodule EventSales.Catalog.ManualMappingCreator do
 
     with :ok <- authorize(actor),
          {:ok, normalized} <- normalize(params),
+         {:ok, provenance} <- normalize_provenance(Keyword.get(opts, :provenance, %{})),
          {:ok, source} <- fetch_source_system(normalized.source_system_id),
          {:ok, event} <- fetch_event(normalized.event_id, source),
          :ok <- reject_duplicate(normalized) do
-      create_transaction(normalized, event, actor)
+      create_transaction(normalized, event, actor, provenance)
     end
   end
 
@@ -48,9 +49,9 @@ defmodule EventSales.Catalog.ManualMappingCreator do
     if Policies.global_admin?(actor), do: :ok, else: {:error, :forbidden}
   end
 
-  defp create_transaction(normalized, event, actor) do
+  defp create_transaction(normalized, event, actor, provenance) do
     Repo.transaction(fn ->
-      case create_in_transaction(normalized, event, actor) do
+      case create_in_transaction(normalized, event, actor, provenance) do
         {:ok, result} -> result
         {:error, reason} -> Repo.rollback(reason)
       end
@@ -147,6 +148,36 @@ defmodule EventSales.Catalog.ManualMappingCreator do
   defp source_status(status) when status in @source_statuses, do: {:ok, status}
   defp source_status(_status), do: {:error, :invalid_source_status}
 
+  defp normalize_provenance(nil), do: {:ok, %{}}
+
+  defp normalize_provenance(provenance) when is_map(provenance) do
+    allowed =
+      provenance
+      |> Map.new(fn {key, value} -> {to_string(key), value} end)
+      |> Map.take(~w(
+        catalog_sync_run_id
+        dry_run_hash
+        tickera_event_id
+        woo_product_id
+        woo_variation_id
+        resolution_source
+      ))
+
+    if Enum.all?(allowed, fn
+         {key, value} when key in ~w(tickera_event_id woo_product_id woo_variation_id) ->
+           is_integer(value) and value > 0
+
+         {_key, value} ->
+           is_binary(value) and value != ""
+       end) do
+      {:ok, allowed}
+    else
+      {:error, :invalid_provenance}
+    end
+  end
+
+  defp normalize_provenance(_provenance), do: {:error, :invalid_provenance}
+
   defp fetch_source_system(source_system_id) do
     case Ash.get(SourceSystem, source_system_id, domain: Catalog) do
       {:ok, %SourceSystem{kind: :woocommerce, active: true} = source} -> {:ok, source}
@@ -206,18 +237,28 @@ defmodule EventSales.Catalog.ManualMappingCreator do
   defp duplicate_result({:ok, %ProductMapping{}}), do: {:error, :duplicate_mapping}
   defp duplicate_result({:error, _reason}), do: {:error, :duplicate_check_failed}
 
-  defp create_in_transaction(%{ticket_type_mode: :existing} = normalized, event, actor) do
+  defp create_in_transaction(
+         %{ticket_type_mode: :existing} = normalized,
+         event,
+         actor,
+         provenance
+       ) do
     with {:ok, ticket_type} <- fetch_ticket_type(normalized.ticket_type_id, event),
          {:ok, mapping} <- create_mapping(normalized, ticket_type),
-         :ok <- audit_created(normalized, mapping, ticket_type, false, actor) do
+         :ok <- audit_created(normalized, mapping, ticket_type, false, actor, provenance) do
       {:ok, %{mapping: mapping, ticket_type: ticket_type, created_ticket_type?: false}}
     end
   end
 
-  defp create_in_transaction(%{ticket_type_mode: :new} = normalized, _event, actor) do
+  defp create_in_transaction(
+         %{ticket_type_mode: :new} = normalized,
+         _event,
+         actor,
+         provenance
+       ) do
     with {:ok, ticket_type} <- create_ticket_type(normalized),
          {:ok, mapping} <- create_mapping(normalized, ticket_type),
-         :ok <- audit_created(normalized, mapping, ticket_type, true, actor) do
+         :ok <- audit_created(normalized, mapping, ticket_type, true, actor, provenance) do
       {:ok, %{mapping: mapping, ticket_type: ticket_type, created_ticket_type?: true}}
     end
   end
@@ -302,17 +343,11 @@ defmodule EventSales.Catalog.ManualMappingCreator do
          %ProductMapping{} = mapping,
          %TicketType{} = ticket_type,
          created?,
-         actor
+         actor,
+         provenance
        ) do
-    attrs = %{
-      actor_type: :user,
-      actor_user_id: actor.id,
-      actor_role: :admin,
-      source: :admin,
-      subject_type: "product_mapping",
-      subject_id: mapping.id,
-      event_id: normalized.event_id,
-      metadata: %{
+    metadata =
+      Map.merge(provenance, %{
         source_system_id: normalized.source_system_id,
         event_id: normalized.event_id,
         ticket_type_id: ticket_type.id,
@@ -322,7 +357,17 @@ defmodule EventSales.Catalog.ManualMappingCreator do
         label: normalized.label,
         source_status: normalized.source_status,
         reason: normalized.reason
-      },
+      })
+
+    attrs = %{
+      actor_type: :user,
+      actor_user_id: actor.id,
+      actor_role: :admin,
+      source: :admin,
+      subject_type: "product_mapping",
+      subject_id: mapping.id,
+      event_id: normalized.event_id,
+      metadata: metadata,
       ash_opts: [return_notifications?: true]
     }
 
