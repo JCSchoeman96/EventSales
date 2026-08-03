@@ -414,7 +414,7 @@ defmodule EventSales.Ingestion.TickeraCatalogSyncTest do
         %{
           run_id: run.id,
           severity: :warning,
-          code: :expected_warning,
+          code: "expected_warning",
           message: "Expected advisory finding"
         },
         action: :create,

@@ -63,6 +63,7 @@ Do not rebuild EventSales functionality that already exists.
 Do not perform unrelated refactors or dependency upgrades.
 Do not expose secrets or real customer data.
 Task completion requires focused validation and a clear result.
+ALWAYS keep Linear up to date as well
 ```
 
 Use factual backing from:
@@ -106,6 +107,7 @@ Before changing local-runtime configuration or diagnosing startup failures, use:
 ```bash
 bash scripts/dev_local.sh doctor
 bash scripts/dev_local.sh status
+bash scripts/dev_local.sh catalogue-dry-run
 ```
 
 When a task is finished and the local services are no longer needed, use:
@@ -581,8 +583,15 @@ Local infrastructure:
 bash scripts/dev_local.sh
 bash scripts/dev_local.sh status
 bash scripts/dev_local.sh doctor
+bash scripts/dev_local.sh catalogue-dry-run
+bash scripts/dev_local.sh catalogue-dry-run --fresh
 bash scripts/dev_local.sh stop
 ```
+
+Use `--fresh` only when current localhost WordPress catalogue state must be
+rediscovered. Do not use it as a generic recovery command. Fresh mode may
+supersede only a ready dry run; it must reuse queued, discovering, or
+retry-scheduled runs and must never revoke an applying run.
 
 Do not use `docker compose down -v` during normal development.
 

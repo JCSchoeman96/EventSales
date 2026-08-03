@@ -271,7 +271,7 @@ defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorkerTest do
       %{
         run_id: run.id,
         severity: :warning,
-        code: :stale_partial_finding,
+        code: "stale_partial_finding",
         message: "stale partial finding"
       },
       action: :create,
@@ -307,7 +307,7 @@ defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorkerTest do
     assert ready.status == :dry_run_ready
     assert is_nil(ready.retry_attempt)
     assert is_nil(ready.retry_max_attempts)
-    refute Enum.any?(findings, &(&1.code == :stale_partial_finding))
+    refute Enum.any?(findings, &(&1.code == "stale_partial_finding"))
     refute_receive {:catalog_sync_failed, _payload}
   end
 
@@ -331,7 +331,7 @@ defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorkerTest do
     assert updated.status == :dry_run_ready
     assert is_binary(updated.dry_run_hash)
     assert is_map(updated.plan_snapshot)
-    assert Enum.any?(findings, &(&1.code == :published_event_without_ticket_products))
+    assert Enum.any?(findings, &(&1.code == "published_event_without_ticket_products"))
 
     assert_receive {:catalog_sync_started, %{run_id: run_id}}
     assert run_id == run.id

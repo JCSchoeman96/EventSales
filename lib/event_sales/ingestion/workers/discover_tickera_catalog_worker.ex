@@ -218,7 +218,7 @@ defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker do
       attrs = %{
         run_id: run_id,
         severity: finding.severity,
-        code: finding.code,
+        code: persisted_finding_code(finding.code),
         message: finding.message,
         tickera_event_id: finding.tickera_event_id,
         woo_product_id: finding.woo_product_id,
@@ -238,6 +238,22 @@ defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker do
           {:halt, {:error, reason}}
       end
     end)
+  end
+
+  defp persisted_finding_code(code) when is_atom(code) do
+    code
+    |> Atom.to_string()
+    |> persisted_finding_code()
+  end
+
+  defp persisted_finding_code(code) when is_binary(code) do
+    code = String.trim(code)
+
+    if code == "" or byte_size(code) > 120 do
+      raise ArgumentError, "invalid persisted catalogue finding code"
+    end
+
+    code
   end
 
   defp mark_ready(run, plan, owner_attempt) do

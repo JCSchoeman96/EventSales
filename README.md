@@ -15,8 +15,17 @@ Operational commands:
 ```bash
 bash scripts/dev_local.sh status
 bash scripts/dev_local.sh doctor
+bash scripts/dev_local.sh catalogue-dry-run
+bash scripts/dev_local.sh catalogue-dry-run --fresh
 bash scripts/dev_local.sh stop
 ```
+
+`catalogue-dry-run` prepares the local infrastructure and safely reuses the
+current ready full-feed plan without starting Phoenix or applying changes.
+Pass `--fresh` only when the current localhost WordPress catalogue state must
+be rediscovered. Fresh mode supersedes only a ready dry run, preserves its
+history and findings, reuses any discovery already in progress, and never
+interrupts an applying run or Applies catalogue changes.
 
 `Ctrl+C` stops Phoenix. PostgreSQL and Redis remain available for a quick
 restart. Run `bash scripts/dev_local.sh stop` to stop the Compose services.
