@@ -97,6 +97,67 @@ printf '%s\n' "\$*" >>"${tmp_dir}/mix-calls"
 EOF
 chmod +x "${tmp_dir}/bin/mix"
 
+assert_doctor_passes() {
+  local description="$1"
+  local output
+  local status
+
+  set +e
+  output="$(PATH="${tmp_dir}/bin:${PATH}" bash "${tmp_dir}/repo/scripts/dev_local.sh" doctor 2>&1)"
+  status=$?
+  set -e
+
+  [[ ${status} -eq 0 ]] || fail "${description}: doctor unexpectedly failed: ${output}"
+  [[ "${output}" == *"Doctor checks passed"* ]] ||
+    fail "${description}: doctor did not report success"
+}
+
+assert_doctor_fails_with() {
+  local description="$1"
+  local expected="$2"
+  local output
+  local status
+
+  set +e
+  output="$(PATH="${tmp_dir}/bin:${PATH}" bash "${tmp_dir}/repo/scripts/dev_local.sh" doctor 2>&1)"
+  status=$?
+  set -e
+
+  [[ ${status} -ne 0 ]] || fail "${description}: doctor unexpectedly passed"
+  [[ "${output}" == *"${expected}"* ]] ||
+    fail "${description}: expected output to contain: ${expected}; got: ${output}"
+}
+
+assert_doctor_passes "regular mode-600 .env.local"
+
+mv "${tmp_dir}/repo/.env.local" "${tmp_dir}/repo/.env.local-target"
+ln -s .env.local-target "${tmp_dir}/repo/.env.local"
+assert_doctor_passes "symlink to mode-600 regular .env.local target"
+
+chmod 644 "${tmp_dir}/repo/.env.local-target"
+assert_doctor_fails_with "symlink to mode-644 regular .env.local target" \
+  ".env.local permissions are 644"
+
+rm "${tmp_dir}/repo/.env.local-target"
+assert_doctor_fails_with "dangling .env.local symlink" \
+  ".env.local symlink target is unavailable"
+
+mkdir "${tmp_dir}/repo/.env.local-directory"
+rm "${tmp_dir}/repo/.env.local"
+ln -s .env.local-directory "${tmp_dir}/repo/.env.local"
+assert_doctor_fails_with "symlink to .env.local directory" \
+  ".env.local is not a regular file"
+
+rm "${tmp_dir}/repo/.env.local"
+cp "${REPO_ROOT}/.env.local.example" "${tmp_dir}/repo/.env.local"
+chmod 777 "${tmp_dir}/repo/.env.local"
+assert_doctor_fails_with "regular mode-777 .env.local" ".env.local permissions are 777"
+
+sed \
+  -e "s|^EVENTSALES_CATALOG_SECRET_FILE=.*$|EVENTSALES_CATALOG_SECRET_FILE=${tmp_dir}/catalog-secret|" \
+  "${REPO_ROOT}/.env.local.example" >"${tmp_dir}/repo/.env.local"
+chmod 600 "${tmp_dir}/repo/.env.local"
+
 PATH="${tmp_dir}/bin:${PATH}" bash "${tmp_dir}/repo/scripts/dev_local.sh" catalogue-dry-run
 
 grep -Fxq 'ecto.create' "${tmp_dir}/mix-calls" || fail "catalogue dry-run must create the database"
