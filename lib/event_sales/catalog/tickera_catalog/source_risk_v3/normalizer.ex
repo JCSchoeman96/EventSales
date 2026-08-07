@@ -53,8 +53,9 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Normalizer do
         value: value,
         completeness: completeness,
         origin: origin,
-        provenance:
+        provenance: [
           Map.put(evidence.provenance, "producer_source_key", evidence.producer_source_key)
+        ]
       }
 
       {:ok, fact}
@@ -79,6 +80,27 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Normalizer do
       duplicate_of: duplicates,
       conflicts_with: Enum.reverse(conflicts)
     }
+  end
+
+  @spec merge_duplicate(CanonicalFact.t(), CanonicalFact.t()) ::
+          {:ok, CanonicalFact.t()}
+          | {:error, :conflicting_canonical_facts | :different_canonical_fact_identity}
+  def merge_duplicate(%CanonicalFact{} = existing, %CanonicalFact{} = duplicate) do
+    case CanonicalFact.compare_pair(existing, duplicate) do
+      :duplicate ->
+        provenance =
+          (existing.provenance ++ duplicate.provenance)
+          |> Enum.uniq()
+          |> CanonicalFact.sort_provenance_records()
+
+        {:ok, %{existing | provenance: provenance}}
+
+      :conflict ->
+        {:error, :conflicting_canonical_facts}
+
+      :different_identity ->
+        {:error, :different_canonical_fact_identity}
+    end
   end
 
   @spec never_safe_state?(String.t()) :: boolean()

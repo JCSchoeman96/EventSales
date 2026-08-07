@@ -15,7 +15,7 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.CanonicalFactTest do
       value: "private",
       completeness: "partial",
       origin: "native",
-      provenance: %{"raw_producer_code" => "private_product"}
+      provenance: [%{"raw_producer_code" => "private_product"}]
     }
 
     struct!(CanonicalFact, Map.merge(base, Map.new(overrides)))
@@ -46,10 +46,33 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.CanonicalFactTest do
 
   test "same identity plus same semantic claim is a duplicate" do
     left = fact(%{value: "private", completeness: "partial"})
-    right = fact(%{value: "private", completeness: "partial", provenance: %{"other" => "x"}})
+    right = fact(%{value: "private", completeness: "partial", provenance: [%{"other" => "x"}]})
 
     assert CanonicalFact.compare_pair(left, right) == :duplicate
     assert CanonicalFact.same_semantic_claim?(left, right)
+  end
+
+  test "provenance differences remain duplicates and are excluded from claim equality" do
+    left = fact(%{provenance: [%{"producer_version" => "2026-08-07.1"}]})
+
+    right =
+      fact(%{
+        provenance: [%{"producer_version" => "2026-08-07.1", "raw_producer_code" => "a"}]
+      })
+
+    assert CanonicalFact.compare_pair(left, right) == :duplicate
+    refute Map.has_key?(CanonicalFact.semantic_claim(left), :provenance)
+    refute Map.has_key?(CanonicalFact.identity(left), :provenance)
+  end
+
+  test "provenance records sort deterministically by sorted key/value pairs" do
+    a = %{"raw_producer_code" => "b", "producer_version" => "1"}
+    b = %{"raw_producer_code" => "a", "producer_version" => "1"}
+
+    assert CanonicalFact.sort_provenance_records([a, b]) ==
+             CanonicalFact.sort_provenance_records([b, a])
+
+    assert CanonicalFact.sort_provenance_records([a, b]) == [b, a]
   end
 
   test "same identity plus conflicting claim is a conflict" do
