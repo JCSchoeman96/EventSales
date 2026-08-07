@@ -36,6 +36,13 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.NormalizerTest do
              completeness: "partial",
              origin: "native"
            } = fact
+
+    assert length(fact.provenance) == 1
+
+    assert hd(fact.provenance) == %{
+             "producer_version" => "2026-08-07.1",
+             "producer_source_key" => "wp_posts.post_status"
+           }
   end
 
   test "producer exhaustive completeness cannot mint canonical exhaustive without trusted proof" do
@@ -314,5 +321,80 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.NormalizerTest do
                "provenance" => %{"raw_producer_code" => invalid},
                "value" => "publish"
              })
+  end
+
+  describe "merge_duplicate/2" do
+    test "merges identical provenance to one record" do
+      assert {:ok, left} = Normalizer.normalize_evidence(evidence(%{}), run_id: "run-a")
+      assert {:ok, right} = Normalizer.normalize_evidence(evidence(%{}), run_id: "run-a")
+
+      assert {:ok, merged} = Normalizer.merge_duplicate(left, right)
+      assert length(merged.provenance) == 1
+      assert merged.provenance == left.provenance
+      assert_no_semantic_change(left, merged)
+    end
+
+    test "retains distinct provenance records without strengthening the claim" do
+      assert {:ok, left} =
+               Normalizer.normalize_evidence(
+                 evidence(%{"provenance" => %{"producer_version" => "2026-08-07.1"}}),
+                 run_id: "run-a"
+               )
+
+      assert {:ok, right} =
+               Normalizer.normalize_evidence(
+                 evidence(%{
+                   "provenance" => %{
+                     "producer_version" => "2026-08-07.1",
+                     "raw_producer_code" => "private_product"
+                   }
+                 }),
+                 run_id: "run-a"
+               )
+
+      assert CanonicalFact.compare_pair(left, right) == :duplicate
+      assert {:ok, merged_ab} = Normalizer.merge_duplicate(left, right)
+      assert {:ok, merged_ba} = Normalizer.merge_duplicate(right, left)
+
+      assert length(merged_ab.provenance) == 2
+      assert merged_ab.provenance == merged_ba.provenance
+
+      assert Enum.sort(merged_ab.provenance) ==
+               Enum.sort([hd(left.provenance), hd(right.provenance)])
+
+      assert_no_semantic_change(left, merged_ab)
+    end
+
+    test "rejects conflicts and different identities" do
+      assert {:ok, left} = Normalizer.normalize_evidence(evidence(%{}), run_id: "run-a")
+
+      assert {:ok, conflicting} =
+               Normalizer.normalize_evidence(evidence(%{"value" => "draft"}), run_id: "run-a")
+
+      assert {:ok, other_target} =
+               Normalizer.normalize_evidence(
+                 evidence(%{"target" => %{"woo_product_id" => 99}}),
+                 run_id: "run-a"
+               )
+
+      assert {:error, :conflicting_canonical_facts} =
+               Normalizer.merge_duplicate(left, conflicting)
+
+      assert {:error, :different_canonical_fact_identity} =
+               Normalizer.merge_duplicate(left, other_target)
+    end
+  end
+
+  defp assert_no_semantic_change(original, merged) do
+    assert merged.state == original.state
+    assert merged.value == original.value
+    assert merged.completeness == original.completeness
+    assert merged.origin == original.origin
+    assert merged.target == original.target
+    assert merged.authority == original.authority
+    assert merged.authority_slot == original.authority_slot
+    assert merged.dimension == original.dimension
+    assert merged.semantic_scope == original.semantic_scope
+    assert merged.run_id == original.run_id
   end
 end
