@@ -385,39 +385,51 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
   end
 
   defp dispatch_class_a(input, run_id) do
-    cond do
-      input.event_status in ["private", "draft", "trash"] ->
-        event_lifecycle(
-          input,
-          run_id,
-          "t.class_a.event_status",
-          input.event_status,
-          "translated",
-          "preserved"
-        )
+    with :ok <- require_class_a_authority(input),
+         {:ok, observation} <- exactly_one_class_a_observation(input) do
+      case observation do
+        {:event_status, value} ->
+          event_lifecycle(input, run_id, nil, value, "translated", "preserved",
+            reason: "direct retained Class A evidence"
+          )
 
-      input.product_status_classification in ["private", "draft", "trash"] ->
-        parent_lifecycle(
-          input,
-          run_id,
-          "t.class_a.product_status_classification",
-          input.product_status_classification,
-          "translated",
-          "preserved"
-        )
+        {:product_status_classification, value} ->
+          parent_lifecycle(input, run_id, nil, value, "translated", "preserved",
+            reason: "direct retained Class A evidence"
+          )
 
-      input.variation_status_classification in ["private", "draft", "trash"] ->
-        variation_lifecycle(
-          input,
-          run_id,
-          "t.class_a.variation_status_classification",
-          input.variation_status_classification
-        )
-
-      true ->
-        {:error, :missing_class_a_or_raw_code}
+        {:variation_status_classification, value} ->
+          variation_lifecycle(input, run_id, nil, value,
+            reason: "direct retained Class A evidence"
+          )
+      end
     end
   end
+
+  defp require_class_a_authority(%{source_owner: "WordPress", source_emitter: emitter})
+       when emitter in ["wp.event_risk_codes", "wp.review_reasons", "unknown"],
+       do: :ok
+
+  defp require_class_a_authority(_), do: {:error, :invalid_class_a_authority}
+
+  defp exactly_one_class_a_observation(input) do
+    observations =
+      []
+      |> append_class_a(:event_status, input.event_status)
+      |> append_class_a(:product_status_classification, input.product_status_classification)
+      |> append_class_a(:variation_status_classification, input.variation_status_classification)
+
+    case observations do
+      [only] -> {:ok, only}
+      [] -> {:error, :missing_class_a_or_raw_code}
+      _ -> {:error, :ambiguous_class_a_input}
+    end
+  end
+
+  defp append_class_a(acc, field, value) when value in ["private", "draft", "trash"],
+    do: [{field, value} | acc]
+
+  defp append_class_a(acc, _field, _value), do: acc
 
   defp draft_event_review_reasons(input, run_id) do
     case input.event_status do
@@ -522,7 +534,8 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
         translation_result: result,
         certainty_change: certainty,
         finding: lifecycle_finding(value),
-        lossy: Keyword.get(opts, :lossy)
+        lossy: Keyword.get(opts, :lossy),
+        reason: Keyword.get(opts, :reason)
       )
     end
   end
@@ -558,12 +571,13 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
         certainty_change: if(regrouped?, do: "weakened", else: certainty),
         finding: lifecycle_finding(value),
         lossy: Keyword.get(opts, :lossy),
-        regrouping?: regrouped?
+        regrouping?: regrouped?,
+        reason: Keyword.get(opts, :reason)
       )
     end
   end
 
-  defp variation_lifecycle(input, run_id, rule_id, value) do
+  defp variation_lifecycle(input, run_id, rule_id, value, opts \\ []) do
     with {:ok, target} <- require_variation_target(input) do
       mint_fact(input, run_id,
         rule_id: rule_id,
@@ -575,7 +589,8 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
         source_key: "wp_posts.post_status",
         translation_result: "translated",
         certainty_change: "preserved",
-        finding: lifecycle_finding(value)
+        finding: lifecycle_finding(value),
+        reason: Keyword.get(opts, :reason)
       )
     end
   end
@@ -781,7 +796,7 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
                 qualified_finding_id: Keyword.get(opts, :finding),
                 lossy_derivative_of: Keyword.get(opts, :lossy),
                 compatibility_regrouping?: Keyword.get(opts, :regrouping?, false) == true,
-                reason: "historical compatibility translation"
+                reason: Keyword.get(opts, :reason) || "historical compatibility translation"
             }
 
             {:ok, wrap(record, fact, nil)}

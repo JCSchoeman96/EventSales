@@ -556,7 +556,7 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
   end
 
   describe "Class A classification-only and variation hardening" do
-    test "classification-only event draft works with no raw_code" do
+    test "WordPress Class A event succeeds without invented raw code or rule id" do
       result =
         translate!(%{
           "event_status" => "draft",
@@ -567,12 +567,16 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
       assert result.fact.value == "draft"
       assert result.fact.semantic_scope == "event"
       assert is_nil(result.record.raw_code)
-      assert result.record.translation_rule_id == "t.class_a.event_status"
+      assert is_nil(result.record.translation_rule_id)
+      assert result.record.translation_result == "translated"
+      assert result.record.certainty_change == "preserved"
+      assert result.record.reason == "direct retained Class A evidence"
+      assert result.fact.origin == "compatibility_derived"
       assert result.fact.completeness == "unknown"
       refute result.automation_eligible?
     end
 
-    test "classification-only parent trash works with no raw_code" do
+    test "WordPress Class A parent succeeds without invented raw code or rule id" do
       result =
         translate!(%{
           "product_status_classification" => "trash",
@@ -582,10 +586,14 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
       assert result.fact.value == "trash"
       assert result.fact.semantic_scope == "parent_product"
       assert is_nil(result.record.raw_code)
-      assert result.record.translation_rule_id == "t.class_a.product_status_classification"
+      assert is_nil(result.record.translation_rule_id)
+      assert result.record.reason == "direct retained Class A evidence"
+      assert result.fact.origin == "compatibility_derived"
+      assert result.fact.completeness == "unknown"
+      refute result.automation_eligible?
     end
 
-    test "variation classification private draft trash works with no raw_code" do
+    test "WordPress Class A variation succeeds without invented raw code or rule id" do
       for {status, id} <- [{"private", 203}, {"draft", 204}, {"trash", 205}] do
         result =
           translate!(%{
@@ -599,7 +607,90 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
         assert result.fact.semantic_scope == "variation"
         assert result.fact.target == %{woo_product_id: 300, woo_variation_id: id}
         assert is_nil(result.record.raw_code)
+        assert is_nil(result.record.translation_rule_id)
+        assert result.record.reason == "direct retained Class A evidence"
+        assert result.fact.origin == "compatibility_derived"
+        assert result.fact.completeness == "unknown"
+        refute result.automation_eligible?
       end
+    end
+
+    test "Phoenix Class A event is rejected" do
+      assert {:error, :invalid_class_a_authority} =
+               V2Adapter.translate(
+                 input(%{
+                   "source_owner" => "Phoenix",
+                   "source_emitter" => "phoenix.normalizer",
+                   "event_status" => "draft",
+                   "tickera_event_id" => 201
+                 }),
+                 run_id: "run-hist"
+               )
+    end
+
+    test "planner Class A product is rejected" do
+      assert {:error, :invalid_class_a_authority} =
+               V2Adapter.translate(
+                 input(%{
+                   "source_owner" => "planner",
+                   "source_emitter" => "planner",
+                   "product_status_classification" => "trash",
+                   "woo_product_id" => 202
+                 }),
+                 run_id: "run-hist"
+               )
+    end
+
+    test "contract Class A variation is rejected" do
+      assert {:error, :invalid_class_a_authority} =
+               V2Adapter.translate(
+                 input(%{
+                   "source_owner" => "contract",
+                   "source_emitter" => "contract",
+                   "variation_status_classification" => "private",
+                   "woo_product_id" => 300,
+                   "woo_variation_id" => 203
+                 }),
+                 run_id: "run-hist"
+               )
+    end
+
+    test "event plus product Class A fields are ambiguous" do
+      assert {:error, :ambiguous_class_a_input} =
+               V2Adapter.translate(
+                 input(%{
+                   "event_status" => "draft",
+                   "product_status_classification" => "trash",
+                   "tickera_event_id" => 201,
+                   "woo_product_id" => 202
+                 }),
+                 run_id: "run-hist"
+               )
+    end
+
+    test "product plus variation Class A fields are ambiguous" do
+      assert {:error, :ambiguous_class_a_input} =
+               V2Adapter.translate(
+                 input(%{
+                   "product_status_classification" => "draft",
+                   "variation_status_classification" => "private",
+                   "woo_product_id" => 300,
+                   "woo_variation_id" => 401
+                 }),
+                 run_id: "run-hist"
+               )
+    end
+
+    test "code-specific locked rule IDs remain unchanged" do
+      event =
+        translate!(%{
+          "raw_code" => "draft_event",
+          "source_emitter" => "wp.event_risk_codes",
+          "tickera_event_id" => 11
+        })
+
+      assert event.record.translation_rule_id == "t.draft_event.event_risk_codes"
+      refute is_nil(event.record.translation_rule_id)
     end
 
     test "private_variation explicit_safe does not mint a lifecycle fact" do
