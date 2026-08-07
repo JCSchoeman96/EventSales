@@ -129,34 +129,38 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
     CanonicalFact.compare_pair(left, right)
   end
 
-  @spec known_lossy_lifecycle_derivative?(String.t(), String.t()) :: boolean()
-  def known_lossy_lifecycle_derivative?(exact_status, raw_code)
-      when exact_status in ["trash", "draft", "private"] and is_binary(raw_code) do
-    case {exact_status, raw_code} do
-      {"trash", "draft_product"} -> true
-      {"trash", "draft_event"} -> true
-      {"draft", "draft_product"} -> true
-      {"draft", "draft_event"} -> true
-      {"private", "private_product"} -> true
-      {"private", "private_event"} -> true
+  @spec known_lossy_lifecycle_derivative?(String.t(), String.t(), String.t(), String.t()) ::
+          boolean()
+  def known_lossy_lifecycle_derivative?(exact_status, raw_code, source_owner, source_emitter)
+      when exact_status in ["trash", "draft"] and is_binary(raw_code) and
+             is_binary(source_owner) and is_binary(source_emitter) do
+    case {exact_status, raw_code, source_owner, source_emitter} do
+      {"trash", "draft_product", "WordPress", "wp.review_reasons"} -> true
+      {"draft", "draft_product", "WordPress", "wp.review_reasons"} -> true
+      {"trash", "draft_event", "WordPress", "wp.review_reasons"} -> true
+      {"draft", "draft_event", "WordPress", "wp.review_reasons"} -> true
       _ -> false
     end
   end
 
-  def known_lossy_lifecycle_derivative?(_, _), do: false
+  def known_lossy_lifecycle_derivative?(_, _, _, _), do: false
 
   defp require_run_id(run_id) when is_binary(run_id) and run_id != "", do: :ok
   defp require_run_id(_), do: {:error, :missing_run_id}
 
   defp normalize_input(input) do
     with :ok <- reject_non_string_keys(input),
+         :ok <- reject_forbidden_self_assertions(input),
          {:ok, raw_code} <- optional_bounded_string(input, "raw_code"),
          {:ok, source_owner} <- require_owner(input),
          {:ok, source_emitter} <- require_emitter(input),
          {:ok, source_record_identity} <- optional_bounded_string(input, "source_record_identity"),
          {:ok, raw_classification} <- optional_bounded_string(input, "raw_classification"),
+         {:ok, raw_scope} <- optional_bounded_string(input, "raw_scope"),
          {:ok, event_status} <- optional_bounded_string(input, "event_status"),
          {:ok, product_status} <- optional_bounded_string(input, "product_status_classification"),
+         {:ok, variation_status} <-
+           optional_bounded_string(input, "variation_status_classification"),
          {:ok, product_type_token} <- optional_bounded_string(input, "product_type_token"),
          {:ok, event_link_ref} <- optional_bounded_string(input, "event_link_reference_state"),
          {:ok, tickera_event_id} <- optional_pos_int(input, "tickera_event_id"),
@@ -169,8 +173,10 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
          source_emitter: source_emitter,
          source_record_identity: source_record_identity,
          raw_classification: raw_classification,
+         raw_scope: raw_scope,
          event_status: event_status,
          product_status_classification: product_status,
+         variation_status_classification: variation_status,
          product_type_token: product_type_token,
          event_link_reference_state: event_link_ref,
          tickera_event_id: tickera_event_id,
@@ -182,6 +188,16 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
 
   defp reject_non_string_keys(map) do
     if Enum.all?(Map.keys(map), &is_binary/1), do: :ok, else: {:error, :non_string_map_keys}
+  end
+
+  defp reject_forbidden_self_assertions(input) do
+    forbidden = ["origin", "authority_slot", "translation_rule_id"]
+
+    if Enum.any?(forbidden, &Map.has_key?(input, &1)) do
+      {:error, :forbidden_self_assertion}
+    else
+      :ok
+    end
   end
 
   defp require_owner(input) do
@@ -198,8 +214,6 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
         if MapSet.member?(@emitters, emitter) do
           {:ok, emitter}
         else
-          # Unknown arbitrary emitter strings fail closed to the locked "unknown" token
-          # only when the caller explicitly used the closed vocabulary; otherwise reject.
           {:error, :unknown_source_emitter}
         end
 
@@ -236,7 +250,14 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
     end
   end
 
-  defp dispatch(%{raw_code: nil} = _input, _run_id), do: {:error, :missing_raw_code}
+  defp require_source_record_identity(%{source_record_identity: id})
+       when is_binary(id) and id != "",
+       do: :ok
+
+  defp require_source_record_identity(_), do: {:error, :missing_source_record_identity}
+
+  # Class A exact retained classifications may drive translation without inventing a raw code.
+  defp dispatch(%{raw_code: nil} = input, run_id), do: dispatch_class_a(input, run_id)
 
   defp dispatch(%{raw_code: code} = input, run_id) do
     case {code, input.source_owner, input.source_emitter} do
@@ -265,7 +286,7 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
       {"draft_event", "WordPress", "wp.review_reasons"} ->
         draft_event_review_reasons(input, run_id)
 
-      {"draft_event", _, "unknown"} ->
+      {"draft_event", "WordPress", "unknown"} ->
         diagnostic(
           input,
           "t.draft_event.unknown_emitter",
@@ -293,6 +314,9 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
       {"draft_variation", "Phoenix", "phoenix.vocab"} ->
         variation_lifecycle(input, run_id, "t.draft_variation", "draft")
 
+      {"private_variation", "Phoenix", "phoenix.normalizer"} ->
+        private_variation(input, run_id)
+
       {"subscription_product", "WordPress", "wp.review_reasons"} ->
         subscription_present(input, run_id)
 
@@ -313,7 +337,7 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
       {"missing_tickera_event", "WordPress", "wp.review_reasons"} ->
         missing_tickera_event(input, run_id)
 
-      {"unknown_product_semantics", _, _} ->
+      {"unknown_product_semantics", "WordPress", "wp.review_reasons"} ->
         derived_summary(input, "t.unknown_product_semantics")
 
       {dim, "Phoenix", "phoenix.normalizer"}
@@ -357,6 +381,41 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
 
       _ ->
         undeclared_raw(input)
+    end
+  end
+
+  defp dispatch_class_a(input, run_id) do
+    cond do
+      input.event_status in ["private", "draft", "trash"] ->
+        event_lifecycle(
+          input,
+          run_id,
+          "t.class_a.event_status",
+          input.event_status,
+          "translated",
+          "preserved"
+        )
+
+      input.product_status_classification in ["private", "draft", "trash"] ->
+        parent_lifecycle(
+          input,
+          run_id,
+          "t.class_a.product_status_classification",
+          input.product_status_classification,
+          "translated",
+          "preserved"
+        )
+
+      input.variation_status_classification in ["private", "draft", "trash"] ->
+        variation_lifecycle(
+          input,
+          run_id,
+          "t.class_a.variation_status_classification",
+          input.variation_status_classification
+        )
+
+      true ->
+        {:error, :missing_class_a_or_raw_code}
     end
   end
 
@@ -423,6 +482,30 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
           "t.draft_product",
           "draft_product code-only is lossy; exact classification unavailable"
         )
+    end
+  end
+
+  defp private_variation(input, run_id) do
+    case input.variation_status_classification do
+      status when status in ["private", "draft", "trash"] ->
+        variation_lifecycle(input, run_id, "t.private_variation", status)
+
+      _ ->
+        case input.raw_classification do
+          "explicit_safe" ->
+            diagnostic(
+              input,
+              "t.private_variation",
+              "synthetic explicit_safe filler does not invent variation lifecycle observation"
+            )
+
+          _ ->
+            diagnostic(
+              input,
+              "t.private_variation",
+              "private_variation without retained variation classification"
+            )
+        end
     end
   end
 
@@ -637,7 +720,7 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
             source_key: "wc_get_product.type",
             translation_result: if(regrouped?, do: "translated_weakened", else: "translated"),
             certainty_change: "weakened",
-            finding: nil,
+            finding: "source_risk.unsupported_product_type",
             regrouping?: regrouped?
           )
         end
@@ -660,51 +743,53 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
   end
 
   defp mint_fact(input, run_id, opts) do
-    evidence = %Evidence{
-      dimension: Keyword.fetch!(opts, :dimension),
-      producer_scope: Keyword.fetch!(opts, :scope),
-      target: Keyword.fetch!(opts, :target),
-      state: Keyword.fetch!(opts, :state),
-      producer_source_key: Keyword.fetch!(opts, :source_key),
-      completeness: "unknown",
-      provenance: bounded_producer_provenance(input),
-      value: Keyword.get(opts, :value),
-      related_targets: %{}
-    }
+    with :ok <- require_source_record_identity(input) do
+      evidence = %Evidence{
+        dimension: Keyword.fetch!(opts, :dimension),
+        producer_scope: Keyword.fetch!(opts, :scope),
+        target: Keyword.fetch!(opts, :target),
+        state: Keyword.fetch!(opts, :state),
+        producer_source_key: Keyword.fetch!(opts, :source_key),
+        completeness: "unknown",
+        provenance: bounded_producer_provenance(input),
+        value: Keyword.get(opts, :value),
+        related_targets: %{}
+      }
 
-    case Normalizer.normalize_evidence(evidence,
-           run_id: run_id,
-           origin: "compatibility_derived",
-           exhaustive_proven?: false
-         ) do
-      {:ok, fact} ->
-        if fact.completeness == "exhaustive" or fact.origin != "compatibility_derived" do
-          {:error, :compatibility_invariant_violation}
-        else
-          record = %{
-            base_record(
-              input,
-              Keyword.fetch!(opts, :rule_id),
-              Keyword.fetch!(opts, :translation_result),
-              Keyword.fetch!(opts, :certainty_change)
-            )
-            | canonical_dimension: fact.dimension,
-              canonical_state: fact.state,
-              canonical_value: fact.value,
-              canonical_scope: fact.semantic_scope,
-              canonical_target: fact.target,
-              translated_completeness: fact.completeness,
-              qualified_finding_id: Keyword.get(opts, :finding),
-              lossy_derivative_of: Keyword.get(opts, :lossy),
-              compatibility_regrouping?: Keyword.get(opts, :regrouping?, false) == true,
-              reason: "historical compatibility translation"
-          }
+      case Normalizer.normalize_evidence(evidence,
+             run_id: run_id,
+             origin: "compatibility_derived",
+             exhaustive_proven?: false
+           ) do
+        {:ok, fact} ->
+          if fact.completeness == "exhaustive" or fact.origin != "compatibility_derived" do
+            {:error, :compatibility_invariant_violation}
+          else
+            record = %{
+              base_record(
+                input,
+                Keyword.fetch!(opts, :rule_id),
+                Keyword.fetch!(opts, :translation_result),
+                Keyword.fetch!(opts, :certainty_change)
+              )
+              | canonical_dimension: fact.dimension,
+                canonical_state: fact.state,
+                canonical_value: fact.value,
+                canonical_scope: fact.semantic_scope,
+                canonical_target: fact.target,
+                translated_completeness: fact.completeness,
+                qualified_finding_id: Keyword.get(opts, :finding),
+                lossy_derivative_of: Keyword.get(opts, :lossy),
+                compatibility_regrouping?: Keyword.get(opts, :regrouping?, false) == true,
+                reason: "historical compatibility translation"
+            }
 
-          {:ok, wrap(record, fact, nil)}
-        end
+            {:ok, wrap(record, fact, nil)}
+          end
 
-      {:error, reason} ->
-        {:error, reason}
+        {:error, reason} ->
+          {:error, reason}
+      end
     end
   end
 
@@ -754,35 +839,40 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
   end
 
   defp derived_summary(input, rule_id) do
-    record = %{
-      base_record(input, rule_id, "derived_summary", "weakened")
-      | reason: "derived aggregate only; not a co-equal blocker"
-    }
+    with :ok <- require_source_record_identity(input),
+         {:ok, _target, _regrouped?} <- require_parent_target(input) do
+      record = %{
+        base_record(input, rule_id, "derived_summary", "weakened")
+        | reason: "derived aggregate only; not a co-equal blocker"
+      }
 
-    {:ok,
-     wrap(record, nil, %{
-       kind: "derived_summary",
-       code: "unknown_product_semantics",
-       woo_product_id: input.woo_product_id
-     })}
+      {:ok,
+       wrap(record, nil, %{
+         kind: "derived_summary",
+         code: "unknown_product_semantics",
+         woo_product_id: input.woo_product_id
+       })}
+    end
   end
 
   defp structural_planner(input, rule_id, result) do
-    record = %{
-      base_record(input, rule_id, result, "preserved")
-      | reason: "non source-risk projection"
-    }
+    with :ok <- require_source_record_identity(input) do
+      record = %{
+        base_record(input, rule_id, result, "preserved")
+        | reason: "non source-risk projection"
+      }
 
-    projection =
-      case result do
-        "structural_projection" ->
-          %{kind: "structural_projection", code: input.raw_code, rule_id: rule_id}
+      projection =
+        case result do
+          "structural_projection" ->
+            %{kind: "structural_projection", code: input.raw_code, rule_id: rule_id}
 
-        "planner_projection" ->
-          %{kind: "planner_projection", code: input.raw_code, rule_id: rule_id}
-      end
+          "planner_projection" ->
+            %{kind: "planner_projection", code: input.raw_code, rule_id: rule_id}
+        end
 
-    {:ok, wrap(record, nil, projection)}
+      {:ok, wrap(record, nil, projection)}
+    end
   end
 
   defp wrap(%TranslationRecord{} = record, fact, projection) do
@@ -810,7 +900,7 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
       source_emitter: input.source_emitter,
       raw_code: input.raw_code,
       raw_classification: input.raw_classification,
-      raw_scope: nil,
+      raw_scope: input.raw_scope,
       raw_target: raw_target(input),
       translation_rule_id: rule_id,
       translation_result: translation_result,
@@ -836,8 +926,10 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
       "source_emitter" => input.source_emitter
     }
     |> maybe_put("product_status_classification", input.product_status_classification)
+    |> maybe_put("variation_status_classification", input.variation_status_classification)
     |> maybe_put("event_status", input.event_status)
     |> maybe_put("product_type_token", input.product_type_token)
+    |> maybe_put("raw_scope", input.raw_scope)
   end
 
   defp maybe_put(map, _key, nil), do: map

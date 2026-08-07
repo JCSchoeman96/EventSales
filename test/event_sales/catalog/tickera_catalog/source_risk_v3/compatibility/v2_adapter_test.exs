@@ -150,7 +150,13 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
         })
 
       assert trash.fact.value == "trash"
-      assert V2Adapter.known_lossy_lifecycle_derivative?("trash", "draft_product")
+
+      assert V2Adapter.known_lossy_lifecycle_derivative?(
+               "trash",
+               "draft_product",
+               "WordPress",
+               "wp.review_reasons"
+             )
 
       only =
         translate!(%{"raw_code" => "draft_product", "woo_product_id" => 41})
@@ -168,8 +174,14 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
         }).fact
 
       assert exact.value == "trash"
-      assert V2Adapter.known_lossy_lifecycle_derivative?("trash", "draft_product")
-      # Lossy code is provenance only — no second independent claim to conflict with.
+
+      assert V2Adapter.known_lossy_lifecycle_derivative?(
+               "trash",
+               "draft_product",
+               "WordPress",
+               "wp.review_reasons"
+             )
+
       assert V2Adapter.classify_pair(exact, exact) == :duplicate
     end
   end
@@ -384,6 +396,7 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
 
       assert simple.fact.state == "present"
       assert simple.fact.value == "simple"
+      assert simple.record.qualified_finding_id == "source_risk.unsupported_product_type"
 
       undeclared =
         translate!(%{
@@ -529,17 +542,189 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
     end
 
     test "producer provenance cannot self-assert native origin" do
-      # Adapter strips/ignores forbidden self-asserted origin; output remains compatibility_derived.
+      assert {:error, :forbidden_self_assertion} =
+               V2Adapter.translate(
+                 input(%{
+                   "raw_code" => "private_product",
+                   "woo_product_id" => 121,
+                   "origin" => "native",
+                   "authority_slot" => "slot.lifecycle.wp_post_status"
+                 }),
+                 run_id: "run-hist"
+               )
+    end
+  end
+
+  describe "Class A classification-only and variation hardening" do
+    test "classification-only event draft works with no raw_code" do
+      result =
+        translate!(%{
+          "event_status" => "draft",
+          "tickera_event_id" => 201
+        })
+
+      assert result.fact.state == "present"
+      assert result.fact.value == "draft"
+      assert result.fact.semantic_scope == "event"
+      assert is_nil(result.record.raw_code)
+      assert result.record.translation_rule_id == "t.class_a.event_status"
+      assert result.fact.completeness == "unknown"
+      refute result.automation_eligible?
+    end
+
+    test "classification-only parent trash works with no raw_code" do
+      result =
+        translate!(%{
+          "product_status_classification" => "trash",
+          "woo_product_id" => 202
+        })
+
+      assert result.fact.value == "trash"
+      assert result.fact.semantic_scope == "parent_product"
+      assert is_nil(result.record.raw_code)
+      assert result.record.translation_rule_id == "t.class_a.product_status_classification"
+    end
+
+    test "variation classification private draft trash works with no raw_code" do
+      for {status, id} <- [{"private", 203}, {"draft", 204}, {"trash", 205}] do
+        result =
+          translate!(%{
+            "variation_status_classification" => status,
+            "woo_product_id" => 300,
+            "woo_variation_id" => id
+          })
+
+        assert result.fact.state == "present"
+        assert result.fact.value == status
+        assert result.fact.semantic_scope == "variation"
+        assert result.fact.target == %{woo_product_id: 300, woo_variation_id: id}
+        assert is_nil(result.record.raw_code)
+      end
+    end
+
+    test "private_variation explicit_safe does not mint a lifecycle fact" do
+      result =
+        translate!(%{
+          "raw_code" => "private_variation",
+          "source_owner" => "Phoenix",
+          "source_emitter" => "phoenix.normalizer",
+          "raw_classification" => "explicit_safe",
+          "woo_product_id" => 301,
+          "woo_variation_id" => 401
+        })
+
+      assert result.fact == nil
+      assert result.record.translation_result == "compatibility_diagnostic"
+    end
+
+    test "draft_event emitter-specific lossy handling" do
+      refute V2Adapter.known_lossy_lifecycle_derivative?(
+               "draft",
+               "draft_event",
+               "WordPress",
+               "wp.event_risk_codes"
+             )
+
+      assert V2Adapter.known_lossy_lifecycle_derivative?(
+               "draft",
+               "draft_event",
+               "WordPress",
+               "wp.review_reasons"
+             )
+
+      refute V2Adapter.known_lossy_lifecycle_derivative?(
+               "private",
+               "private_event",
+               "WordPress",
+               "wp.event_risk_codes"
+             )
+
+      refute V2Adapter.known_lossy_lifecycle_derivative?(
+               "private",
+               "private_product",
+               "WordPress",
+               "wp.review_reasons"
+             )
+    end
+
+    test "unknown_product_semantics requires WordPress review_reasons and woo_product_id" do
+      assert {:ok, wrong_owner} =
+               V2Adapter.translate(
+                 input(%{
+                   "raw_code" => "unknown_product_semantics",
+                   "source_owner" => "Phoenix",
+                   "source_emitter" => "phoenix.normalizer",
+                   "woo_product_id" => 91
+                 }),
+                 run_id: "run-hist"
+               )
+
+      assert wrong_owner.record.translation_result == "undeclared_raw"
+
+      assert {:error, :missing_woo_product_id} =
+               V2Adapter.translate(
+                 input(%{"raw_code" => "unknown_product_semantics"}),
+                 run_id: "run-hist"
+               )
+    end
+
+    test "draft_event unknown emitter requires WordPress owner" do
+      assert {:ok, wrong} =
+               V2Adapter.translate(
+                 input(%{
+                   "raw_code" => "draft_event",
+                   "source_owner" => "Phoenix",
+                   "source_emitter" => "unknown",
+                   "tickera_event_id" => 13
+                 }),
+                 run_id: "run-hist"
+               )
+
+      assert wrong.record.translation_result == "undeclared_raw"
+      refute wrong.record.translation_rule_id == "t.draft_event.unknown_emitter"
+    end
+
+    test "raw_scope and source_record_identity are retained; bounds fail closed" do
       result =
         translate!(%{
           "raw_code" => "private_product",
-          "woo_product_id" => 121,
-          "origin" => "native",
-          "authority_slot" => "slot.lifecycle.wp_post_status"
+          "woo_product_id" => 210,
+          "raw_scope" => "parent_product"
         })
 
-      assert result.fact.origin == "compatibility_derived"
-      refute Map.has_key?(result.fact.provenance, "origin")
+      assert result.record.raw_scope == "parent_product"
+      assert result.record.source_record_identity == "hist-1"
+
+      assert {:error, :invalid_utf8} =
+               V2Adapter.translate(
+                 input(%{
+                   "raw_code" => "private_product",
+                   "woo_product_id" => 1,
+                   "raw_scope" => <<0xFF>>
+                 }),
+                 run_id: "run-hist"
+               )
+
+      assert {:error, :oversized_string} =
+               V2Adapter.translate(
+                 input(%{
+                   "raw_code" => "private_product",
+                   "woo_product_id" => 1,
+                   "source_record_identity" => String.duplicate("x", 65)
+                 }),
+                 run_id: "run-hist"
+               )
+
+      assert {:error, :missing_source_record_identity} =
+               V2Adapter.translate(
+                 %{
+                   "raw_code" => "private_product",
+                   "source_owner" => "WordPress",
+                   "source_emitter" => "wp.review_reasons",
+                   "woo_product_id" => 1
+                 },
+                 run_id: "run-hist"
+               )
     end
   end
 end
