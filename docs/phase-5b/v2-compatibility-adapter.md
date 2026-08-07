@@ -17,7 +17,9 @@
 
 - `v1` — initial compatibility adapter after PR #152 merge (`83fae70…`)
 - `v2` — Gate D REQUEST CHANGES on PR #153: weaken overstated translations; separate precedence from conflict
-- `v3` — Gate D REQUEST CHANGES: `source_emitter` identity; split `wp.event_risk_codes` vs `wp.review_reasons` `draft_event`### Conflict rule
+- `v3` — Gate D REQUEST CHANGES: `source_emitter` identity; split `wp.event_risk_codes` vs `wp.review_reasons` `draft_event`
+
+### Conflict rule
 
 ```text
 domain model + source_risk.v3 native contract win on semantics/invariants
