@@ -21,6 +21,8 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.FindingPolicy do
           implies_apply_eligible?: false
         }
 
+  @capability_dimensions ~w(payment_plan membership bundle add_on)
+
   @spec evaluate(CanonicalFact.t()) :: disposition_result()
   def evaluate(%CanonicalFact{} = fact) do
     fact
@@ -61,15 +63,35 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.FindingPolicy do
   def evaluate_contract_error(reason) when is_atom(reason) do
     {disposition, finding_id} =
       case reason do
-        :scope_mismatch -> {"blocking_scope_mismatch", "contract.scope_mismatch"}
-        :authority_mismatch -> {"blocking_authority_mismatch", "contract.authority_mismatch"}
-        :unknown_dimension -> {"blocking_contract_error", "contract.contract_violation"}
-        :unknown_scope -> {"blocking_contract_error", "contract.contract_violation"}
-        :unknown_state -> {"blocking_contract_error", "contract.contract_violation"}
-        :unknown_value -> {"blocking_contract_error", "contract.contract_violation"}
-        :undeclared_product_type -> {"blocking_invalid", "contract.contract_violation"}
-        :parser_error -> {"blocking_error", "contract.parser_error"}
-        _ -> {"blocking_contract_error", "contract.contract_violation"}
+        :scope_mismatch ->
+          {"blocking_scope_mismatch", "contract.scope_mismatch"}
+
+        :authority_mismatch ->
+          {"blocking_authority_mismatch", "contract.authority_mismatch"}
+
+        :unknown_dimension ->
+          {"blocking_contract_error", "contract.contract_violation"}
+
+        :unknown_scope ->
+          {"blocking_contract_error", "contract.contract_violation"}
+
+        :unknown_state ->
+          {"blocking_contract_error", "contract.contract_violation"}
+
+        :unknown_value ->
+          {"blocking_contract_error", "contract.contract_violation"}
+
+        :undeclared_product_type ->
+          {"blocking_invalid", "contract.contract_violation"}
+
+        :unproven_exhaustive_completeness ->
+          {"blocking_contract_error", "contract.contract_violation"}
+
+        :parser_error ->
+          {"blocking_error", "contract.parser_error"}
+
+        _ ->
+          {"blocking_contract_error", "contract.contract_violation"}
       end
 
     finalize(%{
@@ -209,6 +231,38 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.FindingPolicy do
 
   defp explicit_risk(_fact), do: nil
 
+  # Subscription non-safe matrix — owns finding id before generic state clauses.
+  defp blocking_for_state(%CanonicalFact{dimension: "subscription", state: state})
+       when state in ["unknown", "unsupported", "missing", "invalid", "producer_error", "absent"] do
+    {disposition, _} = subscription_blocking(state)
+
+    %{
+      disposition: disposition,
+      severity: :blocking,
+      qualified_finding_id: "source_risk.subscription_unresolved",
+      dimension_local_only?: true
+    }
+  end
+
+  # Capability dimension matrix — including producer_error.
+  defp blocking_for_state(%CanonicalFact{dimension: dimension, state: state})
+       when dimension in @capability_dimensions and
+              state in ["unsupported", "unknown", "producer_error"] do
+    disposition =
+      case state do
+        "unsupported" -> "blocking_unsupported"
+        "unknown" -> "blocking_unknown"
+        "producer_error" -> "blocking_error"
+      end
+
+    %{
+      disposition: disposition,
+      severity: :blocking,
+      qualified_finding_id: "source_risk.#{dimension}",
+      dimension_local_only?: true
+    }
+  end
+
   defp blocking_for_state(%CanonicalFact{state: "unknown"} = fact) do
     %{
       disposition: "blocking_unknown",
@@ -227,21 +281,20 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.FindingPolicy do
     }
   end
 
-  defp blocking_for_state(%CanonicalFact{state: "unsupported"} = fact) do
-    finding =
-      case fact.dimension do
-        "payment_plan" -> "source_risk.payment_plan"
-        "membership" -> "source_risk.membership"
-        "bundle" -> "source_risk.bundle"
-        "add_on" -> "source_risk.add_on"
-        "product_type" -> "contract.blocking_unsupported"
-        _ -> "contract.blocking_unsupported"
-      end
-
+  defp blocking_for_state(%CanonicalFact{state: "unsupported", dimension: "product_type"}) do
     %{
       disposition: "blocking_unsupported",
       severity: :blocking,
-      qualified_finding_id: finding,
+      qualified_finding_id: "contract.blocking_unsupported",
+      dimension_local_only?: true
+    }
+  end
+
+  defp blocking_for_state(%CanonicalFact{state: "unsupported"}) do
+    %{
+      disposition: "blocking_unsupported",
+      severity: :blocking,
+      qualified_finding_id: "contract.blocking_unsupported",
       dimension_local_only?: true
     }
   end
@@ -264,24 +317,20 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.FindingPolicy do
     }
   end
 
-  defp blocking_for_state(%CanonicalFact{state: state})
-       when state in ["producer_error", "parser_error"] do
-    finding =
-      if state == "parser_error", do: "contract.parser_error", else: "contract.contract_violation"
-
+  defp blocking_for_state(%CanonicalFact{state: "parser_error"}) do
     %{
       disposition: "blocking_error",
       severity: :blocking,
-      qualified_finding_id: finding,
+      qualified_finding_id: "contract.parser_error",
       dimension_local_only?: true
     }
   end
 
-  defp blocking_for_state(%CanonicalFact{dimension: "subscription", state: "absent"}) do
+  defp blocking_for_state(%CanonicalFact{state: "producer_error"} = fact) do
     %{
-      disposition: "blocking_unknown",
+      disposition: "blocking_error",
       severity: :blocking,
-      qualified_finding_id: "source_risk.subscription_unresolved",
+      qualified_finding_id: unresolved_finding(fact),
       dimension_local_only?: true
     }
   end
@@ -316,6 +365,13 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.FindingPolicy do
 
   defp blocking_for_state(_fact), do: nil
 
+  defp subscription_blocking("unknown"), do: {"blocking_unknown", :ok}
+  defp subscription_blocking("unsupported"), do: {"blocking_unsupported", :ok}
+  defp subscription_blocking("missing"), do: {"blocking_missing", :ok}
+  defp subscription_blocking("invalid"), do: {"blocking_invalid", :ok}
+  defp subscription_blocking("producer_error"), do: {"blocking_error", :ok}
+  defp subscription_blocking("absent"), do: {"blocking_unknown", :ok}
+
   defp unresolved_finding(%CanonicalFact{dimension: "lifecycle"}),
     do: "source_risk.lifecycle_unresolved"
 
@@ -323,7 +379,7 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.FindingPolicy do
     do: "source_risk.subscription_unresolved"
 
   defp unresolved_finding(%CanonicalFact{dimension: dimension})
-       when dimension in ["payment_plan", "membership", "bundle", "add_on"],
+       when dimension in @capability_dimensions,
        do: "source_risk.#{dimension}"
 
   defp unresolved_finding(_fact), do: "contract.contract_violation"

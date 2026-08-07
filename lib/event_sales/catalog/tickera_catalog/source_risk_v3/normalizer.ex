@@ -24,6 +24,7 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Normalizer do
   def normalize_evidence(%Evidence{} = evidence, opts) when is_list(opts) do
     run_id = Keyword.get(opts, :run_id)
     origin = Keyword.get(opts, :origin, "native")
+    exhaustive_proven? = Keyword.get(opts, :exhaustive_proven?, false) == true
 
     with :ok <- require_run_id(run_id),
          {:ok, origin} <- ContractRegistry.fetch_origin(origin),
@@ -32,7 +33,8 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Normalizer do
          :ok <- validate_scope_for_dimension(dimension, scope),
          {:ok, state} <- ContractRegistry.fetch_state(evidence.state),
          :ok <- validate_state_for_dimension(dimension, state),
-         {:ok, completeness} <- ContractRegistry.fetch_completeness(evidence.completeness),
+         {:ok, completeness} <-
+           resolve_completeness(evidence.completeness, exhaustive_proven?),
          {:ok, authority_slot} <- ContractRegistry.authority_slot_for_dimension(dimension),
          {:ok, authority} <- ContractRegistry.authority_for_slot(authority_slot),
          :ok <- validate_state_for_authority(authority, state),
@@ -97,6 +99,24 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Normalizer do
   defp require_run_id(run_id) when is_binary(run_id) and run_id != "", do: :ok
   defp require_run_id(_), do: {:error, :missing_run_id}
 
+  defp resolve_completeness(claimed, exhaustive_proven?) do
+    with {:ok, completeness} <- ContractRegistry.fetch_completeness(claimed) do
+      case completeness do
+        "partial" ->
+          {:ok, "partial"}
+
+        "unknown" ->
+          {:ok, "unknown"}
+
+        "exhaustive" when exhaustive_proven? ->
+          {:ok, "exhaustive"}
+
+        "exhaustive" ->
+          {:error, :unproven_exhaustive_completeness}
+      end
+    end
+  end
+
   defp validate_scope_for_dimension(dimension, scope) do
     if ContractRegistry.scope_allowed_for_dimension?(dimension, scope) do
       :ok
@@ -123,15 +143,11 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Normalizer do
 
   defp validate_producer_source_key(authority, producer_source_key) do
     case ContractRegistry.producer_source_key_for_authority(authority) do
-      {:ok, expected} ->
-        # Accept exact expected key, or for event_name_meta the documented compound key prefix.
-        if producer_source_key == expected or
-             (authority == "auth.event_name_meta" and
-                String.starts_with?(producer_source_key, "postmeta:_event_name")) do
-          :ok
-        else
-          {:error, :authority_mismatch}
-        end
+      {:ok, expected} when producer_source_key == expected ->
+        :ok
+
+      {:ok, _expected} ->
+        {:error, :authority_mismatch}
 
       {:error, reason} ->
         {:error, reason}
@@ -148,6 +164,8 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Normalizer do
 
   defp reject_parent_as_variation(_scope, _target), do: :ok
 
+  # --- lifecycle ---
+
   defp normalize_value("lifecycle", "present", value) when is_binary(value) do
     case ContractRegistry.allowed_values_for_dimension("lifecycle") do
       {:ok, allowed} ->
@@ -162,25 +180,17 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Normalizer do
     end
   end
 
-  defp normalize_value("product_type", "present", value) when is_binary(value) do
-    case ContractRegistry.allowed_values_for_dimension("product_type") do
-      {:ok, allowed} ->
-        if MapSet.member?(allowed, value) do
-          {:ok, value}
-        else
-          {:error, :undeclared_product_type}
-        end
+  defp normalize_value("lifecycle", "present", _), do: {:error, :missing_value_for_present}
 
-      other ->
-        other
-    end
-  end
+  defp normalize_value("lifecycle", state, nil)
+       when state in ["unknown", "missing", "invalid", "producer_error"],
+       do: {:ok, nil}
 
-  defp normalize_value("event_link", "present", value) when is_integer(value) and value > 0 do
-    {:ok, value}
-  end
+  defp normalize_value("lifecycle", state, _value)
+       when state in ["unknown", "missing", "invalid", "producer_error"],
+       do: {:error, :unexpected_canonical_value}
 
-  defp normalize_value("event_link", "present", _), do: {:error, :invalid_event_link_value}
+  # --- ticket_template ---
 
   defp normalize_value("ticket_template", "present", value)
        when is_binary(value) and value != "" do
@@ -196,40 +206,104 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Normalizer do
   defp normalize_value("ticket_template", "present", _),
     do: {:error, :invalid_ticket_template_value}
 
-  defp normalize_value(dimension, "present", value)
-       when dimension in ["payment_plan", "membership", "bundle", "add_on"] do
-    _ = value
-    {:error, :unauthorized_semantic_claim}
+  defp normalize_value("ticket_template", state, nil)
+       when state in ["absent", "missing", "unknown", "unsupported", "invalid", "producer_error"],
+       do: {:ok, nil}
+
+  defp normalize_value("ticket_template", state, _value)
+       when state in ["absent", "missing", "unknown", "unsupported", "invalid", "producer_error"],
+       do: {:error, :unexpected_canonical_value}
+
+  # --- event_link ---
+
+  defp normalize_value("event_link", "present", value) when is_integer(value) and value > 0 do
+    {:ok, value}
   end
 
-  defp normalize_value(dimension, "absent", value)
-       when dimension in ["payment_plan", "membership", "bundle", "add_on"] do
-    _ = value
-    {:error, :unauthorized_semantic_claim}
-  end
+  defp normalize_value("event_link", "present", _), do: {:error, :invalid_event_link_value}
 
-  defp normalize_value(_dimension, _state, nil), do: {:ok, nil}
+  defp normalize_value("event_link", state, nil)
+       when state in ["absent", "missing", "unknown", "invalid", "producer_error"],
+       do: {:ok, nil}
 
-  defp normalize_value(_dimension, state, value)
-       when state != "present" and not is_nil(value) do
-    # Non-present states may carry optional digests; keep bounded strings only.
-    cond do
-      is_binary(value) ->
-        case ContractRegistry.validate_bounded_string(
-               value,
-               ContractRegistry.max_evidence_value_bytes()
-             ) do
-          :ok -> {:ok, value}
-          {:error, reason} -> {:error, reason}
-        end
+  defp normalize_value("event_link", state, _value)
+       when state in ["absent", "missing", "unknown", "invalid", "producer_error"],
+       do: {:error, :unexpected_canonical_value}
 
-      is_integer(value) and value > 0 ->
-        {:ok, value}
+  # --- subscription ---
 
-      true ->
-        {:error, :invalid_value}
+  defp normalize_value("subscription", "present", nil), do: {:ok, nil}
+
+  defp normalize_value("subscription", "present", value)
+       when is_binary(value) and value != "" do
+    case ContractRegistry.validate_bounded_string(
+           value,
+           ContractRegistry.max_evidence_value_bytes()
+         ) do
+      :ok -> {:ok, value}
+      {:error, reason} -> {:error, reason}
     end
   end
 
-  defp normalize_value(_dimension, _state, value), do: {:ok, value}
+  defp normalize_value("subscription", "present", _), do: {:error, :invalid_subscription_value}
+
+  defp normalize_value("subscription", state, nil)
+       when state in ["absent", "unknown", "unsupported", "missing", "invalid", "producer_error"],
+       do: {:ok, nil}
+
+  defp normalize_value("subscription", state, _value)
+       when state in ["absent", "unknown", "unsupported", "missing", "invalid", "producer_error"],
+       do: {:error, :unexpected_canonical_value}
+
+  # --- capability dimensions ---
+
+  defp normalize_value(dimension, state, nil)
+       when dimension in ["payment_plan", "membership", "bundle", "add_on"] and
+              state in ["unsupported", "unknown", "producer_error"],
+       do: {:ok, nil}
+
+  defp normalize_value(dimension, state, _value)
+       when dimension in ["payment_plan", "membership", "bundle", "add_on"] and
+              state in ["unsupported", "unknown", "producer_error"],
+       do: {:error, :unexpected_canonical_value}
+
+  defp normalize_value(dimension, "present", _value)
+       when dimension in ["payment_plan", "membership", "bundle", "add_on"],
+       do: {:error, :unauthorized_semantic_claim}
+
+  defp normalize_value(dimension, "absent", _value)
+       when dimension in ["payment_plan", "membership", "bundle", "add_on"],
+       do: {:error, :unauthorized_semantic_claim}
+
+  defp normalize_value(dimension, "missing", _value)
+       when dimension in ["payment_plan", "membership", "bundle", "add_on"],
+       do: {:error, :unauthorized_semantic_claim}
+
+  # --- product_type ---
+
+  defp normalize_value("product_type", "present", value) when is_binary(value) do
+    case ContractRegistry.allowed_values_for_dimension("product_type") do
+      {:ok, allowed} ->
+        if MapSet.member?(allowed, value) do
+          {:ok, value}
+        else
+          {:error, :undeclared_product_type}
+        end
+
+      other ->
+        other
+    end
+  end
+
+  defp normalize_value("product_type", "present", _), do: {:error, :missing_value_for_present}
+
+  defp normalize_value("product_type", state, nil)
+       when state in ["unsupported", "unknown", "missing", "invalid", "producer_error"],
+       do: {:ok, nil}
+
+  defp normalize_value("product_type", state, _value)
+       when state in ["unsupported", "unknown", "missing", "invalid", "producer_error"],
+       do: {:error, :unexpected_canonical_value}
+
+  defp normalize_value(_dimension, _state, _value), do: {:error, :invalid_value}
 end

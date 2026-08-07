@@ -93,6 +93,77 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.FindingPolicyTest do
            ).qualified_finding_id == "source_risk.missing_tickera_event"
   end
 
+  test "subscription non-safe state matrix uses subscription_unresolved" do
+    expected = %{
+      "unknown" => "blocking_unknown",
+      "unsupported" => "blocking_unsupported",
+      "missing" => "blocking_missing",
+      "invalid" => "blocking_invalid",
+      "producer_error" => "blocking_error",
+      "absent" => "blocking_unknown"
+    }
+
+    for {state, disposition} <- expected do
+      result =
+        FindingPolicy.evaluate(
+          fact(%{
+            dimension: "subscription",
+            authority_slot: "slot.subscription.detection",
+            authority: "auth.subscription_detection",
+            state: state,
+            value: nil
+          })
+        )
+
+      assert result.disposition == disposition,
+             "subscription/#{state} expected #{disposition}, got #{result.disposition}"
+
+      assert result.qualified_finding_id == "source_risk.subscription_unresolved"
+      assert result.severity == :blocking
+    end
+
+    present =
+      FindingPolicy.evaluate(
+        fact(%{
+          dimension: "subscription",
+          authority_slot: "slot.subscription.detection",
+          authority: "auth.subscription_detection",
+          state: "present",
+          value: nil
+        })
+      )
+
+    assert present.disposition == "explicit_risk"
+    assert present.qualified_finding_id == "source_risk.subscription"
+  end
+
+  test "capability dimension state matrix uses source_risk.<dimension>" do
+    for dimension <- ["payment_plan", "membership", "bundle", "add_on"] do
+      for {state, disposition} <- [
+            {"unsupported", "blocking_unsupported"},
+            {"unknown", "blocking_unknown"},
+            {"producer_error", "blocking_error"}
+          ] do
+        result =
+          FindingPolicy.evaluate(
+            fact(%{
+              dimension: dimension,
+              authority_slot: "slot.#{dimension}.capability",
+              authority: "auth.wp_semantic_capability",
+              state: state,
+              value: nil
+            })
+          )
+
+        assert result.disposition == disposition,
+               "#{dimension}/#{state} expected #{disposition}, got #{result.disposition}"
+
+        assert result.qualified_finding_id == "source_risk.#{dimension}"
+        assert result.severity == :blocking
+      end
+    end
+  end
+
   test "conflict and contract error dispositions" do
     left = fact(%{value: "private"})
     right = fact(%{value: "draft"})

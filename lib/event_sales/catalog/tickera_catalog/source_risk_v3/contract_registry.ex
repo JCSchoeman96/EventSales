@@ -159,8 +159,8 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.ContractRegistry do
   @authority_producer_source_keys %{
     "auth.wp_post_status" => "wp_posts.post_status",
     "auth.ticket_template_meta" => "postmeta:_ticket_template",
-    "auth.event_name_meta" => "postmeta:_event_name",
-    "auth.subscription_detection" => "wc_product_type",
+    "auth.event_name_meta" => "postmeta:_event_name+tc_events.resolve",
+    "auth.subscription_detection" => "wc_product_type+subscription_evidence",
     "auth.wc_product_type" => "wc_get_product.type",
     "auth.wp_semantic_capability" => "product_semantics_capability"
   }
@@ -481,10 +481,10 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.ContractRegistry do
   @spec validate_bounded_string(term(), pos_integer()) :: :ok | {:error, atom()}
   def validate_bounded_string(value, max_bytes)
       when is_binary(value) and is_integer(max_bytes) and max_bytes > 0 do
-    if byte_size(value) <= max_bytes do
-      :ok
-    else
-      {:error, :oversized_string}
+    cond do
+      not String.valid?(value) -> {:error, :invalid_utf8}
+      byte_size(value) > max_bytes -> {:error, :oversized_string}
+      true -> :ok
     end
   end
 

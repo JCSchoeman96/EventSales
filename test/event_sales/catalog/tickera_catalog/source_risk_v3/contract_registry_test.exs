@@ -65,6 +65,20 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.ContractRegistryTest do
 
     assert {:error, :unknown_authority_slot} =
              ContractRegistry.authority_for_slot("slot.lifecycle.none")
+
+    assert {:ok, "postmeta:_event_name+tc_events.resolve"} =
+             ContractRegistry.producer_source_key_for_authority("auth.event_name_meta")
+
+    assert {:ok, "wc_product_type+subscription_evidence"} =
+             ContractRegistry.producer_source_key_for_authority("auth.subscription_detection")
+  end
+
+  test "bounded strings require valid UTF-8" do
+    assert :ok = ContractRegistry.validate_bounded_string("ok", 64)
+    assert {:error, :invalid_utf8} = ContractRegistry.validate_bounded_string(<<0xFF>>, 64)
+
+    assert {:error, :oversized_string} =
+             ContractRegistry.validate_bounded_string(String.duplicate("a", 65), 64)
   end
 
   test "exposes allowed canonical values" do

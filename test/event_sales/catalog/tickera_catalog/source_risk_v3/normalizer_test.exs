@@ -38,6 +38,35 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.NormalizerTest do
            } = fact
   end
 
+  test "producer exhaustive completeness cannot mint canonical exhaustive without trusted proof" do
+    exhaustive = evidence(%{"completeness" => "exhaustive"})
+
+    assert {:error, :unproven_exhaustive_completeness} =
+             Normalizer.normalize_evidence(exhaustive, run_id: "run-a")
+
+    assert {:error, :unproven_exhaustive_completeness} =
+             Normalizer.normalize_evidence(exhaustive,
+               run_id: "run-a",
+               exhaustive_proven?: false
+             )
+
+    assert {:ok, %CanonicalFact{completeness: "exhaustive"}} =
+             Normalizer.normalize_evidence(exhaustive,
+               run_id: "run-a",
+               exhaustive_proven?: true
+             )
+
+    assert {:ok, %CanonicalFact{completeness: "partial"}} =
+             Normalizer.normalize_evidence(evidence(%{"completeness" => "partial"}),
+               run_id: "run-a"
+             )
+
+    assert {:ok, %CanonicalFact{completeness: "unknown"}} =
+             Normalizer.normalize_evidence(evidence(%{"completeness" => "unknown"}),
+               run_id: "run-a"
+             )
+  end
+
   test "rejects unknown states and values fail closed" do
     assert {:error, :unknown_state} =
              Evidence.validate(%{
@@ -74,7 +103,7 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.NormalizerTest do
              Normalizer.normalize_evidence(validated, run_id: "run-a")
   end
 
-  test "authority and scope validation fail closed" do
+  test "authority and scope validation fail closed with exact source keys only" do
     assert {:error, :scope_mismatch} =
              Normalizer.normalize_evidence(
                evidence(%{
@@ -92,6 +121,29 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.NormalizerTest do
                evidence(%{"producer_source_key" => "invented.source"}),
                run_id: "run-a"
              )
+
+    assert {:error, :authority_mismatch} =
+             Normalizer.normalize_evidence(
+               evidence(%{
+                 "dimension" => "event_link",
+                 "producer_scope" => "event_product_relationship",
+                 "target" => %{"woo_product_id" => 55},
+                 "producer_source_key" => "postmeta:_event_name",
+                 "value" => 101
+               }),
+               run_id: "run-a"
+             )
+
+    assert {:error, :authority_mismatch} =
+             Normalizer.normalize_evidence(
+               evidence(%{
+                 "dimension" => "subscription",
+                 "producer_source_key" => "wc_product_type",
+                 "value" => nil,
+                 "state" => "present"
+               }),
+               run_id: "run-a"
+             )
   end
 
   test "target validation preserves event_link primary identity as woo_product_id" do
@@ -101,7 +153,7 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.NormalizerTest do
                "producer_scope" => "event_product_relationship",
                "target" => %{"woo_product_id" => 55},
                "state" => "present",
-               "producer_source_key" => "postmeta:_event_name",
+               "producer_source_key" => "postmeta:_event_name+tc_events.resolve",
                "completeness" => "partial",
                "provenance" => %{},
                "value" => 101,
@@ -111,6 +163,61 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.NormalizerTest do
     assert {:ok, fact} = Normalizer.normalize_evidence(validated, run_id: "run-a")
     assert fact.target == %{woo_product_id: 55}
     assert fact.value == 101
+    assert fact.authority == "auth.event_name_meta"
+  end
+
+  test "non-present states reject unauthorized canonical values" do
+    assert {:error, :unexpected_canonical_value} =
+             Normalizer.normalize_evidence(
+               evidence(%{
+                 "dimension" => "payment_plan",
+                 "state" => "unsupported",
+                 "producer_source_key" => "product_semantics_capability",
+                 "value" => "x"
+               }),
+               run_id: "run-a"
+             )
+
+    assert {:error, :unexpected_canonical_value} =
+             Normalizer.normalize_evidence(
+               evidence(%{
+                 "dimension" => "product_type",
+                 "state" => "unsupported",
+                 "producer_source_key" => "wc_get_product.type",
+                 "value" => "simple"
+               }),
+               run_id: "run-a"
+             )
+
+    assert {:error, :unexpected_canonical_value} =
+             Normalizer.normalize_evidence(
+               evidence(%{
+                 "dimension" => "event_link",
+                 "producer_scope" => "event_product_relationship",
+                 "target" => %{"woo_product_id" => 55},
+                 "state" => "absent",
+                 "producer_source_key" => "postmeta:_event_name+tc_events.resolve",
+                 "value" => 123
+               }),
+               run_id: "run-a"
+             )
+
+    assert {:error, :unexpected_canonical_value} =
+             Normalizer.normalize_evidence(
+               evidence(%{"state" => "unknown", "value" => "publish"}),
+               run_id: "run-a"
+             )
+
+    assert {:error, :unexpected_canonical_value} =
+             Normalizer.normalize_evidence(
+               evidence(%{
+                 "dimension" => "subscription",
+                 "state" => "unknown",
+                 "producer_source_key" => "wc_product_type+subscription_evidence",
+                 "value" => "digest"
+               }),
+               run_id: "run-a"
+             )
   end
 
   test "unknown missing unsupported and error states never become safe" do
@@ -166,6 +273,46 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.NormalizerTest do
                "completeness" => "partial",
                "provenance" => %{},
                "value" => oversized
+             })
+  end
+
+  test "rejects invalid UTF-8 evidence values and source keys fail closed" do
+    invalid = <<0xFF, 0xFE>>
+
+    assert {:error, :invalid_utf8} =
+             Evidence.validate(%{
+               "dimension" => "ticket_template",
+               "producer_scope" => "parent_product",
+               "target" => %{"woo_product_id" => 1},
+               "state" => "present",
+               "producer_source_key" => "postmeta:_ticket_template",
+               "completeness" => "partial",
+               "provenance" => %{},
+               "value" => invalid
+             })
+
+    assert {:error, :invalid_utf8} =
+             Evidence.validate(%{
+               "dimension" => "lifecycle",
+               "producer_scope" => "parent_product",
+               "target" => %{"woo_product_id" => 1},
+               "state" => "present",
+               "producer_source_key" => invalid,
+               "completeness" => "partial",
+               "provenance" => %{},
+               "value" => "publish"
+             })
+
+    assert {:error, :invalid_utf8} =
+             Evidence.validate(%{
+               "dimension" => "lifecycle",
+               "producer_scope" => "parent_product",
+               "target" => %{"woo_product_id" => 1},
+               "state" => "present",
+               "producer_source_key" => "wp_posts.post_status",
+               "completeness" => "partial",
+               "provenance" => %{"raw_producer_code" => invalid},
+               "value" => "publish"
              })
   end
 end
