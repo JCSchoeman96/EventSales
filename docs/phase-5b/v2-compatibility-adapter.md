@@ -3,20 +3,20 @@
 | Field | Value |
 |---|---|
 | Plan / document ID | `phase-5b-v2-compatibility-adapter` |
-| Document version | `v1` |
-| Status | Draft for independent Gate D review |
+| Document version | `v2` |
+| Status | Draft for independent Gate D re-review (PR #153) |
 | Scope | Compatibility translation from historical `2026-07-22.v2` representations into locked `source_risk.v3` **projections** — no implementation, no historical mutation |
 | Authority | Active Phase 5B Gate D contract; subordinate to locked domain model and native contract on conflicts |
 | Locked domain model | `docs/phase-5b/source-risk-domain-model.md` — SHA256 `16563ee02f58a12d2fde1e6995da3cb4d1be89dfd9ecbb8e07eb76ba5d8a6375` |
 | Locked native contract | `docs/phase-5b/source-risk-contract.md` — SHA256 `87dec4238e5c7ea04fe8d2a9735980a35f2bf542324a851686d60fead1d0785c` |
 | Historical context | `docs/phase-5a/source-risk-blocker-taxonomy.md`, `docs/phase-5a/source-risk-blocker-ledger.csv` |
 | Last updated | 2026-08-07 |
-| Change summary | Initial Gate D v2→`source_risk.v3` compatibility adapter design |
+| Change summary | Harden translation: no null-status→absent, no draft_product-only→draft, closed product_type registry, split missing_source_risk_data, precedence≠conflict |
 
 ### Revision log
 
 - `v1` — initial compatibility adapter after PR #152 merge (`83fae70…`)
-
+- `v2` — Gate D REQUEST CHANGES on PR #153: weaken overstated translations; separate precedence from conflict
 ### Conflict rule
 
 ```text
@@ -109,7 +109,41 @@ Distinguish input classes; do not mix them opportunistically for the “safest�
 
 Never reconstruct missing producer evidence from a downstream summary when original semantics were erased.
 
-If higher and lower layers conflict for the same canonical identity → surface `blocking_conflict`; do not silently prefer the safer claim.
+### Representation precedence vs evidence conflict
+
+These are different rules. Do not conflate them.
+
+**Known derived / lossy representations** (one underlying observation, different fidelity):
+
+```text
+example:
+  product_status_classification=trash
+  + risk_code=draft_product
+```
+
+v2 is known to emit `draft_product` from a broader non-publish branch that includes trash.
+
+```text
+higher-fidelity authoritative representation wins translation
+lower-fidelity known derivative:
+  - retained in compatibility provenance
+  - marked superseded / derived / lossy
+  - does NOT independently create blocking_conflict
+```
+
+**Genuinely independent contradictory claims** (separate evidence for the same canonical identity):
+
+```text
+example:
+  independent source A → lifecycle=private
+  independent source B → lifecycle=draft
+  same canonical identity
+→ blocking_conflict
+```
+
+Never choose whichever independent claim is safer.
+
+Never manufacture a conflict from a documented lossy derivative of the same observation.
 
 ---
 
@@ -203,11 +237,14 @@ Classification-only mapping is forbidden.
 
 ## 8. Translation Source Precedence
 
-See §4. Additional rules:
+See §4 for the class ladder and the precedence-vs-conflict distinction.
 
-- Prefer Class A classification fields (`*_status_classification`) over collapsed `risk_codes` when they diverge (e.g. product trash collapsed to `draft_product`).
-- Prefer retained raw `risk_codes` entry over post-`from_code/3` `missing_source_risk_data` fact.
+Additional deterministic rules:
+
+- Prefer Class A classification fields (`*_status_classification`) over known lossy `risk_codes` derivatives (e.g. `product_status_classification=trash` + `draft_product`). Apply §4 lossy-derivative handling — **not** `blocking_conflict`.
+- Prefer retained raw `risk_codes` entry over post-`from_code/3` Phoenix-fallback `missing_source_risk_data` fact when the original code is still recoverable from Class A.
 - Prefer parent product id for parent semantics even when variation id is present on the transport row (§16).
+- When two representations are **not** documented as lossy derivatives of each other and normalize to different claims on the same canonical identity → `blocking_conflict` (§17).
 
 ---
 
@@ -223,7 +260,7 @@ Adapter version scope: `compat.v2_to_source_risk_v3.v1` / source `2026-07-22.v2`
 | `t.trashed_event` | `trashed_event` | Phoenix vocab (often not WP-emitted) | event | `explicit_risky` if present | typed fact | `lifecycle` | `present` | `trash` | `event` | event id | `unknown` | `source_risk.lifecycle_trashed` | preserved |
 | `t.deleted_event` | `deleted_event` | Phoenix vocab; not full-feed WP | event | if present | typed fact / diagnostic | `lifecycle` | `present` | `deleted` | `event` | event id | `unknown` | lifecycle deleted | rare; no invention |
 | `t.private_product` | `private_product` | WP `review_reasons` | product (may be on variation row) | `explicit_risky` | typed fact | `lifecycle` | `present` | `private` | `parent_product` | `{woo_product_id}` regroup | `unknown` | `source_risk.lifecycle_private` | preserved |
-| `t.draft_product` | `draft_product` | WP `review_reasons` | product | `explicit_risky` | typed fact **or** weakened | `lifecycle` | `present` | see §10 | `parent_product` | product id | `unknown` | lifecycle draft/trash | **trash collapsed into draft_product in WP** — use classification when retained |
+| `t.draft_product` | `draft_product` | WP `review_reasons` | product | `explicit_risky` | compatibility diagnostic / unresolved lifecycle unless classification proves exact value | `lifecycle` | only when classification proves exact value; else — | only when classification proves; else — | `parent_product` | product id | `unknown` | retain historical finding | **never** map draft_product-only → present/draft; trash collapsed into this code |
 | `t.trashed_product` | `trashed_product` | Phoenix vocab | product | if present | typed fact | `lifecycle` | `present` | `trash` | `parent_product` | product id | `unknown` | lifecycle trashed | rare in WP emission |
 | `t.deleted_product` | `deleted_product` | Phoenix vocab | product | if present | typed fact | `lifecycle` | `present` | `deleted` | `parent_product` | product id | `unknown` | lifecycle deleted | rare |
 | `t.private_variation` | `private_variation` | mostly Phoenix ensure_dimension | variation | often synthetic `explicit_safe` fill | typed / diagnostic | `lifecycle` | depends | see §10 | `variation` | variation id | `unknown` | as proven | synthetic safe fills do not invent publish observation from absence of code alone without retained classification |
@@ -231,20 +268,29 @@ Adapter version scope: `compat.v2_to_source_risk_v3.v1` / source `2026-07-22.v2`
 | `t.subscription_product` | `subscription_product` | WP when `is_subscription_product` true | product | erased by `from_code` | declared alias → typed fact | `subscription` | `present` | optional digest | `parent_product` | product id | `unknown` | `source_risk.subscription` | positive only; never safe absent |
 | `t.payment_plan_product` | `payment_plan_product` | WP co-emitted with subscription | product | erased by `from_code` | **rejected alias** / undeclared_raw diagnostic | — | — | — | — | retain product id in provenance | `unknown` | `contract.unknown_source_risk_code` or compat diagnostic | **NOT** `payment_plan` |
 | `t.missing_ticket_template` | `missing_ticket_template` | WP when template id null | product | Phoenix `explicit_risky` | typed fact | `ticket_template` | `absent` | null | `parent_product` | product id | `unknown` (not invented exhaustive) | `source_risk.missing_ticket_template` | “missing” in code name ≠ EvidenceState missing |
-| `t.missing_tickera_event` | `missing_tickera_event` | WP when `event_status` null | product relation | erased by `from_code` | typed fact **weakened if flat** | `event_link` | prefer `absent` when WP path is null status; else unrecoverable | null | `event_product_relationship` | `{woo_product_id}` | `unknown` | `source_risk.missing_tickera_event` | WP path is “event_status null”; invalid-vs-absent not fully separable if only fallback fact remains |
+| `t.missing_tickera_event` | `missing_tickera_event` | WP when `event_status` null | product relation | erased by `from_code` | compatibility diagnostic / unresolved event_link unless Class A proves reference absence or invalidity | `event_link` | only absent/invalid when Class A proves; null-status alone → — | — | `event_product_relationship` | `{woo_product_id}` | `unknown` | preserve `source_risk.missing_tickera_event` visibility | **never** mint absent from event_status=null alone |
 | `t.unknown_product_semantics` | `unknown_product_semantics` | WP always appended | product | Phoenix `unknown` | derived summary only | — | — | — | — | product id for aggregate | — | derived UI/audit only | do not mint co-equal blocker |
 | `t.payment_plan` | `payment_plan` | Phoenix semantic dim / WP semantics unknown | product | `unknown` from `product_semantics` | capability fact | `payment_plan` | `unknown` | — | `parent_product` | product id | `unknown` | `source_risk.payment_plan` | via capability slot semantics for review |
 | `t.membership` | `membership` | same | product | `unknown` | capability fact | `membership` | `unknown` | — | `parent_product` | product id | `unknown` | `source_risk.membership` | same |
 | `t.bundle` | `bundle` | same | product | `unknown` | capability fact | `bundle` | `unknown` | — | `parent_product` | product id | `unknown` | `source_risk.bundle` | same |
 | `t.add_on` | `add_on` | same | product | `unknown` | capability fact | `add_on` | `unknown` | — | `parent_product` | product id | `unknown` | `source_risk.add_on` | same |
 | `t.subscription` | `subscription` | Phoenix after alias / ensure | product | risky or safe fill | typed / capability | `subscription` | present if risky from code; safe fill ≠ exhaustive absent | — | `parent_product` | product id | `unknown` | as applicable | never promote safe fill to exhaustive absent |
-| `t.unsupported_product_type` | `unsupported_product_type` | Phoenix | product | often `unsupported` class | observation vs support split | `product_type` | if type token retained → `present`; else diagnostic | retained type if any; only `simple` locked as safe-positive candidate | `parent_product` | product id | `unknown` | `source_risk.unsupported_product_type` when historical finding means not-supported | do not map class `unsupported` to EvidenceState unsupported unless unevaluable |
+| `t.unsupported_product_type` | `unsupported_product_type` | Phoenix | product | often `unsupported` class | closed-registry observation vs diagnostic | `product_type` | `present` **only** if retained token is locked-declared (`simple`); else — | `simple` only when declared; else — | `parent_product` | product id | `unknown` | preserve historical `source_risk.unsupported_product_type` | undeclared tokens stay raw provenance; fail closed — never mint present with undeclared token as canonical value |
 | `t.variation_mapping_required` | `variation_mapping_required` | WP risk_codes **and** Normalizer structural warning | variation blocker / product warning | overloaded | structural_projection and/or planner_projection | — | — | — | — | separate identities per emitter | — | `structural.*` / `planner.status.*` | never source-risk canonical evidence |
-| `t.missing_source_risk_data` | `missing_source_risk_data` | Phoenix fallback / WP event unknown | varies | `missing` | unrecoverable / retained raw only | — | — | — | — | retained targets only | `unknown` | `contract.*` diagnostic | **never invent erased producer code** |
+| `t.missing_source_risk_data.wp_event_unknown` | `missing_source_risk_data` | WP `event_risk_codes` (explicit emission for unknown event status) | event | `missing` | lifecycle unresolved/unknown projection | `lifecycle` | `unknown` | — | `event` | event id when known | `unknown` | blocking compatibility / lifecycle unknown | explicit WP literal — **not** erased producer code |
+| `t.missing_source_risk_data.phoenix_fallback` | `missing_source_risk_data` | Phoenix `SourceRisk.from_code/3` fallback | varies | `missing` | unrecoverable / contract diagnostic | — | — | — | — | retained targets only | `unknown` | `contract.*` diagnostic | original raw code erased; **never invent**; do not map to lifecycle |
 | `t.unknown_source_risk_code` | n/a (v3) | contract | — | — | contract diagnostic | — | — | — | — | — | — | `contract.unknown_source_risk_code` | for undeclared raw |
 | Planner codes (`ambiguous_*`, `existing_mapping_*`, etc.) | various | planner/normalizer | varies | — | planner_projection | — | — | — | — | planner identities | — | `planner.status.*` | not source evidence |
 
 Unique rule ids above are closed for `compat.v2_to_source_risk_v3.v1`.
+
+Rule uniqueness key:
+
+```text
+compatibility_version + source_contract_version + raw_code + source_owner
+```
+
+`missing_source_risk_data` therefore has two rules because WP explicit emission and Phoenix fallback share the literal but not the owner/provenance. If provenance cannot determine which owner produced the historical literal → use the weaker `t.missing_source_risk_data.phoenix_fallback` path; do not guess.
 
 ---
 
@@ -252,14 +298,15 @@ Unique rule ids above are closed for `compat.v2_to_source_risk_v3.v1`.
 
 ### Event
 
-Static proof: `event_risk_codes/1` emits `private_event`, `draft_event`, or `trash_event` (`status . '_event'`), or `missing_source_risk_data` for unknown status.
+Static proof: `event_risk_codes/1` emits `private_event`, `draft_event`, or `trash_event` (`status . '_event'`), or explicit `missing_source_risk_data` for unknown status.
 
 | Classification retained | Mapping |
 |---|---|
 | `trash` / raw `trash_event` | lifecycle present/trash @ event |
 | `private` / `private_event` | lifecycle present/private |
 | `draft` / `draft_event` | lifecycle present/draft |
-| `unknown` / missing_source_risk_data from event path | lifecycle unknown or contract diagnostic — no invented value |
+| explicit WP `missing_source_risk_data` for unknown event status (`t.missing_source_risk_data.wp_event_unknown`) | lifecycle unresolved/`unknown` @ event — raw code was explicitly emitted, not erased |
+| Phoenix-fallback `missing_source_risk_data` with unproven owner | unrecoverable diagnostic — do not invent lifecycle value |
 
 ### Parent product
 
@@ -269,9 +316,10 @@ Therefore:
 
 | Retained evidence | Mapping |
 |---|---|
-| `product_status_classification=trash` | lifecycle present/trash @ parent_product (**prefer over** `draft_product` code) |
-| `draft_product` only, classification absent/unknown | lifecycle present/draft with `certainty_change=weakened` note that trash may have been collapsed — **do not invent trash** |
-| `private_product` | lifecycle present/private |
+| `product_status_classification=trash` | lifecycle present/trash @ parent_product; if `draft_product` also present, treat it as known lossy derivative (§4) — not conflict |
+| `product_status_classification=draft` | lifecycle present/draft @ parent_product |
+| `private_product` / classification=`private` | lifecycle present/private |
+| `draft_product` only AND `product_status_classification` unavailable/unknown | **compatibility diagnostic** or lifecycle unresolved/`unknown` projection; completeness=`unknown`; origin=`compatibility_derived`; historical finding retained; **do not invent draft or trash**; a `certainty_change=weakened` flag does **not** authorize `present/draft` |
 
 ### Variation
 
@@ -301,27 +349,46 @@ If only a synthetic `explicit_safe` missing_ticket_template fill exists without 
 
 ## 12. Event-Link Translation
 
-Static proof: WP emits `missing_tickera_event` when `event_status === null` (no resolved event status on row).
-
-Preferred when Class A proves null event status:
+Static proof: WP emits `missing_tickera_event` whenever `event_status === null`. Targeted SQL uses LEFT JOINs for both `_event_name` and the referenced Tickera event, so null status can mean:
 
 ```text
-dimension event_link
-scope event_product_relationship
-target {woo_product_id}
-state absent
-completeness unknown
-finding source_risk.missing_tickera_event
+no relationship reference
 ```
 
-If only post-fallback `missing_source_risk_data` remains and raw `missing_tickera_event` was erased:
+or
+
+```text
+relationship reference exists but target is missing / malformed / wrong type / unresolvable
+```
+
+v2 null event status alone does **not** distinguish those cases. The adapter must never choose `absent` merely because that is the historical finding's name or emission path.
+
+Lock:
+
+```text
+retained Class A evidence proves relationship reference itself absent
+→ event_link state=absent
+
+retained Class A evidence proves reference exists but cannot resolve
+→ event_link state=invalid
+
+only event_status=null / missing_tickera_event survives
+without the relationship-reference distinction
+→ compatibility diagnostic
+   or weakened event_link unresolved/unknown projection
+→ preserve historical source_risk.missing_tickera_event visibility
+→ DO NOT mint absent
+→ DO NOT guess invalid
+```
+
+If only post-fallback Phoenix `missing_source_risk_data` remains and raw `missing_tickera_event` was erased:
 
 ```text
 unrecoverable / contract diagnostic
 do not invent absent vs invalid split
 ```
 
-Invalid (malformed reference) cannot be reconstructed from the flat WP null-status path alone → do not guess `invalid`.
+Primary canonical target remains `{woo_product_id}`; resolved Tickera event id is value, never primary identity.
 
 ---
 
@@ -348,13 +415,24 @@ Do not mint present/absent. Do not invent capability `unsupported` unless histor
 
 v2 often uses code `unsupported_product_type` with classification `unsupported`, which overloads “not supported” vs “unevaluable”.
 
+Locked `source_risk.v3` MVP currently declares only:
+
+```text
+simple
+```
+
+as a concrete canonical `product_type` value. The adapter must **not** expand that registry.
+
 Rules:
 
 | Retained evidence | Mapping |
 |---|---|
-| Actual product type token retained and equals `simple` | `product_type` present/`simple` (compat); historical unsupported finding only if also present historically |
-| Actual type token retained, not `simple` | `product_type` present/`<bounded raw>` + historical `source_risk.unsupported_product_type` finding projection; do not treat EvidenceState as unsupported |
-| Type token not retained; only unsupported_product_type fact | compatibility diagnostic; **do not invent type value**; do not claim EvidenceState unsupported unless unevaluable proven |
+| Actual product type token retained and equals locked-declared `simple` | `product_type` present/`simple` (compat); historical unsupported finding only if also present historically |
+| Actual type token retained and **explicitly declared** in the locked canonical registry (future adapter/registry versions may add more) | use its reviewed canonical mapping |
+| Actual type token retained but **not** declared in the locked canonical registry | do **not** mint a canonical `product_type` present fact with an undeclared token as value; retain bounded raw token as compatibility provenance; compatibility diagnostic / contract-invalid or unresolved projection; preserve historical `source_risk.unsupported_product_type` visibility |
+| Type token not retained; only `unsupported_product_type` fact | compatibility diagnostic; **do not invent type value**; do not claim EvidenceState unsupported unless unevaluable proven |
+
+Do not infer additional WooCommerce type tokens from general knowledge.
 
 ---
 
@@ -417,10 +495,20 @@ Compatibility metadata is **not** part of identity.
 
 ```text
 same identity + same normalized claim → duplicate collapse; retain all bounded compat provenance refs
-same identity + different normalized claim → blocking_conflict
+same identity + different normalized claim from genuinely independent evidence → blocking_conflict
 ```
 
-Two differently named v2 aliases that imply incompatible claims must conflict, not silently merge.
+Known lossy / derived representations of one observation (§4, §8):
+
+```text
+higher-fidelity claim wins translation
+lossy derivative retained as superseded provenance
+→ NOT blocking_conflict
+```
+
+Two differently named v2 aliases that imply incompatible **independent** claims must conflict, not silently merge.
+
+Never choose whichever independent claim is safer.
 
 Normalized claim fields follow `source_risk.v3` (§20 of contract): state, value, completeness, scope, authority_slot, origin=`compatibility_derived`.
 
@@ -617,19 +705,21 @@ Later Phase 5C: page-by-page translate; batch reads; avoid N+1; no unbounded run
 | Claim | Static evidence | Legacy owner | Proven semantics | Adapter decision | Confidence | Unresolved? |
 |---|---|---|---|---|---|---|
 | `trash_event` → lifecycle trash @ event | WP `event_risk_codes` uses `status.'_event'`; trash∈status set | WP | Positive trash observation | Alias translate | high | no |
-| Phoenix erases `trash_event` | `SourceRisk.from_code/3` fallback | Phoenix | Raw lost unless retained earlier | Prefer raw risk_codes / classification before fallback fact | high | no |
+| Phoenix erases unknown raw codes | `SourceRisk.from_code/3` fallback → `:missing_source_risk_data` | Phoenix | Original raw lost | Prefer Class A raw before fallback; else `t.missing_source_risk_data.phoenix_fallback` | high | Exact erased codes for certified rows remain unknown |
+| Explicit WP `missing_source_risk_data` | WP `event_risk_codes` for unknown event status | WP | Event lifecycle could not be classified | `t.missing_source_risk_data.wp_event_unknown` → lifecycle unknown @ event | high | no |
 | `subscription_product` positive | WP emits when `is_subscription_product` true | WP | Positive subscription detection | Alias → subscription present | high | no |
 | `payment_plan_product` ≠ payment_plan | Co-emitted under same subscription predicate | WP | Not independent payment-plan proof | Reject alias; diagnostic | high | no |
 | `missing_ticket_template` → absent | WP when template id null | WP | Authoritative absence of template link | state=absent | high | Completeness remains unknown |
-| `missing_tickera_event` | WP when event_status null | WP | No resolved event status on row | Prefer absent; weaken if only fallback | medium | invalid vs absent if only fallback |
-| Product trash → `draft_product` | WP non-publish branch | WP | Trash collapsed | Prefer `product_status_classification` | high | If classification missing, do not invent trash |
+| `missing_tickera_event` + `event_status=null` | WP emits for null status; SQL LEFT JOINs `_event_name` and Tickera event | WP | Ambiguous: no relationship vs unresolved reference | Diagnostic / unresolved event_link; **never** mint absent from null-status alone | high | Absent/invalid only when Class A proves reference distinction |
+| Product trash → `draft_product` | WP non-publish branch | WP | Trash collapsed into draft_product code | Classification trash wins; `draft_product` is lossy derivative (not conflict) | high | no |
+| `draft_product` only | WP review_reasons without classification | WP | Exact lifecycle value unrecoverable | Diagnostic / lifecycle unknown — **not** present/draft | high | no |
 | Parent semantics on variation rows | Normalizer target_type from variation_id | Phoenix | Scope defect | Regroup to parent_product when product id present | high | no |
 | Dual `variation_mapping_required` | WP review_reasons + Normalizer.variation_findings | both | Overloaded code | Structural/planner projections only | high | Exact replacement names deferred |
 | `unknown_product_semantics` | WP always appends; semantics all unknown | WP | Aggregate unknown | Derived summary only | high | no |
-| `missing_source_risk_data` erases raw | from_code fallback | Phoenix | Original code unrecoverable after fallback | Unrecoverable diagnostic; no invention | high | Exact erased codes for certified rows remain unknown |
 | product_semantics dims unknown | WP hard-coded unknown | WP | Unknown by design | Capability unknown facts | high | no |
 | Variation lifecycle incomplete | classification serialized; codes often omitted | WP/Phoenix | Incomplete emission | Prefer classification; no invention | medium | Full variation lifecycle historical coverage incomplete |
-| `unsupported_product_type` overload | Phoenix classification unsupported | Phoenix | Ambiguous | Split observation vs support | medium | Exact historical type token may be absent |
+| `unsupported_product_type` + non-simple token | Phoenix classification unsupported; v3 registry only `simple` | Phoenix / contract | Token may be retained but undeclared | Retain raw provenance; diagnostic; no canonical present value for undeclared tokens | high | Future registry expansion out of Gate D scope |
+| Classification trash + `draft_product` | documented WP collapse | WP | One observation, two fidelities | Precedence wins; not blocking_conflict | high | no |
 
 ---
 
@@ -645,14 +735,19 @@ v2 explicit_safe != automatic absent+exhaustive
 v2 explicit_risky != automatic present
 missing legacy evidence != semantic absence
 no invented raw producer code
-missing_source_risk_data cannot recover erased producer code
+Phoenix-fallback missing_source_risk_data cannot recover erased producer code
+explicit WP missing_source_risk_data != Phoenix fallback (separate rules)
+event_status=null / missing_tickera_event alone != event_link absent
+draft_product-only != lifecycle present/draft
+undeclared product type token != canonical product_type value
 payment_plan_product != payment_plan alias
 variation_mapping_required != source-risk canonical evidence
 unknown_product_semantics = derived only
 product semantic parent scope != variation scope
 transport variation_id does not determine semantic scope
 regrouping is read-model projection, not new authority
-same canonical identity + conflicting claim = blocking_conflict
+known lossy derivative != blocking_conflict
+same canonical identity + genuinely independent conflicting claim = blocking_conflict
 raw/provenance retained within bounds
 historical v2 snapshot/hash not rewritten
 mixed incompatible versions fail closed
@@ -670,6 +765,7 @@ Applier remains sole catalogue writer
 3. Certified-run rows whose raw codes were erased: remain unrecoverable; no investigation via runtime/DB in Gate D.
 4. Full historical variation lifecycle coverage when only classification exists without codes.
 5. Exact UI layout for human-review badges (design intent only here).
+6. Class A proofs that distinguish event_link absent vs invalid (beyond null status) remain source-owner investigation for future native producers; v2 adapter stays weakened.
 
 ---
 
@@ -683,7 +779,10 @@ Gate D succeeds when this document:
 - maps approved aliases (`trash_event`, `subscription_product`) and rejects `payment_plan_product`→`payment_plan`;
 - routes `variation_mapping_required` out of source-risk evidence;
 - treats `unknown_product_semantics` as derived only;
-- maps ticket-template / event-link code names without mechanical EvidenceState `missing`;
+- maps ticket-template without mechanical EvidenceState `missing`; maps event-link only when Class A proves absent vs invalid;
+- forbids draft_product-only → present/draft and undeclared product-type tokens as canonical values;
+- splits WP vs Phoenix `missing_source_risk_data` rules;
+- separates representation precedence from genuine evidence conflict;
 - defines parent-product regrouping as projection only;
 - marks all adapted facts `compatibility_derived` and automation-ineligible;
 - leaves v2 snapshots immutable;
