@@ -1,12 +1,51 @@
 defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponse do
   @moduledoc """
   Validates and aggregates VS-26C WordPress Tickera catalog feed pages.
+
+  Exact schema dispatch:
+  - legacy `2026-07-22.v2` / `2026-07-08.v1` / `2026-07-05.v1` unchanged
+  - native `2026-08-07.v3` transport parsing + DiscoveryIntegrity aggregation
   """
+
+  alias EventSales.Catalog.TickeraCatalog.SourceRiskV3.DiscoveryIntegrity
+  alias EventSales.Catalog.TickeraCatalog.SourceRiskV3.Evidence
 
   @schema_version "2026-07-22.v2"
   @legacy_schema_versions ["2026-07-08.v1", "2026-07-05.v1"]
-  @supported_schema_versions [@schema_version | @legacy_schema_versions]
+  @native_schema_version "2026-08-07.v3"
   @source "wordpress_tickera"
+  @native_canonical_contract_version "source_risk.v3"
+  @native_producer_version "2026-08-07.1"
+  @native_max_per_page 100
+  @native_max_evidence_per_page 500
+  @native_max_catalog_rows_per_page 100
+
+  @native_envelope_keys MapSet.new([
+                          "schema_version",
+                          "canonical_contract_version",
+                          "producer_version",
+                          "source",
+                          "source_system_id",
+                          "discovery_snapshot_id",
+                          "source_snapshot_at",
+                          "generated_at",
+                          "page",
+                          "per_page",
+                          "has_more",
+                          "filters",
+                          "events",
+                          "catalog_rows",
+                          "evidence"
+                        ])
+
+  @native_filter_keys MapSet.new([
+                        "updated_since",
+                        "product_id",
+                        "variation_id",
+                        "event_id",
+                        "include_private"
+                      ])
+
   @statuses ["publish", "private", "draft", "trash", "deleted", "unknown"]
   @observations ["present", "trashed", "deleted", "unknown"]
   @semantic_values ["present", "absent", "unknown"]
@@ -20,7 +59,14 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponse do
           per_page: pos_integer(),
           has_more: boolean(),
           events: [map()],
-          catalog_rows: [map()]
+          catalog_rows: [map()],
+          canonical_contract_version: String.t() | nil,
+          producer_version: String.t() | nil,
+          source_system_id: String.t() | nil,
+          discovery_snapshot_id: String.t() | nil,
+          generated_at: DateTime.t() | nil,
+          filters: map() | nil,
+          evidence: [Evidence.t()]
         }
 
   defstruct schema_version: nil,
@@ -30,41 +76,43 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponse do
             per_page: 100,
             has_more: false,
             events: [],
-            catalog_rows: []
+            catalog_rows: [],
+            canonical_contract_version: nil,
+            producer_version: nil,
+            source_system_id: nil,
+            discovery_snapshot_id: nil,
+            generated_at: nil,
+            filters: nil,
+            evidence: []
 
   @spec parse_page(term()) :: {:ok, t()} | {:error, :invalid_feed_response}
   def parse_page(%{} = decoded) do
-    with schema_version when schema_version in @supported_schema_versions <-
-           decoded["schema_version"],
-         true <- decoded["source"] == @source,
-         events when is_list(events) <- decoded["events"],
-         rows when is_list(rows) <- decoded["catalog_rows"],
-         true <- valid_payload?(schema_version, events, rows),
-         page when is_integer(page) and page > 0 <- decoded["page"],
-         per_page when is_integer(per_page) and per_page > 0 <- decoded["per_page"],
-         has_more when is_boolean(has_more) <- decoded["has_more"],
-         {:ok, source_snapshot_at} <- parse_datetime(decoded["source_snapshot_at"]) do
-      {:ok,
-       %__MODULE__{
-         schema_version: schema_version,
-         auto_apply_proof_complete?: schema_version == @schema_version,
-         source_snapshot_at: source_snapshot_at,
-         page: page,
-         per_page: per_page,
-         has_more: has_more,
-         events: events,
-         catalog_rows: rows
-       }}
-    else
-      _error -> {:error, :invalid_feed_response}
+    case Map.get(decoded, "schema_version") do
+      @native_schema_version ->
+        parse_native_page(decoded)
+
+      schema_version when schema_version in [@schema_version | @legacy_schema_versions] ->
+        parse_legacy_page(decoded, schema_version)
+
+      _other ->
+        {:error, :invalid_feed_response}
     end
   end
 
   def parse_page(_decoded), do: {:error, :invalid_feed_response}
 
   @spec aggregate_pages([t()]) :: {:ok, t()} | {:error, :invalid_feed_response}
+  def aggregate_pages([%__MODULE__{schema_version: @native_schema_version} | _] = pages) do
+    with :ok <- require_all_native(pages),
+         {:ok, :complete} <- DiscoveryIntegrity.validate_discovery_pages(pages) do
+      {:ok, aggregate_native_pages(pages)}
+    else
+      _ -> {:error, :invalid_feed_response}
+    end
+  end
+
   def aggregate_pages([%__MODULE__{} | _rest] = pages) do
-    if one_schema_version?(pages) do
+    if one_schema_version?(pages) and not Enum.any?(pages, &native?/1) do
       aggregate =
         Enum.reduce(pages, %__MODULE__{events: [], catalog_rows: []}, fn page,
                                                                          %__MODULE__{} = acc ->
@@ -89,6 +137,180 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponse do
   end
 
   def aggregate_pages(_pages), do: {:error, :invalid_feed_response}
+
+  defp parse_legacy_page(decoded, schema_version) do
+    with true <- decoded["source"] == @source,
+         events when is_list(events) <- decoded["events"],
+         rows when is_list(rows) <- decoded["catalog_rows"],
+         true <- valid_payload?(schema_version, events, rows),
+         page when is_integer(page) and page > 0 <- decoded["page"],
+         per_page when is_integer(per_page) and per_page > 0 <- decoded["per_page"],
+         has_more when is_boolean(has_more) <- decoded["has_more"],
+         {:ok, source_snapshot_at} <- parse_datetime(decoded["source_snapshot_at"]) do
+      {:ok,
+       %__MODULE__{
+         schema_version: schema_version,
+         auto_apply_proof_complete?: schema_version == @schema_version,
+         source_snapshot_at: source_snapshot_at,
+         page: page,
+         per_page: per_page,
+         has_more: has_more,
+         events: events,
+         catalog_rows: rows
+       }}
+    else
+      _error -> {:error, :invalid_feed_response}
+    end
+  end
+
+  defp parse_native_page(decoded) do
+    with :ok <- require_string_keys(decoded),
+         :ok <- require_exact_keys(decoded, @native_envelope_keys),
+         true <- decoded["source"] == @source,
+         true <- decoded["canonical_contract_version"] == @native_canonical_contract_version,
+         true <- decoded["producer_version"] == @native_producer_version,
+         source_system_id when is_binary(source_system_id) and source_system_id != "" <-
+           decoded["source_system_id"],
+         discovery_snapshot_id
+         when is_binary(discovery_snapshot_id) and discovery_snapshot_id != "" <-
+           decoded["discovery_snapshot_id"],
+         {:ok, source_snapshot_at} <- require_datetime(decoded["source_snapshot_at"]),
+         {:ok, generated_at} <- require_datetime(decoded["generated_at"]),
+         page when is_integer(page) and page > 0 <- decoded["page"],
+         per_page
+         when is_integer(per_page) and per_page >= 1 and per_page <= @native_max_per_page <-
+           decoded["per_page"],
+         has_more when is_boolean(has_more) <- decoded["has_more"],
+         {:ok, filters} <- validate_filters(decoded["filters"]),
+         events when is_list(events) <- decoded["events"],
+         rows when is_list(rows) <- decoded["catalog_rows"],
+         evidence_raw when is_list(evidence_raw) <- decoded["evidence"],
+         true <- length(rows) <= @native_max_catalog_rows_per_page,
+         true <- length(evidence_raw) <= @native_max_evidence_per_page,
+         true <- Enum.all?(events, &is_map/1),
+         true <- Enum.all?(rows, &is_map/1),
+         {:ok, evidence} <- validate_evidence_list(evidence_raw) do
+      {:ok,
+       %__MODULE__{
+         schema_version: @native_schema_version,
+         auto_apply_proof_complete?: false,
+         source_snapshot_at: source_snapshot_at,
+         page: page,
+         per_page: per_page,
+         has_more: has_more,
+         events: events,
+         catalog_rows: rows,
+         canonical_contract_version: @native_canonical_contract_version,
+         producer_version: @native_producer_version,
+         source_system_id: source_system_id,
+         discovery_snapshot_id: discovery_snapshot_id,
+         generated_at: generated_at,
+         filters: filters,
+         evidence: evidence
+       }}
+    else
+      _error -> {:error, :invalid_feed_response}
+    end
+  end
+
+  defp validate_evidence_list(items) do
+    Enum.reduce_while(items, {:ok, []}, fn item, {:ok, acc} ->
+      case Evidence.validate(item) do
+        {:ok, evidence} -> {:cont, {:ok, [evidence | acc]}}
+        {:error, _reason} -> {:halt, {:error, :invalid_evidence}}
+      end
+    end)
+    |> case do
+      {:ok, evidence} -> {:ok, Enum.reverse(evidence)}
+      other -> other
+    end
+  end
+
+  defp validate_filters(filters) when is_map(filters) do
+    with :ok <- require_string_keys(filters),
+         true <- MapSet.subset?(MapSet.new(Map.keys(filters)), @native_filter_keys),
+         :ok <- validate_filter_values(filters) do
+      {:ok, filters}
+    else
+      _ -> {:error, :invalid_filters}
+    end
+  end
+
+  defp validate_filters(_), do: {:error, :invalid_filters}
+
+  defp validate_filter_values(filters) do
+    Enum.reduce_while(filters, :ok, fn {key, value}, :ok ->
+      case {key, value} do
+        {"updated_since", nil} ->
+          {:cont, :ok}
+
+        {"updated_since", value} when is_binary(value) ->
+          case require_datetime(value) do
+            {:ok, _} -> {:cont, :ok}
+            _ -> {:halt, {:error, :invalid_filters}}
+          end
+
+        {"product_id", nil} ->
+          {:cont, :ok}
+
+        {"product_id", id} when is_integer(id) and id > 0 ->
+          {:cont, :ok}
+
+        {"variation_id", nil} ->
+          {:cont, :ok}
+
+        {"variation_id", id} when is_integer(id) and id > 0 ->
+          {:cont, :ok}
+
+        {"event_id", nil} ->
+          {:cont, :ok}
+
+        {"event_id", id} when is_integer(id) and id > 0 ->
+          {:cont, :ok}
+
+        {"include_private", value} when is_boolean(value) ->
+          {:cont, :ok}
+
+        _ ->
+          {:halt, {:error, :invalid_filters}}
+      end
+    end)
+  end
+
+  defp aggregate_native_pages(pages) do
+    ordered = Enum.sort_by(pages, & &1.page)
+    first = hd(ordered)
+    last = List.last(ordered)
+
+    evidence =
+      ordered
+      |> Enum.flat_map(& &1.evidence)
+
+    %__MODULE__{
+      schema_version: first.schema_version,
+      auto_apply_proof_complete?: false,
+      source_snapshot_at: first.source_snapshot_at,
+      page: last.page,
+      per_page: last.per_page,
+      has_more: last.has_more,
+      events: Enum.flat_map(ordered, & &1.events),
+      catalog_rows: Enum.flat_map(ordered, & &1.catalog_rows),
+      canonical_contract_version: first.canonical_contract_version,
+      producer_version: first.producer_version,
+      source_system_id: first.source_system_id,
+      discovery_snapshot_id: first.discovery_snapshot_id,
+      generated_at: last.generated_at,
+      filters: first.filters,
+      evidence: evidence
+    }
+  end
+
+  defp require_all_native(pages) do
+    if Enum.all?(pages, &native?/1), do: :ok, else: {:error, :mixed_schema}
+  end
+
+  defp native?(%__MODULE__{schema_version: @native_schema_version}), do: true
+  defp native?(_), do: false
 
   defp one_schema_version?(pages) do
     pages |> Enum.map(& &1.schema_version) |> Enum.uniq() |> length() == 1
@@ -174,6 +396,20 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponse do
   defp string_list?(value), do: is_list(value) and Enum.all?(value, &is_binary/1)
   defp has_exact_required_keys?(map, keys), do: Enum.all?(keys, &Map.has_key?(map, &1))
 
+  defp require_string_keys(map) do
+    if Enum.all?(Map.keys(map), &is_binary/1), do: :ok, else: {:error, :non_string_map_keys}
+  end
+
+  defp require_exact_keys(map, allowed) do
+    keys = MapSet.new(Map.keys(map))
+
+    if MapSet.equal?(keys, allowed) do
+      :ok
+    else
+      {:error, :invalid_envelope_keys}
+    end
+  end
+
   defp parse_datetime(nil), do: {:ok, nil}
 
   defp parse_datetime(value) when is_binary(value) do
@@ -184,6 +420,15 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponse do
   end
 
   defp parse_datetime(_value), do: {:error, :invalid}
+
+  defp require_datetime(value) when is_binary(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, datetime, _offset} -> {:ok, datetime}
+      _other -> {:error, :invalid}
+    end
+  end
+
+  defp require_datetime(_value), do: {:error, :invalid}
 
   defp latest_datetime(nil, datetime), do: datetime
   defp latest_datetime(datetime, nil), do: datetime

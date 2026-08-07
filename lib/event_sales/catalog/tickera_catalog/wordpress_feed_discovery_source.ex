@@ -1,28 +1,157 @@
 defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedDiscoverySource do
   @moduledoc """
   DiscoverySource adapter for the VS-26C WordPress Tickera catalog feed.
+
+  Exact schema dispatch after fetch:
+  - legacy v2/v1 → `legacy_v2_operational` (never routes through V2Adapter)
+  - native v3 → SourceSystem binding, DiscoveryIntegrity-backed facts/findings
   """
 
   @behaviour EventSales.Catalog.TickeraCatalog.DiscoverySource
 
-  alias EventSales.Catalog.TickeraCatalog.{DiscoveryResult, WordPressFeedClient}
+  alias EventSales.Catalog
+  alias EventSales.Catalog.Resources.SourceSystem
+
+  alias EventSales.Catalog.TickeraCatalog.{
+    DiscoveryResult,
+    WordPressFeedClient,
+    WordPressFeedResponse
+  }
+
+  alias EventSales.Catalog.TickeraCatalog.SourceRiskV3.CanonicalFact
+  alias EventSales.Catalog.TickeraCatalog.SourceRiskV3.DiscoveryIntegrity
+  alias EventSales.Catalog.TickeraCatalog.SourceRiskV3.FindingPolicy
+  alias EventSales.Catalog.TickeraCatalog.SourceRiskV3.Normalizer
+
+  @native_schema_version "2026-08-07.v3"
 
   @impl true
   def discover(source_system_id, scope) when is_binary(source_system_id) and is_map(scope) do
     with {:ok, query} <- normalize_scope(scope),
          {:ok, response} <- WordPressFeedClient.fetch(query) do
-      {:ok,
-       %DiscoveryResult{
-         schema_version: response.schema_version,
-         auto_apply_proof_complete?: response.auto_apply_proof_complete?,
-         events: response.events,
-         catalog_rows: response.catalog_rows,
-         source_snapshot_at: response.source_snapshot_at
-       }}
+      build_discovery_result(source_system_id, response)
     end
   end
 
   def discover(_source_system_id, _scope), do: {:error, :invalid_scope}
+
+  defp build_discovery_result(configured_source_system_id, %WordPressFeedResponse{} = response) do
+    case response.schema_version do
+      @native_schema_version ->
+        build_native_result(configured_source_system_id, response)
+
+      _legacy ->
+        {:ok, build_legacy_result(response)}
+    end
+  end
+
+  defp build_legacy_result(response) do
+    %DiscoveryResult{
+      schema_version: response.schema_version,
+      auto_apply_proof_complete?: response.auto_apply_proof_complete?,
+      events: response.events,
+      catalog_rows: response.catalog_rows,
+      source_snapshot_at: response.source_snapshot_at,
+      canonical_contract_version: nil,
+      producer_version: nil,
+      source_system_id: nil,
+      discovery_snapshot_id: nil,
+      normalization_mode: :legacy_v2_operational,
+      evidence_origin: nil,
+      canonical_source_risk_facts: [],
+      canonical_source_risk_findings: []
+    }
+  end
+
+  defp build_native_result(configured_source_system_id, response) do
+    with {:ok, source_system} <- load_source_system(configured_source_system_id),
+         :ok <-
+           DiscoveryIntegrity.verify_source_system_id(
+             source_system.base_url,
+             response.source_system_id
+           ),
+         {:ok, facts, findings} <- normalize_native_evidence(response) do
+      {:ok,
+       %DiscoveryResult{
+         schema_version: response.schema_version,
+         auto_apply_proof_complete?: false,
+         events: response.events,
+         catalog_rows: response.catalog_rows,
+         source_snapshot_at: response.source_snapshot_at,
+         canonical_contract_version: response.canonical_contract_version,
+         producer_version: response.producer_version,
+         source_system_id: response.source_system_id,
+         discovery_snapshot_id: response.discovery_snapshot_id,
+         normalization_mode: :native_v3_review,
+         evidence_origin: :native,
+         canonical_source_risk_facts: facts,
+         canonical_source_risk_findings: findings
+       }}
+    else
+      {:error, :source_system_id_mismatch} -> {:error, :invalid_feed_response}
+      {:error, :invalid_base_url} -> {:error, :invalid_feed_response}
+      {:error, :missing_source_system} -> {:error, :invalid_feed_response}
+      {:error, :invalid_source_system_base_url} -> {:error, :invalid_feed_response}
+      {:error, _reason} -> {:error, :invalid_feed_response}
+    end
+  end
+
+  defp load_source_system(configured_source_system_id) do
+    case Ash.get(SourceSystem, configured_source_system_id, domain: Catalog) do
+      {:ok, %SourceSystem{base_url: base_url} = source}
+      when is_binary(base_url) and base_url != "" ->
+        {:ok, source}
+
+      {:ok, %SourceSystem{}} ->
+        {:error, :invalid_source_system_base_url}
+
+      {:ok, nil} ->
+        {:error, :missing_source_system}
+
+      {:error, _} ->
+        {:error, :missing_source_system}
+    end
+  end
+
+  defp normalize_native_evidence(response) do
+    run_id = response.discovery_snapshot_id
+    # Successful native aggregation already proved a complete stable sequence.
+    exhaustive_proven? = true
+
+    Enum.reduce_while(response.evidence, {:ok, [], []}, fn evidence, {:ok, facts, findings} ->
+      case Normalizer.normalize_evidence(evidence,
+             run_id: run_id,
+             origin: "native",
+             exhaustive_proven?: exhaustive_proven?
+           ) do
+        {:ok, fact} ->
+          classification = Normalizer.classify_against_existing(fact, facts)
+
+          if classification.duplicate_of do
+            {:cont, {:ok, facts, findings}}
+          else
+            fact_finding = FindingPolicy.evaluate(fact)
+
+            conflict_findings =
+              Enum.map(classification.conflicts_with, fn other ->
+                FindingPolicy.evaluate_conflict(fact, other)
+              end)
+
+            {:cont, {:ok, [fact | facts], conflict_findings ++ [fact_finding | findings]}}
+          end
+
+        {:error, _reason} ->
+          {:halt, {:error, :invalid_feed_response}}
+      end
+    end)
+    |> case do
+      {:ok, facts, findings} ->
+        {:ok, CanonicalFact.sort_facts(Enum.reverse(facts)), Enum.reverse(findings)}
+
+      other ->
+        other
+    end
+  end
 
   defp normalize_scope(scope) do
     scope = string_key_map(scope)
