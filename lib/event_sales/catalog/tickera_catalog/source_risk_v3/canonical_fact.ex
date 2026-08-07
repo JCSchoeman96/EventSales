@@ -31,10 +31,11 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.CanonicalFact do
     :completeness,
     :origin,
     :value,
-    provenance: %{}
+    provenance: []
   ]
 
   @type target :: %{required(atom()) => pos_integer()}
+  @type provenance_record :: map()
 
   @type t :: %__MODULE__{
           run_id: String.t(),
@@ -47,7 +48,7 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.CanonicalFact do
           completeness: String.t(),
           origin: String.t(),
           value: String.t() | pos_integer() | nil,
-          provenance: map()
+          provenance: [provenance_record()]
         }
 
   @type identity :: %{
@@ -128,6 +129,11 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.CanonicalFact do
     Enum.sort_by(facts, &compare_key/1)
   end
 
+  @spec sort_provenance_records([provenance_record()]) :: [provenance_record()]
+  def sort_provenance_records(records) when is_list(records) do
+    Enum.sort_by(records, &provenance_sort_key/1)
+  end
+
   @spec target_canonical_json(target()) :: String.t()
   def target_canonical_json(target) when is_map(target) do
     target
@@ -182,4 +188,10 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.CanonicalFact do
   defp normalize_claim_value(nil), do: nil
   defp normalize_claim_value(value) when is_integer(value), do: value
   defp normalize_claim_value(value) when is_binary(value), do: value
+
+  defp provenance_sort_key(record) when is_map(record) do
+    record
+    |> Enum.map(fn {key, value} -> {to_string(key), value} end)
+    |> Enum.sort_by(&elem(&1, 0))
+  end
 end
