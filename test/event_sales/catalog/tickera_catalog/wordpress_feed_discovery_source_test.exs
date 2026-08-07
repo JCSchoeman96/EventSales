@@ -222,8 +222,9 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedDiscoverySourceTest do
     assert fact.run_id == result.discovery_snapshot_id
     assert fact.origin == "native"
     assert fact.completeness in ["partial", "exhaustive", "unknown"]
-    assert result.canonical_source_risk_findings != []
-    assert hd(result.canonical_source_risk_findings).disposition
+
+    assert [%{qualified_finding_id: "source_risk.lifecycle_draft", severity: :blocking}] =
+             result.canonical_source_risk_findings
   end
 
   test "native source_system_id mismatch fails closed" do
@@ -277,6 +278,183 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedDiscoverySourceTest do
 
     assert [%CanonicalFact{completeness: "exhaustive", origin: "native"}] =
              result.canonical_source_risk_facts
+
+    assert result.canonical_source_risk_findings == []
+  end
+
+  test "duplicate identical provenance collapses to one fact and one provenance record" do
+    source =
+      SalesHelpers.create_source_system!(%{base_url: "https://wordpress.example.test"})
+
+    assert {:ok, expected_key} =
+             DiscoveryIntegrity.expected_source_system_id(source.base_url)
+
+    evidence_item = %{
+      "dimension" => "lifecycle",
+      "producer_scope" => "parent_product",
+      "target" => %{"woo_product_id" => 42},
+      "state" => "present",
+      "producer_source_key" => "wp_posts.post_status",
+      "completeness" => "partial",
+      "provenance" => %{"producer_version" => "2026-08-07.1"},
+      "value" => "publish"
+    }
+
+    page =
+      valid_v3_page(expected_key, "snap-dup-same")
+      |> Map.put("evidence", [evidence_item, evidence_item])
+
+    FakeTransport.reset!([{:ok, 200, [], Jason.encode!(page)}])
+
+    assert {:ok, %DiscoveryResult{} = result} =
+             WordPressFeedDiscoverySource.discover(source.id, %{
+               "kind" => "wordpress_feed",
+               "mode" => "full"
+             })
+
+    assert length(result.canonical_source_risk_facts) == 1
+    assert length(hd(result.canonical_source_risk_facts).provenance) == 1
+    assert result.canonical_source_risk_findings == []
+  end
+
+  test "duplicate distinct provenance collapses while retaining both records" do
+    source =
+      SalesHelpers.create_source_system!(%{base_url: "https://wordpress.example.test"})
+
+    assert {:ok, expected_key} =
+             DiscoveryIntegrity.expected_source_system_id(source.base_url)
+
+    left = %{
+      "dimension" => "lifecycle",
+      "producer_scope" => "parent_product",
+      "target" => %{"woo_product_id" => 42},
+      "state" => "present",
+      "producer_source_key" => "wp_posts.post_status",
+      "completeness" => "partial",
+      "provenance" => %{"producer_version" => "2026-08-07.1"},
+      "value" => "publish"
+    }
+
+    right =
+      put_in(left, ["provenance", "raw_producer_code"], "private_product")
+
+    page =
+      valid_v3_page(expected_key, "snap-dup-distinct")
+      |> Map.put("evidence", [left, right])
+
+    FakeTransport.reset!([{:ok, 200, [], Jason.encode!(page)}])
+
+    assert {:ok, %DiscoveryResult{} = result} =
+             WordPressFeedDiscoverySource.discover(source.id, %{
+               "kind" => "wordpress_feed",
+               "mode" => "full"
+             })
+
+    assert [fact] = result.canonical_source_risk_facts
+    assert length(fact.provenance) == 2
+    assert result.canonical_source_risk_findings == []
+  end
+
+  test "safe-positive publish has fact but no actual finding; draft and conflicts do" do
+    source =
+      SalesHelpers.create_source_system!(%{base_url: "https://wordpress.example.test"})
+
+    assert {:ok, expected_key} =
+             DiscoveryIntegrity.expected_source_system_id(source.base_url)
+
+    publish_page =
+      valid_v3_page(expected_key, "snap-safe")
+      |> Map.put("evidence", [
+        %{
+          "dimension" => "lifecycle",
+          "producer_scope" => "parent_product",
+          "target" => %{"woo_product_id" => 7},
+          "state" => "present",
+          "producer_source_key" => "wp_posts.post_status",
+          "completeness" => "partial",
+          "provenance" => %{"producer_version" => "2026-08-07.1"},
+          "value" => "publish"
+        }
+      ])
+
+    FakeTransport.reset!([{:ok, 200, [], Jason.encode!(publish_page)}])
+
+    assert {:ok, safe} =
+             WordPressFeedDiscoverySource.discover(source.id, %{
+               "kind" => "wordpress_feed",
+               "mode" => "full"
+             })
+
+    assert length(safe.canonical_source_risk_facts) == 1
+    assert safe.canonical_source_risk_findings == []
+
+    draft_page =
+      valid_v3_page(expected_key, "snap-draft")
+      |> Map.put("evidence", [
+        %{
+          "dimension" => "lifecycle",
+          "producer_scope" => "parent_product",
+          "target" => %{"woo_product_id" => 8},
+          "state" => "present",
+          "producer_source_key" => "wp_posts.post_status",
+          "completeness" => "partial",
+          "provenance" => %{"producer_version" => "2026-08-07.1"},
+          "value" => "draft"
+        }
+      ])
+
+    FakeTransport.reset!([{:ok, 200, [], Jason.encode!(draft_page)}])
+
+    assert {:ok, risky} =
+             WordPressFeedDiscoverySource.discover(source.id, %{
+               "kind" => "wordpress_feed",
+               "mode" => "full"
+             })
+
+    assert length(risky.canonical_source_risk_facts) == 1
+
+    assert Enum.any?(risky.canonical_source_risk_findings, fn finding ->
+             finding.qualified_finding_id == "source_risk.lifecycle_draft"
+           end)
+
+    conflict_page =
+      valid_v3_page(expected_key, "snap-conflict")
+      |> Map.put("evidence", [
+        %{
+          "dimension" => "lifecycle",
+          "producer_scope" => "parent_product",
+          "target" => %{"woo_product_id" => 9},
+          "state" => "present",
+          "producer_source_key" => "wp_posts.post_status",
+          "completeness" => "partial",
+          "provenance" => %{"producer_version" => "2026-08-07.1"},
+          "value" => "draft"
+        },
+        %{
+          "dimension" => "lifecycle",
+          "producer_scope" => "parent_product",
+          "target" => %{"woo_product_id" => 9},
+          "state" => "present",
+          "producer_source_key" => "wp_posts.post_status",
+          "completeness" => "partial",
+          "provenance" => %{"producer_version" => "2026-08-07.1"},
+          "value" => "private"
+        }
+      ])
+
+    FakeTransport.reset!([{:ok, 200, [], Jason.encode!(conflict_page)}])
+
+    assert {:ok, conflict} =
+             WordPressFeedDiscoverySource.discover(source.id, %{
+               "kind" => "wordpress_feed",
+               "mode" => "full"
+             })
+
+    assert length(conflict.canonical_source_risk_facts) == 2
+
+    assert Enum.any?(conflict.canonical_source_risk_findings, fn finding ->
+             finding.qualified_finding_id == "contract.evidence_conflict"
+           end)
   end
 
   defp page_response do

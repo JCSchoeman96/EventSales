@@ -7,6 +7,7 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponse do
   - native `2026-08-07.v3` transport parsing + DiscoveryIntegrity aggregation
   """
 
+  alias EventSales.Catalog.TickeraCatalog.SourceRiskV3.ContractRegistry
   alias EventSales.Catalog.TickeraCatalog.SourceRiskV3.DiscoveryIntegrity
   alias EventSales.Catalog.TickeraCatalog.SourceRiskV3.Evidence
 
@@ -171,11 +172,10 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponse do
          true <- decoded["producer_version"] == @native_producer_version,
          source_system_id when is_binary(source_system_id) and source_system_id != "" <-
            decoded["source_system_id"],
-         discovery_snapshot_id
-         when is_binary(discovery_snapshot_id) and discovery_snapshot_id != "" <-
-           decoded["discovery_snapshot_id"],
-         {:ok, source_snapshot_at} <- require_datetime(decoded["source_snapshot_at"]),
-         {:ok, generated_at} <- require_datetime(decoded["generated_at"]),
+         {:ok, discovery_snapshot_id} <-
+           require_discovery_snapshot_id(decoded["discovery_snapshot_id"]),
+         {:ok, source_snapshot_at} <- require_native_utc_z_datetime(decoded["source_snapshot_at"]),
+         {:ok, generated_at} <- require_native_utc_z_datetime(decoded["generated_at"]),
          page when is_integer(page) and page > 0 <- decoded["page"],
          per_page
          when is_integer(per_page) and per_page >= 1 and per_page <= @native_max_per_page <-
@@ -245,7 +245,7 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponse do
           {:cont, :ok}
 
         {"updated_since", value} when is_binary(value) ->
-          case require_datetime(value) do
+          case require_native_utc_z_datetime(value) do
             {:ok, _} -> {:cont, :ok}
             _ -> {:halt, {:error, :invalid_filters}}
           end
@@ -278,13 +278,10 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponse do
   end
 
   defp aggregate_native_pages(pages) do
-    ordered = Enum.sort_by(pages, & &1.page)
-    first = hd(ordered)
-    last = List.last(ordered)
+    first = hd(pages)
+    last = List.last(pages)
 
-    evidence =
-      ordered
-      |> Enum.flat_map(& &1.evidence)
+    evidence = Enum.flat_map(pages, & &1.evidence)
 
     %__MODULE__{
       schema_version: first.schema_version,
@@ -293,8 +290,8 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponse do
       page: last.page,
       per_page: last.per_page,
       has_more: last.has_more,
-      events: Enum.flat_map(ordered, & &1.events),
-      catalog_rows: Enum.flat_map(ordered, & &1.catalog_rows),
+      events: Enum.flat_map(pages, & &1.events),
+      catalog_rows: Enum.flat_map(pages, & &1.catalog_rows),
       canonical_contract_version: first.canonical_contract_version,
       producer_version: first.producer_version,
       source_system_id: first.source_system_id,
@@ -421,14 +418,27 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponse do
 
   defp parse_datetime(_value), do: {:error, :invalid}
 
-  defp require_datetime(value) when is_binary(value) do
-    case DateTime.from_iso8601(value) do
-      {:ok, datetime, _offset} -> {:ok, datetime}
-      _other -> {:error, :invalid}
+  defp require_discovery_snapshot_id(value) when is_binary(value) and value != "" do
+    case ContractRegistry.validate_bounded_string(value, 128) do
+      :ok -> {:ok, value}
+      {:error, reason} -> {:error, reason}
     end
   end
 
-  defp require_datetime(_value), do: {:error, :invalid}
+  defp require_discovery_snapshot_id(_), do: {:error, :invalid}
+
+  defp require_native_utc_z_datetime(value) when is_binary(value) do
+    if Regex.match?(~r/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/, value) do
+      case DateTime.from_iso8601(value) do
+        {:ok, datetime, 0} -> {:ok, datetime}
+        _other -> {:error, :invalid}
+      end
+    else
+      {:error, :invalid}
+    end
+  end
+
+  defp require_native_utc_z_datetime(_value), do: {:error, :invalid}
 
   defp latest_datetime(nil, datetime), do: datetime
   defp latest_datetime(datetime, nil), do: datetime

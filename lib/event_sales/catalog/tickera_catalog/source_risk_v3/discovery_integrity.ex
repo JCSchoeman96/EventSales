@@ -178,6 +178,9 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.DiscoveryIntegrity do
         not filters_equal?(page.filters, first.filters) ->
           {:halt, {:error, :filters_mismatch}}
 
+        page.per_page != first.per_page ->
+          {:halt, {:error, :per_page_mismatch}}
+
         page.canonical_contract_version != @canonical_contract_version ->
           {:halt, {:error, :invalid_canonical_contract_version}}
 
@@ -208,6 +211,7 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.DiscoveryIntegrity do
 
   defp require_complete_page_sequence(pages) do
     page_numbers = Enum.map(pages, & &1.page)
+    expected = Enum.to_list(1..length(pages))
 
     cond do
       Enum.any?(page_numbers, &(not is_integer(&1) or &1 < 1)) ->
@@ -216,19 +220,21 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.DiscoveryIntegrity do
       length(page_numbers) != MapSet.size(MapSet.new(page_numbers)) ->
         {:error, :duplicate_page}
 
-      Enum.sort(page_numbers) != Enum.to_list(1..length(page_numbers)) ->
-        {:error, :page_gap_or_incomplete_sequence}
-
-      true ->
-        ordered = Enum.sort_by(pages, & &1.page)
-        final = List.last(ordered)
+      page_numbers == expected ->
+        final = List.last(pages)
 
         if final.has_more == false and
-             Enum.all?(Enum.drop(ordered, -1), &(&1.has_more == true)) do
+             Enum.all?(Enum.drop(pages, -1), &(&1.has_more == true)) do
           :ok
         else
           {:error, :incomplete_page_sequence}
         end
+
+      Enum.sort(page_numbers) == expected ->
+        {:error, :out_of_order_page}
+
+      true ->
+        {:error, :page_gap_or_incomplete_sequence}
     end
   end
 

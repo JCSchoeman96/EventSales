@@ -283,8 +283,73 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponseTest do
         |> Map.put("has_more", false)
         |> WordPressFeedResponse.parse_page()
 
+      {:ok, out_of_order} =
+        valid_v3_page()
+        |> Map.put("page", 2)
+        |> Map.put("has_more", false)
+        |> WordPressFeedResponse.parse_page()
+
       assert {:error, :invalid_feed_response} = WordPressFeedResponse.aggregate_pages([a, dup])
       assert {:error, :invalid_feed_response} = WordPressFeedResponse.aggregate_pages([a, gap])
+
+      assert {:error, :invalid_feed_response} =
+               WordPressFeedResponse.aggregate_pages([out_of_order, a])
+    end
+
+    test "rejects native offset timestamps and oversized discovery_snapshot_id" do
+      assert {:ok, _} =
+               valid_v3_page()
+               |> Map.put("source_snapshot_at", "2026-08-07T10:00:00.123Z")
+               |> Map.put("generated_at", "2026-08-07T10:00:00Z")
+               |> Map.put("filters", %{"updated_since" => "2026-08-07T09:00:00Z"})
+               |> WordPressFeedResponse.parse_page()
+
+      assert {:error, :invalid_feed_response} =
+               valid_v3_page()
+               |> Map.put("source_snapshot_at", "2026-08-07T12:00:00+02:00")
+               |> WordPressFeedResponse.parse_page()
+
+      assert {:error, :invalid_feed_response} =
+               valid_v3_page()
+               |> Map.put("generated_at", "2026-08-07T08:00:00-02:00")
+               |> WordPressFeedResponse.parse_page()
+
+      assert {:error, :invalid_feed_response} =
+               valid_v3_page()
+               |> Map.put("filters", %{"updated_since" => "2026-08-07T10:00:00+00:00"})
+               |> WordPressFeedResponse.parse_page()
+
+      assert {:ok, _} =
+               valid_v3_page()
+               |> Map.put("discovery_snapshot_id", String.duplicate("a", 128))
+               |> WordPressFeedResponse.parse_page()
+
+      assert {:error, :invalid_feed_response} =
+               valid_v3_page()
+               |> Map.put("discovery_snapshot_id", String.duplicate("a", 129))
+               |> WordPressFeedResponse.parse_page()
+
+      assert {:error, :invalid_feed_response} =
+               valid_v3_page()
+               |> Map.put("discovery_snapshot_id", <<0xFF, 0xFE>>)
+               |> WordPressFeedResponse.parse_page()
+    end
+
+    test "rejects multipage per_page mismatch" do
+      {:ok, first} =
+        valid_v3_page()
+        |> Map.put("has_more", true)
+        |> Map.put("per_page", 100)
+        |> WordPressFeedResponse.parse_page()
+
+      {:ok, second} =
+        valid_v3_page()
+        |> Map.put("page", 2)
+        |> Map.put("per_page", 50)
+        |> WordPressFeedResponse.parse_page()
+
+      assert {:error, :invalid_feed_response} =
+               WordPressFeedResponse.aggregate_pages([first, second])
     end
 
     test "preserves legacy aggregation semantics" do

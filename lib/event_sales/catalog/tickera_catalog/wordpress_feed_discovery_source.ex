@@ -127,17 +127,28 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedDiscoverySource do
         {:ok, fact} ->
           classification = Normalizer.classify_against_existing(fact, facts)
 
-          if classification.duplicate_of do
-            {:cont, {:ok, facts, findings}}
-          else
-            fact_finding = FindingPolicy.evaluate(fact)
+          cond do
+            classification.duplicate_of ->
+              case Normalizer.merge_duplicate(classification.duplicate_of, fact) do
+                {:ok, merged} ->
+                  updated_facts =
+                    Enum.map(facts, fn existing ->
+                      if existing == classification.duplicate_of, do: merged, else: existing
+                    end)
 
-            conflict_findings =
-              Enum.map(classification.conflicts_with, fn other ->
-                FindingPolicy.evaluate_conflict(fact, other)
-              end)
+                  {:cont, {:ok, updated_facts, findings}}
 
-            {:cont, {:ok, [fact | facts], conflict_findings ++ [fact_finding | findings]}}
+                {:error, _reason} ->
+                  {:halt, {:error, :invalid_feed_response}}
+              end
+
+            true ->
+              findings =
+                findings
+                |> prepend_actual_finding(FindingPolicy.evaluate(fact))
+                |> prepend_conflict_findings(fact, classification.conflicts_with)
+
+              {:cont, {:ok, [fact | facts], findings}}
           end
 
         {:error, _reason} ->
@@ -152,6 +163,27 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedDiscoverySource do
         other
     end
   end
+
+  defp prepend_conflict_findings(findings, fact, conflicts) do
+    Enum.reduce(conflicts, findings, fn other, acc ->
+      prepend_actual_finding(acc, FindingPolicy.evaluate_conflict(fact, other))
+    end)
+  end
+
+  defp prepend_actual_finding(findings, result) do
+    if actual_finding?(result) do
+      [result | findings]
+    else
+      findings
+    end
+  end
+
+  defp actual_finding?(result) when is_map(result) do
+    is_binary(result[:qualified_finding_id]) and result[:qualified_finding_id] != "" and
+      result[:severity] in [:info, :warning, :blocking]
+  end
+
+  defp actual_finding?(_), do: false
 
   defp normalize_scope(scope) do
     scope = string_key_map(scope)

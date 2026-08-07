@@ -91,7 +91,7 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.DiscoveryIntegrityTest 
              ])
   end
 
-  test "rejects duplicate pages, gaps, and incomplete sequences" do
+  test "rejects duplicate pages, gaps, out-of-order, and incomplete sequences" do
     assert {:error, :duplicate_page} =
              DiscoveryIntegrity.validate_discovery_pages([
                page(%{page: 1, has_more: true}),
@@ -104,8 +104,34 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.DiscoveryIntegrityTest 
                page(%{page: 3, has_more: false})
              ])
 
+    assert {:error, :out_of_order_page} =
+             DiscoveryIntegrity.validate_discovery_pages([
+               page(%{page: 2, has_more: false}),
+               page(%{page: 1, has_more: true})
+             ])
+
+    assert {:ok, :complete} =
+             DiscoveryIntegrity.validate_discovery_pages([
+               page(%{page: 1, has_more: true}),
+               page(%{page: 2, has_more: false})
+             ])
+
     assert {:error, :incomplete_page_sequence} =
              DiscoveryIntegrity.validate_discovery_pages([page(%{has_more: true})])
+  end
+
+  test "rejects per_page mismatches across pages" do
+    assert {:ok, :complete} =
+             DiscoveryIntegrity.validate_discovery_pages([
+               page(%{page: 1, per_page: 100, has_more: true}),
+               page(%{page: 2, per_page: 100, has_more: false})
+             ])
+
+    assert {:error, :per_page_mismatch} =
+             DiscoveryIntegrity.validate_discovery_pages([
+               page(%{page: 1, per_page: 100, has_more: true}),
+               page(%{page: 2, per_page: 50, has_more: false})
+             ])
   end
 
   test "enforces native per-page bounds" do
