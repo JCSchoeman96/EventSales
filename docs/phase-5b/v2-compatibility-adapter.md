@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Plan / document ID | `phase-5b-v2-compatibility-adapter` |
-| Document version | `v2` |
+| Document version | `v3` |
 | Status | Draft for independent Gate D re-review (PR #153) |
 | Scope | Compatibility translation from historical `2026-07-22.v2` representations into locked `source_risk.v3` **projections** — no implementation, no historical mutation |
 | Authority | Active Phase 5B Gate D contract; subordinate to locked domain model and native contract on conflicts |
@@ -11,13 +11,13 @@
 | Locked native contract | `docs/phase-5b/source-risk-contract.md` — SHA256 `87dec4238e5c7ea04fe8d2a9735980a35f2bf542324a851686d60fead1d0785c` |
 | Historical context | `docs/phase-5a/source-risk-blocker-taxonomy.md`, `docs/phase-5a/source-risk-blocker-ledger.csv` |
 | Last updated | 2026-08-07 |
-| Change summary | Harden translation: no null-status→absent, no draft_product-only→draft, closed product_type registry, split missing_source_risk_data, precedence≠conflict |
+| Change summary | Disambiguate `draft_event` by `source_emitter`; rule uniqueness includes emitter/path |
 
 ### Revision log
 
 - `v1` — initial compatibility adapter after PR #152 merge (`83fae70…`)
 - `v2` — Gate D REQUEST CHANGES on PR #153: weaken overstated translations; separate precedence from conflict
-### Conflict rule
+- `v3` — Gate D REQUEST CHANGES: `source_emitter` identity; split `wp.event_risk_codes` vs `wp.review_reasons` `draft_event`### Conflict rule
 
 ```text
 domain model + source_risk.v3 native contract win on semantics/invariants
@@ -252,45 +252,75 @@ Additional deterministic rules:
 
 Adapter version scope: `compat.v2_to_source_risk_v3.v1` / source `2026-07-22.v2`.
 
-| Rule id | Legacy code | Legacy owner | Observed scope (v2) | Legacy classification behaviour | Handling class | v3 dimension | v3 state | v3 value | v3 scope | Target reconstruction | Completeness | Finding handling | Certainty note |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `t.trash_event` | `trash_event` | WP `event_risk_codes` | event | erased by Phoenix `from_code` → often `missing_source_risk_data` | declared alias → typed fact | `lifecycle` | `present` | `trash` | `event` | `{tickera_event_id}` from event | `unknown` | `source_risk.lifecycle_trashed` (compat) | preserved semantic; completeness unknown |
-| `t.private_event` | `private_event` | WP + Phoenix known | event | `explicit_risky` | typed fact | `lifecycle` | `present` | `private` | `event` | event id | `unknown` | `source_risk.lifecycle_private` | preserved |
-| `t.draft_event` | `draft_event` | WP + Phoenix known | event | `explicit_risky` | typed fact | `lifecycle` | `present` | `draft` | `event` | event id | `unknown` | `source_risk.lifecycle_draft` | preserved; note draft may include non-trash non-private statuses only when classification says draft |
-| `t.trashed_event` | `trashed_event` | Phoenix vocab (often not WP-emitted) | event | `explicit_risky` if present | typed fact | `lifecycle` | `present` | `trash` | `event` | event id | `unknown` | `source_risk.lifecycle_trashed` | preserved |
-| `t.deleted_event` | `deleted_event` | Phoenix vocab; not full-feed WP | event | if present | typed fact / diagnostic | `lifecycle` | `present` | `deleted` | `event` | event id | `unknown` | lifecycle deleted | rare; no invention |
-| `t.private_product` | `private_product` | WP `review_reasons` | product (may be on variation row) | `explicit_risky` | typed fact | `lifecycle` | `present` | `private` | `parent_product` | `{woo_product_id}` regroup | `unknown` | `source_risk.lifecycle_private` | preserved |
-| `t.draft_product` | `draft_product` | WP `review_reasons` | product | `explicit_risky` | compatibility diagnostic / unresolved lifecycle unless classification proves exact value | `lifecycle` | only when classification proves exact value; else — | only when classification proves; else — | `parent_product` | product id | `unknown` | retain historical finding | **never** map draft_product-only → present/draft; trash collapsed into this code |
-| `t.trashed_product` | `trashed_product` | Phoenix vocab | product | if present | typed fact | `lifecycle` | `present` | `trash` | `parent_product` | product id | `unknown` | lifecycle trashed | rare in WP emission |
-| `t.deleted_product` | `deleted_product` | Phoenix vocab | product | if present | typed fact | `lifecycle` | `present` | `deleted` | `parent_product` | product id | `unknown` | lifecycle deleted | rare |
-| `t.private_variation` | `private_variation` | mostly Phoenix ensure_dimension | variation | often synthetic `explicit_safe` fill | typed / diagnostic | `lifecycle` | depends | see §10 | `variation` | variation id | `unknown` | as proven | synthetic safe fills do not invent publish observation from absence of code alone without retained classification |
-| `t.draft_variation` | `draft_variation` | Phoenix vocab | variation | if present | typed fact | `lifecycle` | `present` | `draft` | `variation` | variation id | `unknown` | lifecycle draft | WP often serializes status but may not emit risk code |
-| `t.subscription_product` | `subscription_product` | WP when `is_subscription_product` true | product | erased by `from_code` | declared alias → typed fact | `subscription` | `present` | optional digest | `parent_product` | product id | `unknown` | `source_risk.subscription` | positive only; never safe absent |
-| `t.payment_plan_product` | `payment_plan_product` | WP co-emitted with subscription | product | erased by `from_code` | **rejected alias** / undeclared_raw diagnostic | — | — | — | — | retain product id in provenance | `unknown` | `contract.unknown_source_risk_code` or compat diagnostic | **NOT** `payment_plan` |
-| `t.missing_ticket_template` | `missing_ticket_template` | WP when template id null | product | Phoenix `explicit_risky` | typed fact | `ticket_template` | `absent` | null | `parent_product` | product id | `unknown` (not invented exhaustive) | `source_risk.missing_ticket_template` | “missing” in code name ≠ EvidenceState missing |
-| `t.missing_tickera_event` | `missing_tickera_event` | WP when `event_status` null | product relation | erased by `from_code` | compatibility diagnostic / unresolved event_link unless Class A proves reference absence or invalidity | `event_link` | only absent/invalid when Class A proves; null-status alone → — | — | `event_product_relationship` | `{woo_product_id}` | `unknown` | preserve `source_risk.missing_tickera_event` visibility | **never** mint absent from event_status=null alone |
-| `t.unknown_product_semantics` | `unknown_product_semantics` | WP always appended | product | Phoenix `unknown` | derived summary only | — | — | — | — | product id for aggregate | — | derived UI/audit only | do not mint co-equal blocker |
-| `t.payment_plan` | `payment_plan` | Phoenix semantic dim / WP semantics unknown | product | `unknown` from `product_semantics` | capability fact | `payment_plan` | `unknown` | — | `parent_product` | product id | `unknown` | `source_risk.payment_plan` | via capability slot semantics for review |
-| `t.membership` | `membership` | same | product | `unknown` | capability fact | `membership` | `unknown` | — | `parent_product` | product id | `unknown` | `source_risk.membership` | same |
-| `t.bundle` | `bundle` | same | product | `unknown` | capability fact | `bundle` | `unknown` | — | `parent_product` | product id | `unknown` | `source_risk.bundle` | same |
-| `t.add_on` | `add_on` | same | product | `unknown` | capability fact | `add_on` | `unknown` | — | `parent_product` | product id | `unknown` | `source_risk.add_on` | same |
-| `t.subscription` | `subscription` | Phoenix after alias / ensure | product | risky or safe fill | typed / capability | `subscription` | present if risky from code; safe fill ≠ exhaustive absent | — | `parent_product` | product id | `unknown` | as applicable | never promote safe fill to exhaustive absent |
-| `t.unsupported_product_type` | `unsupported_product_type` | Phoenix | product | often `unsupported` class | closed-registry observation vs diagnostic | `product_type` | `present` **only** if retained token is locked-declared (`simple`); else — | `simple` only when declared; else — | `parent_product` | product id | `unknown` | preserve historical `source_risk.unsupported_product_type` | undeclared tokens stay raw provenance; fail closed — never mint present with undeclared token as canonical value |
-| `t.variation_mapping_required` | `variation_mapping_required` | WP risk_codes **and** Normalizer structural warning | variation blocker / product warning | overloaded | structural_projection and/or planner_projection | — | — | — | — | separate identities per emitter | — | `structural.*` / `planner.status.*` | never source-risk canonical evidence |
-| `t.missing_source_risk_data.wp_event_unknown` | `missing_source_risk_data` | WP `event_risk_codes` (explicit emission for unknown event status) | event | `missing` | lifecycle unresolved/unknown projection | `lifecycle` | `unknown` | — | `event` | event id when known | `unknown` | blocking compatibility / lifecycle unknown | explicit WP literal — **not** erased producer code |
-| `t.missing_source_risk_data.phoenix_fallback` | `missing_source_risk_data` | Phoenix `SourceRisk.from_code/3` fallback | varies | `missing` | unrecoverable / contract diagnostic | — | — | — | — | retained targets only | `unknown` | `contract.*` diagnostic | original raw code erased; **never invent**; do not map to lifecycle |
-| `t.unknown_source_risk_code` | n/a (v3) | contract | — | — | contract diagnostic | — | — | — | — | — | — | `contract.unknown_source_risk_code` | for undeclared raw |
-| Planner codes (`ambiguous_*`, `existing_mapping_*`, etc.) | various | planner/normalizer | varies | — | planner_projection | — | — | — | — | planner identities | — | `planner.status.*` | not source evidence |
+Closed `source_emitter` vocabulary (deterministic; not exhaustive of all future emitters):
+
+```text
+wp.event_risk_codes
+wp.review_reasons
+phoenix.source_risk.from_code
+phoenix.normalizer
+phoenix.vocab
+contract
+planner
+unknown
+```
+
+| Rule id | Legacy code | Legacy owner | Source emitter | Observed scope (v2) | Legacy classification behaviour | Handling class | v3 dimension | v3 state | v3 value | v3 scope | Target reconstruction | Completeness | Finding handling | Certainty note |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `t.trash_event` | `trash_event` | WordPress | `wp.event_risk_codes` | event | erased by Phoenix `from_code` → often `missing_source_risk_data` | declared alias → typed fact | `lifecycle` | `present` | `trash` | `event` | `{tickera_event_id}` from event | `unknown` | `source_risk.lifecycle_trashed` (compat) | preserved semantic; completeness unknown |
+| `t.private_event.event_risk_codes` | `private_event` | WordPress | `wp.event_risk_codes` | event | `explicit_risky` | typed fact | `lifecycle` | `present` | `private` | `event` | event id | `unknown` | `source_risk.lifecycle_private` | classification private → exact |
+| `t.private_event.review_reasons` | `private_event` | WordPress | `wp.review_reasons` | event | `explicit_risky` | typed fact | `lifecycle` | `present` | `private` | `event` | event id | `unknown` | `source_risk.lifecycle_private` | review_reasons emits only when event_status === private |
+| `t.draft_event.event_risk_codes` | `draft_event` | WordPress | `wp.event_risk_codes` | event | `explicit_risky` | typed fact | `lifecycle` | `present` | `draft` | `event` | event id | `unknown` | `source_risk.lifecycle_draft` | receives already-normalized classification=`draft` |
+| `t.draft_event.review_reasons` | `draft_event` | WordPress | `wp.review_reasons` | event | `explicit_risky` | diagnostic / unresolved unless Class A exact status proves value | `lifecycle` | only when exact status proves; else — | only when exact status proves; else — | `event` | event id | `unknown` | retain historical finding | **lossy**: any non-null non-publish non-private status; never mint present/draft from code alone |
+| `t.draft_event.unknown_emitter` | `draft_event` | WordPress | `unknown` | event | `explicit_risky` | compatibility diagnostic / lifecycle unresolved | `lifecycle` | — | — | `event` | event id when known | `unknown` | retain historical finding | cannot choose event_risk_codes vs review_reasons — weaken |
+| `t.trashed_event` | `trashed_event` | Phoenix | `phoenix.vocab` | event | `explicit_risky` if present | typed fact | `lifecycle` | `present` | `trash` | `event` | event id | `unknown` | `source_risk.lifecycle_trashed` | preserved |
+| `t.deleted_event` | `deleted_event` | Phoenix | `phoenix.vocab` | event | if present | typed fact / diagnostic | `lifecycle` | `present` | `deleted` | `event` | event id | `unknown` | lifecycle deleted | rare; no invention |
+| `t.private_product` | `private_product` | WordPress | `wp.review_reasons` | product (may be on variation row) | `explicit_risky` | typed fact | `lifecycle` | `present` | `private` | `parent_product` | `{woo_product_id}` regroup | `unknown` | `source_risk.lifecycle_private` | preserved |
+| `t.draft_product` | `draft_product` | WordPress | `wp.review_reasons` | product | `explicit_risky` | compatibility diagnostic / unresolved lifecycle unless classification proves exact value | `lifecycle` | only when classification proves exact value; else — | only when classification proves; else — | `parent_product` | product id | `unknown` | retain historical finding | **never** map draft_product-only → present/draft; trash collapsed into this code |
+| `t.trashed_product` | `trashed_product` | Phoenix | `phoenix.vocab` | product | if present | typed fact | `lifecycle` | `present` | `trash` | `parent_product` | product id | `unknown` | lifecycle trashed | rare in WP emission |
+| `t.deleted_product` | `deleted_product` | Phoenix | `phoenix.vocab` | product | if present | typed fact | `lifecycle` | `present` | `deleted` | `parent_product` | product id | `unknown` | lifecycle deleted | rare |
+| `t.private_variation` | `private_variation` | Phoenix | `phoenix.normalizer` | variation | often synthetic `explicit_safe` fill | typed / diagnostic | `lifecycle` | depends | see §10 | `variation` | variation id | `unknown` | as proven | synthetic safe fills do not invent publish observation from absence of code alone without retained classification |
+| `t.draft_variation` | `draft_variation` | Phoenix | `phoenix.vocab` | variation | if present | typed fact | `lifecycle` | `present` | `draft` | `variation` | variation id | `unknown` | lifecycle draft | WP often serializes status but may not emit risk code |
+| `t.subscription_product` | `subscription_product` | WordPress | `wp.review_reasons` | product | erased by `from_code` | declared alias → typed fact | `subscription` | `present` | optional digest | `parent_product` | product id | `unknown` | `source_risk.subscription` | positive only; never safe absent |
+| `t.payment_plan_product` | `payment_plan_product` | WordPress | `wp.review_reasons` | product | erased by `from_code` | **rejected alias** / undeclared_raw diagnostic | — | — | — | — | retain product id in provenance | `unknown` | `contract.unknown_source_risk_code` or compat diagnostic | **NOT** `payment_plan` |
+| `t.missing_ticket_template` | `missing_ticket_template` | WordPress | `wp.review_reasons` | product | Phoenix `explicit_risky` | typed fact | `ticket_template` | `absent` | null | `parent_product` | product id | `unknown` (not invented exhaustive) | `source_risk.missing_ticket_template` | “missing” in code name ≠ EvidenceState missing |
+| `t.missing_tickera_event` | `missing_tickera_event` | WordPress | `wp.review_reasons` | product relation | erased by `from_code` | compatibility diagnostic / unresolved event_link unless Class A proves reference absence or invalidity | `event_link` | only absent/invalid when Class A proves; null-status alone → — | — | `event_product_relationship` | `{woo_product_id}` | `unknown` | preserve `source_risk.missing_tickera_event` visibility | **never** mint absent from event_status=null alone |
+| `t.unknown_product_semantics` | `unknown_product_semantics` | WordPress | `wp.review_reasons` | product | Phoenix `unknown` | derived summary only | — | — | — | — | product id for aggregate | — | derived UI/audit only | do not mint co-equal blocker |
+| `t.payment_plan` | `payment_plan` | Phoenix | `phoenix.normalizer` | product | `unknown` from `product_semantics` | capability fact | `payment_plan` | `unknown` | — | `parent_product` | product id | `unknown` | `source_risk.payment_plan` | via capability slot semantics for review |
+| `t.membership` | `membership` | Phoenix | `phoenix.normalizer` | product | `unknown` | capability fact | `membership` | `unknown` | — | `parent_product` | product id | `unknown` | `source_risk.membership` | same |
+| `t.bundle` | `bundle` | Phoenix | `phoenix.normalizer` | product | `unknown` | capability fact | `bundle` | `unknown` | — | `parent_product` | product id | `unknown` | `source_risk.bundle` | same |
+| `t.add_on` | `add_on` | Phoenix | `phoenix.normalizer` | product | `unknown` | capability fact | `add_on` | `unknown` | — | `parent_product` | product id | `unknown` | `source_risk.add_on` | same |
+| `t.subscription` | `subscription` | Phoenix | `phoenix.normalizer` | product | risky or safe fill | typed / capability | `subscription` | present if risky from code; safe fill ≠ exhaustive absent | — | `parent_product` | product id | `unknown` | as applicable | never promote safe fill to exhaustive absent |
+| `t.unsupported_product_type` | `unsupported_product_type` | Phoenix | `phoenix.normalizer` | product | often `unsupported` class | closed-registry observation vs diagnostic | `product_type` | `present` **only** if retained token is locked-declared (`simple`); else — | `simple` only when declared; else — | `parent_product` | product id | `unknown` | preserve historical `source_risk.unsupported_product_type` | undeclared tokens stay raw provenance; fail closed — never mint present with undeclared token as canonical value |
+| `t.variation_mapping_required.review_reasons` | `variation_mapping_required` | WordPress | `wp.review_reasons` | variation blocker | overloaded | structural_projection and/or planner_projection | — | — | — | — | separate identity | — | `structural.*` / `planner.status.*` | never source-risk canonical evidence |
+| `t.variation_mapping_required.normalizer` | `variation_mapping_required` | Phoenix | `phoenix.normalizer` | product warning | overloaded | structural_projection | — | — | — | — | separate identity | — | `structural.*` | never source-risk canonical evidence |
+| `t.missing_source_risk_data.wp_event_unknown` | `missing_source_risk_data` | WordPress | `wp.event_risk_codes` | event | `missing` | lifecycle unresolved/unknown projection | `lifecycle` | `unknown` | — | `event` | event id when known | `unknown` | blocking compatibility / lifecycle unknown | explicit WP literal — **not** erased producer code |
+| `t.missing_source_risk_data.phoenix_fallback` | `missing_source_risk_data` | Phoenix | `phoenix.source_risk.from_code` | varies | `missing` | unrecoverable / contract diagnostic | — | — | — | — | retained targets only | `unknown` | `contract.*` diagnostic | original raw code erased; **never invent**; do not map to lifecycle |
+| `t.unknown_source_risk_code` | n/a (v3) | contract | `contract` | — | — | contract diagnostic | — | — | — | — | — | — | `contract.unknown_source_risk_code` | for undeclared raw |
+| Planner codes (`ambiguous_*`, `existing_mapping_*`, etc.) | various | planner/normalizer | `planner` | varies | — | planner_projection | — | — | — | — | planner identities | — | `planner.status.*` | not source evidence |
 
 Unique rule ids above are closed for `compat.v2_to_source_risk_v3.v1`.
 
 Rule uniqueness key:
 
 ```text
-compatibility_version + source_contract_version + raw_code + source_owner
+compatibility_version
++ source_contract_version
++ raw_code
++ source_owner
++ source_emitter
 ```
 
-`missing_source_risk_data` therefore has two rules because WP explicit emission and Phoenix fallback share the literal but not the owner/provenance. If provenance cannot determine which owner produced the historical literal → use the weaker `t.missing_source_risk_data.phoenix_fallback` path; do not guess.
+Same-owner / different-emitter rules MUST be representable (required for `draft_event` and dual `variation_mapping_required`).
+
+If provenance cannot determine which owner/emitter produced a historical literal that has multiple rules:
+
+```text
+choose the weaker interpretation for that code
+(for draft_event → t.draft_event.unknown_emitter)
+```
+
+Do not guess.
 
 ---
 
@@ -298,15 +328,24 @@ compatibility_version + source_contract_version + raw_code + source_owner
 
 ### Event
 
-Static proof: `event_risk_codes/1` emits `private_event`, `draft_event`, or `trash_event` (`status . '_event'`), or explicit `missing_source_risk_data` for unknown status.
+Static proof — two WordPress emitters of event lifecycle codes:
 
-| Classification retained | Mapping |
+1. **`wp.event_risk_codes`** (event rows): receives already-normalized `event_status_classification`; emits `private_event`, `draft_event`, or `trash_event` as `status . '_event'`, or explicit `missing_source_risk_data` for unknown status.
+2. **`wp.review_reasons`** (catalog rows): emits `private_event` only when `event_status === 'private'`; emits `draft_event` for **any** other non-null status that is not `publish` (including `draft`, `trash`, or unrecognized).
+
+| Retained evidence | Mapping |
 |---|---|
-| `trash` / raw `trash_event` | lifecycle present/trash @ event |
-| `private` / `private_event` | lifecycle present/private |
-| `draft` / `draft_event` | lifecycle present/draft |
-| explicit WP `missing_source_risk_data` for unknown event status (`t.missing_source_risk_data.wp_event_unknown`) | lifecycle unresolved/`unknown` @ event — raw code was explicitly emitted, not erased |
-| Phoenix-fallback `missing_source_risk_data` with unproven owner | unrecoverable diagnostic — do not invent lifecycle value |
+| `wp.event_risk_codes` + classification/`trash_event` | lifecycle present/trash @ event |
+| `wp.event_risk_codes` + classification/`private_event` | lifecycle present/private |
+| `wp.event_risk_codes` + classification=`draft` / `draft_event` (`t.draft_event.event_risk_codes`) | lifecycle present/draft — exact classified draft |
+| `wp.review_reasons` + `private_event` | lifecycle present/private |
+| `wp.review_reasons` + retained exact `event_status=draft` | lifecycle present/draft; `draft_event` code is known lossy provenance only (§4) |
+| `wp.review_reasons` + retained exact `event_status=trash` | lifecycle present/trash; `draft_event` code is known lossy provenance only |
+| `wp.review_reasons` + other retained status not safely canonicalizable | diagnostic / lifecycle unresolved; `draft_event` lossy provenance |
+| `wp.review_reasons` + `draft_event` only (exact status unavailable) (`t.draft_event.review_reasons`) | **compatibility diagnostic** or lifecycle unresolved/`unknown`; completeness=`unknown`; origin=`compatibility_derived`; historical finding retained; **NEVER mint lifecycle present/draft** |
+| `draft_event` with unknown emitter/path (`t.draft_event.unknown_emitter`) | weaker interpretation: diagnostic / lifecycle unresolved — do not guess |
+| explicit WP `missing_source_risk_data` (`t.missing_source_risk_data.wp_event_unknown`) | lifecycle unresolved/`unknown` @ event — raw code was explicitly emitted, not erased |
+| Phoenix-fallback `missing_source_risk_data` | unrecoverable diagnostic — do not invent lifecycle value |
 
 ### Parent product
 
@@ -523,7 +562,8 @@ Conceptual fields (Phase 5C may implement structs later):
 | `compatibility_version` | `compat.v2_to_source_risk_v3.v1` |
 | `source_contract_version` | `2026-07-22.v2` |
 | `source_record_identity` | run/finding/fact/row key |
-| `source_owner` | WP function / Phoenix module |
+| `source_owner` | WordPress / Phoenix / contract / planner |
+| `source_emitter` | Deterministic path id, e.g. `wp.event_risk_codes`, `wp.review_reasons`, `phoenix.source_risk.from_code`, `phoenix.normalizer`, `phoenix.vocab`, `contract`, `planner`, `unknown` |
 | `raw_code` | when present |
 | `raw_classification` | when present |
 | `raw_scope` / `raw_target` | as retained |
@@ -704,22 +744,26 @@ Later Phase 5C: page-by-page translate; batch reads; avoid N+1; no unbounded run
 
 | Claim | Static evidence | Legacy owner | Proven semantics | Adapter decision | Confidence | Unresolved? |
 |---|---|---|---|---|---|---|
-| `trash_event` → lifecycle trash @ event | WP `event_risk_codes` uses `status.'_event'`; trash∈status set | WP | Positive trash observation | Alias translate | high | no |
-| Phoenix erases unknown raw codes | `SourceRisk.from_code/3` fallback → `:missing_source_risk_data` | Phoenix | Original raw lost | Prefer Class A raw before fallback; else `t.missing_source_risk_data.phoenix_fallback` | high | Exact erased codes for certified rows remain unknown |
-| Explicit WP `missing_source_risk_data` | WP `event_risk_codes` for unknown event status | WP | Event lifecycle could not be classified | `t.missing_source_risk_data.wp_event_unknown` → lifecycle unknown @ event | high | no |
-| `subscription_product` positive | WP emits when `is_subscription_product` true | WP | Positive subscription detection | Alias → subscription present | high | no |
-| `payment_plan_product` ≠ payment_plan | Co-emitted under same subscription predicate | WP | Not independent payment-plan proof | Reject alias; diagnostic | high | no |
-| `missing_ticket_template` → absent | WP when template id null | WP | Authoritative absence of template link | state=absent | high | Completeness remains unknown |
-| `missing_tickera_event` + `event_status=null` | WP emits for null status; SQL LEFT JOINs `_event_name` and Tickera event | WP | Ambiguous: no relationship vs unresolved reference | Diagnostic / unresolved event_link; **never** mint absent from null-status alone | high | Absent/invalid only when Class A proves reference distinction |
-| Product trash → `draft_product` | WP non-publish branch | WP | Trash collapsed into draft_product code | Classification trash wins; `draft_product` is lossy derivative (not conflict) | high | no |
-| `draft_product` only | WP review_reasons without classification | WP | Exact lifecycle value unrecoverable | Diagnostic / lifecycle unknown — **not** present/draft | high | no |
-| Parent semantics on variation rows | Normalizer target_type from variation_id | Phoenix | Scope defect | Regroup to parent_product when product id present | high | no |
-| Dual `variation_mapping_required` | WP review_reasons + Normalizer.variation_findings | both | Overloaded code | Structural/planner projections only | high | Exact replacement names deferred |
-| `unknown_product_semantics` | WP always appends; semantics all unknown | WP | Aggregate unknown | Derived summary only | high | no |
+| `trash_event` → lifecycle trash @ event | WP `event_risk_codes` uses `status.'_event'`; trash∈status set | WP / `wp.event_risk_codes` | Positive trash observation | Alias translate | high | no |
+| Phoenix erases unknown raw codes | `SourceRisk.from_code/3` fallback → `:missing_source_risk_data` | Phoenix / `phoenix.source_risk.from_code` | Original raw lost | Prefer Class A raw before fallback; else `t.missing_source_risk_data.phoenix_fallback` | high | Exact erased codes for certified rows remain unknown |
+| Explicit WP `missing_source_risk_data` | WP `event_risk_codes` for unknown event status | WP / `wp.event_risk_codes` | Event lifecycle could not be classified | `t.missing_source_risk_data.wp_event_unknown` → lifecycle unknown @ event | high | no |
+| `draft_event` via `wp.event_risk_codes` | Emits only when classification is `draft` | WP / `wp.event_risk_codes` | Exact classified draft | `t.draft_event.event_risk_codes` → present/draft | high | no |
+| `draft_event` via `wp.review_reasons` | Emits for any non-null non-publish non-private status | WP / `wp.review_reasons` | Lossy; may be draft, trash, or unrecognized | Prefer exact `event_status`; code alone → diagnostic / unknown — **never** present/draft | high | no |
+| `draft_event` unknown emitter | Historical literal without path proof | unknown | Ambiguous between exact and lossy emitters | `t.draft_event.unknown_emitter` weaker path | high | no |
+| `subscription_product` positive | WP emits when `is_subscription_product` true | WP / `wp.review_reasons` | Positive subscription detection | Alias → subscription present | high | no |
+| `payment_plan_product` ≠ payment_plan | Co-emitted under same subscription predicate | WP / `wp.review_reasons` | Not independent payment-plan proof | Reject alias; diagnostic | high | no |
+| `missing_ticket_template` → absent | WP when template id null | WP / `wp.review_reasons` | Authoritative absence of template link | state=absent | high | Completeness remains unknown |
+| `missing_tickera_event` + `event_status=null` | WP emits for null status; SQL LEFT JOINs `_event_name` and Tickera event | WP / `wp.review_reasons` | Ambiguous: no relationship vs unresolved reference | Diagnostic / unresolved event_link; **never** mint absent from null-status alone | high | Absent/invalid only when Class A proves reference distinction |
+| Product trash → `draft_product` | WP non-publish branch | WP / `wp.review_reasons` | Trash collapsed into draft_product code | Classification trash wins; `draft_product` is lossy derivative (not conflict) | high | no |
+| `draft_product` only | WP review_reasons without classification | WP / `wp.review_reasons` | Exact lifecycle value unrecoverable | Diagnostic / lifecycle unknown — **not** present/draft | high | no |
+| Parent semantics on variation rows | Normalizer target_type from variation_id | Phoenix / `phoenix.normalizer` | Scope defect | Regroup to parent_product when product id present | high | no |
+| Dual `variation_mapping_required` | WP review_reasons + Normalizer.variation_findings | both emitters | Overloaded code | Separate structural/planner projections per emitter | high | Exact replacement names deferred |
+| `unknown_product_semantics` | WP always appends; semantics all unknown | WP / `wp.review_reasons` | Aggregate unknown | Derived summary only | high | no |
 | product_semantics dims unknown | WP hard-coded unknown | WP | Unknown by design | Capability unknown facts | high | no |
 | Variation lifecycle incomplete | classification serialized; codes often omitted | WP/Phoenix | Incomplete emission | Prefer classification; no invention | medium | Full variation lifecycle historical coverage incomplete |
-| `unsupported_product_type` + non-simple token | Phoenix classification unsupported; v3 registry only `simple` | Phoenix / contract | Token may be retained but undeclared | Retain raw provenance; diagnostic; no canonical present value for undeclared tokens | high | Future registry expansion out of Gate D scope |
+| `unsupported_product_type` + non-simple token | Phoenix classification unsupported; v3 registry only `simple` | Phoenix / `phoenix.normalizer` | Token may be retained but undeclared | Retain raw provenance; diagnostic; no canonical present value for undeclared tokens | high | Future registry expansion out of Gate D scope |
 | Classification trash + `draft_product` | documented WP collapse | WP | One observation, two fidelities | Precedence wins; not blocking_conflict | high | no |
+| review_reasons `event_status=trash` + `draft_event` | documented WP collapse | WP | One observation, two fidelities | Exact status wins; `draft_event` lossy provenance; not conflict | high | no |
 
 ---
 
@@ -739,6 +783,8 @@ Phoenix-fallback missing_source_risk_data cannot recover erased producer code
 explicit WP missing_source_risk_data != Phoenix fallback (separate rules)
 event_status=null / missing_tickera_event alone != event_link absent
 draft_product-only != lifecycle present/draft
+wp.review_reasons draft_event-only != lifecycle present/draft
+unknown draft_event emitter != lifecycle present/draft
 undeclared product type token != canonical product_type value
 payment_plan_product != payment_plan alias
 variation_mapping_required != source-risk canonical evidence
@@ -748,6 +794,7 @@ transport variation_id does not determine semantic scope
 regrouping is read-model projection, not new authority
 known lossy derivative != blocking_conflict
 same canonical identity + genuinely independent conflicting claim = blocking_conflict
+same-owner different-emitter rules require source_emitter identity
 raw/provenance retained within bounds
 historical v2 snapshot/hash not rewritten
 mixed incompatible versions fail closed
@@ -781,6 +828,7 @@ Gate D succeeds when this document:
 - treats `unknown_product_semantics` as derived only;
 - maps ticket-template without mechanical EvidenceState `missing`; maps event-link only when Class A proves absent vs invalid;
 - forbids draft_product-only → present/draft and undeclared product-type tokens as canonical values;
+- splits `draft_event` by `source_emitter` (`wp.event_risk_codes` exact vs `wp.review_reasons` lossy vs unknown weaker);
 - splits WP vs Phoenix `missing_source_risk_data` rules;
 - separates representation precedence from genuine evidence conflict;
 - defines parent-product regrouping as projection only;
