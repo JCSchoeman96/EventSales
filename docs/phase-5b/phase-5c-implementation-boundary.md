@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Plan / document ID | `phase-5c-source-risk-implementation-boundary` |
-| Document version | `v2` |
+| Document version | `v3` |
 | Status | Draft for independent Phase 5C boundary re-review (PR #154) |
 | Scope | Implementation boundary, module ownership, tests, PR slices, and cutover rules for merged Phase 5B contracts — **design only** |
 | Authority | Subordinate to locked Phase 5B domain model, native contract, and v2 compatibility adapter |
@@ -12,12 +12,13 @@
 | Locked v2 adapter | `docs/phase-5b/v2-compatibility-adapter.md` — SHA256 `8236b6c1ddcd908a9a602f9b25bbe248323f3e117b20f63410e5cf348aaf30f5` |
 | Base main | `b384ed48f0cd644005e7762c496f341a0d7269de` |
 | Last updated | 2026-08-07 |
-| Change summary | Three-mode cutover; complete native envelope; opaque snapshot generation; skip v3 AutoApply enqueue; harden Apply defence; executable TOONs |
+| Change summary | Finalize DiscoveryResult carrier, durable findings, source-key MVP, native page bounds, self-contained 5C-06 |
 
 ### Revision log
 
 - `v1` — initial implementation boundary after PR #153 merge
-- `v2` — PR #154 REQUEST CHANGES: separate operational v2 from compatibility; lock envelope/generation/carrier; skip v3 AutoApply enqueue; fully expand TOONs
+- `v2` — PR #154 REQUEST CHANGES: three-mode cutover; envelope/generation/carrier; skip v3 AutoApply enqueue; expand TOONs
+- `v3` — PR #154 REQUEST CHANGES: lock DiscoveryResult-only carrier; durable TickeraCatalogSyncFinding; remove source-key override; native per_page≤100 / evidence≤500; enumerate 5C-06 files
 
 ### Conflict rule
 
@@ -101,11 +102,12 @@ exactly one fresh native-v3 end-to-end dry-run
 | RawProducerEvidence | `SourceRiskV3.Evidence` | `lib/event_sales/catalog/tickera_catalog/source_risk_v3/evidence.ex` | wire page/evidence | validated evidence | transport only | no | optional bounded refs | warm/run |
 | CanonicalEvidenceFact | `SourceRiskV3.CanonicalFact` | `lib/event_sales/catalog/tickera_catalog/source_risk_v3/canonical_fact.ex` | validated evidence / adapter | facts + identity | identity/equality | no | via plan snapshot | cold |
 | CompatibilityTranslation | `SourceRiskV3.Compatibility.V2Adapter` | `lib/event_sales/catalog/tickera_catalog/source_risk_v3/compatibility/v2_adapter.ex` | historical v2 only | translation + candidates | Gate D | no | computed MVP | cold compute |
-| SourceRiskFinding | `SourceRiskV3.FindingPolicy` + `Finding` | `lib/event_sales/catalog/tickera_catalog/source_risk_v3/finding_policy.ex` + `lib/event_sales/catalog/tickera_catalog/finding.ex` | facts/errors | dispositions | disposition codes | yes | plan snapshot | cold |
-| PlannerDecision / Action | `Planner` | `lib/event_sales/catalog/tickera_catalog/planner.ex` | mode-specific inputs | plan v2 or v3 | planner structural | planner status | plan snapshot | cold |
+| SourceRiskFinding | `SourceRiskV3.FindingPolicy` → `Finding` shape → durable rows | `lib/event_sales/catalog/tickera_catalog/source_risk_v3/finding_policy.ex` + `lib/event_sales/catalog/tickera_catalog/finding.ex` + `lib/event_sales/ingestion/resources/tickera_catalog_sync_finding.ex` | facts/errors | dispositions + persisted findings | disposition codes | yes | plan snapshot **and** `TickeraCatalogSyncFinding` | cold |
+| PlannerDecision / Action | `Planner` | `lib/event_sales/catalog/tickera_catalog/planner.ex` | mode-specific inputs from DiscoveryResult / legacy Normalizer | plan v2 or v3 | planner structural | planner status | plan snapshot | cold |
 | Discovery integrity | `SourceRiskV3.DiscoveryIntegrity` | `lib/event_sales/catalog/tickera_catalog/source_risk_v3/discovery_integrity.ex` | page envelopes | accept/reject | integrity | no | run aggregation | warm/run |
-| Native normalizer | `SourceRiskV3.Normalizer` | `lib/event_sales/catalog/tickera_catalog/source_risk_v3/normalizer.ex` | validated evidence | candidates | semantic construction | no | none alone | cold compute |
-| Discovery carrier | `DiscoveryResult` | `lib/event_sales/catalog/tickera_catalog/discovery_result.ex` | discovery output | struct to planner | field presence | no | no | warm |
+| Native normalizer | `SourceRiskV3.Normalizer` | `lib/event_sales/catalog/tickera_catalog/source_risk_v3/normalizer.ex` | validated evidence | `DiscoveryResult.canonical_source_risk_facts` | semantic construction | no | via plan snapshot | cold compute |
+| Discovery carrier (sole) | `DiscoveryResult` | `lib/event_sales/catalog/tickera_catalog/discovery_result.ex` | discovery + normalize outputs | sole planner input carrier | field presence | no | no | warm |
+| Durable finding projection | `DiscoverTickeraCatalogWorker` + `TickeraCatalogSyncFinding` | `lib/event_sales/ingestion/workers/discover_tickera_catalog_worker.ex` + `lib/event_sales/ingestion/resources/tickera_catalog_sync_finding.ex` | plan findings | DB rows | existing bounds | no | yes | cold |
 | Legacy v2 SourceRisk | `SourceRisk` | `lib/event_sales/catalog/tickera_catalog/source_risk.ex` | live/historical v2 | v2 facts | legacy | legacy | historical v2 snapshots | preserve |
 | Legacy v2 Normalizer | `Normalizer` | `lib/event_sales/catalog/tickera_catalog/normalizer.ex` | live v2 rows | v2 plan inputs | legacy | legacy | via plan.v2 | preserve |
 
@@ -381,6 +383,13 @@ evidence
 
 Native typed `evidence[]` is primary.
 
+Native pagination/evidence bounds (do not inherit legacy PHP `MAX_PER_PAGE = 500` for v3):
+
+```text
+per_page <= 100
+evidence.length <= 500 per page
+```
+
 Legacy flat risk strings, if retained, are **non-authoritative diagnostics only**; Phoenix native normalization ignores them for canonical proof.
 
 ### `producer_version` (exact lock)
@@ -407,34 +416,33 @@ Wire field name remains `source_system_id` per locked contract.
 
 Producer value is a **stable producer-local source key**, not the EventSales database UUID.
 
-Algorithm:
+**Phase 5C MVP: derived normalize-url hash only. No override constants/config.**
+
+Algorithm (locked):
 
 ```text
-IF defined(EVENTSALES_TICKERA_CATALOG_SOURCE_KEY) AND non-empty bounded string (≤128 chars, printable):
-  producer_source_key = that constant
-ELSE:
-  home = normalize_url(home_url())
-  // normalize: lowercase scheme/host; strip default ports; strip trailing slash; no fragment/query
-  producer_source_key = "wordpress_tickera:" <> sha256_hex(home)
+home = normalize_url(home_url())
+// normalize: lowercase scheme/host; strip default ports; strip trailing slash; no fragment/query
+producer_source_key = "wordpress_tickera:" <> sha256_hex(home)
 ```
+
+Phoenix verification:
+
+```text
+expected_key = "wordpress_tickera:" <> sha256_hex(normalize_url(source_system.base_url))
+reject page if page.source_system_id != expected_key
+→ source_system_id mismatch (fail closed)
+```
+
+Do **not** implement `EVENTSALES_TICKERA_CATALOG_SOURCE_KEY` or Phoenix env/app-config overrides in Phase 5C.
+
+If a real installation later needs an override, that requires a separately reviewed design change.
 
 Properties: stable across pages/restarts; different per WP installation; non-secret; bounded; deterministic.
 
-Phoenix verification (no WordPress knowledge of DB UUID required):
-
-```text
-expected_key =
-  configured override for the SourceSystem if present
-  else "wordpress_tickera:" <> sha256_hex(normalize_url(source_system.base_url))
-
-reject page if page.source_system_id != expected_key
-```
-
-Optional override config on Phoenix (env/app config keyed by SourceSystem id) may supply the same string as `EVENTSALES_TICKERA_CATALOG_SOURCE_KEY` when site URL and configured `base_url` intentionally differ. Default path uses normalize+hash only.
-
 ---
 
-## 12. DiscoveryResult / v3 Carrier (exact lock)
+## 12. DiscoveryResult / v3 Carrier (FINAL lock)
 
 Path:
 
@@ -442,7 +450,7 @@ Path:
 lib/event_sales/catalog/tickera_catalog/discovery_result.ex
 ```
 
-**Decision:** extend `DiscoveryResult`; do not replace.
+**FINAL decision:** extend `DiscoveryResult`. Do **not** replace it. Do **not** introduce an adjacent result struct, alternative carrier, process dictionary, ETS side channel, or deferred ownership.
 
 Preserve all existing v2 fields/semantics:
 
@@ -455,36 +463,53 @@ catalog_rows
 source_snapshot_at
 ```
 
-Add optional native-v3 carrier fields (nil for legacy_v2_operational):
+Add optional native-v3 carrier fields (nil/default for `legacy_v2_operational`):
 
 ```text
 canonical_contract_version
 producer_version
-source_system_id          // producer-local key from page
+source_system_id
 discovery_snapshot_id
-normalization_mode        // :legacy_v2_operational | :native_v3_review
-evidence_origin           // :native | nil for operational v2
-canonical_source_risk_facts   // list | nil until after normalize stage ownership settles
-canonical_source_risk_findings // list | nil
+normalization_mode
+evidence_origin
+canonical_source_risk_facts
+canonical_source_risk_findings
 ```
 
-Exact ownership for when facts are filled:
+`normalization_mode` values:
 
 ```text
-DiscoverySource / Integrity accumulates pages
-→ for native_v3_review, Normalizer+FindingPolicy fill facts/findings on the DiscoveryResult (or an adjacent immutable result struct returned alongside it)
-→ Planner consumes DiscoveryResult fields only — no hidden process dictionary / ETS side channels
+:legacy_v2_operational
+:native_v3_review
 ```
 
-If an adjacent result struct is introduced, it must live under:
+`evidence_origin` values:
 
 ```text
-lib/event_sales/catalog/tickera_catalog/source_risk_v3/
+:native
+nil   // operational v2
 ```
 
-and be explicitly named in 5C-03. Preferred minimal approach remains extending `DiscoveryResult`.
+### Field ownership (locked)
 
-`historical_v2_compatibility_review` uses adapter outputs in a review read-model path; it does not replace operational DiscoveryResult for live dry-runs.
+| Field group | Owner |
+|---|---|
+| Transport/envelope fields (`schema_version`, `canonical_contract_version`, `producer_version`, `source_system_id`, `discovery_snapshot_id`, `source_snapshot_at`, events/rows) | `WordPressFeedResponse` / `WordPressFeedDiscoverySource` (+ `DiscoveryIntegrity` checks) |
+| `canonical_source_risk_facts` | `SourceRiskV3.Normalizer` only |
+| `canonical_source_risk_findings` | `SourceRiskV3.FindingPolicy` only |
+| Planner | **read-only consumer** of `DiscoveryResult` |
+
+Pipeline:
+
+```text
+WordPressFeedResponse / DiscoverySource accumulate pages
+→ DiscoveryIntegrity validates agreement
+→ SourceRiskV3.Normalizer writes canonical_source_risk_facts onto DiscoveryResult
+→ SourceRiskV3.FindingPolicy writes canonical_source_risk_findings onto DiscoveryResult
+→ Planner reads DiscoveryResult only
+```
+
+`historical_v2_compatibility_review` uses adapter outputs in a separate human-review read-model path; it does not replace operational `DiscoveryResult` for live dry-runs and does not invent a second operational carrier.
 
 ---
 
@@ -612,9 +637,19 @@ repeated/concurrent invalidations → new opaque tokens
 
 ## 14. Page Processing / Memory Boundary
 
+Native v3 bounds (locked contract; stricter than legacy PHP `MAX_PER_PAGE = 500`):
+
 ```text
-≤ 100 catalog rows/page
-≤ 500 evidence items/page
+per_page <= 100
+evidence.length <= 500 per page
+catalog rows/page <= 100
+```
+
+Legacy `2026-07-22.v2` producer bounds remain unchanged until the producer cutover.
+
+Processing:
+
+```text
 validate page → canonicalize bounded evidence → incremental aggregate → finalize
 ```
 
@@ -649,7 +684,39 @@ NO
 
 Existing `tickera_catalog_sync_runs.plan_snapshot` (:map) stores versioned JSON. No historical v2 rewrite. CompatibilityTranslationRecord: not persisted for MVP.
 
-Producer source-key override config, if needed, may use application config/env without a SourceSystem migration in Phase 5C.
+### Durable findings (locked)
+
+Native v3 findings persist in **both**:
+
+```text
+A. tickera_catalog_plan.v3 findings (immutable audit artifact)
+B. existing TickeraCatalogSyncFinding rows (durable query/admin projection)
+```
+
+Paths:
+
+```text
+lib/event_sales/ingestion/resources/tickera_catalog_sync_finding.ex
+lib/event_sales/ingestion/workers/discover_tickera_catalog_worker.ex
+```
+
+No second finding table.
+
+No migration unless later static proof shows existing bounds cannot store a valid locked v3 finding. Expected Phase 5C design:
+
+```text
+migration = NO
+```
+
+5C-04 must verify:
+
+```text
+qualified v3 finding codes fit code max_length=120
+metadata remains bounded
+severity maps to existing :info | :warning | :blocking
+retry cleanup/recreation via destroy_for_retry remains transactional
+historical v2 finding representation unchanged
+```
 
 ---
 
@@ -751,8 +818,9 @@ lib/event_sales/catalog/tickera_catalog/planner.ex
 ```
 
 - `legacy_v2_operational`: consumes legacy Normalizer outputs as today.
-- `native_v3_review`: consumes canonical facts/findings from DiscoveryResult carrier.
+- `native_v3_review`: **read-only** consumes `DiscoveryResult.canonical_source_risk_facts` and `DiscoveryResult.canonical_source_risk_findings`.
 - Must not embed Gate D alias translation / authority inference / scope correction.
+- Must not invent an alternate carrier.
 - `variation_mapping_required` stays outside canonical source-risk evidence.
 
 ---
@@ -791,14 +859,18 @@ lib/event_sales/catalog/tickera_catalog/wordpress_feed_signature.ex
 | Page duplicate/gap | page set | reject | retry | integrity | none |
 | Mixed schema versions | version set | reject | retry | integrity | none |
 | Producer source key mismatch | expected_key check | reject | fix config | contract | none |
-| Duplicate/conflict facts | identity+claim | collapse/conflict | n/a | findings | snapshot |
-| Unknown producer code | registry | blocking | n/a | finding | snapshot |
+| Duplicate/conflict facts | identity+claim | collapse/conflict | n/a | findings | plan + TickeraCatalogSyncFinding |
+| Unknown producer code | registry | blocking | n/a | finding | plan + rows |
 | Oversized provenance | bounds | reject | no truncate-alias | contract | none |
 | Adapter unknown emitter | Gate D | weaker diagnostic | n/a | review only | projection |
+| Finding code > 120 chars | length check | reject/fail closed finding persist | n/a | contract | no ready |
 | Snapshot finalization crash | worker | failed/retry_scheduled | Oban | last_error | no false ready |
 | AutoApply eval for v3 | discover worker | skip enqueue | n/a | none | ready review-only |
 | queue_apply v3 | Sync | reject | no job | error | no write |
 | Applier/worker v3 | Applier/worker | unsupported_snapshot_version / discard | no write | keep ready | no applied |
+| source_system_id mismatch | hash compare | reject discovery | fix base_url | contract | none |
+| native per_page > 100 | producer/parser bounds | reject page | n/a | contract | none |
+| native evidence > 500 | producer/parser bounds | reject page | n/a | contract | none |
 
 ---
 
@@ -837,7 +909,7 @@ test/event_sales/catalog/tickera_catalog/wordpress_feed_discovery_source_test.ex
 test/event_sales/catalog/tickera_catalog/discovery_result_test.exs
 ```
 
-### Planner / snapshot / Apply safety
+### Planner / snapshot / Apply safety / durable findings
 
 ```text
 test/event_sales/catalog/tickera_catalog/snapshot_canonicalizer_test.exs
@@ -847,6 +919,7 @@ test/event_sales/ingestion/tickera_catalog_auto_apply_test.exs
 test/event_sales/ingestion/workers/discover_tickera_catalog_worker_test.exs
 test/event_sales/ingestion/workers/apply_tickera_catalog_worker_test.exs
 test/event_sales/ingestion/tickera_catalog_sync_test.exs
+test/event_sales/ingestion/resources/tickera_catalog_sync_finding_test.exs
 ```
 
 ### WordPress
@@ -896,8 +969,10 @@ Each slice: fresh main → fresh branch → tests → draft PR → review → me
 | finding policy | — | `lib/event_sales/catalog/tickera_catalog/source_risk_v3/finding_policy.ex` | add | dispositions |
 | discovery integrity | — | `lib/event_sales/catalog/tickera_catalog/source_risk_v3/discovery_integrity.ex` | add | page/snapshot |
 | v2 adapter | — | `lib/event_sales/catalog/tickera_catalog/source_risk_v3/compatibility/v2_adapter.ex` | add | historical review only |
-| DiscoveryResult carrier | `lib/event_sales/catalog/tickera_catalog/discovery_result.ex` | same | extend | v3 fields |
+| DiscoveryResult carrier (sole) | `lib/event_sales/catalog/tickera_catalog/discovery_result.ex` | same | extend only | sole v3 carrier |
+| Durable findings | `lib/event_sales/ingestion/resources/tickera_catalog_sync_finding.ex` | same | reuse | plan + rows |
 | Finding shape | `lib/event_sales/catalog/tickera_catalog/finding.ex` | same | reuse | shared |
+| Discover worker | `lib/event_sales/ingestion/workers/discover_tickera_catalog_worker.ex` | same | skip v3 auto-eval; persist findings rows | review-only |
 | feed response | `lib/event_sales/catalog/tickera_catalog/wordpress_feed_response.ex` | same | update | dual-mode parse |
 | discovery source | `lib/event_sales/catalog/tickera_catalog/wordpress_feed_discovery_source.ex` | same | update | mode dispatch |
 | feed client/signature | `lib/event_sales/catalog/tickera_catalog/wordpress_feed_client.ex`, `lib/event_sales/catalog/tickera_catalog/wordpress_feed_signature.ex` | same | preserve | transport |
@@ -906,7 +981,6 @@ Each slice: fresh main → fresh branch → tests → draft PR → review → me
 | Plan struct | `lib/event_sales/catalog/tickera_catalog/plan.ex` | same | update if needed | carry snapshot |
 | AutoApplyPolicy | `lib/event_sales/catalog/tickera_catalog/auto_apply_policy.ex` | same | unchanged semantics | v2-only |
 | AutoApply orchestration | `lib/event_sales/ingestion/tickera_catalog_auto_apply.ex` | same | regression | v2 |
-| Discover worker | `lib/event_sales/ingestion/workers/discover_tickera_catalog_worker.ex` | same | skip v3 auto-eval enqueue | review-only |
 | Sync | `lib/event_sales/ingestion/tickera_catalog_sync.ex` | same | reject v3 queue_apply | gate |
 | Apply worker | `lib/event_sales/ingestion/workers/apply_tickera_catalog_worker.ex` | same | discard/reject v3 | no writes |
 | Applier | `lib/event_sales/catalog/tickera_catalog/applier.ex` | same | explicit v3 denial | sole writer |
@@ -927,7 +1001,8 @@ Each slice: fresh main → fresh branch → tests → draft PR → review → me
 | CanonicalEvidenceFact | yes in plan.v3 | `plan_snapshot` | `source_risk.v3` inside plan.v3 | immutable when ready | no | audit |
 | CompatibilityTranslationRecord | no MVP | computed | `compat.v2_to_source_risk_v3.v1` | n/a | no | computed |
 | SnapshotGeneration | WP option | `eventsales_tickera_catalog_snapshot_generation` | opaque token | replace on invalidate | WP-side only | current generation |
-| findings | yes | plan snapshot | v2 or v3 | finalized | no | audit |
+| findings (plan) | yes | plan snapshot findings | v2 or v3 | finalized | no | audit |
+| findings (durable rows) | yes | `ingestion_tickera_catalog_sync_findings` via `TickeraCatalogSyncFinding` | same codes/severity | recreated on retry | no | admin/query |
 
 ---
 
@@ -961,12 +1036,14 @@ historical/persisted v2
 
 ```text
 2026-08-07.v3 pages
-→ native parse + source key check
+→ native parse + source key check (derive-only hash)
 → DiscoveryIntegrity (generation/snapshot/pages)
-→ DiscoveryResult(+v3 fields)
-→ SourceRiskV3.Normalizer + FindingPolicy
-→ Planner
+→ DiscoveryResult transport fields
+→ SourceRiskV3.Normalizer → DiscoveryResult.canonical_source_risk_facts
+→ SourceRiskV3.FindingPolicy → DiscoveryResult.canonical_source_risk_findings
+→ Planner (read-only DiscoveryResult)
 → tickera_catalog_plan.v3
+→ DiscoverTickeraCatalogWorker persists TickeraCatalogSyncFinding rows
 → dry_run_ready review-only
 → no AutoApply evaluation enqueue
 → queue_apply/Applier/worker Apply denied
@@ -1018,37 +1095,37 @@ Do not execute as implementation in this design task.
 
 | Field | Content |
 | --- | --- |
-| Task | Add exact schema dispatch that preserves legacy_v2_operational unchanged and adds native_v3_review parsing, DiscoveryIntegrity, and extended DiscoveryResult carrier fields. Unknown/mixed versions fail closed. |
-| Objective | Make Phoenix dual-mode: live v2 stays v2; native v3 can be parsed and carried to later planner work without hidden side channels. |
+| Task | Add exact schema dispatch that preserves legacy_v2_operational unchanged and adds native_v3_review parsing, DiscoveryIntegrity, and FINAL extended DiscoveryResult carrier fields filled by Normalizer/FindingPolicy ownership. Unknown/mixed versions fail closed. No adjacent carrier structs. |
+| Objective | Make Phoenix dual-mode: live v2 stays v2; native v3 is parsed and carried solely via DiscoveryResult without hidden side channels. |
 | Output | Update `lib/event_sales/catalog/tickera_catalog/wordpress_feed_response.ex`, `lib/event_sales/catalog/tickera_catalog/wordpress_feed_discovery_source.ex`, `lib/event_sales/catalog/tickera_catalog/discovery_result.ex`. Create `lib/event_sales/catalog/tickera_catalog/source_risk_v3/discovery_integrity.ex`. Update/create tests: `test/event_sales/catalog/tickera_catalog/wordpress_feed_response_test.exs`, `test/event_sales/catalog/tickera_catalog/wordpress_feed_discovery_source_test.exs`, `test/event_sales/catalog/tickera_catalog/discovery_result_test.exs`, `test/event_sales/catalog/tickera_catalog/source_risk_v3/discovery_integrity_test.exs`. Dependency: 5C-01 and 5C-02 merged. |
-| Note | Minimal tools: git, rg, mix format, mix test with the exact test paths above. Indexes: none. Caching: none. TTL: n/a. Redis: none. Invalidation: none. PubSub: none. Security: exact envelope keys; producer source-key verify algorithm; reject unknown/mixed; transport validation only. Performance: page-bounded aggregation; no unbounded catalogue load. Phase 5D: catalogue-dry-run --fresh forbidden. PR: own fresh branch + draft PR. STOP: if live v2 is routed through V2Adapter; if DiscoveryResult v2 fields change semantics; if parser assigns severity/authority; if WP producer is cut over in this slice. |
+| Note | Minimal tools: git, rg, mix format, mix test test/event_sales/catalog/tickera_catalog/wordpress_feed_response_test.exs test/event_sales/catalog/tickera_catalog/wordpress_feed_discovery_source_test.exs test/event_sales/catalog/tickera_catalog/discovery_result_test.exs test/event_sales/catalog/tickera_catalog/source_risk_v3/discovery_integrity_test.exs. Indexes: none. Caching: none. TTL: n/a. Redis: none. Invalidation: none. PubSub: none. Security: exact envelope keys; derive-only source_system_id verify (`wordpress_tickera:`+sha256(normalize_url(base_url))); reject unknown/mixed/mismatch; transport validation only. Performance: page-bounded aggregation; no unbounded catalogue load. Phase 5D: catalogue-dry-run --fresh forbidden. PR: own fresh branch + draft PR. STOP: if live v2 is routed through V2Adapter; if DiscoveryResult v2 fields change semantics; if an adjacent carrier struct is introduced; if parser assigns severity/authority; if WP producer is cut over in this slice; if source-key overrides are added. |
 
-### 5C-04 — Planner plan.v3 review-only and Apply denial
+### 5C-04 — Planner plan.v3 review-only, durable findings, Apply denial
 
 | Field | Content |
 | --- | --- |
-| Task | Wire planner/snapshot canonicalizer to emit tickera_catalog_plan.v3 for native_v3_review; keep tickera_catalog_plan.v2 operational path unchanged; skip AutoApply evaluation enqueue for v3; deny Human Apply, Applier, and Apply worker for v3. |
-| Objective | Produce reviewable native-v3 dry-runs with no Apply writes and no AutoApply evaluation jobs. |
-| Output | Update `lib/event_sales/catalog/tickera_catalog/planner.ex`, `lib/event_sales/catalog/tickera_catalog/snapshot_canonicalizer.ex`, `lib/event_sales/catalog/tickera_catalog/applier.ex`, `lib/event_sales/ingestion/tickera_catalog_sync.ex`, `lib/event_sales/ingestion/workers/discover_tickera_catalog_worker.ex`, `lib/event_sales/ingestion/workers/apply_tickera_catalog_worker.ex`, `lib/event_sales_web/live/admin/catalog_sync_live.ex`. Update tests: `test/event_sales/catalog/tickera_catalog/snapshot_canonicalizer_test.exs`, `test/event_sales/catalog/tickera_catalog/planner_applier_test.exs`, `test/event_sales/catalog/tickera_catalog/auto_apply_policy_test.exs`, `test/event_sales/ingestion/tickera_catalog_auto_apply_test.exs`, `test/event_sales/ingestion/workers/discover_tickera_catalog_worker_test.exs`, `test/event_sales/ingestion/workers/apply_tickera_catalog_worker_test.exs`, `test/event_sales/ingestion/tickera_catalog_sync_test.exs`. Dependency: 5C-03 merged. |
-| Note | Minimal tools: git, rg, mix format, mix test with the exact test paths above. Indexes: none new. Caching: existing Cache.put_preview may store v3 preview bytes; not authority. TTL: n/a. Redis: none for source-risk. Invalidation: none new. PubSub: existing catalog_sync_preview_ready notify only. Security: explicit unsupported_snapshot_version before writes; no catalogue mutation on v3 Apply paths. Performance: deterministic ordering before hash; no N+1 introduced. Required proofs: v2 ready → auto-eval enqueue unchanged; v3 ready → no EvaluateTickeraCatalogAutoApplyWorker; queue_apply(v3) rejected; Applier(v3) returns unsupported_snapshot_version; Apply worker(v3) zero writes and does not mark applied. Phase 5D: catalogue-dry-run --fresh forbidden. PR: own fresh branch + draft PR. STOP: if v3 serializes as plan.v2; if v3 AutoApply evaluation is enqueued; if v3 Apply can write; if AutoApplyPolicy semantics weaken; if live v2 Apply changes. |
+| Task | Wire planner/snapshot canonicalizer to emit tickera_catalog_plan.v3 for native_v3_review; persist findings into both plan.v3 and existing TickeraCatalogSyncFinding rows via DiscoverTickeraCatalogWorker; keep tickera_catalog_plan.v2 operational path unchanged; skip AutoApply evaluation enqueue for v3; deny Human Apply, Applier, and Apply worker for v3. |
+| Objective | Produce reviewable native-v3 dry-runs with durable findings, no Apply writes, and no AutoApply evaluation jobs. |
+| Output | Update `lib/event_sales/catalog/tickera_catalog/planner.ex`, `lib/event_sales/catalog/tickera_catalog/snapshot_canonicalizer.ex`, `lib/event_sales/catalog/tickera_catalog/applier.ex`, `lib/event_sales/ingestion/tickera_catalog_sync.ex`, `lib/event_sales/ingestion/workers/discover_tickera_catalog_worker.ex`, `lib/event_sales/ingestion/workers/apply_tickera_catalog_worker.ex`, `lib/event_sales_web/live/admin/catalog_sync_live.ex`. Reuse without schema migration: `lib/event_sales/ingestion/resources/tickera_catalog_sync_finding.ex`. Update tests: `test/event_sales/catalog/tickera_catalog/snapshot_canonicalizer_test.exs`, `test/event_sales/catalog/tickera_catalog/planner_applier_test.exs`, `test/event_sales/catalog/tickera_catalog/auto_apply_policy_test.exs`, `test/event_sales/ingestion/tickera_catalog_auto_apply_test.exs`, `test/event_sales/ingestion/workers/discover_tickera_catalog_worker_test.exs`, `test/event_sales/ingestion/workers/apply_tickera_catalog_worker_test.exs`, `test/event_sales/ingestion/tickera_catalog_sync_test.exs`, `test/event_sales/ingestion/resources/tickera_catalog_sync_finding_test.exs`. Dependency: 5C-03 merged. |
+| Note | Minimal tools: git, rg, mix format, mix test test/event_sales/catalog/tickera_catalog/snapshot_canonicalizer_test.exs test/event_sales/catalog/tickera_catalog/planner_applier_test.exs test/event_sales/catalog/tickera_catalog/auto_apply_policy_test.exs test/event_sales/ingestion/tickera_catalog_auto_apply_test.exs test/event_sales/ingestion/workers/discover_tickera_catalog_worker_test.exs test/event_sales/ingestion/workers/apply_tickera_catalog_worker_test.exs test/event_sales/ingestion/tickera_catalog_sync_test.exs test/event_sales/ingestion/resources/tickera_catalog_sync_finding_test.exs. Indexes: none new. Caching: existing Cache.put_preview may store v3 preview bytes; not authority. TTL: n/a. Redis: none for source-risk. Invalidation: none new. PubSub: existing catalog_sync_preview_ready notify only. Security: explicit unsupported_snapshot_version before writes; no catalogue mutation on v3 Apply paths; finding codes ≤120 chars; metadata bounded; severity maps to info/warning/blocking. Performance: deterministic ordering before hash; no N+1 introduced. Required proofs: v2 ready → auto-eval enqueue unchanged; v3 ready → no EvaluateTickeraCatalogAutoApplyWorker; v3 findings present in plan.v3 and TickeraCatalogSyncFinding rows; queue_apply(v3) rejected; Applier(v3) returns unsupported_snapshot_version; Apply worker(v3) zero writes and does not mark applied; no DB migration. Phase 5D: catalogue-dry-run --fresh forbidden. PR: own fresh branch + draft PR. STOP: if v3 serializes as plan.v2; if v3 AutoApply evaluation is enqueued; if v3 Apply can write; if a second finding table/migration is introduced without separate review; if AutoApplyPolicy semantics weaken; if live v2 Apply changes. |
 
 ### 5C-05 — Native WordPress 2026-08-07.v3 producer
 
 | Field | Content |
 | --- | --- |
-| Task | Upgrade WP feed to emit native typed evidence with complete envelope, producer_version=2026-08-07.1, producer-local source_system_id algorithm, SnapshotGeneration opaque token+generation_at, generation-tied source_snapshot_at, mid-page generation check, and discovery_snapshot_id composition excluding page/per_page. |
+| Task | Upgrade WP feed to emit native typed evidence with complete envelope, producer_version=2026-08-07.1, derive-only source_system_id hash, SnapshotGeneration opaque token+generation_at, generation-tied source_snapshot_at, mid-page generation check, discovery_snapshot_id excluding page/per_page, and native bounds per_page<=100 and evidence.length<=500. |
 | Objective | Provide authoritative native producer evidence only after Phoenix dual-mode + plan.v3 review-only support exists. |
 | Output | Update `integrations/wordpress/eventsales-tickera-catalog-feed/eventsales-tickera-catalog-feed.php`, `integrations/wordpress/eventsales-tickera-catalog-feed/tests/catalog-feed-contract.md`, `integrations/wordpress/eventsales-tickera-catalog-feed/tests/catalog-feed-test.php`, `integrations/wordpress/eventsales-tickera-catalog-feed/tests/catalog-change-trigger-test.php`. Dependency: 5C-04 merged. |
-| Note | Minimal tools: git, rg, php integrations/wordpress/eventsales-tickera-catalog-feed/tests/catalog-feed-test.php, php integrations/wordpress/eventsales-tickera-catalog-feed/tests/catalog-change-trigger-test.php. Indexes: none. Caching: keep CACHE_VERSION_OPTION for transients only; SnapshotGeneration is separate contract identity. TTL: existing MIN/DEFAULT/MAX cache TTL bounds unchanged conceptually. Redis: none. Invalidation: every catalogue-relevant invalidate replaces SnapshotGeneration with new opaque token+generation_at; also bumps transient cache version. PubSub: none. Security: no secrets in source key; bounded strings; typed evidence primary; legacy risk strings non-authoritative if retained. Performance: page build with before/after generation read; fail/retry on mid-page change. Phase 5D: catalogue-dry-run --fresh forbidden. PR: own fresh branch + draft PR. STOP: if deployed before Phoenix 5C-04; if source_snapshot_at uses request time; if arithmetic cache version is used as discovery_snapshot_id; if page/per_page enter discovery identity; if producer_version invents a value other than 2026-08-07.1 for first native cutover. |
+| Note | Minimal tools: git, rg, php integrations/wordpress/eventsales-tickera-catalog-feed/tests/catalog-feed-test.php, php integrations/wordpress/eventsales-tickera-catalog-feed/tests/catalog-change-trigger-test.php. Indexes: none. Caching: keep CACHE_VERSION_OPTION for transients only; SnapshotGeneration is separate contract identity. TTL: existing MIN/DEFAULT/MAX cache TTL bounds unchanged conceptually for transients. Redis: none. Invalidation: every catalogue-relevant invalidate replaces SnapshotGeneration with new opaque token+generation_at; also bumps transient cache version. PubSub: none. Security: no secrets in source key; no SOURCE_KEY override; bounded strings; typed evidence primary; legacy risk strings non-authoritative if retained. Performance: page build with before/after generation read; fail/retry on mid-page change; native per_page<=100; evidence<=500/page (do not inherit legacy MAX_PER_PAGE=500 for v3). Required contract tests: per_page 100 accepted / 101 rejected; evidence 500 accepted / 501 rejected. Legacy 2026-07-22.v2 behaviour unchanged until cutover. Phase 5D: catalogue-dry-run --fresh forbidden. PR: own fresh branch + draft PR. STOP: if deployed before Phoenix 5C-04; if source_snapshot_at uses request time; if arithmetic cache version is used as discovery_snapshot_id; if page/per_page enter discovery identity; if native per_page>100 or evidence>500; if producer_version invents a value other than 2026-08-07.1; if source-key override is added. |
 
 ### 5C-06 — Regression/security/performance closure
 
 | Field | Content |
 | --- | --- |
-| Task | Close cross-mode regressions proving live v2 unchanged, historical adapter review-only, native v3 review-only, Apply/AutoApply denial, deterministic hashes, security bounds, and generation/filter identity tests. |
+| Task | Close cross-mode regressions proving live v2 unchanged, historical adapter review-only, native v3 review-only, DiscoveryResult-only carrier, durable TickeraCatalogSyncFinding persistence, Apply/AutoApply denial, native page bounds, deterministic hashes, security bounds, and generation/filter identity tests. |
 | Objective | Prove Phase 5C is fail-closed and ready to hand off to Phase 5D without consuming the reserved fresh dry-run. |
-| Output | Extend/add tests under `test/event_sales/catalog/tickera_catalog/source_risk_v3/`, `test/event_sales/catalog/tickera_catalog/wordpress_feed_response_test.exs`, `test/event_sales/catalog/tickera_catalog/snapshot_canonicalizer_test.exs`, `test/event_sales/ingestion/workers/discover_tickera_catalog_worker_test.exs`, `test/event_sales/ingestion/workers/apply_tickera_catalog_worker_test.exs`, `test/event_sales/ingestion/tickera_catalog_sync_test.exs`, and WP PHP contract tests listed in 5C-05. Dependency: 5C-01 through 5C-05 merged. |
-| Note | Minimal tools: git, rg, mix format, mix test with the targeted paths above, php integrations/wordpress/eventsales-tickera-catalog-feed/tests/catalog-feed-test.php, php integrations/wordpress/eventsales-tickera-catalog-feed/tests/catalog-change-trigger-test.php. Indexes: none new. Caching: none new. TTL: n/a. Redis: none. Invalidation: none new. PubSub: none new. Security: envelope/provenance/Apply denial regressions must pass. Performance: no unbounded fixtures; page-bounded cases only. Phase 5D: catalogue-dry-run --fresh forbidden. PR: own fresh branch + draft PR then STOP Phase 5C. STOP: if any test requires production WordPress mutation; if Apply guards weaken; if live v2 operational assertions regress; if Phase 5D fresh run is invoked. |
+| Output | Extend/add exactly these test files: `test/event_sales/catalog/tickera_catalog/source_risk_v3/contract_registry_test.exs`, `test/event_sales/catalog/tickera_catalog/source_risk_v3/canonical_fact_test.exs`, `test/event_sales/catalog/tickera_catalog/source_risk_v3/normalizer_test.exs`, `test/event_sales/catalog/tickera_catalog/source_risk_v3/finding_policy_test.exs`, `test/event_sales/catalog/tickera_catalog/source_risk_v3/discovery_integrity_test.exs`, `test/event_sales/catalog/tickera_catalog/source_risk_v3/compatibility/v2_adapter_test.exs`, `test/event_sales/catalog/tickera_catalog/wordpress_feed_response_test.exs`, `test/event_sales/catalog/tickera_catalog/wordpress_feed_discovery_source_test.exs`, `test/event_sales/catalog/tickera_catalog/discovery_result_test.exs`, `test/event_sales/catalog/tickera_catalog/snapshot_canonicalizer_test.exs`, `test/event_sales/catalog/tickera_catalog/planner_applier_test.exs`, `test/event_sales/ingestion/tickera_catalog_auto_apply_test.exs`, `test/event_sales/ingestion/tickera_catalog_sync_test.exs`, `test/event_sales/ingestion/workers/discover_tickera_catalog_worker_test.exs`, `test/event_sales/ingestion/workers/apply_tickera_catalog_worker_test.exs`, `test/event_sales/ingestion/resources/tickera_catalog_sync_finding_test.exs`, `integrations/wordpress/eventsales-tickera-catalog-feed/tests/catalog-feed-test.php`, `integrations/wordpress/eventsales-tickera-catalog-feed/tests/catalog-change-trigger-test.php`, `integrations/wordpress/eventsales-tickera-catalog-feed/tests/catalog-feed-contract.md`. Dependency: 5C-01 through 5C-05 merged. |
+| Note | Minimal tools: git, rg, mix format, mix test test/event_sales/catalog/tickera_catalog/source_risk_v3/contract_registry_test.exs test/event_sales/catalog/tickera_catalog/source_risk_v3/canonical_fact_test.exs test/event_sales/catalog/tickera_catalog/source_risk_v3/normalizer_test.exs test/event_sales/catalog/tickera_catalog/source_risk_v3/finding_policy_test.exs test/event_sales/catalog/tickera_catalog/source_risk_v3/discovery_integrity_test.exs test/event_sales/catalog/tickera_catalog/source_risk_v3/compatibility/v2_adapter_test.exs test/event_sales/catalog/tickera_catalog/wordpress_feed_response_test.exs test/event_sales/catalog/tickera_catalog/wordpress_feed_discovery_source_test.exs test/event_sales/catalog/tickera_catalog/discovery_result_test.exs test/event_sales/catalog/tickera_catalog/snapshot_canonicalizer_test.exs test/event_sales/catalog/tickera_catalog/planner_applier_test.exs test/event_sales/ingestion/tickera_catalog_auto_apply_test.exs test/event_sales/ingestion/tickera_catalog_sync_test.exs test/event_sales/ingestion/workers/discover_tickera_catalog_worker_test.exs test/event_sales/ingestion/workers/apply_tickera_catalog_worker_test.exs test/event_sales/ingestion/resources/tickera_catalog_sync_finding_test.exs, php integrations/wordpress/eventsales-tickera-catalog-feed/tests/catalog-feed-test.php, php integrations/wordpress/eventsales-tickera-catalog-feed/tests/catalog-change-trigger-test.php. Indexes: none new. Caching: none new. TTL: n/a. Redis: none. Invalidation: none new. PubSub: none new. Security: envelope/provenance/Apply denial/source_system_id mismatch regressions must pass. Performance: no unbounded fixtures; assert native per_page<=100 and evidence<=500 bounds. Phase 5D: catalogue-dry-run --fresh forbidden. PR: own fresh branch + draft PR then STOP Phase 5C. STOP: if any test requires production WordPress mutation; if Apply guards weaken; if live v2 operational assertions regress; if Phase 5D fresh run is invoked; if this TOON must consult another TOON for file names. |
 
 ---
 
@@ -1080,8 +1157,9 @@ Rollback: keep WP on `2026-07-22.v2`; live operational path unchanged.
 | Snapshot instability | opaque SnapshotGeneration + mid-page check |
 | Version skew | Phoenix before WP |
 | Compatibility as native | origin + automation-ineligible |
-| DiscoveryResult side channels | extend struct; planner consumes fields only |
-| Source UUID coupling | producer-local key + base_url hash bind |
+| DiscoveryResult side channels | sole extended DiscoveryResult; no adjacent carrier |
+| Source UUID coupling | derive-only hash bind; no Phase 5C override |
+| Durable findings drift | plan.v3 + TickeraCatalogSyncFinding both required |
 | Phase 5D consumed early | forbidden --fresh |
 
 ---
@@ -1100,7 +1178,11 @@ Is v3 AutoApply evaluation enqueued? → NO
 What is producer_version? → 2026-08-07.1
 How is source_system_id produced/verified? → §11 algorithm
 How is discovery_snapshot_id built? → §13
-What does DiscoveryResult carry? → §12
+What does DiscoveryResult carry? → §12 sole carrier fields
+Who writes facts/findings onto it? → Normalizer / FindingPolicy only
+Where do durable findings land? → plan.v3 AND TickeraCatalogSyncFinding
+Is source-key override in Phase 5C? → NO
+Native per_page / evidence bounds? → 100 / 500
 Which PR next? → next unmet 5C-0N
 When STOP? → after 5C-06; no Phase 5D in 5C
 ```
@@ -1116,11 +1198,16 @@ When STOP? → after 5C-06; no Phase 5D in 5C
 | Human Apply v3 | denied |
 | AutoApply evaluate v3 | not enqueued |
 | AutoApplyPolicy | unchanged v2-only |
-| DiscoveryResult | extend |
+| DiscoveryResult | sole extended carrier; FINAL |
+| Adjacent carrier structs | forbidden |
+| Durable findings | plan snapshot + TickeraCatalogSyncFinding |
 | SnapshotGeneration | opaque token + generation_at |
 | source_snapshot_at | generation_at |
 | Filters in identity | exclude page/per_page |
 | producer_version first value | `2026-08-07.1` |
+| source_system_id | derive-only hash; no override in Phase 5C |
+| Native per_page max | 100 |
+| Native evidence/page max | 500 |
 | Redis for source-risk | none |
 | Phase 5D --fresh in 5C | forbidden |
 
@@ -1152,6 +1239,14 @@ no Redis/Cachex/GenServer for source-risk vocabulary
 exact version/mode dispatch only
 source_snapshot_at is generation-tied
 page/per_page excluded from discovery identity
+DiscoveryResult is the sole v3 carrier
+no adjacent result struct / side-channel carrier
+Normalizer owns canonical_source_risk_facts
+FindingPolicy owns canonical_source_risk_findings
+v3 findings persist in plan.v3 and TickeraCatalogSyncFinding
+source_system_id is derive-only hash in Phase 5C (no override)
+native per_page <= 100
+native evidence per page <= 500
 ```
 
 ---
@@ -1161,11 +1256,14 @@ page/per_page excluded from discovery identity
 Reviewers confirm:
 
 - three modes are unambiguous and live v2 stays operational
-- native envelope includes producer_version + source_system_id mechanism
-- DiscoveryResult extension is owned
+- native envelope includes producer_version + derive-only source_system_id
+- DiscoveryResult is the sole FINAL v3 carrier with locked field ownership
+- durable findings use plan.v3 + TickeraCatalogSyncFinding (no new table/migration)
 - SnapshotGeneration is exact (opaque token, not arithmetic identity)
+- native per_page≤100 and evidence≤500 are locked
 - v3 AutoApply evaluation skipped; Apply denied at all boundaries
 - all six TOONs are fully expanded with tools/tests/PR/STOP and mandatory Note fields
+- 5C-06 enumerates exact files without consulting other TOONs
 - no implementation code included
 
 ---
