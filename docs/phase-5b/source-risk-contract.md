@@ -3,19 +3,20 @@
 | Field | Value |
 |---|---|
 | Plan / document ID | `phase-5b-source-risk-contract` |
-| Document version | `v2` |
-| Status | Draft for independent Gate C re-review (PR #152 REQUEST CHANGES applied) |
+| Document version | `v3` |
+| Status | Draft for final Gate C re-review (PR #152 consistency pass) |
 | Scope | Native producer/page envelope, closed dimension/authority/disposition registries, finding policy — **no** v2 adapter detail, **no** Phase 5C implementation |
 | Authority | Active Phase 5B **contract** document; subordinate to locked domain model on resource/invariant conflicts |
 | Locked domain model | `docs/phase-5b/source-risk-domain-model.md` v2 — SHA256 `16563ee02f58a12d2fde1e6995da3cb4d1be89dfd9ecbb8e07eb76ba5d8a6375` |
 | Historical context | `docs/phase-5a/source-risk-blocker-taxonomy.md`, `docs/phase-5a/source-risk-blocker-ledger.csv` |
 | Last updated | 2026-08-07 |
-| Change summary | Gate C REQUEST CHANGES: missing≠absent, event_link identity, dimension-local safety, closed completeness, empty safe-negative allowlist, capability authority, ticket-template scope, qualified findings, closed filters/provenance |
+| Change summary | Final Gate C consistency: closed EvidenceState only, capability≠missing, event_link absent/invalid split, product_type observation vs support, producer provenance ownership |
 
 ### Revision log
 
 - `v1` — initial native source-risk contract after Gate B domain-model lock
 - `v2` — Gate C PR #152 corrections from comment `5216546173`
+- `v3` — Gate C PR #152 consistency pass from comment `5216673666`
 
 ### Conflict rule
 
@@ -208,7 +209,7 @@ Each `evidence[]` item is one producer observation.
 | `state` | string | Producer-emittable EvidenceState (§7) |
 | `producer_source_key` | string | Closed producer evidence/source key (§11) |
 | `completeness` | string | Only `exhaustive` \| `partial` \| `unknown` (§8); **not** authoritative alone |
-| `provenance` | object | Exact-key allowlist only (§23) |
+| `provenance` | object | Producer-owned exact-key allowlist only (§23.1); reject trusted local fields if present |
 
 ### Optional / conditional fields
 
@@ -265,7 +266,9 @@ missing != absent
 
 Producer envelopes **must not** emit `parser_error`. Transport cannot impersonate parser errors.
 
-Forbidden collapses: do not merge unknown/missing/unsupported/invalid/error into one state.
+Forbidden collapses: do not merge unknown/missing/unsupported/invalid/producer_error/parser_error into one state.
+
+Generic prose such as “errors fail closed” is allowed when it clearly means producer_error/parser_error paths — never as a ninth EvidenceState token named `error`.
 
 ---
 
@@ -330,15 +333,15 @@ Closed native dimensions:
 
 | Dimension id | Allowed scopes | Allowed states | Allowed values | Authority slot | Exhaustive negative permitted? | Native producer support now? | Default fail-closed |
 |---|---|---|---|---|---|---|---|
-| `lifecycle` | `event`, `parent_product`, `variation` | present, unknown, missing, invalid, producer_error | `publish`, `private`, `draft`, `trash`, `deleted` | `slot.lifecycle.wp_post_status` | no (lifecycle uses positive value proof; “absent” N/A) | event/product: yes; variation: **required by contract**, currently incomplete in WP emission | unknown/missing/invalid/error block; non-publish values risk |
-| `ticket_template` | `parent_product` **only** (native v3 presence evidence) | present, absent, missing, unknown, unsupported, invalid, producer_error | optional template id string when present | `slot.ticket_template.meta` | yes for authoritative absent under exhaustive meta read | yes (`_ticket_template`) | absent → explicit_risk; missing → blocking_missing; unknown/error block |
-| `event_link` | `event_product_relationship` | present, absent, missing, unknown, invalid, producer_error | resolved `tickera_event_id` when present | `slot.event_link.meta` | yes for authoritative absent under exhaustive relationship query | yes (null resolved event path today) | absent → explicit_risk; missing → blocking_missing; invalid → blocking; unknown/error block |
-| `subscription` | `parent_product` | present, absent, unknown, unsupported, missing, invalid, producer_error | optional bounded type/meta digest when present | `slot.subscription.detection` | **no** under current reviewed evidence (positive-only) | positive detection yes; exhaustive negative **no** | present → risk; absent not safe; unknown/unsupported/missing/error block |
-| `payment_plan` | `parent_product` | unsupported, unknown, missing, producer_error | none | `slot.payment_plan.capability` | no | capability reporting only | unsupported/unknown/missing/error block; present/absent unauthorized |
-| `membership` | `parent_product` | unsupported, unknown, missing, producer_error | none | `slot.membership.capability` | no | capability reporting only | same |
-| `bundle` | `parent_product` | unsupported, unknown, missing, producer_error | none | `slot.bundle.capability` | no | capability reporting only | same |
-| `add_on` | `parent_product` | unsupported, unknown, missing, producer_error | none | `slot.add_on.capability` | no | capability reporting only | same |
-| `product_type` | `parent_product` | present, unsupported, unknown, missing, invalid, producer_error | closed allowlist token, starting with `simple`; others unsupported | `slot.product_type.wc` | no | partial (type available) | non-allowlisted / unknown / missing / error block |
+| `lifecycle` | `event`, `parent_product`, `variation` | present, unknown, missing, invalid, producer_error | `publish`, `private`, `draft`, `trash`, `deleted` | `slot.lifecycle.wp_post_status` | no (lifecycle uses positive value proof; “absent” N/A) | event/product: yes; variation: **required by contract**, currently incomplete in WP emission | unknown/missing/invalid/producer_error block; non-publish values risk |
+| `ticket_template` | `parent_product` **only** (native v3 presence evidence) | present, absent, missing, unknown, unsupported, invalid, producer_error | optional template id string when present | `slot.ticket_template.meta` | yes for authoritative absent under exhaustive meta read | yes (`_ticket_template`) | absent → explicit_risk; missing → contract blocking_missing; unknown/producer_error block |
+| `event_link` | `event_product_relationship` | present, absent, missing, unknown, invalid, producer_error | resolved `tickera_event_id` when present | `slot.event_link.meta` | yes for authoritative absent under exhaustive relationship query | yes (null reference path today) | absent → explicit_risk; missing → contract blocking_missing; invalid → blocking_invalid; unknown/producer_error block |
+| `subscription` | `parent_product` | present, absent, unknown, unsupported, missing, invalid, producer_error | optional bounded type/meta digest when present | `slot.subscription.detection` | **no** under current reviewed evidence (positive-only) | positive detection yes; exhaustive negative **no** | present → risk; absent not safe; unknown/unsupported/missing/invalid/producer_error block |
+| `payment_plan` | `parent_product` | unsupported, unknown, producer_error | none | `slot.payment_plan.capability` | no | capability reporting only | unsupported/unknown/producer_error block; present/absent unauthorized; missing capability envelope → contract.blocking_missing (not this authority) |
+| `membership` | `parent_product` | unsupported, unknown, producer_error | none | `slot.membership.capability` | no | capability reporting only | same |
+| `bundle` | `parent_product` | unsupported, unknown, producer_error | none | `slot.bundle.capability` | no | capability reporting only | same |
+| `add_on` | `parent_product` | unsupported, unknown, producer_error | none | `slot.add_on.capability` | no | capability reporting only | same |
+| `product_type` | `parent_product` | present, unsupported, unknown, missing, invalid, producer_error | closed observed type tokens starting with `simple` (§12); support is policy, not EvidenceState | `slot.product_type.wc` | no | type read available | unevaluable → unsupported; observed non-simple known types → present+explicit_risk; undeclared tokens fail closed |
 
 ### Deterministic recommendation (lifecycle)
 
@@ -365,10 +368,10 @@ For native automation completeness, a complete discovery must include evaluated 
 |---|---|---|---|---|---|---|---|
 | `auth.wp_post_status` | `wordpress_tickera` | `wp_posts.post_status` | event, parent_product, variation | present, unknown, missing, invalid, producer_error | yes (status value) | N/A for lifecycle values | Row must exist; status in closed set; unknown status → `unknown` |
 | `auth.ticket_template_meta` | `wordpress_tickera` | `postmeta:_ticket_template` | parent_product | present, absent, missing, unknown, invalid, producer_error | yes | yes (`absent` when meta proves no template under exhaustive product meta read) | Allowlisted meta read for that product completed |
-| `auth.event_name_meta` | `wordpress_tickera` | `postmeta:_event_name` + `tc_events` resolve | event_product_relationship | present, absent, missing, unknown, invalid, producer_error | yes (resolved event) | yes (`absent` when exhaustive query proves no resolvable link) | Meta **and** resolve query completed; unresolved/malformed reference → `invalid` or `absent` per §19, never “present” without successful resolve |
+| `auth.event_name_meta` | `wordpress_tickera` | `postmeta:_event_name` + `tc_events` resolve | event_product_relationship | present, absent, missing, unknown, invalid, producer_error | yes (resolved event) | yes (`absent` only when exhaustive query proves **no relationship reference exists**) | Deterministic absent vs invalid per §19; never “present” without successful resolve |
 | `auth.subscription_detection` | `wordpress_tickera` | `wc_product_type` + allowlisted subscription meta | parent_product | present, unknown, unsupported, missing, invalid, producer_error | yes (type/meta positive match) | **not** under this authority | Exhaustive negative **not** claimed |
-| `auth.wc_product_type` | `wordpress_tickera` | `wc_get_product.type` / SQL product type | parent_product | present, unsupported, unknown, missing, invalid, producer_error | yes | N/A | Type read completed; allowlist check |
-| `auth.wp_semantic_capability` | `wordpress_tickera` | `product_semantics_capability` (declared producer capability report) | parent_product | unsupported, unknown, producer_error | no | no | May report inability to evaluate only |
+| `auth.wc_product_type` | `wordpress_tickera` | `wc_get_product.type` / SQL product type | parent_product | present, unsupported, unknown, missing, invalid, producer_error | yes (observed type value) | N/A | Type read completed; `unsupported` only when type cannot be evaluated; support policy is separate (§12, §15) |
+| `auth.wp_semantic_capability` | `wordpress_tickera` | `product_semantics_capability` (declared producer capability report) | parent_product | unsupported, unknown, producer_error | no | no | May report inability to evaluate only; **never** asserts present/absent/missing |
 
 ### Capability vs semantic absence
 
@@ -380,7 +383,17 @@ authority to assert absent ("this semantic is not present")
 
 `auth.wp_semantic_capability` may assert **only** `unsupported`, `unknown`, or `producer_error` for `payment_plan`, `membership`, `bundle`, and `add_on`.
 
-It may **never** assert `present` or `absent` for those dimensions.
+It may **never** assert `present`, `absent`, or `missing` for those dimensions.
+
+```text
+unsupported / unknown / producer_error
+→ capability CanonicalEvidenceFact under auth.wp_semantic_capability
+
+missing required capability observation/envelope
+→ contract.blocking_missing
+→ NO successful semantic capability authority assertion
+→ NOT CanonicalEvidenceFact(authority=auth.wp_semantic_capability, state=missing)
+```
 
 ### Authority groups / slots
 
@@ -418,13 +431,28 @@ Conflicting claims within one slot → `blocking_conflict`. No silent winner.
 
 Mapping rule for producer status classification: closed set `{publish, private, draft, trash}`; any other observed status → state `unknown` or `invalid`, never invent a value.
 
-### Product type allowlist (native v3 MVP)
+### Product type observation vs support (native v3 MVP)
 
-| Value | Disposition class |
-|---|---|
-| `simple` | candidate for **dimension-local** safe-positive when other policies for **this dimension** pass |
-| any other known type string | `unsupported` / explicit_risk path via product_type dimension |
-| missing/unknown type | blocking |
+EvidenceState `unsupported` means **only**: the integration cannot evaluate `product_type`.
+
+A successfully observed product type always uses:
+
+```text
+dimension=product_type
+state=present
+value=<canonical observed product type>
+```
+
+Support is finding policy, not EvidenceState.
+
+| Observed value | EvidenceState | Disposition / finding |
+|---|---|---|
+| `simple` | `present` | dimension-local `safe_positive_proof` when authority precondition holds |
+| other **closed, registry-declared** observed types (none locked beyond `simple` in native v3 MVP) | `present` | `explicit_risk` → `source_risk.unsupported_product_type` when declared as known-but-not-supported |
+| undeclared / unknown runtime type token | not silently canonicalized | fail closed with bounded raw provenance (`blocking_invalid` / `blocking_contract_error`) |
+| type truly unevaluable | `unsupported` | `blocking_unsupported` |
+
+Only `simple` is currently locked as a concrete canonical product-type value grounded from repository/static source. Do not invent additional Woo type tokens from general knowledge.
 
 ### Ticket template values
 
@@ -519,7 +547,9 @@ AND (for automation) origin=native + discovery complete
 
 ### 13.5 Risk-positive proof
 
-Non-publish lifecycle values; subscription `present`; unsupported product types; ticket_template `absent`; event_link `absent`; etc. → `explicit_risk` when authority supports the observation.
+Non-publish lifecycle values; subscription `present`; `product_type` `present` with known-but-not-supported declared values; ticket_template `absent`; event_link `absent`; etc. → `explicit_risk` when authority supports the observation.
+
+Do not use EvidenceState `unsupported` to mean “observed but not supported.”
 
 ### 13.6 Unresolved
 
@@ -576,7 +606,7 @@ Finding identity uses **owner + local_code** with deterministic qualified name `
 | Lifecycle draft | `lifecycle` | present/`draft` | any closed | matching | same | `explicit_risk` | `source_risk.lifecycle_draft` | blocking |
 | Lifecycle trash | `lifecycle` | present/`trash` | any closed | matching | same | `explicit_risk` | `source_risk.lifecycle_trashed` | blocking |
 | Lifecycle deleted | `lifecycle` | present/`deleted` | any closed | matching | same | `explicit_risk` | `source_risk.lifecycle_deleted` | blocking |
-| Lifecycle unresolved | `lifecycle` | unknown/missing/invalid/error | * | matching | * | matching blocking_* | `source_risk.lifecycle_unresolved` or contract ids | blocking |
+| Lifecycle unresolved | `lifecycle` | unknown/missing/invalid/producer_error | * | matching | * | matching blocking_* | `source_risk.lifecycle_unresolved` or contract ids | blocking |
 | Ticket template present | `ticket_template` | present | any closed | parent_product | `auth.ticket_template_meta` | `safe_positive_proof` | none | — |
 | Ticket template absent | `ticket_template` | absent | exhaustive | parent_product | same | `explicit_risk` | `source_risk.missing_ticket_template` | blocking |
 | Ticket template evidence missing | `ticket_template` | missing | * | parent_product | * | `blocking_missing` | `contract.blocking_missing` | blocking |
@@ -585,10 +615,13 @@ Finding identity uses **owner + local_code** with deterministic qualified name `
 | Event link evidence missing | `event_link` | missing | * | event_product_relationship | * | `blocking_missing` | `contract.blocking_missing` | blocking |
 | Event link invalid | `event_link` | invalid | * | event_product_relationship | * | `blocking_invalid` | `contract.blocking_invalid` | blocking |
 | Subscription present | `subscription` | present | * | parent_product | `auth.subscription_detection` | `explicit_risk` | `source_risk.subscription` | blocking |
-| Subscription non-safe non-present | `subscription` | unknown/unsupported/missing/error/absent | * | parent_product | * | blocking_* | `source_risk.subscription_unresolved` | blocking |
-| Capability dims | payment_plan/membership/bundle/add_on | unsupported/unknown/missing/error | * | parent_product | `auth.wp_semantic_capability` | blocking_* | `source_risk.payment_plan` / `.membership` / `.bundle` / `.add_on` | blocking |
+| Subscription non-safe non-present | `subscription` | unknown/unsupported/missing/invalid/producer_error/absent | * | parent_product | * | blocking_* | `source_risk.subscription_unresolved` | blocking |
+| Capability dims (semantic) | payment_plan/membership/bundle/add_on | unsupported/unknown/producer_error | * | parent_product | `auth.wp_semantic_capability` | blocking_* | `source_risk.payment_plan` / `.membership` / `.bundle` / `.add_on` | blocking |
+| Capability evidence missing | payment_plan/membership/bundle/add_on | missing required observation | * | parent_product | none (contract path) | `blocking_missing` | `contract.blocking_missing` | blocking |
 | Product type simple | `product_type` | present/`simple` | any closed | parent_product | `auth.wc_product_type` | `safe_positive_proof` | none | — |
-| Product type other | `product_type` | unsupported / non-allowlist | * | parent_product | same | `explicit_risk` / `blocking_unsupported` | `source_risk.unsupported_product_type` | blocking |
+| Product type observed unsupported | `product_type` | present/`<registry-declared non-simple>` | * | parent_product | same | `explicit_risk` | `source_risk.unsupported_product_type` | blocking |
+| Product type unevaluable | `product_type` | unsupported | * | parent_product | same | `blocking_unsupported` | `contract.blocking_unsupported` | blocking |
+| Product type undeclared token | `product_type` | invalid / contract error | * | parent_product | * | `blocking_invalid` / `blocking_contract_error` | `contract.contract_violation` | blocking |
 | Scope mismatch | any | * | * | wrong | * | `blocking_scope_mismatch` | `contract.scope_mismatch` | blocking |
 | Authority mismatch | any | * | * | * | wrong | `blocking_authority_mismatch` | `contract.authority_mismatch` | blocking |
 | Conflict | same identity | differing claims | * | * | * | `blocking_conflict` | `contract.evidence_conflict` | blocking |
@@ -597,7 +630,9 @@ Finding identity uses **owner + local_code** with deterministic qualified name `
 
 Severity is **policy-owned**, not intrinsic to a code string.
 
-Unknown/missing/unsupported/invalid/error/conflict remain blocking unless an independently reviewed policy explicitly says otherwise (none currently).
+Unknown/missing/unsupported/invalid/producer_error/parser_error/conflict remain blocking unless an independently reviewed policy explicitly says otherwise (none currently).
+
+`parser_error` is contract/parser-owned only. It is never a producer semantic evidence state.
 
 ---
 
@@ -667,11 +702,11 @@ Phase 5C must emit variation lifecycle evidence under native producer changes; t
 | Dimension | Native treatment |
 |---|---|
 | `subscription` | Positive detection authority only; present → blocking risk; absent not safe |
-| `payment_plan` | Capability authority only; emit `unsupported`/`unknown`/`producer_error`/`missing`; never `absent`/`present`; blocking |
+| `payment_plan` | Capability authority only; emit `unsupported`/`unknown`/`producer_error`; never `absent`/`present`/`missing` via that authority; missing envelope → `contract.blocking_missing` |
 | `membership` | same |
 | `bundle` | same |
 | `add_on` | same |
-| `product_type` | Allowlist; `simple` may be dimension-local safe-positive; others unsupported/risk |
+| `product_type` | Observed types use `state=present` + value; `simple` may be dimension-local safe-positive; known-but-not-supported declared values → explicit_risk; EvidenceState `unsupported` only when unevaluable |
 
 Excluded as proof: names, slugs, categories, marketing text, arbitrary meta, heuristics.
 
@@ -688,9 +723,41 @@ Excluded as proof: names, slugs, categories, marketing text, arbitrary meta, heu
 | **Primary target identity** | `{ woo_product_id }` only |
 | Linked event id | Fact **value** (and optional `related_targets.tickera_event_id`) — **not** part of primary identity |
 | Present | state=`present` + successfully resolved Tickera event id → dimension-local `safe_positive_proof` |
-| Absent | state=`absent` + exhaustive relationship query → `explicit_risk` → `source_risk.missing_tickera_event` |
-| Invalid | malformed / unresolvable relationship → `blocking_invalid` |
+| Absent | exhaustive authoritative query proves **no** `_event_name` / event relationship reference exists → `explicit_risk` → `source_risk.missing_tickera_event` |
+| Invalid | a relationship reference **exists** but is malformed or cannot resolve to a valid Tickera event → `blocking_invalid` |
 | Missing | required event-link evidence omitted → `blocking_missing` |
+
+Deterministic absent vs invalid (no overlap):
+
+```text
+absent =
+  exhaustive authoritative relationship query proves
+  no _event_name / event relationship reference exists
+
+invalid =
+  a relationship reference exists but is malformed or cannot
+  resolve to a valid Tickera event
+```
+
+Examples of `invalid`:
+
+```text
+non-positive target id
+malformed reference
+referenced post missing
+referenced post wrong post type
+reference cannot resolve to valid tc_events target
+```
+
+```text
+no relationship reference
+→ absent
+→ source_risk.missing_tickera_event
+
+relationship reference exists but invalid/unresolvable
+→ invalid
+→ blocking_invalid
+```
 
 Conflict example (mandatory):
 
@@ -703,7 +770,7 @@ claim B: present value=20
 → blocking_conflict
 ```
 
-`_event_name` meta existence without successful `tc_events` resolve is **not** present/safe-positive.
+`_event_name` meta existence without successful `tc_events` resolve is **not** present/safe-positive. If the reference exists but cannot resolve, use `invalid`, not `absent`.
 
 Must not collapse into generic product or event lifecycle absence.
 
@@ -831,34 +898,73 @@ Full epistemic classification mapping tables for v2 `explicit_safe` etc. are res
 
 ## 23. Provenance and Security Bounds
 
-### Exact provenance key allowlist
+Provenance is split by ownership. Do not conflate layers.
 
-Only these keys are permitted (all optional unless noted by producer rules; unknown keys rejected):
+```text
+producer-supplied provenance
+≠
+canonical/normalizer-derived provenance
+≠
+compatibility-adapter provenance
+```
+
+### 23.1 Producer-supplied provenance (exact-key allowlist)
+
+Native producer `evidence[].provenance` may include **only**:
 
 | Key | Type |
 |---|---|
 | `discovery_snapshot_id` | string |
-| `run_id` | string |
-| `schema_version` | string |
-| `canonical_contract_version` | string |
 | `producer_version` | string |
 | `producer_source_key` | string |
 | `raw_producer_code` | string (bounded) |
-| `translation_rule_id` | string |
-| `alias_id` | string |
-| `origin` | `native` \| `compatibility_derived` |
-| `authority_slot` | string |
 | `woo_product_id` | pos int |
 | `woo_variation_id` | pos int |
 | `tickera_event_id` | pos int |
 
-Unknown provenance keys → `contract.contract_violation`.
+Unknown producer provenance keys → `contract.contract_violation`.
 
-### Prohibited
+Native producer provenance **must not** supply (reject if present):
+
+```text
+origin
+authority_slot
+translation_rule_id
+alias_id
+canonical_contract_version
+run_id
+schema_version
+```
+
+Preferred closed-v3 policy: **reject** those fields if producer-supplied. Do not trust or accept them.
+
+### 23.2 Canonical / normalizer-derived provenance
+
+Derived locally by trusted Phoenix boundaries after validation:
+
+| Field | Derived by |
+|---|---|
+| `origin` | declared producer→canonical binding (`native`) or adapter path (`compatibility_derived`) |
+| `authority_slot` | ContractRegistry / normalizer |
+| `canonical_contract_version` | declared binding |
+| `schema_version` | validated page envelope (already page-level; may be referenced, not producer-asserted on evidence) |
+| `run_id` | EventSales discovery/run identity |
+
+### 23.3 Compatibility-adapter provenance
+
+Adapter-only fields:
+
+| Field | Notes |
+|---|---|
+| `translation_rule_id` | compatibility adapter only |
+| `alias_id` | compatibility adapter only |
+| `raw_producer_code` | may be retained from legacy |
+
+### 23.4 Prohibited content
 
 credentials, signatures, authorization headers, cookies, full upstream payloads, unbounded metadata, customer/order payloads, PII.
 
-### Bounds
+### 23.5 Bounds
 
 | Item | Bound |
 |---|---|
@@ -867,7 +973,7 @@ credentials, signatures, authorization headers, cookies, full upstream payloads,
 | Producer source key / path max | 128 bytes UTF-8 |
 | Evidence string value max | 64 bytes UTF-8 |
 | Max evidence items / page | 500 |
-| Max provenance keys | exactly the allowlist cardinality (no extras) |
+| Max producer provenance keys | exactly the producer allowlist cardinality (no extras) |
 | Max page size (`per_page`) | 100 |
 
 If an unknown raw value exceeds bounds: **fail closed**. Do not truncate into an ambiguous canonical value.
@@ -1011,7 +1117,11 @@ flat risk string is not primary fact identity
 lifecycle is dimension+value based
 payment_plan/membership/bundle/add_on never present/absent without proven semantic authority
 capability authority may assert unsupported/unknown/producer_error only for those dims
-subscription positive detection != exhaustive negative authority
+capability authority never asserts present/absent/missing
+product_type unsupported means unevaluable, not observed-but-unsupported
+producer provenance cannot self-assert origin/authority_slot/translation_rule_id/alias_id
+event_link absent means no relationship reference; invalid means reference exists but fails resolve
+no EvidenceState token named error
 filters and provenance reject unknown keys
 ```
 
@@ -1038,13 +1148,15 @@ Gate C succeeds when this document:
 - locks producer `2026-08-07.v3` and canonical `source_risk.v3` with declared native binding;
 - preserves `missing != absent` for ticket_template and event_link;
 - keeps event_link identity on `{woo_product_id}` with event id as value;
+- keeps event_link absent vs invalid non-overlapping;
 - states dimension-local safety explicitly;
 - keeps EvidenceCompleteness closed to three values;
 - keeps native v3 MVP safe-negative allowlist empty;
-- provides capability authority/slots for unresolved dims;
+- provides capability authority/slots for unresolved dims without asserting missing;
+- separates product_type observation (`present`) from support policy;
 - uses only `parent_product` for ticket-template presence;
 - locks qualified finding namespaces;
-- closes filters and provenance key allowlists;
+- closes filters and splits producer vs derived provenance;
 - preserves Gate B identity/conflict/monotonic-certainty rules;
 - states AutoApply future cutover without weakening current policy;
 - introduces no Redis/GenServer/Cachex vocabulary path;
