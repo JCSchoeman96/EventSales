@@ -12,7 +12,15 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('EVENTSALES_TICKERA_CATALOG_SCHEMA_VERSION')) {
-    define('EVENTSALES_TICKERA_CATALOG_SCHEMA_VERSION', '2026-07-22.v2');
+    define('EVENTSALES_TICKERA_CATALOG_SCHEMA_VERSION', '2026-08-07.v3');
+}
+
+if (!defined('EVENTSALES_TICKERA_CATALOG_CANONICAL_CONTRACT_VERSION')) {
+    define('EVENTSALES_TICKERA_CATALOG_CANONICAL_CONTRACT_VERSION', 'source_risk.v3');
+}
+
+if (!defined('EVENTSALES_TICKERA_CATALOG_PRODUCER_VERSION')) {
+    define('EVENTSALES_TICKERA_CATALOG_PRODUCER_VERSION', '2026-08-07.1');
 }
 
 if (!defined('EVENTSALES_TICKERA_CATALOG_NAMESPACE')) {
@@ -25,18 +33,90 @@ if (!defined('EVENTSALES_TICKERA_CATALOG_ROUTE')) {
 
 final class EventSales_Tickera_Catalog_Feed
 {
+    /**
+     * Test-only seam invoked between the before/after SnapshotGeneration reads.
+     *
+     * Production code never assigns this. It exists so tests can force a
+     * mid-page catalogue generation change without touching production
+     * authority. It cannot relax or bypass the equality requirement.
+     *
+     * @var callable|null
+     */
+    public static $test_generation_mutator = null;
+
     private static array $catalog_change_targets = [];
     private static int $catalog_change_sequence = 0;
     private const SOURCE = 'wordpress_tickera';
     private const CACHE_VERSION_OPTION = 'eventsales_tickera_catalog_feed_cache_version';
+    private const SNAPSHOT_GENERATION_OPTION = 'eventsales_tickera_catalog_snapshot_generation';
     private const SECRET_OPTION = 'eventsales_tickera_catalog_secret';
     private const CACHE_TTL_OPTION = 'eventsales_tickera_catalog_cache_ttl';
     private const MAX_TIMESTAMP_SKEW_SECONDS = 300;
     private const DEFAULT_PER_PAGE = 100;
-    private const MAX_PER_PAGE = 500;
+    /**
+     * Legacy `2026-07-22.v2` page bound. Never applied to native
+     * `2026-08-07.v3` pages, which are bounded by NATIVE_MAX_PER_PAGE.
+     */
+    private const LEGACY_MAX_PER_PAGE = 500;
+    private const NATIVE_MAX_PER_PAGE = 100;
+    private const MAX_EVIDENCE_PER_PAGE = 500;
+    private const MAX_CATALOG_ROWS_PER_PAGE = 100;
+    private const MAX_RAW_PRODUCER_CODE_BYTES = 64;
+    private const MAX_EVIDENCE_VALUE_BYTES = 64;
     private const DEFAULT_CACHE_TTL_SECONDS = 120;
     private const MIN_CACHE_TTL_SECONDS = 30;
     private const MAX_CACHE_TTL_SECONDS = 300;
+
+    private const NATIVE_ENVELOPE_KEYS = [
+        'schema_version',
+        'canonical_contract_version',
+        'producer_version',
+        'source',
+        'source_system_id',
+        'discovery_snapshot_id',
+        'source_snapshot_at',
+        'generated_at',
+        'page',
+        'per_page',
+        'has_more',
+        'filters',
+        'events',
+        'catalog_rows',
+        'evidence',
+    ];
+
+    private const NATIVE_FILTER_KEYS = [
+        'updated_since',
+        'product_id',
+        'variation_id',
+        'event_id',
+        'include_private',
+    ];
+
+    private const LIFECYCLE_VALUES = ['publish', 'private', 'draft', 'trash', 'deleted'];
+
+    private const SUPPORTED_PRODUCT_TYPES = ['simple'];
+
+    private const CAPABILITY_DIMENSIONS = ['payment_plan', 'membership', 'bundle', 'add_on'];
+
+    private const PRODUCER_SOURCE_KEYS = [
+        'lifecycle' => 'wp_posts.post_status',
+        'ticket_template' => 'postmeta:_ticket_template',
+        'event_link' => 'postmeta:_event_name+tc_events.resolve',
+        'subscription' => 'wc_product_type+subscription_evidence',
+        'product_type' => 'wc_get_product.type',
+        'capability' => 'product_semantics_capability',
+    ];
+
+    private const PROVENANCE_KEYS = [
+        'discovery_snapshot_id',
+        'producer_version',
+        'producer_source_key',
+        'raw_producer_code',
+        'woo_product_id',
+        'woo_variation_id',
+        'tickera_event_id',
+    ];
 
     private const ALLOWED_QUERY_PARAMS = [
         'updated_since',
@@ -84,10 +164,133 @@ final class EventSales_Tickera_Catalog_Feed
         );
     }
 
+    /**
+     * Every catalogue-relevant invalidation bumps the transient cache version
+     * and rotates the durable SnapshotGeneration record.
+     */
     public static function invalidate_cache(): void
     {
         $current = (int) get_option(self::CACHE_VERSION_OPTION, 1);
         update_option(self::CACHE_VERSION_OPTION, $current + 1, false);
+        self::rotate_snapshot_generation();
+    }
+
+    /**
+     * @return array{generation_token: string, generation_at: string}
+     */
+    public static function read_or_create_snapshot_generation(): array
+    {
+        $stored = get_option(self::SNAPSHOT_GENERATION_OPTION, null);
+        $valid = self::valid_snapshot_generation($stored);
+
+        if ($valid !== null) {
+            return $valid;
+        }
+
+        return self::rotate_snapshot_generation();
+    }
+
+    /**
+     * Replaces the whole SnapshotGeneration record with a new opaque token.
+     *
+     * @return array{generation_token: string, generation_at: string}
+     */
+    public static function rotate_snapshot_generation(): array
+    {
+        $record = [
+            'generation_token' => self::generate_generation_token(),
+            'generation_at' => self::utc_now(),
+        ];
+
+        update_option(self::SNAPSHOT_GENERATION_OPTION, $record, false);
+
+        return $record;
+    }
+
+    /**
+     * @param array{generation_token: string, generation_at: string}|null $left
+     * @param array{generation_token: string, generation_at: string}|null $right
+     */
+    public static function snapshot_generations_equal(?array $left, ?array $right): bool
+    {
+        $left = self::valid_snapshot_generation($left);
+        $right = self::valid_snapshot_generation($right);
+
+        if ($left === null || $right === null) {
+            return false;
+        }
+
+        return hash_equals($left['generation_token'], $right['generation_token'])
+            && hash_equals($left['generation_at'], $right['generation_at']);
+    }
+
+    /**
+     * Fails closed when the catalogue generation changed while a page was
+     * being materialised. No page is emitted for a changed generation.
+     *
+     * @param array{generation_token: string, generation_at: string} $generation_before
+     * @return array{generation_token: string, generation_at: string}
+     */
+    public static function require_stable_snapshot_generation(array $generation_before): array
+    {
+        if (self::$test_generation_mutator !== null && is_callable(self::$test_generation_mutator)) {
+            call_user_func(self::$test_generation_mutator);
+        }
+
+        $generation_after = self::read_or_create_snapshot_generation();
+
+        if (!self::snapshot_generations_equal($generation_before, $generation_after)) {
+            throw new RuntimeException('snapshot_generation_changed_mid_page');
+        }
+
+        return $generation_after;
+    }
+
+    /**
+     * @return array{generation_token: string, generation_at: string}|null
+     */
+    private static function valid_snapshot_generation($record): ?array
+    {
+        if (!is_array($record)) {
+            return null;
+        }
+
+        $token = isset($record['generation_token']) ? (string) $record['generation_token'] : '';
+        $generation_at = isset($record['generation_at']) ? (string) $record['generation_at'] : '';
+
+        if (!preg_match('/^[a-f0-9]{32,}$/', $token)) {
+            return null;
+        }
+
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/', $generation_at)) {
+            return null;
+        }
+
+        return ['generation_token' => $token, 'generation_at' => $generation_at];
+    }
+
+    /**
+     * Opaque token. Never derived from a counter, timestamp arithmetic, or the
+     * previous token.
+     */
+    private static function generate_generation_token(): string
+    {
+        if (function_exists('random_bytes')) {
+            try {
+                return bin2hex(random_bytes(16));
+            } catch (Throwable $error) {
+                // Fall through to the WordPress UUID source.
+            }
+        }
+
+        if (function_exists('wp_generate_uuid4')) {
+            $uuid = strtolower(str_replace('-', '', (string) wp_generate_uuid4()));
+            if (preg_match('/^[a-f0-9]{32,}$/', $uuid)) {
+                return $uuid;
+            }
+        }
+
+        return hash('sha256', uniqid('eventsales_tickera_catalog', true));
     }
 
     public static function record_catalog_change(int $post_id, string $reason = 'saved'): void
@@ -345,11 +548,8 @@ final class EventSales_Tickera_Catalog_Feed
             return $page;
         }
 
-        $per_page = $this->positive_integer($params['per_page'], 'per_page', self::DEFAULT_PER_PAGE);
-        if (is_wp_error($per_page)) {
-            return $per_page;
-        }
-        if ($per_page > self::MAX_PER_PAGE) {
+        $per_page = self::validate_native_per_page($params['per_page']);
+        if ($per_page === null) {
             return new WP_Error('invalid_request', 'Invalid per_page');
         }
 
@@ -387,6 +587,194 @@ final class EventSales_Tickera_Catalog_Feed
             'per_page' => $per_page,
             'include_private' => $include_private,
         ];
+    }
+
+    /**
+     * Native `2026-08-07.v3` page bound. Returns null for a rejected value.
+     */
+    public static function validate_native_per_page($value): ?int
+    {
+        if ($value === null || $value === '') {
+            return self::DEFAULT_PER_PAGE;
+        }
+
+        if (!preg_match('/^[1-9][0-9]*$/', (string) $value)) {
+            return null;
+        }
+
+        $per_page = (int) $value;
+
+        if ($per_page > self::NATIVE_MAX_PER_PAGE) {
+            return null;
+        }
+
+        return $per_page;
+    }
+
+    public static function native_max_per_page(): int
+    {
+        return self::NATIVE_MAX_PER_PAGE;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public static function native_envelope_keys(): array
+    {
+        return self::NATIVE_ENVELOPE_KEYS;
+    }
+
+    /**
+     * Normalizes a WordPress home URL into the exact string hashed into
+     * `source_system_id`. Returns null when no usable origin exists.
+     */
+    public static function normalize_home_url($url): ?string
+    {
+        if (!is_string($url) || trim($url) === '') {
+            return null;
+        }
+
+        $parts = function_exists('wp_parse_url') ? wp_parse_url(trim($url)) : parse_url(trim($url));
+
+        if (!is_array($parts)) {
+            return null;
+        }
+
+        $scheme = isset($parts['scheme']) ? strtolower((string) $parts['scheme']) : '';
+        $host = isset($parts['host']) ? strtolower((string) $parts['host']) : '';
+
+        if (!in_array($scheme, ['http', 'https'], true) || $host === '') {
+            return null;
+        }
+
+        $port = isset($parts['port']) ? (int) $parts['port'] : 0;
+        $default_port = $scheme === 'https' ? 443 : 80;
+        $authority = $host;
+
+        if ($port > 0 && $port !== $default_port) {
+            $authority .= ':' . $port;
+        }
+
+        $path = isset($parts['path']) ? rtrim((string) $parts['path'], '/') : '';
+
+        return $scheme . '://' . $authority . $path;
+    }
+
+    /**
+     * Derive-only source identity. There is no override constant, option, or
+     * filter: the identity is always `wordpress_tickera:<sha256(home)>`.
+     */
+    public static function derive_source_system_id($url): ?string
+    {
+        $normalized = self::normalize_home_url($url);
+
+        if ($normalized === null) {
+            return null;
+        }
+
+        return self::SOURCE . ':' . hash('sha256', $normalized);
+    }
+
+    /**
+     * Canonical JSON: recursively lexicographically sorted object keys,
+     * explicit null, boolean literals, integers as integers, UTF-8, and no
+     * insignificant whitespace.
+     */
+    public static function canonical_json($value): string
+    {
+        if ($value === null) {
+            return 'null';
+        }
+
+        if (is_bool($value)) {
+            return $value ? 'true' : 'false';
+        }
+
+        if (is_int($value)) {
+            return (string) $value;
+        }
+
+        if (is_float($value)) {
+            throw new RuntimeException('canonical_json_float_unsupported');
+        }
+
+        if (is_string($value)) {
+            return (string) json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        }
+
+        if (!is_array($value)) {
+            throw new RuntimeException('canonical_json_unsupported_type');
+        }
+
+        if (self::is_json_list($value)) {
+            $items = [];
+            foreach ($value as $item) {
+                $items[] = self::canonical_json($item);
+            }
+
+            return '[' . implode(',', $items) . ']';
+        }
+
+        $keys = array_map('strval', array_keys($value));
+        sort($keys, SORT_STRING);
+        $pairs = [];
+
+        foreach ($keys as $key) {
+            $pairs[] = self::canonical_json($key) . ':' . self::canonical_json($value[$key]);
+        }
+
+        return '{' . implode(',', $pairs) . '}';
+    }
+
+    /**
+     * Canonical identity document for `discovery_snapshot_id`.
+     *
+     * Page, per_page, and cursor state are never part of snapshot identity.
+     *
+     * @param array<string, mixed> $filters
+     */
+    public static function canonical_discovery_json(string $source_system_id, string $generation_token, array $filters): string
+    {
+        return self::canonical_json([
+            'schema_version' => EVENTSALES_TICKERA_CATALOG_SCHEMA_VERSION,
+            'canonical_contract_version' => EVENTSALES_TICKERA_CATALOG_CANONICAL_CONTRACT_VERSION,
+            'producer_version' => EVENTSALES_TICKERA_CATALOG_PRODUCER_VERSION,
+            'source' => self::SOURCE,
+            'source_system_id' => $source_system_id,
+            'generation_token' => $generation_token,
+            'filters' => self::native_filter_identity($filters),
+        ]);
+    }
+
+    /**
+     * @param array<string, mixed> $filters
+     */
+    public static function discovery_snapshot_id(string $source_system_id, string $generation_token, array $filters): string
+    {
+        return hash('sha256', self::canonical_discovery_json($source_system_id, $generation_token, $filters));
+    }
+
+    /**
+     * @param array<string, mixed> $filters
+     * @return array<string, mixed>
+     */
+    private static function native_filter_identity(array $filters): array
+    {
+        $identity = [];
+
+        foreach (self::NATIVE_FILTER_KEYS as $key) {
+            $identity[$key] = array_key_exists($key, $filters) ? $filters[$key] : null;
+        }
+
+        return $identity;
+    }
+
+    /**
+     * @param array<int|string, mixed> $value
+     */
+    private static function is_json_list(array $value): bool
+    {
+        return $value === [] || array_keys($value) === range(0, count($value) - 1);
     }
 
     private function positive_integer($value, string $name, int $default)
@@ -457,13 +845,52 @@ final class EventSales_Tickera_Catalog_Feed
      */
     private function cache_key(array $params): string
     {
-        $version = (int) get_option(self::CACHE_VERSION_OPTION, 1);
-        $payload = wp_json_encode([
+        return self::cache_key_for(
+            $params,
+            self::read_or_create_snapshot_generation(),
+            (int) get_option(self::CACHE_VERSION_OPTION, 1)
+        );
+    }
+
+    /**
+     * Cached pages are bound to the SnapshotGeneration record, so a rotated
+     * generation can never serve a page materialised under the old generation.
+     *
+     * @param array<string, mixed> $params
+     * @param array{generation_token: string, generation_at: string} $generation
+     */
+    public static function cache_key_for(array $params, array $generation, int $cache_version): string
+    {
+        $payload = self::canonical_json([
             'schema_version' => EVENTSALES_TICKERA_CATALOG_SCHEMA_VERSION,
-            'params' => $params,
+            'canonical_contract_version' => EVENTSALES_TICKERA_CATALOG_CANONICAL_CONTRACT_VERSION,
+            'producer_version' => EVENTSALES_TICKERA_CATALOG_PRODUCER_VERSION,
+            'generation_token' => (string) ($generation['generation_token'] ?? ''),
+            'generation_at' => (string) ($generation['generation_at'] ?? ''),
+            'params' => self::canonical_params($params),
         ]);
 
-        return 'eventsales_tickera_catalog_' . $version . '_' . hash('sha256', (string) $payload);
+        return 'eventsales_tickera_catalog_' . $cache_version . '_' . hash('sha256', $payload);
+    }
+
+    /**
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
+     */
+    private static function canonical_params(array $params): array
+    {
+        $canonical = [];
+
+        foreach ($params as $key => $value) {
+            if ($value === null || is_bool($value) || is_int($value)) {
+                $canonical[(string) $key] = $value;
+                continue;
+            }
+
+            $canonical[(string) $key] = (string) $value;
+        }
+
+        return $canonical;
     }
 
     private function cache_ttl(): int
@@ -483,33 +910,129 @@ final class EventSales_Tickera_Catalog_Feed
      */
     private function build_response(array $params): array
     {
-        $generated_at = $this->utc_now();
-        $catalog_rows = $this->catalog_rows($params);
-        $events = $this->event_rows($params);
+        $generation_before = self::read_or_create_snapshot_generation();
 
+        $source_system_id = self::derive_source_system_id(self::home_url_value());
+        if ($source_system_id === null) {
+            throw new RuntimeException('source_system_id_underivable');
+        }
+
+        $filters = [
+            'updated_since' => $this->sql_datetime_to_iso8601($params['updated_since']),
+            'product_id' => $params['product_id'],
+            'variation_id' => $params['variation_id'],
+            'event_id' => $params['event_id'],
+            'include_private' => $params['include_private'],
+        ];
+
+        $discovery_snapshot_id = self::discovery_snapshot_id(
+            $source_system_id,
+            $generation_before['generation_token'],
+            $filters
+        );
+
+        $per_page = (int) $params['per_page'];
+        $catalog = $this->catalog_rows($params);
+        $catalog_rows = array_slice($catalog['rows'], 0, $per_page);
+        $observations = array_slice($catalog['observations'], 0, $per_page);
+
+        if (count($catalog_rows) > self::MAX_CATALOG_ROWS_PER_PAGE) {
+            throw new RuntimeException('catalog_rows_page_limit_exceeded');
+        }
+
+        $events = $this->event_rows($params);
+        $evidence = self::build_native_evidence($observations, $discovery_snapshot_id);
+        $envelope = self::native_envelope([
+            'source_system_id' => $source_system_id,
+            'discovery_snapshot_id' => $discovery_snapshot_id,
+            'source_snapshot_at' => $generation_before['generation_at'],
+            'generated_at' => self::utc_now(),
+            'page' => (int) $params['page'],
+            'per_page' => $per_page,
+            'has_more' => count($catalog['rows']) > $per_page,
+            'filters' => $filters,
+            'events' => $events,
+            'catalog_rows' => $catalog_rows,
+            'evidence' => $evidence,
+        ]);
+
+        self::require_stable_snapshot_generation($generation_before);
+
+        return $envelope;
+    }
+
+    /**
+     * Assembles the exact native envelope: fifteen keys, no extras.
+     *
+     * @param array<string, mixed> $page
+     * @return array<string, mixed>
+     */
+    public static function native_envelope(array $page): array
+    {
         return [
             'schema_version' => EVENTSALES_TICKERA_CATALOG_SCHEMA_VERSION,
+            'canonical_contract_version' => EVENTSALES_TICKERA_CATALOG_CANONICAL_CONTRACT_VERSION,
+            'producer_version' => EVENTSALES_TICKERA_CATALOG_PRODUCER_VERSION,
             'source' => self::SOURCE,
-            'source_snapshot_at' => $generated_at,
-            'generated_at' => $generated_at,
-            'page' => $params['page'],
-            'per_page' => $params['per_page'],
-            'has_more' => count($catalog_rows) > $params['per_page'],
-            'filters' => [
-                'updated_since' => $this->sql_datetime_to_iso8601($params['updated_since']),
-                'product_id' => $params['product_id'],
-                'variation_id' => $params['variation_id'],
-                'event_id' => $params['event_id'],
-                'include_private' => $params['include_private'],
-            ],
-            'events' => $events,
-            'catalog_rows' => array_slice($catalog_rows, 0, $params['per_page']),
+            'source_system_id' => $page['source_system_id'],
+            'discovery_snapshot_id' => $page['discovery_snapshot_id'],
+            'source_snapshot_at' => $page['source_snapshot_at'],
+            'generated_at' => $page['generated_at'],
+            'page' => $page['page'],
+            'per_page' => $page['per_page'],
+            'has_more' => $page['has_more'],
+            'filters' => $page['filters'],
+            'events' => $page['events'],
+            'catalog_rows' => $page['catalog_rows'],
+            'evidence' => $page['evidence'],
+        ];
+    }
+
+    private static function home_url_value(): string
+    {
+        return function_exists('home_url') ? (string) home_url() : '';
+    }
+
+    /**
+     * Native v3 event-relationship join and filter contract.
+     *
+     * Both relationship joins are always LEFT JOINs so a published ticket
+     * product with a missing, malformed, or unresolved `_event_name` still
+     * reaches evidence generation as absent/invalid instead of vanishing from
+     * discovery. The REGEXP guard runs before CAST so MySQL never coerces
+     * `55501abc` into a false relationship, and public mode keeps filtering
+     * resolved events without deleting broken links from the page.
+     *
+     * @return array{
+     *     event_meta_join: string,
+     *     event_join: string,
+     *     event_join_predicate: string,
+     *     public_event_where: string,
+     *     uses_inner_event_joins: bool,
+     *     order_by: string
+     * }
+     */
+    public static function native_catalog_relationship_sql(string $posts = 'wp_posts', string $postmeta = 'wp_postmeta'): array
+    {
+        $event_join_predicate = "ev.post_type = 'tc_events'"
+            . " AND event_meta.meta_value REGEXP '^[1-9][0-9]*$'"
+            . ' AND ev.ID = CAST(event_meta.meta_value AS UNSIGNED)';
+
+        return [
+            'event_meta_join' => "LEFT JOIN {$postmeta} event_meta ON event_meta.post_id = p.ID AND event_meta.meta_key = '_event_name'",
+            'event_join' => "LEFT JOIN {$posts} ev ON " . $event_join_predicate,
+            'event_join_predicate' => $event_join_predicate,
+            'public_event_where' => "(ev.ID IS NULL OR ev.post_status = 'publish')",
+            'uses_inner_event_joins' => false,
+            // Total order after LEFT JOIN relationships can repeat product/variation
+            // across multiple events — finish with ev.ID for deterministic pages.
+            'order_by' => 'ORDER BY ev.post_title ASC, p.post_title ASC, p.ID ASC, variation.ID ASC, ev.ID ASC',
         ];
     }
 
     /**
      * @param array<string, mixed> $params
-     * @return array<int, array<string, mixed>>
+     * @return array{rows: array<int, array<string, mixed>>, observations: array<int, array<string, mixed>>}
      */
     private function catalog_rows(array $params): array
     {
@@ -524,10 +1047,12 @@ final class EventSales_Tickera_Catalog_Feed
         ];
         $values = [];
 
+        $relationship = self::native_catalog_relationship_sql($posts, $postmeta);
+
         $joins = [
             "JOIN {$postmeta} is_ticket ON is_ticket.post_id = p.ID AND is_ticket.meta_key = '_tc_is_ticket'",
-            ($targeted ? 'LEFT JOIN' : 'JOIN') . " {$postmeta} event_meta ON event_meta.post_id = p.ID AND event_meta.meta_key = '_event_name'",
-            ($targeted ? 'LEFT JOIN' : 'JOIN') . " {$posts} ev ON ev.ID = CAST(event_meta.meta_value AS UNSIGNED) AND ev.post_type = 'tc_events'",
+            $relationship['event_meta_join'],
+            $relationship['event_join'],
             "LEFT JOIN {$postmeta} pm ON pm.post_id = p.ID AND pm.meta_key IN (" . $this->sql_placeholders(count(self::ALLOWED_META_KEYS)) . ')',
             "LEFT JOIN {$posts} variation ON variation.post_parent = p.ID AND variation.post_type = 'product_variation'",
         ];
@@ -535,7 +1060,7 @@ final class EventSales_Tickera_Catalog_Feed
 
         if (!$targeted) {
             $where[] = "p.post_status = 'publish'";
-            $where[] = "ev.post_status = 'publish'";
+            $where[] = $relationship['public_event_where'];
             $where[] = "(variation.ID IS NULL OR variation.post_status = 'publish')";
         } else {
             $where[] = "(variation.ID IS NULL OR variation.post_type = 'product_variation')";
@@ -582,6 +1107,7 @@ final class EventSales_Tickera_Catalog_Feed
                 variation.post_title AS variation_title,
                 variation.post_status AS variation_status,
                 variation.post_modified_gmt AS variation_source_updated_at,
+                MAX(event_meta.meta_value) AS event_reference_raw,
                 MAX(CASE WHEN pm.meta_key = 'custom_produk_blad_toegang_naam' THEN pm.meta_value END) AS ticket_display_name,
                 MAX(CASE WHEN pm.meta_key = '_price' THEN pm.meta_value END) AS price,
                 MAX(CASE WHEN pm.meta_key = '_regular_price' THEN pm.meta_value END) AS regular_price,
@@ -610,7 +1136,7 @@ final class EventSales_Tickera_Catalog_Feed
                 variation.post_title,
                 variation.post_status,
                 variation.post_modified_gmt
-            ORDER BY ev.post_title ASC, p.post_title ASC, p.ID ASC, variation.ID ASC
+            ' . $relationship['order_by'] . '
             LIMIT %d OFFSET %d';
 
         $values[] = $limit;
@@ -620,12 +1146,71 @@ final class EventSales_Tickera_Catalog_Feed
         $rows = $wpdb->get_results($prepared, ARRAY_A);
 
         if (!is_array($rows)) {
-            return [];
+            return ['rows' => [], 'observations' => []];
         }
 
-        return array_map(function (array $row): array {
-            return $this->normalize_catalog_row($row);
-        }, $rows);
+        $normalized = [];
+        $observations = [];
+
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $normalized_row = $this->normalize_catalog_row($row);
+            $normalized[] = $normalized_row;
+            $observations[] = $this->native_observation($row, $normalized_row);
+        }
+
+        return ['rows' => $normalized, 'observations' => $observations];
+    }
+
+    /**
+     * Typed producer observation for one catalog row. Separate from the
+     * structural transport row so evidence never depends on legacy
+     * diagnostic fields.
+     *
+     * @param array<string, mixed> $raw_row
+     * @param array<string, mixed> $normalized_row
+     * @return array<string, mixed>
+     */
+    private function native_observation(array $raw_row, array $normalized_row): array
+    {
+        return [
+            'woo_product_id' => $normalized_row['woo_product_id'],
+            'woo_variation_id' => $normalized_row['woo_variation_id'],
+            'tickera_event_id' => $normalized_row['tickera_event_id'],
+            'event_status' => $normalized_row['event_status'],
+            'product_status' => $normalized_row['product_status'],
+            'variation_status' => $normalized_row['variation_status'],
+            // Structural/legacy normalized template id (empty → null) remains for
+            // catalog_rows diagnostics. Native evidence uses the raw SQL value.
+            'ticket_template_id' => $normalized_row['ticket_template_id'],
+            'ticket_template_raw' => self::preserve_raw_meta_value($raw_row['ticket_template_id'] ?? null),
+            'product_type' => $normalized_row['product_type'],
+            'is_subscription' => $normalized_row['is_subscription'],
+            // Preserve exact SQL meta observation: null = meta absent, "" = empty meta.
+            'event_reference_raw' => self::preserve_raw_meta_value($raw_row['event_reference_raw'] ?? null),
+        ];
+    }
+
+    /**
+     * Preserve authority-bearing raw meta values without collapsing empty strings.
+     *
+     * @return string|null null when the SQL observation is NULL (meta absent);
+     *                     otherwise the exact string including "" / whitespace.
+     */
+    public static function preserve_raw_meta_value($value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if (is_bool($value) || is_array($value) || is_object($value)) {
+            return null;
+        }
+
+        return (string) $value;
     }
 
     /**
@@ -921,6 +1506,379 @@ final class EventSales_Tickera_Catalog_Feed
         return [$status === 'unknown' ? 'missing_source_risk_data' : $status . '_event'];
     }
 
+    /**
+     * Builds the deduplicated, bounded native evidence list for one page.
+     *
+     * Producer dedup removes only fully identical raw evidence records. Same
+     * dimension/scope/target with different state, value, completeness, or
+     * provenance must both survive so Phoenix can collapse duplicates or emit
+     * blocking_conflict. Exceeding the page bound fails closed: evidence is
+     * never truncated.
+     *
+     * @param array<int, array<string, mixed>> $observations
+     * @return array<int, array<string, mixed>>
+     */
+    public static function build_native_evidence(array $observations, string $discovery_snapshot_id): array
+    {
+        $evidence = [];
+        $seen = [];
+
+        foreach ($observations as $observation) {
+            if (!is_array($observation)) {
+                continue;
+            }
+
+            foreach (self::build_native_evidence_for_row($observation, $discovery_snapshot_id) as $item) {
+                $fingerprint = self::canonical_json($item);
+
+                if (isset($seen[$fingerprint])) {
+                    continue;
+                }
+
+                $seen[$fingerprint] = true;
+                $evidence[] = $item;
+            }
+        }
+
+        if (count($evidence) > self::MAX_EVIDENCE_PER_PAGE) {
+            throw new RuntimeException('evidence_page_limit_exceeded');
+        }
+
+        return $evidence;
+    }
+
+    /**
+     * @param array<string, mixed> $observation
+     * @return array<int, array<string, mixed>>
+     */
+    public static function build_native_evidence_for_row(array $observation, string $discovery_snapshot_id): array
+    {
+        $product_id = self::positive_int_or_null($observation['woo_product_id'] ?? null);
+
+        if ($product_id === null) {
+            return [];
+        }
+
+        $variation_id = self::positive_int_or_null($observation['woo_variation_id'] ?? null);
+        $event_id = self::positive_int_or_null($observation['tickera_event_id'] ?? null);
+        $items = [];
+
+        if ($event_id !== null) {
+            $items[] = self::lifecycle_evidence(
+                'event',
+                ['tickera_event_id' => $event_id],
+                $observation['event_status'] ?? null,
+                ['tickera_event_id' => $event_id],
+                $discovery_snapshot_id
+            );
+        }
+
+        $items[] = self::lifecycle_evidence(
+            'parent_product',
+            ['woo_product_id' => $product_id],
+            $observation['product_status'] ?? null,
+            ['woo_product_id' => $product_id],
+            $discovery_snapshot_id
+        );
+
+        // A variation lifecycle is always its own observation of the variation
+        // post status. Parent status is never copied onto a variation.
+        if ($variation_id !== null) {
+            $items[] = self::lifecycle_evidence(
+                'variation',
+                ['woo_variation_id' => $variation_id, 'woo_product_id' => $product_id],
+                $observation['variation_status'] ?? null,
+                ['woo_product_id' => $product_id, 'woo_variation_id' => $variation_id],
+                $discovery_snapshot_id
+            );
+        }
+
+        $items[] = self::ticket_template_evidence(
+            $product_id,
+            array_key_exists('ticket_template_raw', $observation)
+                ? $observation['ticket_template_raw']
+                : ($observation['ticket_template_id'] ?? null),
+            $discovery_snapshot_id
+        );
+        $items[] = self::event_link_evidence($product_id, $event_id, $observation['event_reference_raw'] ?? null, $discovery_snapshot_id);
+        $items[] = self::subscription_evidence($product_id, !empty($observation['is_subscription']), $discovery_snapshot_id);
+        $items[] = self::product_type_evidence($product_id, $observation['product_type'] ?? null, $discovery_snapshot_id);
+
+        foreach (self::CAPABILITY_DIMENSIONS as $dimension) {
+            $items[] = self::capability_evidence($dimension, $product_id, $discovery_snapshot_id);
+        }
+
+        return $items;
+    }
+
+    /**
+     * @param array<string, int> $target
+     * @param array<string, int> $identity
+     * @return array<string, mixed>
+     */
+    private static function lifecycle_evidence(string $scope, array $target, $status, array $identity, string $discovery_snapshot_id): array
+    {
+        $source_key = self::PRODUCER_SOURCE_KEYS['lifecycle'];
+        $clean = self::nullable_trimmed($status);
+
+        if ($clean === null) {
+            return self::evidence_item('lifecycle', $scope, $target, 'missing', null, $source_key, 'partial', $identity, null, $discovery_snapshot_id);
+        }
+
+        if (in_array($clean, self::LIFECYCLE_VALUES, true)) {
+            return self::evidence_item('lifecycle', $scope, $target, 'present', $clean, $source_key, 'exhaustive', $identity, null, $discovery_snapshot_id);
+        }
+
+        // An undeclared WordPress status fails closed instead of being mapped.
+        return self::evidence_item('lifecycle', $scope, $target, 'invalid', null, $source_key, 'exhaustive', $identity, $clean, $discovery_snapshot_id);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function ticket_template_evidence(int $product_id, $template_id, string $discovery_snapshot_id): array
+    {
+        $source_key = self::PRODUCER_SOURCE_KEYS['ticket_template'];
+        $target = ['woo_product_id' => $product_id];
+        $identity = ['woo_product_id' => $product_id];
+
+        // SQL NULL means the meta row is genuinely absent.
+        if ($template_id === null) {
+            return self::evidence_item('ticket_template', 'parent_product', $target, 'absent', null, $source_key, 'exhaustive', $identity, null, $discovery_snapshot_id);
+        }
+
+        // Meta row exists. Preserve the exact raw string — including "".
+        $raw = self::preserve_raw_meta_value($template_id);
+        if ($raw === null) {
+            return self::evidence_item('ticket_template', 'parent_product', $target, 'producer_error', null, $source_key, 'unknown', $identity, null, $discovery_snapshot_id);
+        }
+
+        if (trim($raw) === '') {
+            // Empty / whitespace-only meta is invalid, never absent.
+            return self::evidence_item('ticket_template', 'parent_product', $target, 'invalid', null, $source_key, 'exhaustive', $identity, $raw, $discovery_snapshot_id);
+        }
+
+        if (strlen($raw) > self::MAX_EVIDENCE_VALUE_BYTES) {
+            // Oversized raw fails closed inside evidence_item.
+            return self::evidence_item('ticket_template', 'parent_product', $target, 'invalid', null, $source_key, 'exhaustive', $identity, $raw, $discovery_snapshot_id);
+        }
+
+        return self::evidence_item('ticket_template', 'parent_product', $target, 'present', trim($raw), $source_key, 'exhaustive', $identity, null, $discovery_snapshot_id);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function event_link_evidence(int $product_id, ?int $event_id, $event_reference_raw, string $discovery_snapshot_id): array
+    {
+        $source_key = self::PRODUCER_SOURCE_KEYS['event_link'];
+        $target = ['woo_product_id' => $product_id];
+        $identity = ['woo_product_id' => $product_id];
+
+        // SQL NULL means the relationship meta row is genuinely absent.
+        if ($event_reference_raw === null && $event_id === null) {
+            return self::evidence_item('event_link', 'event_product_relationship', $target, 'absent', null, $source_key, 'exhaustive', $identity, null, $discovery_snapshot_id);
+        }
+
+        if ($event_reference_raw === null && $event_id !== null) {
+            // Impossible observation: resolved event without a raw reference.
+            return self::evidence_item('event_link', 'event_product_relationship', $target, 'producer_error', null, $source_key, 'unknown', $identity, null, $discovery_snapshot_id);
+        }
+
+        // Meta row exists. Preserve exact raw including "" / whitespace.
+        $raw = self::preserve_raw_meta_value($event_reference_raw);
+        if ($raw === null) {
+            return self::evidence_item('event_link', 'event_product_relationship', $target, 'producer_error', null, $source_key, 'unknown', $identity, null, $discovery_snapshot_id);
+        }
+
+        $trimmed = trim($raw);
+        if ($trimmed === '') {
+            // Empty / whitespace-only relationship reference is invalid, never absent.
+            return self::evidence_item('event_link', 'event_product_relationship', $target, 'invalid', null, $source_key, 'exhaustive', $identity, $raw, $discovery_snapshot_id);
+        }
+
+        $parsed_reference = self::positive_int_or_null($trimmed);
+
+        // Positive present requires a valid raw positive-integer reference that
+        // resolves to the same tc_events id. Never trust SQL CAST alone.
+        if (
+            $parsed_reference !== null
+            && $event_id !== null
+            && $parsed_reference === $event_id
+        ) {
+            return self::evidence_item(
+                'event_link',
+                'event_product_relationship',
+                $target,
+                'present',
+                $event_id,
+                $source_key,
+                'exhaustive',
+                ['woo_product_id' => $product_id, 'tickera_event_id' => $event_id],
+                null,
+                $discovery_snapshot_id
+            );
+        }
+
+        // Malformed, non-positive, unresolved, or mismatched raw references.
+        return self::evidence_item('event_link', 'event_product_relationship', $target, 'invalid', null, $source_key, 'exhaustive', $identity, $raw, $discovery_snapshot_id);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function subscription_evidence(int $product_id, bool $is_subscription, string $discovery_snapshot_id): array
+    {
+        $source_key = self::PRODUCER_SOURCE_KEYS['subscription'];
+        $target = ['woo_product_id' => $product_id];
+        $identity = ['woo_product_id' => $product_id];
+
+        if ($is_subscription) {
+            return self::evidence_item('subscription', 'parent_product', $target, 'present', null, $source_key, 'partial', $identity, null, $discovery_snapshot_id);
+        }
+
+        // No safe negative subscription proof exists in this producer.
+        return self::evidence_item('subscription', 'parent_product', $target, 'unknown', null, $source_key, 'unknown', $identity, null, $discovery_snapshot_id);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function product_type_evidence(int $product_id, $product_type, string $discovery_snapshot_id): array
+    {
+        $source_key = self::PRODUCER_SOURCE_KEYS['product_type'];
+        $target = ['woo_product_id' => $product_id];
+        $identity = ['woo_product_id' => $product_id];
+        $type = self::nullable_trimmed($product_type);
+
+        if ($type === null) {
+            // Truly unevaluable product type — the source produced no observation.
+            return self::evidence_item('product_type', 'parent_product', $target, 'unsupported', null, $source_key, 'unknown', $identity, null, $discovery_snapshot_id);
+        }
+
+        if (in_array($type, self::SUPPORTED_PRODUCT_TYPES, true)) {
+            return self::evidence_item('product_type', 'parent_product', $target, 'present', $type, $source_key, 'exhaustive', $identity, null, $discovery_snapshot_id);
+        }
+
+        // An observed but undeclared runtime token fails closed as invalid.
+        // Do not treat it as unsupported (unsupported = cannot evaluate).
+        return self::evidence_item('product_type', 'parent_product', $target, 'invalid', null, $source_key, 'exhaustive', $identity, $type, $discovery_snapshot_id);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function capability_evidence(string $dimension, int $product_id, string $discovery_snapshot_id): array
+    {
+        return self::evidence_item(
+            $dimension,
+            'parent_product',
+            ['woo_product_id' => $product_id],
+            'unsupported',
+            null,
+            self::PRODUCER_SOURCE_KEYS['capability'],
+            'unknown',
+            ['woo_product_id' => $product_id],
+            null,
+            $discovery_snapshot_id
+        );
+    }
+
+    /**
+     * @param array<string, int> $target
+     * @param array<string, int> $identity
+     * @return array<string, mixed>
+     */
+    private static function evidence_item(
+        string $dimension,
+        string $scope,
+        array $target,
+        string $state,
+        $value,
+        string $producer_source_key,
+        string $completeness,
+        array $identity,
+        ?string $raw_producer_code,
+        string $discovery_snapshot_id
+    ): array {
+        $provenance = [
+            'discovery_snapshot_id' => $discovery_snapshot_id,
+            'producer_version' => EVENTSALES_TICKERA_CATALOG_PRODUCER_VERSION,
+            'producer_source_key' => $producer_source_key,
+        ];
+
+        foreach (['woo_product_id', 'woo_variation_id', 'tickera_event_id'] as $key) {
+            $id = self::positive_int_or_null($identity[$key] ?? null);
+            if ($id !== null) {
+                $provenance[$key] = $id;
+            }
+        }
+
+        if ($raw_producer_code !== null) {
+            if (!is_string($raw_producer_code) || !self::valid_utf8_string($raw_producer_code)) {
+                throw new RuntimeException('invalid_raw_producer_code');
+            }
+
+            if (strlen($raw_producer_code) > self::MAX_RAW_PRODUCER_CODE_BYTES) {
+                // Oversized raw evidence fails closed. Never truncate or omit.
+                throw new RuntimeException('oversized_raw_producer_code');
+            }
+
+            $provenance['raw_producer_code'] = $raw_producer_code;
+        }
+
+        $item = [
+            'dimension' => $dimension,
+            'producer_scope' => $scope,
+            'target' => $target,
+            'state' => $state,
+            'producer_source_key' => $producer_source_key,
+            'completeness' => $completeness,
+            'provenance' => array_intersect_key($provenance, array_flip(self::PROVENANCE_KEYS)),
+        ];
+
+        if ($value !== null) {
+            $item['value'] = $value;
+        }
+
+        return $item;
+    }
+
+    private static function valid_utf8_string(string $value): bool
+    {
+        if (function_exists('mb_check_encoding')) {
+            return mb_check_encoding($value, 'UTF-8');
+        }
+
+        return @preg_match('//u', $value) === 1;
+    }
+
+    private static function positive_int_or_null($value): ?int
+    {
+        if ($value === null || $value === '' || is_bool($value) || is_array($value) || is_object($value)) {
+            return null;
+        }
+
+        if (is_int($value)) {
+            return $value > 0 ? $value : null;
+        }
+
+        $clean = trim((string) $value);
+
+        return preg_match('/^[1-9][0-9]*$/', $clean) ? (int) $clean : null;
+    }
+
+    private static function nullable_trimmed($value): ?string
+    {
+        if ($value === null || is_array($value) || is_object($value) || is_bool($value)) {
+            return null;
+        }
+
+        $clean = trim((string) $value);
+
+        return $clean === '' ? null : $clean;
+    }
+
     private function error_response(string $error, int $status, ?string $message = null): WP_REST_Response
     {
         $body = ['error' => $error];
@@ -937,7 +1895,7 @@ final class EventSales_Tickera_Catalog_Feed
         return implode(',', array_fill(0, $count, '%s'));
     }
 
-    private function utc_now(): string
+    private static function utc_now(): string
     {
         return gmdate('Y-m-d\TH:i:s\Z');
     }
