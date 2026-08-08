@@ -189,6 +189,46 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponseTest do
                |> WordPressFeedResponse.parse_page()
     end
 
+    test "enforces native events page bound against per_page" do
+      assert {:ok, _} =
+               valid_v3_page()
+               |> Map.put("per_page", 100)
+               |> Map.put("events", event_rows(100))
+               |> WordPressFeedResponse.parse_page()
+
+      assert {:error, :invalid_feed_response} =
+               valid_v3_page()
+               |> Map.put("per_page", 100)
+               |> Map.put("events", event_rows(101))
+               |> WordPressFeedResponse.parse_page()
+
+      assert {:error, :invalid_feed_response} =
+               valid_v3_page()
+               |> Map.put("per_page", 45)
+               |> Map.put("events", event_rows(46))
+               |> WordPressFeedResponse.parse_page()
+    end
+
+    test "aggregates bounded native event pages with deterministic first-occurrence dedup" do
+      {:ok, first} =
+        valid_v3_page()
+        |> Map.put("has_more", true)
+        |> Map.put("events", [%{"tickera_event_id" => 1}, %{"tickera_event_id" => 2}])
+        |> WordPressFeedResponse.parse_page()
+
+      {:ok, second} =
+        valid_v3_page()
+        |> Map.put("page", 2)
+        |> Map.put("has_more", false)
+        |> Map.put("events", [%{"tickera_event_id" => 2}, %{"tickera_event_id" => 3}])
+        |> Map.put("catalog_rows", [])
+        |> Map.put("evidence", [])
+        |> WordPressFeedResponse.parse_page()
+
+      assert {:ok, aggregate} = WordPressFeedResponse.aggregate_pages([first, second])
+      assert Enum.map(aggregate.events, & &1["tickera_event_id"]) == [1, 2, 3]
+    end
+
     test "rejects invalid evidence and datetime fields" do
       bad_evidence =
         put_in(valid_v3_page(), ["evidence"], [
@@ -476,5 +516,9 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponseTest do
 
   defp catalog_rows(count) do
     for id <- 1..count, do: %{"woo_product_id" => id}
+  end
+
+  defp event_rows(count) do
+    for id <- 1..count, do: %{"tickera_event_id" => id}
   end
 end

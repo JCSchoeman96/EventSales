@@ -187,6 +187,7 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponse do
          evidence_raw when is_list(evidence_raw) <- decoded["evidence"],
          true <- length(rows) <= @native_max_catalog_rows_per_page,
          true <- length(evidence_raw) <= @native_max_evidence_per_page,
+         true <- length(events) <= per_page,
          true <- Enum.all?(events, &is_map/1),
          true <- Enum.all?(rows, &is_map/1),
          {:ok, evidence} <- validate_evidence_list(evidence_raw) do
@@ -290,7 +291,7 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponse do
       page: last.page,
       per_page: last.per_page,
       has_more: last.has_more,
-      events: Enum.flat_map(pages, & &1.events),
+      events: dedupe_events(Enum.flat_map(pages, & &1.events)),
       catalog_rows: Enum.flat_map(pages, & &1.catalog_rows),
       canonical_contract_version: first.canonical_contract_version,
       producer_version: first.producer_version,
@@ -458,10 +459,10 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponse do
         if MapSet.member?(seen, key) do
           {acc, seen}
         else
-          {acc ++ [event], MapSet.put(seen, key)}
+          {[event | acc], MapSet.put(seen, key)}
         end
       end)
 
-    deduped
+    Enum.reverse(deduped)
   end
 end

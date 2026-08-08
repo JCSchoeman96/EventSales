@@ -87,6 +87,58 @@ HTTP status must be `400`.
 Native `per_page` is bounded to `1..100`. The legacy `2026-07-22.v2` bound of
 `500` is never applied to a v3 page.
 
+## Shared catalogue and event pagination
+
+Both `catalog_rows` and `events` use the same `page` / `per_page` axis. There is
+no separate event page, event cursor, or `events_has_more` envelope field.
+
+Each stream fetches independently with a sentinel:
+
+```text
+limit  = per_page + 1
+offset = (page - 1) * per_page
+```
+
+Each emitted stream is sliced to `<= per_page` before the response is built.
+The sentinel row never enters `events[]` or `catalog_rows[]`.
+
+```text
+catalogue_has_more = fetched catalogue rows > per_page
+event_has_more     = fetched event rows > per_page
+response.has_more  = catalogue_has_more OR event_has_more
+```
+
+Therefore discovery continues until **both** independent streams are exhausted.
+Later pages may legitimately contain:
+
+```text
+events with no catalog_rows / evidence
+catalog_rows with no events
+```
+
+Discovery is complete only when both streams are exhausted (`has_more=false`).
+
+Event SQL uses a total order that ends in event identity:
+
+```text
+ORDER BY ev.post_title ASC, ev.ID ASC
+```
+
+`events` emitted per page are bounded by `per_page`, and therefore:
+
+```text
+events/page <= per_page <= 100
+```
+
+Published Tickera events with zero eligible ticket products remain in the
+bounded event stream; events are never derived solely from the current
+catalogue page.
+
+Phase 5D still requires `TICKERA_CATALOG_FEED_PER_PAGE <= 45` for the current
+worst-case evidence density. With shared pagination that also means
+`events` emitted per page are `<= 45` during that run. F3 does not change
+runtime config.
+
 ## Native envelope
 
 Request:

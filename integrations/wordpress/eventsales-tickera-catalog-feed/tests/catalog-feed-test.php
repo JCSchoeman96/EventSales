@@ -1530,6 +1530,272 @@ T::ok(
 );
 
 // ---------------------------------------------------------------------------
+T::section('bounded native event pagination');
+
+if (!function_exists('get_the_terms')) {
+    function get_the_terms($id, $taxonomy)
+    {
+        return [(object) ['slug' => 'simple']];
+    }
+}
+
+/**
+ * Fake $wpdb that captures SQL and returns configured catalogue/event rows.
+ */
+final class BoundedPageWpdb
+{
+    public string $posts = 'wp_posts';
+
+    public string $postmeta = 'wp_postmeta';
+
+    public string $captured_sql = '';
+
+    /** @var array<int, mixed> */
+    public array $captured_values = [];
+
+    /** @var array<int, string> */
+    public array $captured_sqls = [];
+
+    /** @var array<int, array<string, mixed>> */
+    public array $catalog_results = [];
+
+    /** @var array<int, array<string, mixed>> */
+    public array $event_results = [];
+
+    public function prepare($sql, $args = null)
+    {
+        $values = func_get_args();
+        array_shift($values);
+
+        if (isset($values[0]) && is_array($values[0])) {
+            $values = $values[0];
+        }
+
+        $this->captured_sql = (string) $sql;
+        $this->captured_values = $values;
+        $this->captured_sqls[] = (string) $sql;
+
+        return (string) $sql;
+    }
+
+    public function get_results($prepared, $output = null)
+    {
+        $sql = (string) $prepared;
+
+        if (strpos($sql, 'linked_ticket_products') !== false) {
+            return $this->event_results;
+        }
+
+        return $this->catalog_results;
+    }
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function fake_event_sql_row(int $id, int $linked = 0, ?string $title = null): array
+{
+    return [
+        'tickera_event_id' => $id,
+        'event_title' => $title ?? ('Event ' . $id),
+        'event_slug' => 'event-' . $id,
+        'event_status' => 'publish',
+        'event_source_updated_at' => '2026-08-01 10:00:00',
+        'event_start_at' => null,
+        'event_end_at' => null,
+        'event_location' => null,
+        'booking_fee_type' => null,
+        'booking_fee_value' => null,
+        'linked_ticket_products' => $linked,
+    ];
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function fake_catalog_sql_row(int $product_id, int $event_id): array
+{
+    return [
+        'woo_product_id' => $product_id,
+        'product_title' => 'Product ' . $product_id,
+        'product_slug' => 'product-' . $product_id,
+        'product_status' => 'publish',
+        'product_source_updated_at' => '2026-08-01 10:00:00',
+        'tickera_event_id' => $event_id,
+        'event_title' => 'Event ' . $event_id,
+        'event_slug' => 'event-' . $event_id,
+        'event_status' => 'publish',
+        'event_source_updated_at' => '2026-08-01 10:00:00',
+        'woo_variation_id' => null,
+        'variation_title' => null,
+        'variation_status' => null,
+        'variation_source_updated_at' => null,
+        'event_reference_raw' => (string) $event_id,
+        'ticket_display_name' => null,
+        'price' => '10.00',
+        'regular_price' => '10.00',
+        'ticket_template_id' => '4242',
+        'subscription_period' => null,
+        'subscription_length' => null,
+        'subscription_price' => null,
+        'subscription_sign_up_fee' => null,
+        'wc_subscription_period' => null,
+        'wc_subscription_length' => null,
+    ];
+}
+
+$params_page = static function (int $page, int $per_page): array {
+    return [
+        'updated_since' => null,
+        'product_id' => null,
+        'variation_id' => null,
+        'event_id' => null,
+        'page' => $page,
+        'per_page' => $per_page,
+        'include_private' => false,
+    ];
+};
+
+$combined_has_more = new ReflectionMethod(Feed::class, 'combined_page_has_more');
+$combined_has_more->setAccessible(true);
+T::same('catalogue more, events done → has_more true', true, $combined_has_more->invoke(null, true, false));
+T::same('catalogue done, events more → has_more true', true, $combined_has_more->invoke(null, false, true));
+T::same('both more → has_more true', true, $combined_has_more->invoke(null, true, true));
+T::same('both done → has_more false', false, $combined_has_more->invoke(null, false, false));
+
+$event_wpdb = new BoundedPageWpdb();
+$GLOBALS['wpdb'] = $event_wpdb;
+$event_rows = new ReflectionMethod(Feed::class, 'event_rows');
+$event_rows->setAccessible(true);
+
+$event_wpdb->event_results = [];
+$event_rows->invoke(new Feed(), $params_page(1, 100));
+$event_sql_page1 = $event_wpdb->captured_sql;
+$event_values_page1 = $event_wpdb->captured_values;
+
+T::ok('event SQL was captured', $event_sql_page1 !== '');
+T::ok(
+    'event SQL uses LIMIT/OFFSET placeholders',
+    preg_match('/LIMIT\s+%d\s+OFFSET\s+%d/i', $event_sql_page1) === 1
+);
+T::ok(
+    'event ORDER BY is title then ID',
+    preg_match('/ORDER BY\s+ev\.post_title\s+ASC\s*,\s*ev\.ID\s+ASC/i', $event_sql_page1) === 1
+);
+T::same('page 1 event LIMIT is per_page+1', 101, (int) $event_values_page1[count($event_values_page1) - 2]);
+T::same('page 1 event OFFSET is 0', 0, (int) $event_values_page1[count($event_values_page1) - 1]);
+
+$event_wpdb->captured_values = [];
+$event_rows->invoke(new Feed(), $params_page(2, 100));
+$event_values_page2 = $event_wpdb->captured_values;
+T::same('page 2 event LIMIT is per_page+1', 101, (int) $event_values_page2[count($event_values_page2) - 2]);
+T::same('page 2 event OFFSET is 100', 100, (int) $event_values_page2[count($event_values_page2) - 1]);
+
+$event_wpdb->event_results = array_map(
+    static fn (int $id): array => fake_event_sql_row($id),
+    range(1, 101)
+);
+$paged_events = $event_rows->invoke(new Feed(), $params_page(1, 100));
+T::ok('event_rows returns bounded shape', is_array($paged_events) && isset($paged_events['rows'], $paged_events['has_more']));
+T::same('sentinel excluded: emits exactly per_page events', 100, count($paged_events['rows']));
+T::same('event sentinel sets has_more true', true, $paged_events['has_more']);
+T::same('first emitted event id', 1, $paged_events['rows'][0]['tickera_event_id']);
+T::same('last emitted event id excludes sentinel 101', 100, $paged_events['rows'][99]['tickera_event_id']);
+
+$event_wpdb->event_results = [fake_event_sql_row(777, 0, 'Zero Product Event')];
+$zero_product = $event_rows->invoke(new Feed(), $params_page(1, 100));
+T::same('zero-product published event still emitted', 1, count($zero_product['rows']));
+T::same('zero-product event id preserved', 777, $zero_product['rows'][0]['tickera_event_id']);
+T::same('zero-product linked count is zero', 0, $zero_product['rows'][0]['linked_ticket_products']);
+T::same('zero-product page has_more false', false, $zero_product['has_more']);
+T::ok(
+    'event SQL remains LEFT JOIN based (not catalogue-derived)',
+    strpos($event_wpdb->captured_sql, 'LEFT JOIN wp_postmeta event_meta') !== false
+    && strpos($event_wpdb->captured_sql, 'INNER JOIN wp_posts p') === false
+);
+
+// Catalogue sentinel regression: catalogue SQL still uses LIMIT per_page+1.
+$catalog_wpdb = new BoundedPageWpdb();
+$GLOBALS['wpdb'] = $catalog_wpdb;
+$catalog_rows_method = new ReflectionMethod(Feed::class, 'catalog_rows');
+$catalog_rows_method->setAccessible(true);
+$catalog_rows_method->invoke(new Feed(), $params_page(1, 100));
+$catalog_values = $catalog_wpdb->captured_values;
+T::same('catalogue sentinel LIMIT remains per_page+1', 101, (int) $catalog_values[count($catalog_values) - 2]);
+T::same('catalogue sentinel OFFSET remains 0', 0, (int) $catalog_values[count($catalog_values) - 1]);
+
+Feed::read_or_create_snapshot_generation();
+$build_response = new ReflectionMethod(Feed::class, 'build_response');
+$build_response->setAccessible(true);
+
+// Event-only continuation: catalogue exhausted, events remain.
+$event_only_wpdb = new BoundedPageWpdb();
+$event_only_wpdb->catalog_results = [];
+$event_only_wpdb->event_results = array_map(
+    static fn (int $id): array => fake_event_sql_row($id),
+    range(1, 101)
+);
+$GLOBALS['wpdb'] = $event_only_wpdb;
+$event_only_page = $build_response->invoke(new Feed(), $params_page(2, 100));
+T::same('event-only page has empty catalog_rows', [], $event_only_page['catalog_rows']);
+T::same('event-only page has empty evidence', [], $event_only_page['evidence']);
+T::same('event-only page emits bounded events', 100, count($event_only_page['events']));
+T::same('event-only continuation has_more true', true, $event_only_page['has_more']);
+T::same('event-only page keeps shared page axis', 2, $event_only_page['page']);
+T::same('event-only page keeps shared per_page', 100, $event_only_page['per_page']);
+T::ok('event-only page has no event_page envelope key', !array_key_exists('event_page', $event_only_page));
+T::ok('event-only page has no events_has_more envelope key', !array_key_exists('events_has_more', $event_only_page));
+
+$event_only_wpdb->event_results = array_map(
+    static fn (int $id): array => fake_event_sql_row($id),
+    range(1, 50)
+);
+$event_only_final = $build_response->invoke(new Feed(), $params_page(3, 100));
+T::same('final event-only page emits remaining events', 50, count($event_only_final['events']));
+T::same('final event-only page has_more false', false, $event_only_final['has_more']);
+
+// Catalogue-only continuation: events exhausted, catalogue remains.
+$catalog_only_wpdb = new BoundedPageWpdb();
+$catalog_only_wpdb->catalog_results = array_map(
+    static fn (int $id): array => fake_catalog_sql_row($id, 10),
+    range(1, 3)
+);
+$catalog_only_wpdb->event_results = [];
+$GLOBALS['wpdb'] = $catalog_only_wpdb;
+$catalog_only_page = $build_response->invoke(new Feed(), $params_page(2, 2));
+T::same('catalogue-only page emits empty events', [], $catalog_only_page['events']);
+T::same('catalogue-only page emits bounded catalog_rows', 2, count($catalog_only_page['catalog_rows']));
+T::same('catalogue-only continuation has_more true', true, $catalog_only_page['has_more']);
+
+$catalog_only_wpdb->catalog_results = array_map(
+    static fn (int $id): array => fake_catalog_sql_row($id, 10),
+    range(1, 1)
+);
+$catalog_only_final = $build_response->invoke(new Feed(), $params_page(3, 2));
+T::same('final catalogue-only page emits remaining rows', 1, count($catalog_only_final['catalog_rows']));
+T::same('final catalogue-only page has_more false', false, $catalog_only_final['has_more']);
+
+// Both streams empty on page 1.
+$empty_wpdb = new BoundedPageWpdb();
+$empty_wpdb->catalog_results = [];
+$empty_wpdb->event_results = [];
+$GLOBALS['wpdb'] = $empty_wpdb;
+$both_empty = $build_response->invoke(new Feed(), $params_page(1, 100));
+T::same('both-empty page has empty catalog_rows', [], $both_empty['catalog_rows']);
+T::same('both-empty page has empty events', [], $both_empty['events']);
+T::same('both-empty page has_more false', false, $both_empty['has_more']);
+
+// Both finished: catalogue and event sentinels absent together.
+$both_done_wpdb = new BoundedPageWpdb();
+$both_done_wpdb->catalog_results = [fake_catalog_sql_row(1, 10)];
+$both_done_wpdb->event_results = [fake_event_sql_row(10, 1)];
+$GLOBALS['wpdb'] = $both_done_wpdb;
+$both_done = $build_response->invoke(new Feed(), $params_page(1, 100));
+T::same('both-finished page has_more false', false, $both_done['has_more']);
+T::same('both-finished emits one catalog row', 1, count($both_done['catalog_rows']));
+T::same('both-finished emits one event', 1, count($both_done['events']));
+
+// ---------------------------------------------------------------------------
 if (T::$failures !== []) {
     fwrite(STDERR, "catalog feed native v3 tests FAILED\n");
 
