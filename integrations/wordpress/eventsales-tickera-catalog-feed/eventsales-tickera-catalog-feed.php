@@ -1025,9 +1025,34 @@ final class EventSales_Tickera_Catalog_Feed
             'public_event_where' => "(ev.ID IS NULL OR ev.post_status = 'publish')",
             'uses_inner_event_joins' => false,
             // Total order after LEFT JOIN relationships can repeat product/variation
-            // across multiple events — finish with ev.ID for deterministic pages.
-            'order_by' => 'ORDER BY ev.post_title ASC, p.post_title ASC, p.ID ASC, variation.ID ASC, ev.ID ASC',
+            // across multiple events and physical authority postmeta rows — finish
+            // with ev.ID plus deterministic meta_id tiebreakers for pages.
+            'order_by' => 'ORDER BY ev.post_title ASC, p.post_title ASC, p.ID ASC, variation.ID ASC, ev.ID ASC, event_meta.meta_id ASC, ticket_template_meta.meta_id ASC',
         ];
+    }
+
+    /**
+     * Meta keys aggregated through the generic `pm` pivot.
+     *
+     * `_ticket_template` remains in ALLOWED_META_KEYS for catalogue-change
+     * invalidation, but authority-bearing template observations use a dedicated
+     * physical-row join so SQL never MAX-selects a winner.
+     *
+     * @return array<int, string>
+     */
+    private static function aggregate_meta_keys(): array
+    {
+        $keys = [];
+
+        foreach (self::ALLOWED_META_KEYS as $key) {
+            if ($key === '_ticket_template') {
+                continue;
+            }
+
+            $keys[] = $key;
+        }
+
+        return $keys;
     }
 
     /**
@@ -1048,15 +1073,17 @@ final class EventSales_Tickera_Catalog_Feed
         $values = [];
 
         $relationship = self::native_catalog_relationship_sql($posts, $postmeta);
+        $aggregate_meta_keys = self::aggregate_meta_keys();
 
         $joins = [
             "JOIN {$postmeta} is_ticket ON is_ticket.post_id = p.ID AND is_ticket.meta_key = '_tc_is_ticket'",
             $relationship['event_meta_join'],
             $relationship['event_join'],
-            "LEFT JOIN {$postmeta} pm ON pm.post_id = p.ID AND pm.meta_key IN (" . $this->sql_placeholders(count(self::ALLOWED_META_KEYS)) . ')',
+            "LEFT JOIN {$postmeta} ticket_template_meta ON ticket_template_meta.post_id = p.ID AND ticket_template_meta.meta_key = '_ticket_template'",
+            "LEFT JOIN {$postmeta} pm ON pm.post_id = p.ID AND pm.meta_key IN (" . $this->sql_placeholders(count($aggregate_meta_keys)) . ')',
             "LEFT JOIN {$posts} variation ON variation.post_parent = p.ID AND variation.post_type = 'product_variation'",
         ];
-        $values = array_merge($values, self::ALLOWED_META_KEYS);
+        $values = array_merge($values, $aggregate_meta_keys);
 
         if (!$targeted) {
             $where[] = "p.post_status = 'publish'";
@@ -1107,11 +1134,11 @@ final class EventSales_Tickera_Catalog_Feed
                 variation.post_title AS variation_title,
                 variation.post_status AS variation_status,
                 variation.post_modified_gmt AS variation_source_updated_at,
-                MAX(event_meta.meta_value) AS event_reference_raw,
+                event_meta.meta_value AS event_reference_raw,
                 MAX(CASE WHEN pm.meta_key = 'custom_produk_blad_toegang_naam' THEN pm.meta_value END) AS ticket_display_name,
                 MAX(CASE WHEN pm.meta_key = '_price' THEN pm.meta_value END) AS price,
                 MAX(CASE WHEN pm.meta_key = '_regular_price' THEN pm.meta_value END) AS regular_price,
-                MAX(CASE WHEN pm.meta_key = '_ticket_template' THEN pm.meta_value END) AS ticket_template_id,
+                ticket_template_meta.meta_value AS ticket_template_id,
                 MAX(CASE WHEN pm.meta_key = '_subscription_period' THEN pm.meta_value END) AS subscription_period,
                 MAX(CASE WHEN pm.meta_key = '_subscription_length' THEN pm.meta_value END) AS subscription_length,
                 MAX(CASE WHEN pm.meta_key = '_subscription_price' THEN pm.meta_value END) AS subscription_price,
@@ -1135,7 +1162,11 @@ final class EventSales_Tickera_Catalog_Feed
                 variation.ID,
                 variation.post_title,
                 variation.post_status,
-                variation.post_modified_gmt
+                variation.post_modified_gmt,
+                event_meta.meta_id,
+                event_meta.meta_value,
+                ticket_template_meta.meta_id,
+                ticket_template_meta.meta_value
             ' . $relationship['order_by'] . '
             LIMIT %d OFFSET %d';
 

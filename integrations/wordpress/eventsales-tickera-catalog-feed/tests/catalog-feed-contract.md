@@ -491,10 +491,37 @@ Public mode filters on (ev.ID IS NULL OR ev.post_status = 'publish'), which keep
   products whose event is missing or unresolved while still excluding products
   attached to a non-published event.
 Catalogue ORDER BY is a total order:
-  ev.post_title ASC, p.post_title ASC, p.ID ASC, variation.ID ASC, ev.ID ASC
-  The final ev.ID ASC tiebreaker keeps offset pages deterministic when the same
-  product/variation appears for multiple events under LEFT JOIN relationships.
+  ev.post_title ASC, p.post_title ASC, p.ID ASC, variation.ID ASC, ev.ID ASC,
+  event_meta.meta_id ASC, ticket_template_meta.meta_id ASC
+  The final ev.ID ASC and physical authority meta_id tiebreakers keep offset
+  pages deterministic when the same product/variation appears for multiple
+  events or multiple authority-bearing postmeta rows under LEFT JOIN.
 ```
+
+Authority-bearing `_event_name` and `_ticket_template` observations
+must never use MAX/MIN/first/last winner selection.
+
+Physical authority postmeta rows remain distinct through SQL
+using deterministic `meta_id` grouping/pagination.
+
+WordPress `meta_id` is transport/query discrimination only.
+It is NOT canonical evidence identity and is NOT emitted as provenance.
+
+Identical raw evidence may collapse through the existing
+complete-evidence-record fingerprint.
+
+Different raw claims must reach Phoenix so canonical conflict
+and provenance rules can execute.
+
+`_event_name` is selected directly as `event_meta.meta_value AS event_reference_raw`
+and grouped by `event_meta.meta_id` plus `event_meta.meta_value`.
+
+`_ticket_template` uses a dedicated `LEFT JOIN ... ticket_template_meta`, is
+selected directly as `ticket_template_meta.meta_value AS ticket_template_id`,
+and is grouped by `ticket_template_meta.meta_id` plus
+`ticket_template_meta.meta_value`. The generic `pm` aggregation pivot excludes
+`_ticket_template`, while catalogue-change invalidation still treats
+`_ticket_template` as catalogue-relevant.
 
 The consequence is that broken event links remain discoverable as `invalid` or
 `absent` `event_link` evidence. Previously an unresolved reference removed the

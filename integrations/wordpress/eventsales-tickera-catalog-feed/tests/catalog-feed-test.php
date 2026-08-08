@@ -12,6 +12,7 @@ declare(strict_types=1);
  */
 
 define('ABSPATH', __DIR__);
+define('ARRAY_A', 'ARRAY_A');
 
 $GLOBALS['options'] = [];
 $GLOBALS['home_url'] = 'http://localhost:10059';
@@ -51,6 +52,21 @@ function wp_generate_uuid4()
 function home_url($path = '')
 {
     return $GLOBALS['home_url'] . $path;
+}
+
+function get_post_type($id)
+{
+    return 'product';
+}
+
+function wp_is_post_autosave($id)
+{
+    return false;
+}
+
+function wp_is_post_revision($id)
+{
+    return false;
 }
 
 require dirname(__DIR__) . '/eventsales-tickera-catalog-feed.php';
@@ -589,14 +605,17 @@ T::ok(
 );
 T::ok('event join compares the casted id', strpos($rel['event_join_predicate'], 'ev.ID = CAST(event_meta.meta_value AS UNSIGNED)') !== false);
 
-// Multi-event LEFT JOINs can repeat the same product/variation; finish the
-// total order with an event-id tiebreaker so offset pages stay deterministic.
+// Multi-event LEFT JOINs and physical authority postmeta rows can repeat the
+// same product/variation; finish the total order with event-id and meta_id
+// tiebreakers so offset pages stay deterministic.
 T::same(
-    'catalogue ORDER BY is a total order ending in ev.ID',
-    'ORDER BY ev.post_title ASC, p.post_title ASC, p.ID ASC, variation.ID ASC, ev.ID ASC',
+    'catalogue ORDER BY is a total order ending in physical authority meta_ids',
+    'ORDER BY ev.post_title ASC, p.post_title ASC, p.ID ASC, variation.ID ASC, ev.ID ASC, event_meta.meta_id ASC, ticket_template_meta.meta_id ASC',
     $rel['order_by']
 );
 T::ok('ORDER BY includes the event-id tiebreaker', strpos($rel['order_by'], 'ev.ID ASC') !== false);
+T::ok('ORDER BY includes the event_meta.meta_id tiebreaker', strpos($rel['order_by'], 'event_meta.meta_id ASC') !== false);
+T::ok('ORDER BY includes the ticket_template_meta.meta_id tiebreaker', strpos($rel['order_by'], 'ticket_template_meta.meta_id ASC') !== false);
 
 $prefixed = Feed::native_catalog_relationship_sql('es_posts', 'es_postmeta');
 T::ok('relationship joins honour the postmeta table', strpos($prefixed['event_meta_join'], 'es_postmeta ') !== false);
@@ -618,6 +637,128 @@ T::ok(
 T::ok(
     'plugin source still contains the event-id tiebreaker',
     strpos($plugin_source, 'ev.ID ASC') !== false
+);
+T::ok(
+    'plugin source still contains the event_meta.meta_id tiebreaker',
+    strpos($plugin_source, 'event_meta.meta_id ASC') !== false
+);
+T::ok(
+    'plugin source still contains the ticket_template_meta.meta_id tiebreaker',
+    strpos($plugin_source, 'ticket_template_meta.meta_id ASC') !== false
+);
+
+// ---------------------------------------------------------------------------
+T::section('authority-bearing postmeta multiplicity sql');
+
+/**
+ * Capture the exact catalogue SQL through a fake $wpdb. Reflection invokes the
+ * private catalog_rows method so production does not need a public test API.
+ */
+final class CapturingWpdb
+{
+    public string $posts = 'wp_posts';
+
+    public string $postmeta = 'wp_postmeta';
+
+    public string $captured_sql = '';
+
+    /** @var array<int, mixed> */
+    public array $captured_values = [];
+
+    public function prepare($sql, $args = null)
+    {
+        $values = func_get_args();
+        array_shift($values);
+
+        if (isset($values[0]) && is_array($values[0])) {
+            $values = $values[0];
+        }
+
+        $this->captured_sql = (string) $sql;
+        $this->captured_values = $values;
+
+        return (string) $sql;
+    }
+
+    public function get_results($prepared, $output = null)
+    {
+        return [];
+    }
+}
+
+$wpdb = new CapturingWpdb();
+$GLOBALS['wpdb'] = $wpdb;
+
+$catalog_rows = new ReflectionMethod(Feed::class, 'catalog_rows');
+$catalog_rows->setAccessible(true);
+$catalog_rows->invoke(new Feed(), [
+    'updated_since' => null,
+    'product_id' => null,
+    'variation_id' => null,
+    'event_id' => null,
+    'page' => 1,
+    'per_page' => 100,
+    'include_private' => false,
+]);
+
+$catalogue_sql = $wpdb->captured_sql;
+$catalogue_values = $wpdb->captured_values;
+
+T::ok('catalogue SQL was captured', $catalogue_sql !== '');
+T::ok('MAX(event_meta.meta_value) is gone', strpos($catalogue_sql, 'MAX(event_meta.meta_value)') === false);
+T::ok(
+    '_ticket_template MAX CASE expression is gone',
+    strpos($catalogue_sql, "MAX(CASE WHEN pm.meta_key = '_ticket_template' THEN pm.meta_value END)") === false
+);
+T::ok(
+    'dedicated ticket_template_meta LEFT JOIN is present',
+    strpos($catalogue_sql, 'LEFT JOIN wp_postmeta ticket_template_meta') !== false
+    && strpos($catalogue_sql, "ticket_template_meta.meta_key = '_ticket_template'") !== false
+);
+T::ok(
+    'event_reference_raw is selected directly',
+    strpos($catalogue_sql, 'event_meta.meta_value AS event_reference_raw') !== false
+);
+T::ok(
+    'ticket_template_id is selected directly',
+    strpos($catalogue_sql, 'ticket_template_meta.meta_value AS ticket_template_id') !== false
+);
+T::ok('GROUP BY includes event_meta.meta_id', strpos($catalogue_sql, 'event_meta.meta_id') !== false);
+T::ok('GROUP BY includes event_meta.meta_value', preg_match('/GROUP BY[\s\S]*event_meta\.meta_value/i', $catalogue_sql) === 1);
+T::ok('GROUP BY includes ticket_template_meta.meta_id', preg_match('/GROUP BY[\s\S]*ticket_template_meta\.meta_id/i', $catalogue_sql) === 1);
+T::ok('GROUP BY includes ticket_template_meta.meta_value', preg_match('/GROUP BY[\s\S]*ticket_template_meta\.meta_value/i', $catalogue_sql) === 1);
+T::ok(
+    'ORDER BY ends with physical authority meta_id tiebreakers',
+    preg_match('/ev\.ID ASC,\s*event_meta\.meta_id ASC,\s*ticket_template_meta\.meta_id ASC/i', $catalogue_sql) === 1
+);
+
+$allowed_meta = (new ReflectionClass(Feed::class))->getConstant('ALLOWED_META_KEYS');
+T::ok('ALLOWED_META_KEYS still lists _ticket_template', in_array('_ticket_template', $allowed_meta, true));
+
+$aggregate_meta = (new ReflectionMethod(Feed::class, 'aggregate_meta_keys'));
+$aggregate_meta->setAccessible(true);
+$aggregate_keys = $aggregate_meta->invoke(null);
+T::ok('aggregate pm keys exclude _ticket_template', !in_array('_ticket_template', $aggregate_keys, true));
+T::ok(
+    'captured prepare values exclude _ticket_template from the pm IN list',
+    !in_array('_ticket_template', $catalogue_values, true)
+);
+T::ok(
+    'plugin source still invalidates on ALLOWED_META_KEYS including _ticket_template',
+    strpos($plugin_source, "'_ticket_template'") !== false
+    && strpos($plugin_source, 'array_merge(self::ALLOWED_META_KEYS') !== false
+);
+
+// Structural/diagnostic MAX aggregation may remain; authority claims may not.
+T::ok(
+    'no first/last/MIN winner selection for event_meta authority',
+    strpos($catalogue_sql, 'MIN(event_meta.meta_value)') === false
+    && strpos($catalogue_sql, 'MAX(event_meta.meta_value)') === false
+);
+T::ok(
+    'no first/last/MIN winner selection for ticket_template authority',
+    strpos($catalogue_sql, 'MIN(ticket_template_meta.meta_value)') === false
+    && strpos($catalogue_sql, 'MAX(ticket_template_meta.meta_value)') === false
 );
 
 // ---------------------------------------------------------------------------
@@ -1242,6 +1383,151 @@ T::same('each invalid claim keeps its own raw code', ['abc', 'def'], (static fun
 // still emitted once.
 $repeated = Feed::build_native_evidence([observation(), observation(), observation()], SNAPSHOT_ID);
 T::same('a repeated identical row adds nothing', 10, count($repeated));
+
+// ---------------------------------------------------------------------------
+T::section('authority-bearing claim multiplicity reaches phoenix');
+
+// Distinct _event_name physical rows must both survive as present event_link
+// claims. Phoenix owns contract.evidence_conflict; the producer never emits it.
+$duplicate_events = Feed::build_native_evidence(
+    [
+        observation(['event_reference_raw' => '10', 'tickera_event_id' => 10]),
+        observation(['event_reference_raw' => '20', 'tickera_event_id' => 20]),
+    ],
+    SNAPSHOT_ID
+);
+$duplicate_event_links = items_for_dimension($duplicate_events, 'event_link');
+T::same('duplicate event raw 10/20 yields exactly two event_link claims', 2, count($duplicate_event_links));
+T::same('duplicate event raw 10/20 preserves both present claims', [10, 20], (static function (array $links): array {
+    $values = array_map(static function (array $link) {
+        return $link['value'];
+    }, $links);
+    sort($values, SORT_NUMERIC);
+
+    return $values;
+})($duplicate_event_links));
+T::same('duplicate event claims stay present', ['present', 'present'], array_map(static function (array $link): string {
+    return $link['state'];
+}, $duplicate_event_links));
+T::ok(
+    'event_link provenance never emits meta_id',
+    !array_key_exists('meta_id', $duplicate_event_links[0]['provenance'])
+    && !array_key_exists('meta_id', $duplicate_event_links[1]['provenance'])
+);
+
+// Distinct _ticket_template physical rows must both survive.
+$duplicate_templates = Feed::build_native_evidence(
+    [
+        observation(['ticket_template_raw' => 'template-a', 'ticket_template_id' => 'template-a']),
+        observation(['ticket_template_raw' => 'template-b', 'ticket_template_id' => 'template-b']),
+    ],
+    SNAPSHOT_ID
+);
+$duplicate_template_items = items_for_dimension($duplicate_templates, 'ticket_template');
+T::same('duplicate templates A/B yield exactly two ticket_template claims', 2, count($duplicate_template_items));
+T::same('duplicate templates A/B both survive', ['template-a', 'template-b'], (static function (array $items): array {
+    $values = array_map(static function (array $item): string {
+        return (string) $item['value'];
+    }, $items);
+    sort($values, SORT_STRING);
+
+    return $values;
+})($duplicate_template_items));
+T::same('duplicate template claims stay present', ['present', 'present'], array_map(static function (array $item): string {
+    return $item['state'];
+}, $duplicate_template_items));
+T::ok(
+    'ticket_template provenance never emits meta_id',
+    !array_key_exists('meta_id', $duplicate_template_items[0]['provenance'])
+    && !array_key_exists('meta_id', $duplicate_template_items[1]['provenance'])
+);
+
+// Empty/invalid and valid template claims must both survive without winner selection.
+$empty_and_valid_templates = Feed::build_native_evidence(
+    [
+        observation(['ticket_template_raw' => '', 'ticket_template_id' => null]),
+        observation(['ticket_template_raw' => 'template-a', 'ticket_template_id' => 'template-a']),
+    ],
+    SNAPSHOT_ID
+);
+$empty_and_valid_items = items_for_dimension($empty_and_valid_templates, 'ticket_template');
+T::same('empty + valid template yields two claims', 2, count($empty_and_valid_items));
+T::same(
+    'empty + valid template preserves invalid empty and present template-a',
+    ['invalid', 'present'],
+    (static function (array $items): array {
+        $states = array_map(static function (array $item): string {
+            return $item['state'];
+        }, $items);
+        sort($states, SORT_STRING);
+
+        return $states;
+    })($empty_and_valid_items)
+);
+T::same(
+    'empty template keeps raw empty provenance while valid keeps value',
+    ['', 'template-a'],
+    (static function (array $items): array {
+        $tokens = [];
+
+        foreach ($items as $item) {
+            if ($item['state'] === 'invalid') {
+                $tokens[] = (string) ($item['provenance']['raw_producer_code'] ?? 'missing');
+            } else {
+                $tokens[] = (string) $item['value'];
+            }
+        }
+
+        sort($tokens, SORT_STRING);
+
+        return $tokens;
+    })($empty_and_valid_items)
+);
+
+// Two physically duplicated but semantically identical observations collapse
+// through the existing complete-record fingerprint. meta_id is never part of
+// provenance, so identical raw authority claims fingerprint-collapse.
+$exact_duplicate_evidence = Feed::build_native_evidence(
+    [
+        observation([
+            'ticket_template_raw' => 'template-a',
+            'ticket_template_id' => 'template-a',
+            'event_reference_raw' => '10',
+            'tickera_event_id' => 10,
+        ]),
+        observation([
+            'ticket_template_raw' => 'template-a',
+            'ticket_template_id' => 'template-a',
+            'event_reference_raw' => '10',
+            'tickera_event_id' => 10,
+        ]),
+    ],
+    SNAPSHOT_ID
+);
+T::same(
+    'exact duplicate template observations collapse to one evidence record',
+    1,
+    count(items_for_dimension($exact_duplicate_evidence, 'ticket_template'))
+);
+T::same(
+    'exact duplicate event_link observations collapse to one evidence record',
+    1,
+    count(items_for_dimension($exact_duplicate_evidence, 'event_link'))
+);
+T::same(
+    'exact duplicate page still emits one closed parent/event set',
+    10,
+    count($exact_duplicate_evidence)
+);
+
+// Invalidation vocabulary still includes _ticket_template even though the
+// generic pm aggregation pivot excludes it.
+$version_before_template = (int) get_option('eventsales_tickera_catalog_feed_cache_version', 1);
+Feed::record_meta_change(99, 109740, '_ticket_template');
+T::ok(
+    '_ticket_template still participates in catalogue invalidation',
+    (int) get_option('eventsales_tickera_catalog_feed_cache_version', 1) > $version_before_template
+);
 
 // ---------------------------------------------------------------------------
 if (T::$failures !== []) {
