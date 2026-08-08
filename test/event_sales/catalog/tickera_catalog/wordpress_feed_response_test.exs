@@ -202,6 +202,12 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponseTest do
                |> Map.put("events", event_rows(101))
                |> WordPressFeedResponse.parse_page()
 
+      assert {:ok, _} =
+               valid_v3_page()
+               |> Map.put("per_page", 45)
+               |> Map.put("events", event_rows(45))
+               |> WordPressFeedResponse.parse_page()
+
       assert {:error, :invalid_feed_response} =
                valid_v3_page()
                |> Map.put("per_page", 45)
@@ -227,8 +233,36 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponseTest do
 
       assert {:error, :invalid_feed_response} =
                valid_v3_page()
+               |> Map.put("events", [%{"tickera_event_id" => -1}])
+               |> WordPressFeedResponse.parse_page()
+
+      assert {:error, :invalid_feed_response} =
+               valid_v3_page()
                |> Map.put("events", [%{"tickera_event_id" => "1"}])
                |> WordPressFeedResponse.parse_page()
+
+      assert {:error, :invalid_feed_response} =
+               valid_v3_page()
+               |> Map.put("events", [%{"tickera_event_id" => 1.5}])
+               |> WordPressFeedResponse.parse_page()
+
+      assert {:error, :invalid_feed_response} =
+               valid_v3_page()
+               |> Map.put("events", [%{"tickera_event_id" => nil}])
+               |> WordPressFeedResponse.parse_page()
+    end
+
+    test "WordPressFeedClient source still defaults max_pages to 50" do
+      source =
+        File.read!(
+          Path.expand(
+            "../../../../lib/event_sales/catalog/tickera_catalog/wordpress_feed_client.ex",
+            __DIR__
+          )
+        )
+
+      assert source =~ ~r/@default_max_pages\s+50\b/
+      refute source =~ ~r/@default_max_pages\s+[5-9]\d{2,}\b/
     end
 
     test "aggregates disjoint native event pages in first-occurrence order" do
