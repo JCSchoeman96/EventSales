@@ -209,7 +209,29 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponseTest do
                |> WordPressFeedResponse.parse_page()
     end
 
-    test "aggregates bounded native event pages with deterministic first-occurrence dedup" do
+    test "requires positive integer tickera_event_id on native events" do
+      assert {:ok, _} =
+               valid_v3_page()
+               |> Map.put("events", [%{"tickera_event_id" => 1}])
+               |> WordPressFeedResponse.parse_page()
+
+      assert {:error, :invalid_feed_response} =
+               valid_v3_page()
+               |> Map.put("events", [%{"event_title" => "Missing id"}])
+               |> WordPressFeedResponse.parse_page()
+
+      assert {:error, :invalid_feed_response} =
+               valid_v3_page()
+               |> Map.put("events", [%{"tickera_event_id" => 0}])
+               |> WordPressFeedResponse.parse_page()
+
+      assert {:error, :invalid_feed_response} =
+               valid_v3_page()
+               |> Map.put("events", [%{"tickera_event_id" => "1"}])
+               |> WordPressFeedResponse.parse_page()
+    end
+
+    test "aggregates disjoint native event pages in first-occurrence order" do
       {:ok, first} =
         valid_v3_page()
         |> Map.put("has_more", true)
@@ -220,13 +242,82 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponseTest do
         valid_v3_page()
         |> Map.put("page", 2)
         |> Map.put("has_more", false)
-        |> Map.put("events", [%{"tickera_event_id" => 2}, %{"tickera_event_id" => 3}])
+        |> Map.put("events", [%{"tickera_event_id" => 3}])
         |> Map.put("catalog_rows", [])
         |> Map.put("evidence", [])
         |> WordPressFeedResponse.parse_page()
 
       assert {:ok, aggregate} = WordPressFeedResponse.aggregate_pages([first, second])
       assert Enum.map(aggregate.events, & &1["tickera_event_id"]) == [1, 2, 3]
+    end
+
+    test "collapses exact duplicate native event maps across pages" do
+      event_two = %{"tickera_event_id" => 2, "event_location" => "Pretoria"}
+
+      {:ok, first} =
+        valid_v3_page()
+        |> Map.put("has_more", true)
+        |> Map.put("events", [%{"tickera_event_id" => 1}, event_two])
+        |> WordPressFeedResponse.parse_page()
+
+      {:ok, second} =
+        valid_v3_page()
+        |> Map.put("page", 2)
+        |> Map.put("has_more", false)
+        |> Map.put("events", [event_two, %{"tickera_event_id" => 3}])
+        |> Map.put("catalog_rows", [])
+        |> Map.put("evidence", [])
+        |> WordPressFeedResponse.parse_page()
+
+      assert {:ok, aggregate} = WordPressFeedResponse.aggregate_pages([first, second])
+      assert Enum.map(aggregate.events, & &1["tickera_event_id"]) == [1, 2, 3]
+      assert Enum.at(aggregate.events, 1) == event_two
+    end
+
+    test "rejects conflicting native event maps for the same tickera_event_id" do
+      {:ok, first} =
+        valid_v3_page()
+        |> Map.put("has_more", true)
+        |> Map.put("events", [
+          %{
+            "tickera_event_id" => 2,
+            "event_title" => "Festival",
+            "event_slug" => "festival",
+            "event_status" => "publish",
+            "event_location" => "Pretoria",
+            "event_start_at" => "2026-08-01T16:00:00Z",
+            "event_end_at" => "2026-08-01T18:00:00Z",
+            "booking_fee_type" => "fixed",
+            "booking_fee_value" => "25.00",
+            "linked_ticket_products" => 3
+          }
+        ])
+        |> WordPressFeedResponse.parse_page()
+
+      {:ok, second} =
+        valid_v3_page()
+        |> Map.put("page", 2)
+        |> Map.put("has_more", false)
+        |> Map.put("events", [
+          %{
+            "tickera_event_id" => 2,
+            "event_title" => "Festival",
+            "event_slug" => "festival",
+            "event_status" => "publish",
+            "event_location" => "Johannesburg",
+            "event_start_at" => "2026-08-01T16:00:00Z",
+            "event_end_at" => "2026-08-01T18:00:00Z",
+            "booking_fee_type" => "fixed",
+            "booking_fee_value" => "25.00",
+            "linked_ticket_products" => 3
+          }
+        ])
+        |> Map.put("catalog_rows", [])
+        |> Map.put("evidence", [])
+        |> WordPressFeedResponse.parse_page()
+
+      assert {:error, :invalid_feed_response} =
+               WordPressFeedResponse.aggregate_pages([first, second])
     end
 
     test "rejects invalid evidence and datetime fields" do
