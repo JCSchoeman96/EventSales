@@ -68,6 +68,7 @@ defmodule EventSales.Catalog.TickeraCatalog.SnapshotCanonicalizer do
   @v3_schema_version "tickera_catalog_plan.v3"
   @v3_source_schema_version "2026-08-07.v3"
   @v3_canonical_contract_version "source_risk.v3"
+  @v3_producer_version "2026-08-07.1"
 
   @v3_top_level_keys ~w(
     snapshot_schema_version source_system_id origin source event_actions
@@ -192,8 +193,8 @@ defmodule EventSales.Catalog.TickeraCatalog.SnapshotCanonicalizer do
       exact_keys?(source, @v3_source_keys),
       source["schema_version"] == @v3_source_schema_version,
       source["canonical_contract_version"] == @v3_canonical_contract_version,
+      source["producer_version"] == @v3_producer_version,
       source["evidence_origin"] == "native",
-      bounded?(source["producer_version"], 128, false),
       bounded?(source["source_system_id"], 160, false),
       bounded?(source["discovery_snapshot_id"], 128, false),
       datetime_or_nil?(source["source_snapshot_at"])

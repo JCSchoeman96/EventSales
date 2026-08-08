@@ -160,11 +160,21 @@ defmodule EventSales.Catalog.TickeraCatalog.SnapshotCanonicalizerTest do
           {"schema_version", "2026-07-22.v2"},
           {"canonical_contract_version", "compat.v2_to_source_risk_v3.v1"},
           {"evidence_origin", "compatibility_derived"},
-          {"producer_version", ""}
+          {"producer_version", ""},
+          {"producer_version", "2026-08-07.2"}
         ] do
       assert {:error, :invalid_snapshot_schema} =
                valid_v3_snapshot() |> put_in(["source", key], value) |> canonicalize()
     end
+  end
+
+  test "v3 requires exact producer_version 2026-08-07.1" do
+    assert {:ok, _bytes, _hash} = canonicalize(valid_v3_snapshot())
+
+    assert {:error, :invalid_snapshot_schema} =
+             valid_v3_snapshot()
+             |> put_in(["source", "producer_version"], "2026-08-07.2")
+             |> canonicalize()
   end
 
   test "v3 and v2 finding allowlists stay separate and closed" do

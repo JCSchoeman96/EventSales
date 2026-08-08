@@ -24,6 +24,7 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
 
   @native_source_schema_version "2026-08-07.v3"
   @native_canonical_contract_version "source_risk.v3"
+  @native_producer_version "2026-08-07.1"
   @native_severities [:info, :warning, :blocking]
 
   @spec plan(Ecto.UUID.t(), DiscoveryResult.t(), keyword()) :: {:ok, Plan.t()} | {:error, term()}
@@ -77,6 +78,7 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
          normalization_mode: :native_v3_review,
          schema_version: @native_source_schema_version,
          canonical_contract_version: @native_canonical_contract_version,
+         producer_version: @native_producer_version,
          evidence_origin: :native
        }),
        do: :ok

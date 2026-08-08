@@ -222,12 +222,24 @@ defmodule EventSales.Catalog.TickeraCatalog.PlannerApplierTest do
     for override <- [
           %{schema_version: "2026-07-22.v2"},
           %{canonical_contract_version: "compat.v2_to_source_risk_v3.v1"},
+          %{producer_version: "2026-08-07.2"},
           %{evidence_origin: nil}
         ] do
       discovery = struct!(native_v3_discovery(), override)
 
       assert {:error, :inconsistent_native_v3_discovery} = Planner.plan(source.id, discovery)
     end
+  end
+
+  test "native v3 discovery requires exact producer_version 2026-08-07.1", %{source: source} do
+    assert {:ok, plan} = Planner.plan(source.id, native_v3_discovery())
+    assert plan.plan_snapshot["source"]["producer_version"] == "2026-08-07.1"
+
+    assert {:error, :inconsistent_native_v3_discovery} =
+             Planner.plan(
+               source.id,
+               struct!(native_v3_discovery(), producer_version: "2026-08-07.2")
+             )
   end
 
   test "applier denies a plan.v3 snapshot before any catalogue write", %{source: source} do
