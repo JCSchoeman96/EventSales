@@ -940,7 +940,10 @@ final class EventSales_Tickera_Catalog_Feed
             throw new RuntimeException('catalog_rows_page_limit_exceeded');
         }
 
-        $events = $this->event_rows($params);
+        $events_page = $this->event_rows($params);
+        $events = $events_page['rows'];
+        $catalogue_has_more = count($catalog['rows']) > $per_page;
+        $event_has_more = (bool) $events_page['has_more'];
         $evidence = self::build_native_evidence($observations, $discovery_snapshot_id);
         $envelope = self::native_envelope([
             'source_system_id' => $source_system_id,
@@ -949,7 +952,7 @@ final class EventSales_Tickera_Catalog_Feed
             'generated_at' => self::utc_now(),
             'page' => (int) $params['page'],
             'per_page' => $per_page,
-            'has_more' => count($catalog['rows']) > $per_page,
+            'has_more' => self::combined_page_has_more($catalogue_has_more, $event_has_more),
             'filters' => $filters,
             'events' => $events,
             'catalog_rows' => $catalog_rows,
@@ -1245,8 +1248,21 @@ final class EventSales_Tickera_Catalog_Feed
     }
 
     /**
+     * Shared page axis: discovery continues while either stream has more rows.
+     */
+    private static function combined_page_has_more(bool $catalogue_has_more, bool $event_has_more): bool
+    {
+        return $catalogue_has_more || $event_has_more;
+    }
+
+    /**
+     * Bounded native event page. Uses the same page/per_page axis as catalogue
+     * rows: fetch per_page + 1, emit at most per_page, and report has_more from
+     * the sentinel. Published events with zero eligible ticket products remain
+     * discoverable — events are never derived from the current catalogue page.
+     *
      * @param array<string, mixed> $params
-     * @return array<int, array<string, mixed>>
+     * @return array{rows: array<int, array<string, mixed>>, has_more: bool}
      */
     private function event_rows(array $params): array
     {
@@ -1254,6 +1270,7 @@ final class EventSales_Tickera_Catalog_Feed
 
         $posts = $wpdb->posts;
         $postmeta = $wpdb->postmeta;
+        $per_page = (int) $params['per_page'];
         $targeted = $params['product_id'] !== null || $params['variation_id'] !== null || $params['event_id'] !== null || $params['include_private'];
         $where = ["ev.post_type = 'tc_events'"];
         $values = self::ALLOWED_EVENT_META_KEYS;
@@ -1287,6 +1304,9 @@ final class EventSales_Tickera_Catalog_Feed
         $linked_product_count_condition = $targeted
             ? "is_ticket.meta_value = 'yes'"
             : "is_ticket.meta_value = 'yes' AND p.post_status = 'publish'";
+
+        $limit = $per_page + 1;
+        $offset = ((int) $params['page'] - 1) * $per_page;
 
         $sql = "
             SELECT
@@ -1324,16 +1344,23 @@ final class EventSales_Tickera_Catalog_Feed
                 ev.post_name,
                 ev.post_status,
                 ev.post_modified_gmt
-            ORDER BY ev.post_title ASC';
+            ORDER BY ev.post_title ASC, ev.ID ASC
+            LIMIT %d OFFSET %d';
 
-        $prepared = empty($values) ? $sql : $wpdb->prepare($sql, $values);
+        $values[] = $limit;
+        $values[] = $offset;
+
+        $prepared = $wpdb->prepare($sql, $values);
         $rows = $wpdb->get_results($prepared, ARRAY_A);
 
         if (!is_array($rows)) {
-            return [];
+            return ['rows' => [], 'has_more' => false];
         }
 
-        return array_map(function (array $row): array {
+        $has_more = count($rows) > $per_page;
+        $rows = array_slice($rows, 0, $per_page);
+
+        $mapped = array_map(function (array $row): array {
             $event_status = $this->status_classification($row['event_status'] ?? null);
 
             return [
@@ -1353,6 +1380,8 @@ final class EventSales_Tickera_Catalog_Feed
                 'linked_ticket_products' => $this->nullable_int($row['linked_ticket_products'] ?? 0) ?? 0,
             ];
         }, $rows);
+
+        return ['rows' => $mapped, 'has_more' => $has_more];
     }
 
     /**

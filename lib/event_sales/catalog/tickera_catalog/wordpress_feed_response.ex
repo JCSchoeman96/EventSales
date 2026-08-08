@@ -105,8 +105,9 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponse do
   @spec aggregate_pages([t()]) :: {:ok, t()} | {:error, :invalid_feed_response}
   def aggregate_pages([%__MODULE__{schema_version: @native_schema_version} | _] = pages) do
     with :ok <- require_all_native(pages),
-         {:ok, :complete} <- DiscoveryIntegrity.validate_discovery_pages(pages) do
-      {:ok, aggregate_native_pages(pages)}
+         {:ok, :complete} <- DiscoveryIntegrity.validate_discovery_pages(pages),
+         {:ok, aggregate} <- aggregate_native_pages(pages) do
+      {:ok, aggregate}
     else
       _ -> {:error, :invalid_feed_response}
     end
@@ -187,7 +188,9 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponse do
          evidence_raw when is_list(evidence_raw) <- decoded["evidence"],
          true <- length(rows) <= @native_max_catalog_rows_per_page,
          true <- length(evidence_raw) <= @native_max_evidence_per_page,
+         true <- length(events) <= per_page,
          true <- Enum.all?(events, &is_map/1),
+         true <- Enum.all?(events, &valid_native_event_identity?/1),
          true <- Enum.all?(rows, &is_map/1),
          {:ok, evidence} <- validate_evidence_list(evidence_raw) do
       {:ok,
@@ -281,26 +284,61 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponse do
     first = hd(pages)
     last = List.last(pages)
 
-    evidence = Enum.flat_map(pages, & &1.evidence)
-
-    %__MODULE__{
-      schema_version: first.schema_version,
-      auto_apply_proof_complete?: false,
-      source_snapshot_at: first.source_snapshot_at,
-      page: last.page,
-      per_page: last.per_page,
-      has_more: last.has_more,
-      events: Enum.flat_map(pages, & &1.events),
-      catalog_rows: Enum.flat_map(pages, & &1.catalog_rows),
-      canonical_contract_version: first.canonical_contract_version,
-      producer_version: first.producer_version,
-      source_system_id: first.source_system_id,
-      discovery_snapshot_id: first.discovery_snapshot_id,
-      generated_at: last.generated_at,
-      filters: first.filters,
-      evidence: evidence
-    }
+    with {:ok, events} <- aggregate_native_events(Enum.flat_map(pages, & &1.events)) do
+      {:ok,
+       %__MODULE__{
+         schema_version: first.schema_version,
+         auto_apply_proof_complete?: false,
+         source_snapshot_at: first.source_snapshot_at,
+         page: last.page,
+         per_page: last.per_page,
+         has_more: last.has_more,
+         events: events,
+         catalog_rows: Enum.flat_map(pages, & &1.catalog_rows),
+         canonical_contract_version: first.canonical_contract_version,
+         producer_version: first.producer_version,
+         source_system_id: first.source_system_id,
+         discovery_snapshot_id: first.discovery_snapshot_id,
+         generated_at: last.generated_at,
+         filters: first.filters,
+         evidence: Enum.flat_map(pages, & &1.evidence)
+       }}
+    end
   end
+
+  # Transport-only integrity for native pages:
+  # exact complete-map duplicates collapse to the first occurrence;
+  # any structural map difference for the same tickera_event_id fails closed.
+  defp aggregate_native_events(events) do
+    Enum.reduce_while(events, {:ok, {[], %{}}}, fn event, {:ok, {acc, by_id}} ->
+      case event do
+        %{"tickera_event_id" => id} when is_integer(id) and id > 0 ->
+          case Map.fetch(by_id, id) do
+            :error ->
+              {:cont, {:ok, {[event | acc], Map.put(by_id, id, event)}}}
+
+            {:ok, ^event} ->
+              {:cont, {:ok, {acc, by_id}}}
+
+            {:ok, _other} ->
+              {:halt, {:error, :conflicting_event}}
+          end
+
+        _other ->
+          {:halt, {:error, :conflicting_event}}
+      end
+    end)
+    |> case do
+      {:ok, {acc, _by_id}} -> {:ok, Enum.reverse(acc)}
+      {:error, :conflicting_event} = error -> error
+    end
+  end
+
+  defp valid_native_event_identity?(%{"tickera_event_id" => id})
+       when is_integer(id) and id > 0,
+       do: true
+
+  defp valid_native_event_identity?(_event), do: false
 
   defp require_all_native(pages) do
     if Enum.all?(pages, &native?/1), do: :ok, else: {:error, :mixed_schema}
@@ -458,10 +496,10 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponse do
         if MapSet.member?(seen, key) do
           {acc, seen}
         else
-          {acc ++ [event], MapSet.put(seen, key)}
+          {[event | acc], MapSet.put(seen, key)}
         end
       end)
 
-    deduped
+    Enum.reverse(deduped)
   end
 end
