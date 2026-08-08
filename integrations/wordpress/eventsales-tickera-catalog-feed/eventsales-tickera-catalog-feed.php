@@ -1008,7 +1008,8 @@ final class EventSales_Tickera_Catalog_Feed
      *     event_join: string,
      *     event_join_predicate: string,
      *     public_event_where: string,
-     *     uses_inner_event_joins: bool
+     *     uses_inner_event_joins: bool,
+     *     order_by: string
      * }
      */
     public static function native_catalog_relationship_sql(string $posts = 'wp_posts', string $postmeta = 'wp_postmeta'): array
@@ -1023,6 +1024,9 @@ final class EventSales_Tickera_Catalog_Feed
             'event_join_predicate' => $event_join_predicate,
             'public_event_where' => "(ev.ID IS NULL OR ev.post_status = 'publish')",
             'uses_inner_event_joins' => false,
+            // Total order after LEFT JOIN relationships can repeat product/variation
+            // across multiple events — finish with ev.ID for deterministic pages.
+            'order_by' => 'ORDER BY ev.post_title ASC, p.post_title ASC, p.ID ASC, variation.ID ASC, ev.ID ASC',
         ];
     }
 
@@ -1132,7 +1136,7 @@ final class EventSales_Tickera_Catalog_Feed
                 variation.post_title,
                 variation.post_status,
                 variation.post_modified_gmt
-            ORDER BY ev.post_title ASC, p.post_title ASC, p.ID ASC, variation.ID ASC
+            ' . $relationship['order_by'] . '
             LIMIT %d OFFSET %d';
 
         $values[] = $limit;
@@ -1179,11 +1183,34 @@ final class EventSales_Tickera_Catalog_Feed
             'event_status' => $normalized_row['event_status'],
             'product_status' => $normalized_row['product_status'],
             'variation_status' => $normalized_row['variation_status'],
+            // Structural/legacy normalized template id (empty → null) remains for
+            // catalog_rows diagnostics. Native evidence uses the raw SQL value.
             'ticket_template_id' => $normalized_row['ticket_template_id'],
+            'ticket_template_raw' => self::preserve_raw_meta_value($raw_row['ticket_template_id'] ?? null),
             'product_type' => $normalized_row['product_type'],
             'is_subscription' => $normalized_row['is_subscription'],
-            'event_reference_raw' => $this->nullable_string($raw_row['event_reference_raw'] ?? null),
+            // Preserve exact SQL meta observation: null = meta absent, "" = empty meta.
+            'event_reference_raw' => self::preserve_raw_meta_value($raw_row['event_reference_raw'] ?? null),
         ];
+    }
+
+    /**
+     * Preserve authority-bearing raw meta values without collapsing empty strings.
+     *
+     * @return string|null null when the SQL observation is NULL (meta absent);
+     *                     otherwise the exact string including "" / whitespace.
+     */
+    public static function preserve_raw_meta_value($value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if (is_bool($value) || is_array($value) || is_object($value)) {
+            return null;
+        }
+
+        return (string) $value;
     }
 
     /**
@@ -1566,7 +1593,13 @@ final class EventSales_Tickera_Catalog_Feed
             );
         }
 
-        $items[] = self::ticket_template_evidence($product_id, $observation['ticket_template_id'] ?? null, $discovery_snapshot_id);
+        $items[] = self::ticket_template_evidence(
+            $product_id,
+            array_key_exists('ticket_template_raw', $observation)
+                ? $observation['ticket_template_raw']
+                : ($observation['ticket_template_id'] ?? null),
+            $discovery_snapshot_id
+        );
         $items[] = self::event_link_evidence($product_id, $event_id, $observation['event_reference_raw'] ?? null, $discovery_snapshot_id);
         $items[] = self::subscription_evidence($product_id, !empty($observation['is_subscription']), $discovery_snapshot_id);
         $items[] = self::product_type_evidence($product_id, $observation['product_type'] ?? null, $discovery_snapshot_id);
@@ -1608,17 +1641,29 @@ final class EventSales_Tickera_Catalog_Feed
         $source_key = self::PRODUCER_SOURCE_KEYS['ticket_template'];
         $target = ['woo_product_id' => $product_id];
         $identity = ['woo_product_id' => $product_id];
-        $template = self::nullable_trimmed($template_id);
 
-        if ($template === null) {
+        // SQL NULL means the meta row is genuinely absent.
+        if ($template_id === null) {
             return self::evidence_item('ticket_template', 'parent_product', $target, 'absent', null, $source_key, 'exhaustive', $identity, null, $discovery_snapshot_id);
         }
 
-        if (strlen($template) > self::MAX_EVIDENCE_VALUE_BYTES) {
-            return self::evidence_item('ticket_template', 'parent_product', $target, 'invalid', null, $source_key, 'exhaustive', $identity, $template, $discovery_snapshot_id);
+        // Meta row exists. Preserve the exact raw string — including "".
+        $raw = self::preserve_raw_meta_value($template_id);
+        if ($raw === null) {
+            return self::evidence_item('ticket_template', 'parent_product', $target, 'producer_error', null, $source_key, 'unknown', $identity, null, $discovery_snapshot_id);
         }
 
-        return self::evidence_item('ticket_template', 'parent_product', $target, 'present', $template, $source_key, 'exhaustive', $identity, null, $discovery_snapshot_id);
+        if (trim($raw) === '') {
+            // Empty / whitespace-only meta is invalid, never absent.
+            return self::evidence_item('ticket_template', 'parent_product', $target, 'invalid', null, $source_key, 'exhaustive', $identity, $raw, $discovery_snapshot_id);
+        }
+
+        if (strlen($raw) > self::MAX_EVIDENCE_VALUE_BYTES) {
+            // Oversized raw fails closed inside evidence_item.
+            return self::evidence_item('ticket_template', 'parent_product', $target, 'invalid', null, $source_key, 'exhaustive', $identity, $raw, $discovery_snapshot_id);
+        }
+
+        return self::evidence_item('ticket_template', 'parent_product', $target, 'present', trim($raw), $source_key, 'exhaustive', $identity, null, $discovery_snapshot_id);
     }
 
     /**
@@ -1628,15 +1673,36 @@ final class EventSales_Tickera_Catalog_Feed
     {
         $source_key = self::PRODUCER_SOURCE_KEYS['event_link'];
         $target = ['woo_product_id' => $product_id];
-        $reference = self::nullable_trimmed($event_reference_raw);
-        $parsed_reference = self::positive_int_or_null($reference);
         $identity = ['woo_product_id' => $product_id];
+
+        // SQL NULL means the relationship meta row is genuinely absent.
+        if ($event_reference_raw === null && $event_id === null) {
+            return self::evidence_item('event_link', 'event_product_relationship', $target, 'absent', null, $source_key, 'exhaustive', $identity, null, $discovery_snapshot_id);
+        }
+
+        if ($event_reference_raw === null && $event_id !== null) {
+            // Impossible observation: resolved event without a raw reference.
+            return self::evidence_item('event_link', 'event_product_relationship', $target, 'producer_error', null, $source_key, 'unknown', $identity, null, $discovery_snapshot_id);
+        }
+
+        // Meta row exists. Preserve exact raw including "" / whitespace.
+        $raw = self::preserve_raw_meta_value($event_reference_raw);
+        if ($raw === null) {
+            return self::evidence_item('event_link', 'event_product_relationship', $target, 'producer_error', null, $source_key, 'unknown', $identity, null, $discovery_snapshot_id);
+        }
+
+        $trimmed = trim($raw);
+        if ($trimmed === '') {
+            // Empty / whitespace-only relationship reference is invalid, never absent.
+            return self::evidence_item('event_link', 'event_product_relationship', $target, 'invalid', null, $source_key, 'exhaustive', $identity, $raw, $discovery_snapshot_id);
+        }
+
+        $parsed_reference = self::positive_int_or_null($trimmed);
 
         // Positive present requires a valid raw positive-integer reference that
         // resolves to the same tc_events id. Never trust SQL CAST alone.
         if (
-            $reference !== null
-            && $parsed_reference !== null
+            $parsed_reference !== null
             && $event_id !== null
             && $parsed_reference === $event_id
         ) {
@@ -1654,18 +1720,8 @@ final class EventSales_Tickera_Catalog_Feed
             );
         }
 
-        if ($reference === null && $event_id === null) {
-            // Absent is only claimed after an exhaustive no-reference observation.
-            return self::evidence_item('event_link', 'event_product_relationship', $target, 'absent', null, $source_key, 'exhaustive', $identity, null, $discovery_snapshot_id);
-        }
-
-        if ($reference === null && $event_id !== null) {
-            // Impossible observation: resolved event without a raw reference.
-            return self::evidence_item('event_link', 'event_product_relationship', $target, 'producer_error', null, $source_key, 'unknown', $identity, null, $discovery_snapshot_id);
-        }
-
-        // Malformed, non-positive, or unresolved raw relationship references.
-        return self::evidence_item('event_link', 'event_product_relationship', $target, 'invalid', null, $source_key, 'exhaustive', $identity, $reference, $discovery_snapshot_id);
+        // Malformed, non-positive, unresolved, or mismatched raw references.
+        return self::evidence_item('event_link', 'event_product_relationship', $target, 'invalid', null, $source_key, 'exhaustive', $identity, $raw, $discovery_snapshot_id);
     }
 
     /**

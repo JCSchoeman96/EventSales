@@ -559,6 +559,7 @@ T::same('relationship seam exposes a closed key set', [
     'event_join',
     'event_join_predicate',
     'event_meta_join',
+    'order_by',
     'public_event_where',
     'uses_inner_event_joins',
 ], (static function (array $rel): array {
@@ -588,6 +589,15 @@ T::ok(
 );
 T::ok('event join compares the casted id', strpos($rel['event_join_predicate'], 'ev.ID = CAST(event_meta.meta_value AS UNSIGNED)') !== false);
 
+// Multi-event LEFT JOINs can repeat the same product/variation; finish the
+// total order with an event-id tiebreaker so offset pages stay deterministic.
+T::same(
+    'catalogue ORDER BY is a total order ending in ev.ID',
+    'ORDER BY ev.post_title ASC, p.post_title ASC, p.ID ASC, variation.ID ASC, ev.ID ASC',
+    $rel['order_by']
+);
+T::ok('ORDER BY includes the event-id tiebreaker', strpos($rel['order_by'], 'ev.ID ASC') !== false);
+
 $prefixed = Feed::native_catalog_relationship_sql('es_posts', 'es_postmeta');
 T::ok('relationship joins honour the postmeta table', strpos($prefixed['event_meta_join'], 'es_postmeta ') !== false);
 T::ok('relationship joins honour the posts table', strpos($prefixed['event_join'], 'es_posts ') !== false);
@@ -600,6 +610,14 @@ T::ok('catalog rows resolve events through the seam', strpos($plugin_source, "\$
 T::ok(
     'catalog rows filter public events through the seam',
     strpos($plugin_source, "\$where[] = \$relationship['public_event_where'];") !== false
+);
+T::ok(
+    'catalog rows order through the seam',
+    strpos($plugin_source, "\$relationship['order_by']") !== false
+);
+T::ok(
+    'plugin source still contains the event-id tiebreaker',
+    strpos($plugin_source, 'ev.ID ASC') !== false
 );
 
 // ---------------------------------------------------------------------------
@@ -714,6 +732,26 @@ $no_template = find_item(Feed::build_native_evidence_for_row(observation(['ticke
 T::same('missing template is absent', 'absent', $no_template['state']);
 T::ok('absent template carries no value', !array_key_exists('value', $no_template));
 T::same('absent template claims exhaustive no-ref proof', 'exhaustive', $no_template['completeness']);
+T::ok('absent template keeps no raw code', !array_key_exists('raw_producer_code', $no_template['provenance']));
+
+$empty_template = find_item(Feed::build_native_evidence_for_row(observation(['ticket_template_id' => '']), SNAPSHOT_ID), 'ticket_template', 'parent_product');
+T::same('empty-string template meta is invalid', 'invalid', $empty_template['state']);
+T::ok('empty template carries no canonical value', !array_key_exists('value', $empty_template));
+T::same('empty template preserves raw empty provenance', '', $empty_template['provenance']['raw_producer_code']);
+T::ok('empty template is never absent', $empty_template['state'] !== 'absent');
+
+$whitespace_template = find_item(Feed::build_native_evidence_for_row(observation(['ticket_template_id' => " \t "]), SNAPSHOT_ID), 'ticket_template', 'parent_product');
+T::same('whitespace-only template meta is invalid', 'invalid', $whitespace_template['state']);
+T::same('whitespace template preserves exact raw provenance', " \t ", $whitespace_template['provenance']['raw_producer_code']);
+T::ok('whitespace template is never absent', $whitespace_template['state'] !== 'absent');
+
+$raw_template_path = find_item(
+    Feed::build_native_evidence_for_row(observation(['ticket_template_raw' => '', 'ticket_template_id' => null]), SNAPSHOT_ID),
+    'ticket_template',
+    'parent_product'
+);
+T::same('ticket_template_raw empty wins over normalized null', 'invalid', $raw_template_path['state']);
+T::same('ticket_template_raw empty preserves ""', '', $raw_template_path['provenance']['raw_producer_code']);
 
 // An oversized template can neither be emitted as a value nor silently
 // dropped from provenance, so the page fails closed instead.
@@ -858,8 +896,17 @@ $negative_reference = event_link_for('-1', null);
 T::same('a negative reference is invalid', 'invalid', $negative_reference['state']);
 T::same('negative reference keeps its raw bytes', '-1', $negative_reference['provenance']['raw_producer_code']);
 
-// A whitespace-only reference trims to nothing, so it is an absent observation.
-T::same('a whitespace-only reference is absent', 'absent', event_link_for(' ', null)['state']);
+// A whitespace-only reference is an observed empty meta value → invalid, never absent.
+$whitespace_only = event_link_for(' ', null);
+T::same('a whitespace-only reference is invalid', 'invalid', $whitespace_only['state']);
+T::same('whitespace-only raw provenance is preserved exactly', ' ', $whitespace_only['provenance']['raw_producer_code']);
+T::ok('whitespace-only reference is never absent', $whitespace_only['state'] !== 'absent');
+
+$empty_event_meta = event_link_for('', null);
+T::same('empty-string event meta is invalid', 'invalid', $empty_event_meta['state']);
+T::same('empty event meta preserves raw empty provenance', '', $empty_event_meta['provenance']['raw_producer_code']);
+T::ok('empty event meta is never absent', $empty_event_meta['state'] !== 'absent');
+T::ok('empty raw provenance key is present', array_key_exists('raw_producer_code', $empty_event_meta['provenance']));
 
 // ---------------------------------------------------------------------------
 T::section('product type matrix');

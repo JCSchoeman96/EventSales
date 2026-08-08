@@ -322,17 +322,25 @@ lifecycle        event | parent_product | variation
 
 ticket_template  parent_product
                  present with the template id, up to 64 bytes
-                 absent after an exhaustive no-reference observation
-                 a stored value over 64 bytes fails the page closed rather than
-                 emitting invalid, because the value bound and the raw bound are
-                 both 64 bytes
+                 absent only when the _ticket_template meta row is genuinely
+                 missing (SQL NULL), never when an empty or whitespace value
+                 was observed
+                 invalid when the meta row exists but the raw value is empty
+                 or whitespace-only; preserve the exact raw_producer_code
+                 including ""
+                 a stored value over 64 bytes or invalid UTF-8 fails the page
+                 closed rather than emitting invalid, because the value bound
+                 and the raw bound are both 64 bytes of valid UTF-8
 
 event_link       event_product_relationship
                  present only when the raw _event_name is a positive integer AND
                  parses to exactly the resolved tickera_event_id
-                 invalid for a malformed, non-positive, unresolved, or
-                 disagreeing reference, raw code in provenance
-                 absent only after an exhaustive no-reference observation
+                 invalid for empty, whitespace-only, malformed, non-positive,
+                 unresolved, or disagreeing references, raw code in provenance
+                 (including raw_producer_code="")
+                 absent only when _event_name is genuinely missing (SQL NULL)
+                 and no event resolved; an existing empty meta row is never
+                 absent
                  producer_error when an event resolved with no raw reference
 
 subscription     parent_product
@@ -358,12 +366,30 @@ always carried in `raw_producer_code`. `unsupported` means the producer could no
 evaluate the dimension at all, so there is nothing raw to carry. An undeclared
 `product_type` such as `variable` is therefore `invalid`, never `unsupported`.
 
+### ticket_template absence matrix
+
+```text
+SQL / raw observation              state
+meta row absent (NULL)             absent
+meta row exists, value ""          invalid, raw_producer_code=""
+meta row exists, whitespace only   invalid, exact raw preserved
+meta row exists, valid <=64 bytes  present, value=<trimmed id>
+meta row exists, value >64 bytes   page fail closed
+meta row exists, invalid UTF-8     page fail closed
+```
+
+Empty string is never classified as `absent`. Native evidence reads the raw SQL
+`_ticket_template` observation separately from the legacy normalized structural
+`ticket_template_id` (which still collapses empty → null for diagnostics only).
+
 ### event_link resolution matrix
 
 ```text
 raw           resolved event_id   state
 55501         55501               present, value 55501
 "  55501  "   55501               present, value 55501 (trimmed)
+""            nil                 invalid, raw_producer_code=""
+" "           nil                 invalid, exact whitespace preserved
 55501         nil                 invalid, raw_producer_code 55501
 55501         55502               invalid, raw_producer_code 55501
 55501abc      55501               invalid, raw_producer_code 55501abc
@@ -372,6 +398,9 @@ abc           nil                 invalid, raw_producer_code abc
 nil           nil                 absent
 nil           55501               producer_error
 ```
+
+Absence means the `_event_name` meta row does not exist. An existing empty or
+whitespace meta value is `invalid`, never `absent`.
 
 The `55501abc` row is the reason the producer never trusts the SQL join alone:
 MySQL `CAST('55501abc' AS UNSIGNED)` yields `55501`, which would fabricate a
@@ -461,6 +490,10 @@ The REGEXP guard runs before the CAST so a malformed reference cannot resolve.
 Public mode filters on (ev.ID IS NULL OR ev.post_status = 'publish'), which keeps
   products whose event is missing or unresolved while still excluding products
   attached to a non-published event.
+Catalogue ORDER BY is a total order:
+  ev.post_title ASC, p.post_title ASC, p.ID ASC, variation.ID ASC, ev.ID ASC
+  The final ev.ID ASC tiebreaker keeps offset pages deterministic when the same
+  product/variation appears for multiple events under LEFT JOIN relationships.
 ```
 
 The consequence is that broken event links remain discoverable as `invalid` or
@@ -468,6 +501,10 @@ The consequence is that broken event links remain discoverable as `invalid` or
 whole product row from a public page, which reported a broken catalogue as a
 clean one. The separate `events` listing query is unaffected: `tc_events` is its
 base table, so public mode still restricts it to published events.
+
+An existing empty `_event_name` or `_ticket_template` meta row is observed as
+`invalid` with exact raw provenance (including `""`), never collapsed to
+`absent`. Absence requires SQL NULL — proof the meta row does not exist.
 
 ## Structural transport rows
 
