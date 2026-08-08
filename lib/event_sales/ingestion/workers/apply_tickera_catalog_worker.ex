@@ -52,7 +52,8 @@ defmodule EventSales.Ingestion.Workers.ApplyTickeraCatalogWorker do
       when reason in [
              :automatic_claim_rejected,
              :missing_auto_apply_decision,
-             :invalid_automatic_claim
+             :invalid_automatic_claim,
+             :unsupported_snapshot_version
            ] ->
         _result = TickeraCatalogAutoApply.record_apply_audit(decision_id, :claim_rejected)
         :discard
@@ -77,6 +78,7 @@ defmodule EventSales.Ingestion.Workers.ApplyTickeraCatalogWorker do
     else
       {:ok, nil} -> :discard
       {:error, :run_not_ready} -> discard_stale_run(run_id)
+      {:error, :unsupported_snapshot_version} -> :discard
       {:error, reason} -> fail_run(run_id, reason)
     end
   end

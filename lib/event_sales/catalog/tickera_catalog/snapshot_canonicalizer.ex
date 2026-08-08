@@ -1,7 +1,13 @@
 defmodule EventSales.Catalog.TickeraCatalog.SnapshotCanonicalizer do
   @moduledoc """
-  Closed deterministic byte and hash boundary for `tickera_catalog_plan.v2`.
+  Closed deterministic byte and hash boundary for `tickera_catalog_plan.v2` and
+  `tickera_catalog_plan.v3`.
+
+  Each snapshot version owns a separate closed schema. The v2 allowlists are never
+  widened for `source_risk.*` / `contract.*` semantics.
   """
+
+  alias EventSales.Catalog.TickeraCatalog.SourceRiskV3.ContractRegistry
 
   @top_level_keys ~w(
     snapshot_schema_version source_system_id origin event_actions
@@ -59,10 +65,72 @@ defmodule EventSales.Catalog.TickeraCatalog.SnapshotCanonicalizer do
   @mapping_proof_keys ~w(source_system_id woo_product_id woo_variation_id event_ref ticket_type_ref action no_existing_conflict no_movement)
   @product_key_keys ~w(woo_product_id woo_variation_id)
 
+  @v3_schema_version "tickera_catalog_plan.v3"
+  @v3_source_schema_version "2026-08-07.v3"
+  @v3_canonical_contract_version "source_risk.v3"
+
+  @v3_top_level_keys ~w(
+    snapshot_schema_version source_system_id origin source event_actions
+    ticket_type_actions product_mapping_actions findings
+    canonical_source_risk_facts canonical_source_risk_findings
+    historical_impact identity_membership_proof touched_identifiers
+  )
+  @v3_source_keys ~w(
+    schema_version canonical_contract_version producer_version source_system_id
+    discovery_snapshot_id source_snapshot_at evidence_origin
+  )
+  @v3_fact_keys ~w(
+    run_id dimension semantic_scope target authority_slot authority state
+    completeness origin value provenance
+  )
+  @v3_risk_finding_keys ~w(
+    qualified_finding_id severity disposition dimension_local_only implies_apply_eligible
+  )
+  @v3_target_keys ~w(tickera_event_id woo_product_id woo_variation_id ticket_template_id)
+
+  @v3_structural_finding_codes ~w(
+    duplicate_meta_collapsed variation_mapping_required ambiguous_variation_ticket_type_name
+    duplicate_ticket_type_name private_event_skipped draft_event_skipped
+    published_event_without_ticket_products existing_mapping_conflict existing_mapping_adopted
+    vwg_pretoria_preserved
+  )
+  @v3_qualified_finding_codes ~w(
+    source_risk.lifecycle_private source_risk.lifecycle_draft source_risk.lifecycle_trashed
+    source_risk.lifecycle_deleted source_risk.lifecycle_unresolved
+    source_risk.missing_ticket_template source_risk.missing_tickera_event
+    source_risk.subscription source_risk.subscription_unresolved
+    source_risk.payment_plan source_risk.membership source_risk.bundle source_risk.add_on
+    contract.evidence_conflict contract.contract_violation contract.scope_mismatch
+    contract.authority_mismatch contract.parser_error contract.blocking_missing
+    contract.blocking_unsupported contract.blocking_invalid
+  )
+  @v3_finding_codes @v3_structural_finding_codes ++ @v3_qualified_finding_codes
+
+  @v3_dimensions ContractRegistry.dimensions()
+  @v3_scopes ContractRegistry.scopes()
+  @v3_states ContractRegistry.states()
+  @v3_completeness ContractRegistry.completeness_values()
+  @v3_authorities ContractRegistry.authorities()
+  @v3_authority_slots ContractRegistry.authority_slots()
+  @v3_origins ContractRegistry.origins()
+  @v3_dispositions ContractRegistry.dispositions()
+  @v3_provenance_keys MapSet.to_list(ContractRegistry.producer_provenance_keys())
+  @v3_provenance_id_keys ~w(woo_product_id woo_variation_id tickera_event_id)
+
+  @spec v3_schema_version() :: String.t()
+  def v3_schema_version, do: @v3_schema_version
+
   @spec canonicalize(map()) ::
           {:ok, binary(), String.t()}
           | {:error, :invalid_snapshot_schema | :invalid_snapshot_value}
-  def canonicalize(snapshot) when is_map(snapshot) do
+  def canonicalize(%{"snapshot_schema_version" => @v3_schema_version} = snapshot),
+    do: canonicalize_v3(snapshot)
+
+  def canonicalize(snapshot) when is_map(snapshot), do: canonicalize_v2(snapshot)
+
+  def canonicalize(_snapshot), do: {:error, :invalid_snapshot_schema}
+
+  defp canonicalize_v2(snapshot) do
     with false <- contains_float?(snapshot),
          :ok <- validate_schema(snapshot),
          {:ok, normalized} <- snapshot |> sort_collections() |> normalize(),
@@ -75,7 +143,218 @@ defmodule EventSales.Catalog.TickeraCatalog.SnapshotCanonicalizer do
     end
   end
 
-  def canonicalize(_snapshot), do: {:error, :invalid_snapshot_schema}
+  defp canonicalize_v3(snapshot) do
+    with false <- contains_float?(snapshot),
+         :ok <- validate_v3_schema(snapshot),
+         {:ok, normalized} <- snapshot |> sort_v3_collections() |> normalize(),
+         {:ok, bytes} <- encode(normalized) do
+      hash = bytes |> then(&:crypto.hash(:sha256, &1)) |> Base.encode16(case: :lower)
+      {:ok, bytes, hash}
+    else
+      true -> {:error, :invalid_snapshot_value}
+      error -> error
+    end
+  end
+
+  defp validate_v3_schema(snapshot) do
+    if valid_v3_root?(snapshot) and valid_v3_source?(snapshot["source"]) and
+         valid_actions?(snapshot) and valid_v3_source_risk?(snapshot) do
+      :ok
+    else
+      {:error, :invalid_snapshot_schema}
+    end
+  end
+
+  defp valid_v3_source_risk?(snapshot) do
+    valid_v3_findings?(snapshot["findings"]) and
+      valid_v3_facts?(snapshot["canonical_source_risk_facts"]) and
+      valid_v3_risk_findings?(snapshot["canonical_source_risk_findings"]) and
+      valid_historical?(snapshot["historical_impact"]) and
+      valid_proof?(snapshot["identity_membership_proof"]) and
+      valid_touched?(snapshot["touched_identifiers"])
+  end
+
+  defp valid_v3_root?(snapshot) do
+    exact_keys?(snapshot, @v3_top_level_keys) and
+      snapshot["snapshot_schema_version"] == @v3_schema_version and
+      uuid?(snapshot["source_system_id"]) and snapshot["origin"] in @origins and
+      lists?(
+        snapshot,
+        ~w(
+          event_actions ticket_type_actions product_mapping_actions findings
+          canonical_source_risk_facts canonical_source_risk_findings
+        )
+      )
+  end
+
+  defp valid_v3_source?(source) when is_map(source) do
+    Enum.all?([
+      exact_keys?(source, @v3_source_keys),
+      source["schema_version"] == @v3_source_schema_version,
+      source["canonical_contract_version"] == @v3_canonical_contract_version,
+      source["evidence_origin"] == "native",
+      bounded?(source["producer_version"], 128, false),
+      bounded?(source["source_system_id"], 160, false),
+      bounded?(source["discovery_snapshot_id"], 128, false),
+      datetime_or_nil?(source["source_snapshot_at"])
+    ])
+  end
+
+  defp valid_v3_source?(_source), do: false
+
+  defp valid_v3_findings?(values) do
+    Enum.all?(values, fn value ->
+      exact_keys?(value, @finding_keys) and value["severity"] in @finding_severities and
+        value["code"] in @v3_finding_codes and value["target_type"] in @finding_targets and
+        valid_target_id?(value["target_type"], value["target_id"]) and
+        valid_v3_context?(value["context"])
+    end)
+  end
+
+  defp valid_v3_context?(context) when is_map(context) do
+    Enum.all?(context, fn
+      {"event_lifecycle", value} -> value in ~w(past current future unknown)
+      {"disposition", value} -> value in @v3_dispositions
+      {"dimension_local_only", value} -> is_boolean(value)
+      {_key, _value} -> false
+    end)
+  end
+
+  defp valid_v3_context?(_context), do: false
+
+  defp valid_v3_facts?(values) do
+    Enum.all?(values, fn value ->
+      Enum.all?([
+        exact_keys?(value, @v3_fact_keys),
+        bounded?(value["run_id"], 128, false),
+        value["dimension"] in @v3_dimensions,
+        value["semantic_scope"] in @v3_scopes,
+        value["authority_slot"] in @v3_authority_slots,
+        value["authority"] in @v3_authorities,
+        value["state"] in @v3_states,
+        value["completeness"] in @v3_completeness,
+        value["origin"] in @v3_origins,
+        valid_v3_target?(value["target"]),
+        valid_v3_fact_value?(value["value"]),
+        valid_v3_provenance_list?(value["provenance"])
+      ])
+    end)
+  end
+
+  defp valid_v3_target?(target) when is_map(target) and map_size(target) > 0 do
+    Enum.all?(target, fn {key, value} ->
+      key in @v3_target_keys and positive_integer?(value)
+    end)
+  end
+
+  defp valid_v3_target?(_target), do: false
+
+  defp valid_v3_fact_value?(nil), do: true
+  defp valid_v3_fact_value?(value) when is_integer(value), do: value > 0
+
+  defp valid_v3_fact_value?(value) when is_binary(value),
+    do: value != "" and byte_size(value) <= ContractRegistry.max_evidence_value_bytes()
+
+  defp valid_v3_fact_value?(_value), do: false
+
+  defp valid_v3_provenance_list?(records) when is_list(records) and records != [],
+    do: Enum.all?(records, &valid_v3_provenance?/1)
+
+  defp valid_v3_provenance_list?(_records), do: false
+
+  defp valid_v3_provenance?(record) when is_map(record) and map_size(record) > 0 do
+    Enum.all?(record, fn
+      {key, value} when key in @v3_provenance_id_keys -> positive_integer?(value)
+      {key, value} when key in @v3_provenance_keys -> bounded?(value, 128, false)
+      {_key, _value} -> false
+    end)
+  end
+
+  defp valid_v3_provenance?(_record), do: false
+
+  defp valid_v3_risk_findings?(values) do
+    Enum.all?(values, fn value ->
+      exact_keys?(value, @v3_risk_finding_keys) and
+        value["qualified_finding_id"] in @v3_qualified_finding_codes and
+        value["severity"] in @finding_severities and
+        value["disposition"] in @v3_dispositions and
+        is_boolean(value["dimension_local_only"]) and
+        value["implies_apply_eligible"] == false
+    end)
+  end
+
+  defp sort_v3_collections(snapshot) do
+    snapshot
+    |> Map.update!("event_actions", &Enum.sort_by(&1, fn v -> event_sort_key(v) end))
+    |> Map.update!("ticket_type_actions", &Enum.sort_by(&1, fn v -> ticket_sort_key(v) end))
+    |> Map.update!("product_mapping_actions", &Enum.sort_by(&1, fn v -> mapping_sort_key(v) end))
+    |> Map.update!("findings", &Enum.sort_by(&1, fn v -> v3_finding_sort_key(v) end))
+    |> Map.update!("canonical_source_risk_facts", fn facts ->
+      facts
+      |> Enum.map(&Map.update!(&1, "provenance", fn records -> sort_maps(records) end))
+      |> Enum.sort_by(fn v -> v3_fact_sort_key(v) end)
+    end)
+    |> Map.update!(
+      "canonical_source_risk_findings",
+      &Enum.sort_by(&1, fn v -> v3_risk_finding_sort_key(v) end)
+    )
+    |> update_in(
+      ["historical_impact", "destinations"],
+      &Enum.sort_by(&1, fn v -> destination_sort_key(v) end)
+    )
+    |> update_in(
+      ["identity_membership_proof", "events"],
+      &Enum.sort_by(&1, fn v -> event_proof_sort_key(v) end)
+    )
+    |> update_in(
+      ["identity_membership_proof", "ticket_types"],
+      &Enum.sort_by(&1, fn v -> ticket_proof_sort_key(v) end)
+    )
+    |> update_in(
+      ["identity_membership_proof", "product_mappings"],
+      &Enum.sort_by(&1, fn v -> mapping_sort_key(v) end)
+    )
+    |> update_in(["touched_identifiers", "event_ids"], &Enum.sort/1)
+    |> update_in(["touched_identifiers", "ticket_type_ids"], &Enum.sort/1)
+    |> update_in(["touched_identifiers", "mapping_ids"], &Enum.sort/1)
+    |> update_in(
+      ["touched_identifiers", "product_keys"],
+      &Enum.sort_by(&1, fn v -> product_key_sort_key(v) end)
+    )
+  end
+
+  defp v3_finding_sort_key(v),
+    do:
+      {v["severity"], v["code"], v["target_type"], v["target_id"] || 0,
+       map_sort_key(v["context"])}
+
+  defp v3_fact_sort_key(v),
+    do:
+      {v["dimension"], v["semantic_scope"], map_sort_key(v["target"]), v["authority_slot"],
+       v["origin"], v["state"], value_sort_key(v["value"]), v["completeness"],
+       Enum.map(v["provenance"], &map_sort_key/1)}
+
+  defp v3_risk_finding_sort_key(v),
+    do:
+      {v["qualified_finding_id"], v["severity"], v["disposition"], v["dimension_local_only"],
+       v["implies_apply_eligible"]}
+
+  defp sort_maps(values) when is_list(values), do: Enum.sort_by(values, &map_sort_key/1)
+  defp sort_maps(values), do: values
+
+  defp map_sort_key(value) when is_map(value),
+    do:
+      value
+      |> Enum.map(fn {key, inner} -> {to_string(key), value_sort_key(inner)} end)
+      |> Enum.sort()
+
+  defp map_sort_key(_value), do: []
+
+  defp value_sort_key(nil), do: {0, 0, ""}
+  defp value_sort_key(value) when is_integer(value), do: {1, value, ""}
+  defp value_sort_key(value) when is_binary(value), do: {2, 0, value}
+  defp value_sort_key(value) when is_boolean(value), do: {3, 0, to_string(value)}
+  defp value_sort_key(value), do: {4, 0, inspect(value)}
 
   defp validate_schema(snapshot) do
     if valid_root?(snapshot) and valid_actions?(snapshot) and

@@ -13,6 +13,8 @@ defmodule EventSales.Catalog.TickeraCatalog.Applier do
   alias EventSales.Ingestion.Workers.MissingCatalogResolutionWorker
   alias EventSales.Repo
 
+  @review_only_snapshot_version "tickera_catalog_plan.v3"
+
   @spec apply(Ecto.UUID.t(), String.t(), keyword()) ::
           {:ok, TickeraCatalogSyncRun.t()} | {:error, term()}
   def apply(run_id, expected_dry_run_hash, opts \\ [])
@@ -22,6 +24,7 @@ defmodule EventSales.Catalog.TickeraCatalog.Applier do
          :ok <- validate_status(run),
          :ok <- validate_hash(run, expected_dry_run_hash),
          {:ok, snapshot} <- fetch_snapshot(run),
+         :ok <- validate_supported_snapshot_version(snapshot),
          :ok <- validate_no_blocking(snapshot),
          {:ok, {applied, touched, notifications}} <-
            apply_transaction(run.id, expected_dry_run_hash, snapshot, opts) do
@@ -42,6 +45,15 @@ defmodule EventSales.Catalog.TickeraCatalog.Applier do
 
   defp fetch_snapshot(%{plan_snapshot: snapshot}) when is_map(snapshot), do: {:ok, snapshot}
   defp fetch_snapshot(_run), do: {:error, :missing_plan_snapshot}
+
+  # Review-only `tickera_catalog_plan.v3` is denied before any claim or catalogue write.
+  defp validate_supported_snapshot_version(snapshot) do
+    if value(snapshot, "snapshot_schema_version") == @review_only_snapshot_version do
+      {:error, :unsupported_snapshot_version}
+    else
+      :ok
+    end
+  end
 
   defp validate_no_blocking(snapshot) do
     if Enum.any?(list(snapshot, "findings"), &(value(&1, "severity") in [:blocking, "blocking"])) do

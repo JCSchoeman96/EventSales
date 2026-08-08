@@ -10,7 +10,21 @@ defmodule EventSales.Catalog.TickeraCatalog.PlannerApplierTest do
   alias EventSales.Catalog
   alias EventSales.Catalog.MappingConflictResolver
   alias EventSales.Catalog.Resources.{Event, ProductMapping, TicketType}
-  alias EventSales.Catalog.TickeraCatalog.{Applier, DiscoveryResult, Plan, Planner}
+
+  alias EventSales.Catalog.TickeraCatalog.{
+    Applier,
+    DiscoveryResult,
+    Plan,
+    Planner,
+    SnapshotCanonicalizer
+  }
+
+  alias EventSales.Catalog.TickeraCatalog.SourceRiskV3.{
+    CanonicalFact,
+    ContractRegistry,
+    FindingPolicy
+  }
+
   alias EventSales.Ingestion.Workers.MissingCatalogResolutionWorker
   alias EventSales.TestSupport.{CatalogSyncRunHelpers, SalesHelpers, TickeraCatalogFixtures}
 
@@ -113,6 +127,131 @@ defmodule EventSales.Catalog.TickeraCatalog.PlannerApplierTest do
              )
 
     assert recomputed_hash == plan.dry_run_hash
+  end
+
+  test "native v3 discovery plans a review-only plan.v3 snapshot with an external hash", %{
+    source: source
+  } do
+    assert {:ok, plan} = Planner.plan(source.id, native_v3_discovery())
+
+    assert Map.keys(plan.plan_snapshot) |> Enum.sort() ==
+             ~w(
+               canonical_source_risk_facts canonical_source_risk_findings event_actions findings
+               historical_impact identity_membership_proof origin product_mapping_actions
+               snapshot_schema_version source source_system_id ticket_type_actions
+               touched_identifiers
+             )
+
+    assert plan.plan_snapshot["snapshot_schema_version"] == "tickera_catalog_plan.v3"
+    refute Map.has_key?(plan.plan_snapshot, "dry_run_hash")
+    refute Map.has_key?(plan.plan_snapshot, "source_risks")
+
+    assert plan.plan_snapshot["source"] == %{
+             "schema_version" => "2026-08-07.v3",
+             "canonical_contract_version" => "source_risk.v3",
+             "producer_version" => "2026-08-07.1",
+             "source_system_id" => native_source_system_id(),
+             "discovery_snapshot_id" => "native-snapshot-1",
+             "source_snapshot_at" => "2026-08-07T09:00:00Z",
+             "evidence_origin" => "native"
+           }
+
+    assert {:ok, _bytes, recomputed_hash} =
+             SnapshotCanonicalizer.canonicalize(plan.plan_snapshot)
+
+    assert recomputed_hash == plan.dry_run_hash
+  end
+
+  test "native v3 source-risk findings project as string codes without dynamic atoms", %{
+    source: source
+  } do
+    assert {:ok, plan} = Planner.plan(source.id, native_v3_discovery())
+
+    projected =
+      Enum.filter(plan.findings, &(&1.code == "source_risk.lifecycle_draft"))
+
+    assert [finding] = projected
+    assert is_binary(finding.code)
+    assert finding.severity == :blocking
+
+    assert finding.message ==
+             "Native source-risk finding: source_risk.lifecycle_draft (explicit_risk)"
+
+    assert finding.metadata == %{"disposition" => "explicit_risk", "dimension_local_only" => true}
+    assert is_nil(finding.tickera_event_id)
+    assert is_nil(finding.woo_product_id)
+    assert is_nil(finding.woo_variation_id)
+
+    assert Enum.any?(plan.findings, &(&1.code == "contract.evidence_conflict"))
+    assert Enum.any?(plan.findings, &(&1.code == :existing_mapping_adopted))
+
+    assert_raise ArgumentError, fn -> String.to_existing_atom("source_risk.lifecycle_draft") end
+
+    snapshot_codes = Enum.map(plan.plan_snapshot["findings"], & &1["code"])
+    assert "source_risk.lifecycle_draft" in snapshot_codes
+    assert "existing_mapping_adopted" in snapshot_codes
+  end
+
+  test "native v3 plan serializes canonical facts with multi-record provenance lists", %{
+    source: source
+  } do
+    assert {:ok, plan} = Planner.plan(source.id, native_v3_discovery())
+
+    facts = plan.plan_snapshot["canonical_source_risk_facts"]
+
+    assert Enum.map(facts, & &1["dimension"]) == ~w(lifecycle subscription)
+    assert Enum.all?(facts, &is_list(&1["provenance"]))
+    assert Enum.all?(facts, &(&1["target"] == %{"woo_product_id" => 109_740}))
+
+    lifecycle_fact = Enum.find(facts, &(&1["dimension"] == "lifecycle"))
+    assert length(lifecycle_fact["provenance"]) == 2
+    assert lifecycle_fact["value"] == "draft"
+
+    subscription_fact = Enum.find(facts, &(&1["dimension"] == "subscription"))
+    assert is_nil(subscription_fact["value"])
+
+    assert Enum.map(
+             plan.plan_snapshot["canonical_source_risk_findings"],
+             & &1["implies_apply_eligible"]
+           ) == [false, false]
+  end
+
+  test "native v3 discovery with an inconsistent contract combination fails closed", %{
+    source: source
+  } do
+    for override <- [
+          %{schema_version: "2026-07-22.v2"},
+          %{canonical_contract_version: "compat.v2_to_source_risk_v3.v1"},
+          %{evidence_origin: nil}
+        ] do
+      discovery = struct!(native_v3_discovery(), override)
+
+      assert {:error, :inconsistent_native_v3_discovery} = Planner.plan(source.id, discovery)
+    end
+  end
+
+  test "applier denies a plan.v3 snapshot before any catalogue write", %{source: source} do
+    assert {:ok, plan} = Planner.plan(source.id, native_v3_discovery())
+    run = create_run!(source.id, plan)
+
+    counts = %{
+      events: Ash.count!(Event, domain: Catalog),
+      ticket_types: Ash.count!(TicketType, domain: Catalog),
+      mappings: Ash.count!(ProductMapping, domain: Catalog)
+    }
+
+    assert {:error, :unsupported_snapshot_version} =
+             Applier.apply(run.id, plan.dry_run_hash, actor: nil)
+
+    assert Ash.count!(Event, domain: Catalog) == counts.events
+    assert Ash.count!(TicketType, domain: Catalog) == counts.ticket_types
+    assert Ash.count!(ProductMapping, domain: Catalog) == counts.mappings
+
+    assert Ash.get!(
+             EventSales.Ingestion.Resources.TickeraCatalogSyncRun,
+             run.id,
+             domain: EventSales.Ingestion
+           ).status == :dry_run_ready
   end
 
   test "applier adopts existing records idempotently from durable plan snapshot", %{
@@ -453,6 +592,74 @@ defmodule EventSales.Catalog.TickeraCatalog.PlannerApplierTest do
       catalog_rows: [TickeraCatalogFixtures.vwg_row()]
     }
   end
+
+  defp native_v3_discovery do
+    lifecycle = native_fact("lifecycle", "present", "draft", "slot.lifecycle.wp_post_status")
+
+    lifecycle = %{
+      lifecycle
+      | provenance:
+          lifecycle.provenance ++
+            [%{"discovery_snapshot_id" => "native-snapshot-1", "raw_producer_code" => "draft"}]
+    }
+
+    conflicting = %{
+      lifecycle
+      | value: "private",
+        provenance: List.first(lifecycle.provenance) |> List.wrap()
+    }
+
+    subscription =
+      native_fact("subscription", "unknown", nil, "slot.subscription.detection")
+
+    %DiscoveryResult{
+      schema_version: "2026-08-07.v3",
+      auto_apply_proof_complete?: false,
+      origin: :human_admin,
+      events: [TickeraCatalogFixtures.vwg_event()],
+      catalog_rows: [TickeraCatalogFixtures.vwg_row()],
+      source_snapshot_at: ~U[2026-08-07 09:00:00Z],
+      canonical_contract_version: "source_risk.v3",
+      producer_version: "2026-08-07.1",
+      source_system_id: native_source_system_id(),
+      discovery_snapshot_id: "native-snapshot-1",
+      normalization_mode: :native_v3_review,
+      evidence_origin: :native,
+      canonical_source_risk_facts: CanonicalFact.sort_facts([lifecycle, subscription]),
+      canonical_source_risk_findings: [
+        FindingPolicy.evaluate(lifecycle),
+        FindingPolicy.evaluate_conflict(lifecycle, conflicting)
+      ]
+    }
+  end
+
+  defp native_fact(dimension, state, value, authority_slot) do
+    {:ok, authority} = ContractRegistry.authority_for_slot(authority_slot)
+    {:ok, producer_source_key} = ContractRegistry.producer_source_key_for_authority(authority)
+
+    %CanonicalFact{
+      run_id: "native-snapshot-1",
+      dimension: dimension,
+      semantic_scope: "parent_product",
+      target: %{woo_product_id: 109_740},
+      authority_slot: authority_slot,
+      authority: authority,
+      state: state,
+      completeness: "exhaustive",
+      origin: "native",
+      value: value,
+      provenance: [
+        %{
+          "discovery_snapshot_id" => "native-snapshot-1",
+          "producer_version" => "2026-08-07.1",
+          "producer_source_key" => producer_source_key,
+          "woo_product_id" => 109_740
+        }
+      ]
+    }
+  end
+
+  defp native_source_system_id, do: "wordpress_tickera:" <> String.duplicate("a", 64)
 
   defp lynette_wr_discovery do
     %DiscoveryResult{

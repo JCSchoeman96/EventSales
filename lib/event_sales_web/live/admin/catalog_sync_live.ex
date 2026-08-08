@@ -2044,8 +2044,19 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLive do
   defp apply_enabled?(run, preview) do
     run.status == :dry_run_ready and is_binary(run.dry_run_hash) and
       preview_ready?(run, preview) and
-      not blocking_findings?(preview)
+      not blocking_findings?(preview) and
+      not review_only_plan?(run, preview)
   end
+
+  # `tickera_catalog_plan.v3` is review-only. The backend remains authoritative.
+  defp review_only_plan?(run, preview) do
+    review_only_snapshot?(preview) or review_only_snapshot?(Map.get(run, :plan_snapshot))
+  end
+
+  defp review_only_snapshot?(snapshot) when is_map(snapshot),
+    do: value(snapshot, "snapshot_schema_version") == "tickera_catalog_plan.v3"
+
+  defp review_only_snapshot?(_snapshot), do: false
 
   defp preview_ready?(run, preview) when is_map(preview) do
     value(preview, "dry_run_hash") == run.dry_run_hash

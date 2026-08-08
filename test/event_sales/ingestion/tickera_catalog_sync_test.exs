@@ -318,6 +318,39 @@ defmodule EventSales.Ingestion.TickeraCatalogSyncTest do
     refute_enqueued(worker: ApplyTickeraCatalogWorker)
   end
 
+  test "queue_apply rejects review-only plan.v3 snapshots before enqueue", %{
+    admin: admin,
+    source: source
+  } do
+    run =
+      CatalogSyncRunHelpers.create_ready_catalog_sync_run!(
+        source.id,
+        %{"kind" => "wordpress_feed", "mode" => "full"},
+        %{
+          dry_run_hash: "review-only-hash",
+          summary: %{"finding_count" => 0},
+          plan_snapshot: %{
+            "snapshot_schema_version" => "tickera_catalog_plan.v3",
+            "event_actions" => [],
+            "ticket_type_actions" => [],
+            "product_mapping_actions" => [],
+            "findings" => [],
+            "canonical_source_risk_facts" => [],
+            "canonical_source_risk_findings" => []
+          }
+        }
+      )
+
+    job_count = apply_job_count()
+
+    assert {:error, :unsupported_snapshot_version} =
+             TickeraCatalogSync.queue_apply(run.id, "review-only-hash", actor: admin)
+
+    refute_enqueued(worker: ApplyTickeraCatalogWorker)
+    assert apply_job_count() == job_count
+    assert Ash.get!(TickeraCatalogSyncRun, run.id, domain: Ingestion).status == :dry_run_ready
+  end
+
   test "queue_apply persists a real Oban job with the exact dry-run hash", %{
     admin: admin,
     source: source

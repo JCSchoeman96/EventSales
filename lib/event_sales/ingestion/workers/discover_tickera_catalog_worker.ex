@@ -38,6 +38,7 @@ defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker do
     server_error: "catalog_feed_server_error",
     transport_error: "catalog_feed_transport_error"
   }
+  @review_only_snapshot_version "tickera_catalog_plan.v3"
   @transient_failures [:timeout, :rate_limited, :server_error, :transport_error]
   @claimable_statuses [:queued, :retry_scheduled, :discovering]
   @advanced_statuses [:dry_run_ready, :applying, :applied, :failed, :cancelled]
@@ -180,12 +181,30 @@ defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker do
     with {:ok, destroy_notifications} <- destroy_existing_findings(run.id),
          {:ok, create_notifications} <- create_findings(run.id, plan.findings),
          {:ok, ready, ready_notifications} <- mark_ready(run, plan, owner_attempt),
-         {:ok, _job} <- enqueue_auto_apply_evaluation(ready) do
+         :ok <- maybe_enqueue_auto_apply_evaluation(ready, plan) do
       {:ok, ready, destroy_notifications ++ create_notifications ++ ready_notifications}
     else
       {:error, reason} -> Repo.rollback(reason)
     end
   end
+
+  # `tickera_catalog_plan.v3` is review-only: never enqueue AutoApply evaluation for it.
+  defp maybe_enqueue_auto_apply_evaluation(ready, plan) do
+    if review_only_snapshot?(plan.plan_snapshot) do
+      :ok
+    else
+      case enqueue_auto_apply_evaluation(ready) do
+        {:ok, _job} -> :ok
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  defp review_only_snapshot?(%{"snapshot_schema_version" => @review_only_snapshot_version}),
+    do: true
+
+  defp review_only_snapshot?(%{snapshot_schema_version: @review_only_snapshot_version}), do: true
+  defp review_only_snapshot?(_snapshot), do: false
 
   defp enqueue_auto_apply_evaluation(ready) do
     %{"run_id" => ready.id, "dry_run_hash" => ready.dry_run_hash}

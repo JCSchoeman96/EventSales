@@ -33,6 +33,38 @@ defmodule EventSales.Ingestion.Resources.TickeraCatalogSyncFindingTest do
     assert is_binary(reloaded.code)
   end
 
+  test "stores qualified source_risk.v3 finding codes without creating atoms" do
+    source = SalesHelpers.create_source_system!()
+    run = CatalogSyncRunHelpers.create_queued_catalog_sync_run!(source.id)
+
+    codes = ["source_risk.lifecycle_draft", "contract.evidence_conflict"]
+
+    for code <- codes do
+      finding =
+        Ash.create!(
+          TickeraCatalogSyncFinding,
+          %{
+            run_id: run.id,
+            severity: :blocking,
+            code: code,
+            message: "Native source-risk finding: #{code} (explicit_risk)",
+            metadata: %{"disposition" => "explicit_risk", "dimension_local_only" => true}
+          },
+          action: :create,
+          domain: Ingestion
+        )
+
+      reloaded = Ash.get!(TickeraCatalogSyncFinding, finding.id, domain: Ingestion)
+
+      assert reloaded.code == code
+      assert is_binary(reloaded.code)
+      assert byte_size(reloaded.code) <= 120
+      assert reloaded.severity == :blocking
+      assert reloaded.metadata["disposition"] == "explicit_risk"
+      assert_raise ArgumentError, fn -> String.to_existing_atom(code) end
+    end
+  end
+
   test "reloads the locally observed variation mapping code as a string" do
     source = SalesHelpers.create_source_system!()
     run = CatalogSyncRunHelpers.create_queued_catalog_sync_run!(source.id)
