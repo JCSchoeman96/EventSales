@@ -191,6 +191,102 @@ defmodule EventSales.Ingestion.Workers.ApplyTickeraCatalogWorkerTest do
     assert reloaded.cancelled_by_user_id == admin.id
   end
 
+  test "stale plan.v3 Apply job discards without writing or marking the run applied" do
+    source = SalesHelpers.create_source_system!()
+
+    run =
+      CatalogSyncRunHelpers.create_ready_catalog_sync_run!(
+        source.id,
+        %{"kind" => "wordpress_feed", "mode" => "full"},
+        %{
+          dry_run_hash: "native-v3-hash",
+          summary: %{},
+          plan_snapshot: review_only_snapshot()
+        }
+      )
+
+    PubSub.subscribe(run.id)
+
+    counts = %{
+      events: Ash.count!(Event, domain: Catalog),
+      ticket_types: Ash.count!(TicketType, domain: Catalog),
+      mappings: Ash.count!(ProductMapping, domain: Catalog)
+    }
+
+    assert :discard =
+             ApplyTickeraCatalogWorker.perform(%Oban.Job{
+               args: %{"run_id" => run.id, "dry_run_hash" => "native-v3-hash"}
+             })
+
+    reloaded = Ash.get!(TickeraCatalogSyncRun, run.id, domain: Ingestion)
+
+    assert reloaded.status == :dry_run_ready
+    assert is_nil(reloaded.last_error)
+    assert Ash.count!(Event, domain: Catalog) == counts.events
+    assert Ash.count!(TicketType, domain: Catalog) == counts.ticket_types
+    assert Ash.count!(ProductMapping, domain: Catalog) == counts.mappings
+    refute_receive {:catalog_sync_applied, _payload}
+    refute_receive {:catalog_sync_failed, _payload}
+  end
+
+  test "wrong-hash plan.v3 Apply job discards before Applier hash validation" do
+    source = SalesHelpers.create_source_system!()
+
+    run =
+      CatalogSyncRunHelpers.create_ready_catalog_sync_run!(
+        source.id,
+        %{"kind" => "wordpress_feed", "mode" => "full"},
+        %{
+          dry_run_hash: "native-v3-hash",
+          summary: %{},
+          plan_snapshot: review_only_snapshot()
+        }
+      )
+
+    PubSub.subscribe(run.id)
+
+    counts = %{
+      events: Ash.count!(Event, domain: Catalog),
+      ticket_types: Ash.count!(TicketType, domain: Catalog),
+      mappings: Ash.count!(ProductMapping, domain: Catalog)
+    }
+
+    # A wrong job hash would hit Applier's stale-hash check before version denial
+    # if the worker deferred to Applier. Worker-level v3 gate must discard first.
+    assert :discard =
+             ApplyTickeraCatalogWorker.perform(%Oban.Job{
+               args: %{"run_id" => run.id, "dry_run_hash" => "deliberately-wrong-hash"}
+             })
+
+    reloaded = Ash.get!(TickeraCatalogSyncRun, run.id, domain: Ingestion)
+
+    assert reloaded.status == :dry_run_ready
+    assert is_nil(reloaded.last_error)
+    assert Ash.count!(Event, domain: Catalog) == counts.events
+    assert Ash.count!(TicketType, domain: Catalog) == counts.ticket_types
+    assert Ash.count!(ProductMapping, domain: Catalog) == counts.mappings
+    refute_receive {:catalog_sync_applied, _payload}
+    refute_receive {:catalog_sync_failed, _payload}
+  end
+
+  defp review_only_snapshot do
+    %{
+      "snapshot_schema_version" => "tickera_catalog_plan.v3",
+      "event_actions" => [],
+      "ticket_type_actions" => [],
+      "product_mapping_actions" => [],
+      "findings" => [],
+      "canonical_source_risk_facts" => [],
+      "canonical_source_risk_findings" => [],
+      "touched_identifiers" => %{
+        "event_ids" => [],
+        "ticket_type_ids" => [],
+        "mapping_ids" => [],
+        "product_keys" => []
+      }
+    }
+  end
+
   defp empty_snapshot(hash) do
     %{
       "dry_run_hash" => hash,

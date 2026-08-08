@@ -9,6 +9,20 @@ defmodule EventSales.Catalog.TickeraCatalog.SnapshotCanonicalizerTest do
     historical_impact identity_membership_proof touched_identifiers
   )
 
+  @v3_keys ~w(
+    snapshot_schema_version source_system_id origin source event_actions
+    ticket_type_actions product_mapping_actions findings
+    canonical_source_risk_facts canonical_source_risk_findings
+    historical_impact identity_membership_proof touched_identifiers
+  )
+
+  @v2_pinned_hash "76738311f87c33f46d558bdcf0ff352ba058ebce4b316641f9352a46acc478d2"
+
+  test "pins the v2 canonical hash so Phase 5C cannot silently change live v2 bytes" do
+    assert {:ok, _bytes, hash} = canonicalize(valid_snapshot())
+    assert hash == @v2_pinned_hash
+  end
+
   test "canonicalizes the exact eleven-key v2 snapshot independently of insertion order" do
     snapshot = valid_snapshot()
     reversed = snapshot |> Enum.reverse() |> Map.new()
@@ -91,7 +105,205 @@ defmodule EventSales.Catalog.TickeraCatalog.SnapshotCanonicalizerTest do
     assert {:ok, ^bytes, ^hash} = canonicalize(reversed)
   end
 
+  test "canonicalizes the exact thirteen-key v3 snapshot independently of insertion order" do
+    snapshot = valid_v3_snapshot()
+
+    assert Map.keys(snapshot) |> Enum.sort() == Enum.sort(@v3_keys)
+    assert {:ok, bytes, hash} = canonicalize(snapshot)
+    assert {:ok, ^bytes, ^hash} = canonicalize(snapshot |> Enum.reverse() |> Map.new())
+    assert byte_size(hash) == 64
+    assert bytes =~ ~s("snapshot_schema_version":"tickera_catalog_plan.v3")
+  end
+
+  test "v3 hashes are stable when facts, provenance, and findings arrive shuffled" do
+    snapshot = valid_v3_snapshot()
+
+    shuffled =
+      snapshot
+      |> Map.update!("canonical_source_risk_facts", fn facts ->
+        facts
+        |> Enum.reverse()
+        |> Enum.map(&Map.update!(&1, "provenance", fn records -> Enum.reverse(records) end))
+      end)
+      |> Map.update!("canonical_source_risk_findings", &Enum.reverse/1)
+      |> Map.update!("findings", &Enum.reverse/1)
+      |> Map.update!("event_actions", &Enum.reverse/1)
+      |> Map.update!("ticket_type_actions", &Enum.reverse/1)
+      |> Map.update!("product_mapping_actions", &Enum.reverse/1)
+
+    assert {:ok, bytes, hash} = canonicalize(snapshot)
+    assert {:ok, ^bytes, ^hash} = canonicalize(shuffled)
+  end
+
+  test "v3 retains every multi-record provenance entry" do
+    assert {:ok, bytes, _hash} = canonicalize(valid_v3_snapshot())
+
+    assert bytes =~ ~s("raw_producer_code":"draft_product")
+    assert bytes =~ ~s("raw_producer_code":"private_product")
+  end
+
+  test "v3 rejects unknown top-level keys and v2-only collections" do
+    assert {:error, :invalid_snapshot_schema} =
+             valid_v3_snapshot() |> Map.put("source_risks", []) |> canonicalize()
+
+    assert {:error, :invalid_snapshot_schema} =
+             valid_v3_snapshot()
+             |> Map.put("dry_run_hash", String.duplicate("0", 64))
+             |> canonicalize()
+
+    assert {:error, :invalid_snapshot_schema} =
+             valid_v3_snapshot() |> Map.delete("source") |> canonicalize()
+  end
+
+  test "v3 requires the locked native source envelope" do
+    for {key, value} <- [
+          {"schema_version", "2026-07-22.v2"},
+          {"canonical_contract_version", "compat.v2_to_source_risk_v3.v1"},
+          {"evidence_origin", "compatibility_derived"},
+          {"producer_version", ""},
+          {"producer_version", "2026-08-07.2"}
+        ] do
+      assert {:error, :invalid_snapshot_schema} =
+               valid_v3_snapshot() |> put_in(["source", key], value) |> canonicalize()
+    end
+  end
+
+  test "v3 requires exact producer_version 2026-08-07.1" do
+    assert {:ok, _bytes, _hash} = canonicalize(valid_v3_snapshot())
+
+    assert {:error, :invalid_snapshot_schema} =
+             valid_v3_snapshot()
+             |> put_in(["source", "producer_version"], "2026-08-07.2")
+             |> canonicalize()
+  end
+
+  test "v3 and v2 finding allowlists stay separate and closed" do
+    assert {:error, :invalid_snapshot_schema} =
+             valid_snapshot()
+             |> put_in(["findings", Access.at(0), "code"], "source_risk.lifecycle_draft")
+             |> canonicalize()
+
+    assert {:error, :invalid_snapshot_schema} =
+             valid_v3_snapshot()
+             |> put_in(["findings", Access.at(0), "code"], "missing_source_risk_data")
+             |> canonicalize()
+
+    assert {:error, :invalid_snapshot_schema} =
+             valid_v3_snapshot()
+             |> put_in(["findings", Access.at(0), "code"], "source_risk.invented_code")
+             |> canonicalize()
+  end
+
+  test "v3 rejects unknown nested keys, unknown vocabulary, and apply-eligible claims" do
+    paths = [
+      ["canonical_source_risk_facts", Access.at(0)],
+      ["canonical_source_risk_facts", Access.at(0), "provenance", Access.at(0)],
+      ["canonical_source_risk_findings", Access.at(0)],
+      ["findings", Access.at(0)],
+      ["findings", Access.at(0), "context"]
+    ]
+
+    for path <- paths do
+      invalid = update_in(valid_v3_snapshot(), path, &Map.put(&1, "unexpected", "unsafe"))
+      assert {:error, :invalid_snapshot_schema} = canonicalize(invalid)
+    end
+
+    assert {:error, :invalid_snapshot_schema} =
+             valid_v3_snapshot()
+             |> put_in(["canonical_source_risk_facts", Access.at(0), "dimension"], "invented")
+             |> canonicalize()
+
+    assert {:error, :invalid_snapshot_schema} =
+             valid_v3_snapshot()
+             |> put_in(
+               ["canonical_source_risk_findings", Access.at(0), "implies_apply_eligible"],
+               true
+             )
+             |> canonicalize()
+  end
+
   defp canonicalize(snapshot), do: SnapshotCanonicalizer.canonicalize(snapshot)
+
+  defp valid_v3_snapshot do
+    %{
+      "snapshot_schema_version" => "tickera_catalog_plan.v3",
+      "source_system_id" => "00000000-0000-0000-0000-000000000001",
+      "origin" => "human_admin",
+      "source" => %{
+        "schema_version" => "2026-08-07.v3",
+        "canonical_contract_version" => "source_risk.v3",
+        "producer_version" => "2026-08-07.1",
+        "source_system_id" => "wordpress_tickera:" <> String.duplicate("a", 64),
+        "discovery_snapshot_id" => "snapshot-1",
+        "source_snapshot_at" => "2026-08-07T09:00:00.000000Z",
+        "evidence_origin" => "native"
+      },
+      "event_actions" => [event_create(2), event_create(1)],
+      "ticket_type_actions" => [ticket_create(20), ticket_create(10)],
+      "product_mapping_actions" => [mapping_create(20), mapping_create(10)],
+      "findings" => [
+        v3_finding("blocking", "source_risk.lifecycle_draft"),
+        v3_finding("info", "existing_mapping_adopted")
+      ],
+      "canonical_source_risk_facts" => [fact(20), fact(10)],
+      "canonical_source_risk_findings" => [
+        v3_risk_finding("source_risk.lifecycle_draft", "explicit_risk"),
+        v3_risk_finding("contract.evidence_conflict", "blocking_conflict")
+      ],
+      "historical_impact" => valid_snapshot()["historical_impact"],
+      "identity_membership_proof" => valid_snapshot()["identity_membership_proof"],
+      "touched_identifiers" => valid_snapshot()["touched_identifiers"]
+    }
+  end
+
+  defp v3_finding(severity, code) do
+    %{
+      "severity" => severity,
+      "code" => code,
+      "target_type" => "run",
+      "target_id" => nil,
+      "context" => %{"disposition" => "explicit_risk", "dimension_local_only" => true}
+    }
+  end
+
+  defp v3_risk_finding(qualified_finding_id, disposition) do
+    %{
+      "qualified_finding_id" => qualified_finding_id,
+      "severity" => "blocking",
+      "disposition" => disposition,
+      "dimension_local_only" => true,
+      "implies_apply_eligible" => false
+    }
+  end
+
+  defp fact(id) do
+    %{
+      "run_id" => "snapshot-1",
+      "dimension" => "lifecycle",
+      "semantic_scope" => "parent_product",
+      "target" => %{"woo_product_id" => id},
+      "authority_slot" => "slot.lifecycle.wp_post_status",
+      "authority" => "auth.wp_post_status",
+      "state" => "present",
+      "completeness" => "exhaustive",
+      "origin" => "native",
+      "value" => "draft",
+      "provenance" => [
+        %{
+          "discovery_snapshot_id" => "snapshot-1",
+          "producer_source_key" => "wp_posts.post_status",
+          "raw_producer_code" => "private_product",
+          "woo_product_id" => id
+        },
+        %{
+          "discovery_snapshot_id" => "snapshot-1",
+          "producer_source_key" => "wp_posts.post_status",
+          "raw_producer_code" => "draft_product",
+          "woo_product_id" => id
+        }
+      ]
+    }
+  end
 
   defp valid_snapshot do
     %{

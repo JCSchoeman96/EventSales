@@ -22,6 +22,7 @@ defmodule EventSales.Ingestion.Workers.ApplyTickeraCatalogWorker do
 
   @failure_transition_statuses [:queued, :discovering, :dry_run_ready]
   @terminal_statuses [:cancelled, :applying, :applied, :failed]
+  @review_only_snapshot_version "tickera_catalog_plan.v3"
 
   @impl Oban.Worker
   def perform(%Oban.Job{
@@ -43,11 +44,16 @@ defmodule EventSales.Ingestion.Workers.ApplyTickeraCatalogWorker do
            ),
          {:ok, %TickeraCatalogSyncRun{} = run} <-
            Ash.get(TickeraCatalogSyncRun, run_id, domain: Ingestion),
+         :ok <- reject_review_only_snapshot(run),
          {:ok, _applied} <-
            Applier.apply(run.id, dry_run_hash, automatic_decision_id: decision_id),
          :ok <- PubSub.broadcast(run.id, :catalog_sync_applied, %{run_id: run.id}) do
       :ok
     else
+      {:error, :unsupported_snapshot_version} ->
+        _result = TickeraCatalogAutoApply.record_apply_audit(decision_id, :claim_rejected)
+        :discard
+
       {:error, reason}
       when reason in [
              :automatic_claim_rejected,
@@ -71,17 +77,35 @@ defmodule EventSales.Ingestion.Workers.ApplyTickeraCatalogWorker do
       when is_binary(run_id) and is_binary(dry_run_hash) do
     with {:ok, %TickeraCatalogSyncRun{} = run} <-
            Ash.get(TickeraCatalogSyncRun, run_id, domain: Ingestion),
+         :ok <- reject_review_only_snapshot(run),
          {:ok, _applied} <- Applier.apply(run.id, dry_run_hash),
          :ok <- PubSub.broadcast(run.id, :catalog_sync_applied, %{run_id: run.id}) do
       :ok
     else
       {:ok, nil} -> :discard
+      {:error, :unsupported_snapshot_version} -> :discard
       {:error, :run_not_ready} -> discard_stale_run(run_id)
       {:error, reason} -> fail_run(run_id, reason)
     end
   end
 
   def perform(_job), do: :discard
+
+  # Defense in depth: reject plan.v3 before Applier so a stale/wrong hash never
+  # reaches Applier hash validation first.
+  defp reject_review_only_snapshot(%TickeraCatalogSyncRun{} = run) do
+    if review_only_snapshot?(run.plan_snapshot) do
+      {:error, :unsupported_snapshot_version}
+    else
+      :ok
+    end
+  end
+
+  defp review_only_snapshot?(%{"snapshot_schema_version" => @review_only_snapshot_version}),
+    do: true
+
+  defp review_only_snapshot?(%{snapshot_schema_version: @review_only_snapshot_version}), do: true
+  defp review_only_snapshot?(_snapshot), do: false
 
   @doc false
   def fail_run(run_id, reason, opts \\ []) do

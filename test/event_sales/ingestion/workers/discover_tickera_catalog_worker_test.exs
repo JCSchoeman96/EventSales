@@ -1,12 +1,105 @@
 defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorkerTest do
   use EventSales.DataCase, async: false
+  use Oban.Testing, repo: EventSales.Repo
+
+  require Ash.Query
 
   alias EventSales.Catalog.TickeraCatalog.DiscoveryResult
   alias EventSales.Catalog.TickeraCatalog.PubSub
+  alias EventSales.Catalog.TickeraCatalog.SourceRiskV3.{CanonicalFact, FindingPolicy}
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.{TickeraCatalogSyncFinding, TickeraCatalogSyncRun}
   alias EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker
+  alias EventSales.Ingestion.Workers.EvaluateTickeraCatalogAutoApplyWorker
   alias EventSales.TestSupport.{CatalogSyncRunHelpers, SalesHelpers, TickeraCatalogFixtures}
+
+  defmodule NativeV3DiscoverySource do
+    @behaviour EventSales.Catalog.TickeraCatalog.DiscoverySource
+
+    alias EventSales.Catalog.TickeraCatalog.DiscoveryResult
+    alias EventSales.Catalog.TickeraCatalog.SourceRiskV3.{CanonicalFact, FindingPolicy}
+    alias EventSales.TestSupport.TickeraCatalogFixtures
+
+    @impl true
+    def discover(_source_system_id, _scope) do
+      {:ok,
+       %DiscoveryResult{
+         schema_version: "2026-08-07.v3",
+         auto_apply_proof_complete?: false,
+         origin: :human_admin,
+         events: [TickeraCatalogFixtures.zero_product_event()],
+         catalog_rows: [TickeraCatalogFixtures.vwg_row()],
+         source_snapshot_at: ~U[2026-08-07 09:00:00Z],
+         canonical_contract_version: "source_risk.v3",
+         producer_version: "2026-08-07.1",
+         source_system_id: "wordpress_tickera:" <> String.duplicate("a", 64),
+         discovery_snapshot_id: "native-snapshot-1",
+         normalization_mode: :native_v3_review,
+         evidence_origin: :native,
+         canonical_source_risk_facts: [fact()],
+         canonical_source_risk_findings: [FindingPolicy.evaluate(fact())]
+       }}
+    end
+
+    def fact do
+      %CanonicalFact{
+        run_id: "native-snapshot-1",
+        dimension: "lifecycle",
+        semantic_scope: "parent_product",
+        target: %{woo_product_id: 109_740},
+        authority_slot: "slot.lifecycle.wp_post_status",
+        authority: "auth.wp_post_status",
+        state: "present",
+        completeness: "exhaustive",
+        origin: "native",
+        value: "draft",
+        provenance: [
+          %{
+            "discovery_snapshot_id" => "native-snapshot-1",
+            "producer_version" => "2026-08-07.1",
+            "producer_source_key" => "wp_posts.post_status",
+            "woo_product_id" => 109_740
+          }
+        ]
+      }
+    end
+  end
+
+  defmodule UnpersistableNativeFindingDiscoverySource do
+    @behaviour EventSales.Catalog.TickeraCatalog.DiscoverySource
+
+    alias EventSales.Catalog.TickeraCatalog.DiscoveryResult
+    alias EventSales.TestSupport.TickeraCatalogFixtures
+
+    @impl true
+    def discover(_source_system_id, _scope) do
+      {:ok,
+       %DiscoveryResult{
+         schema_version: "2026-08-07.v3",
+         auto_apply_proof_complete?: false,
+         origin: :human_admin,
+         events: [TickeraCatalogFixtures.zero_product_event()],
+         catalog_rows: [TickeraCatalogFixtures.vwg_row()],
+         source_snapshot_at: ~U[2026-08-07 09:00:00Z],
+         canonical_contract_version: "source_risk.v3",
+         producer_version: "2026-08-07.1",
+         source_system_id: "wordpress_tickera:" <> String.duplicate("a", 64),
+         discovery_snapshot_id: "native-snapshot-oversized",
+         normalization_mode: :native_v3_review,
+         evidence_origin: :native,
+         canonical_source_risk_facts: [],
+         canonical_source_risk_findings: [
+           %{
+             disposition: "explicit_risk",
+             severity: :blocking,
+             qualified_finding_id: "source_risk." <> String.duplicate("x", 120),
+             dimension_local_only?: false,
+             implies_apply_eligible?: false
+           }
+         ]
+       }}
+    end
+  end
 
   defmodule FailingDiscoverySource do
     @behaviour EventSales.Catalog.TickeraCatalog.DiscoverySource
@@ -339,6 +432,142 @@ defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorkerTest do
     assert run_id == run.id
   end
 
+  test "v2 ready plans still enqueue the AutoApply evaluation job" do
+    source = SalesHelpers.create_source_system!()
+
+    run =
+      CatalogSyncRunHelpers.create_queued_catalog_sync_run!(source.id, %{
+        "kind" => "manual_rows",
+        "events" => [TickeraCatalogFixtures.zero_product_event()],
+        "catalog_rows" => [TickeraCatalogFixtures.vwg_row()]
+      })
+
+    assert :ok = DiscoverTickeraCatalogWorker.perform(%Oban.Job{args: %{"run_id" => run.id}})
+
+    ready = Ash.get!(TickeraCatalogSyncRun, run.id, domain: Ingestion)
+
+    assert_enqueued(
+      worker: EvaluateTickeraCatalogAutoApplyWorker,
+      args: %{"run_id" => run.id, "dry_run_hash" => ready.dry_run_hash}
+    )
+  end
+
+  test "native v3 ready plans are review-only with durable findings and no AutoApply job" do
+    source = SalesHelpers.create_source_system!()
+
+    Application.put_env(:event_sales, :tickera_catalog_discovery_source, NativeV3DiscoverySource)
+
+    run =
+      CatalogSyncRunHelpers.create_queued_catalog_sync_run!(
+        source.id,
+        %{"kind" => "wordpress_feed", "mode" => "full"}
+      )
+
+    PubSub.subscribe(run.id)
+
+    assert :ok =
+             DiscoverTickeraCatalogWorker.perform(%Oban.Job{
+               args: %{"run_id" => run.id},
+               attempt: 1,
+               max_attempts: 3
+             })
+
+    ready = Ash.get!(TickeraCatalogSyncRun, run.id, domain: Ingestion)
+
+    assert ready.status == :dry_run_ready
+    assert ready.plan_snapshot["snapshot_schema_version"] == "tickera_catalog_plan.v3"
+    assert is_binary(ready.dry_run_hash)
+
+    refute_enqueued(worker: EvaluateTickeraCatalogAutoApplyWorker)
+
+    codes = run_finding_codes(run.id)
+    assert "source_risk.lifecycle_draft" in codes
+    assert Enum.all?(codes, &is_binary/1)
+
+    persisted =
+      TickeraCatalogSyncFinding
+      |> Ash.Query.filter(run_id == ^run.id and code == "source_risk.lifecycle_draft")
+      |> Ash.read_one!(domain: Ingestion)
+
+    assert persisted.severity == :blocking
+    assert persisted.metadata["disposition"] == "explicit_risk"
+
+    assert_receive {:catalog_sync_preview_ready, %{run_id: ready_id}}
+    assert ready_id == run.id
+  end
+
+  test "unpersistable native finding codes never become falsely dry_run_ready" do
+    source = SalesHelpers.create_source_system!()
+
+    Application.put_env(
+      :event_sales,
+      :tickera_catalog_discovery_source,
+      UnpersistableNativeFindingDiscoverySource
+    )
+
+    run =
+      CatalogSyncRunHelpers.create_queued_catalog_sync_run!(
+        source.id,
+        %{"kind" => "wordpress_feed", "mode" => "full"}
+      )
+
+    assert :discard =
+             DiscoverTickeraCatalogWorker.perform(%Oban.Job{
+               args: %{"run_id" => run.id},
+               attempt: 1,
+               max_attempts: 3
+             })
+
+    failed = Ash.get!(TickeraCatalogSyncRun, run.id, domain: Ingestion)
+
+    assert failed.status == :failed
+    refute failed.status == :dry_run_ready
+    assert run_finding_codes(run.id) == []
+    refute_enqueued(worker: EvaluateTickeraCatalogAutoApplyWorker)
+  end
+
+  test "native v3 retry replaces stale durable findings instead of duplicating them" do
+    source = SalesHelpers.create_source_system!()
+
+    Application.put_env(:event_sales, :tickera_catalog_discovery_source, NativeV3DiscoverySource)
+
+    run =
+      source.id
+      |> CatalogSyncRunHelpers.create_queued_catalog_sync_run!(%{
+        "kind" => "wordpress_feed",
+        "mode" => "full"
+      })
+      |> CatalogSyncRunHelpers.mark_discovering!(1)
+      |> CatalogSyncRunHelpers.mark_retry_scheduled!(%{
+        last_error: "catalog_feed_timeout",
+        retry_attempt: 1,
+        retry_max_attempts: 3
+      })
+
+    for code <- ["source_risk.lifecycle_draft", "stale_partial_finding"] do
+      Ash.create!(
+        TickeraCatalogSyncFinding,
+        %{run_id: run.id, severity: :warning, code: code, message: "stale #{code}"},
+        action: :create,
+        domain: Ingestion
+      )
+    end
+
+    assert :ok =
+             DiscoverTickeraCatalogWorker.perform(%Oban.Job{
+               args: %{"run_id" => run.id},
+               attempt: 2,
+               max_attempts: 3
+             })
+
+    codes = run_finding_codes(run.id)
+
+    assert Ash.get!(TickeraCatalogSyncRun, run.id, domain: Ingestion).status == :dry_run_ready
+    refute "stale_partial_finding" in codes
+    assert Enum.count(codes, &(&1 == "source_risk.lifecycle_draft")) == 1
+    refute_enqueued(worker: EvaluateTickeraCatalogAutoApplyWorker)
+  end
+
   test "stores bounded feed discovery errors" do
     cases = [
       {:misconfigured, "catalog_feed_misconfigured"},
@@ -396,6 +625,14 @@ defmodule EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorkerTest do
     for reason <- [:timeout, :rate_limited, :server_error, :transport_error] do
       assert DiscoverTickeraCatalogWorker.retryable_failure?(reason)
     end
+  end
+
+  defp run_finding_codes(run_id) do
+    TickeraCatalogSyncFinding
+    |> Ash.Query.filter(run_id == ^run_id)
+    |> Ash.read!(domain: Ingestion)
+    |> Enum.map(& &1.code)
+    |> Enum.sort()
   end
 
   defp restore_env(key, nil), do: Application.delete_env(:event_sales, key)

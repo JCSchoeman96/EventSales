@@ -16,6 +16,7 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
 
   @default_limit 50
   @active_constraint "ingestion_tickera_catalog_sync_runs_one_active_per_source_idx"
+  @review_only_snapshot_version "tickera_catalog_plan.v3"
   @run_summary_fields [
     :id,
     :source_system_id,
@@ -478,8 +479,18 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
   defp validate_apply_ready(run, dry_run_hash) do
     with :ok <- validate_apply_status(run),
          :ok <- validate_apply_hash(run, dry_run_hash),
-         {:ok, snapshot} <- fetch_plan_snapshot(run) do
+         {:ok, snapshot} <- fetch_plan_snapshot(run),
+         :ok <- validate_supported_snapshot_version(snapshot) do
       validate_no_blocking_findings(snapshot)
+    end
+  end
+
+  # Review-only `tickera_catalog_plan.v3` can never be queued for Apply.
+  defp validate_supported_snapshot_version(snapshot) do
+    if value(snapshot, "snapshot_schema_version") == @review_only_snapshot_version do
+      {:error, :unsupported_snapshot_version}
+    else
+      :ok
     end
   end
 
@@ -531,6 +542,7 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
   defp sanitize_error(:stale_dry_run_hash), do: :stale_dry_run_hash
   defp sanitize_error(:missing_plan_snapshot), do: :missing_plan_snapshot
   defp sanitize_error(:blocking_findings), do: :blocking_findings
+  defp sanitize_error(:unsupported_snapshot_version), do: :unsupported_snapshot_version
   defp sanitize_error(:invalid_reason_code), do: :invalid_reason_code
   defp sanitize_error(:reason_details_required), do: :reason_details_required
   defp sanitize_error(:reason_details_too_long), do: :reason_details_too_long

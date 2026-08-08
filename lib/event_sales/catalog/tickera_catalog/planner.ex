@@ -18,35 +18,43 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
     SnapshotCanonicalizer
   }
 
+  alias EventSales.Catalog.TickeraCatalog.SourceRiskV3.CanonicalFact
+
   alias EventSales.Ingestion.TickeraCatalogHistoricalImpact
+
+  @native_source_schema_version "2026-08-07.v3"
+  @native_canonical_contract_version "source_risk.v3"
+  @native_producer_version "2026-08-07.1"
+  @native_severities [:info, :warning, :blocking]
 
   @spec plan(Ecto.UUID.t(), DiscoveryResult.t(), keyword()) :: {:ok, Plan.t()} | {:error, term()}
   def plan(source_system_id, %DiscoveryResult{} = discovery_result, opts \\ [])
       when is_binary(source_system_id) do
-    with {:ok, %{rows: rows, findings: normalizer_findings, source_risks: source_risks}} <-
+    with :ok <- validate_normalization_mode(discovery_result),
+         {:ok, %{rows: rows, findings: normalizer_findings, source_risks: source_risks}} <-
            Normalizer.normalize(discovery_result),
+         {:ok, native_findings} <- native_source_risk_findings(discovery_result),
          {:ok, planned} <- plan_rows(source_system_id, rows),
          {:ok, historical_impact} <-
            TickeraCatalogHistoricalImpact.forecast(
              source_system_id,
              Map.merge(planned, %{source_snapshot_at: discovery_result.source_snapshot_at}),
              Keyword.get(opts, :historical_impact_opts, [])
+           ),
+         findings <-
+           normalizer_findings
+           |> Enum.concat(planned.findings)
+           |> maybe_vwg_preserved(rows, planned)
+           |> Enum.concat(native_findings),
+         {:ok, snapshot, hash} <-
+           build_snapshot(
+             source_system_id,
+             discovery_result,
+             planned,
+             findings,
+             source_risks,
+             historical_impact
            ) do
-      findings =
-        normalizer_findings
-        |> Enum.concat(planned.findings)
-        |> maybe_vwg_preserved(rows, planned)
-
-      {snapshot, hash} =
-        build_snapshot(
-          source_system_id,
-          discovery_result,
-          planned,
-          findings,
-          source_risks,
-          historical_impact
-        )
-
       {:ok,
        %Plan{
          event_changes: planned.event_changes,
@@ -60,6 +68,88 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
          dry_run_hash: hash,
          plan_snapshot: snapshot
        }}
+    end
+  end
+
+  defp validate_normalization_mode(%DiscoveryResult{normalization_mode: :legacy_v2_operational}),
+    do: :ok
+
+  defp validate_normalization_mode(%DiscoveryResult{
+         normalization_mode: :native_v3_review,
+         schema_version: @native_source_schema_version,
+         canonical_contract_version: @native_canonical_contract_version,
+         producer_version: @native_producer_version,
+         evidence_origin: :native
+       }),
+       do: :ok
+
+  defp validate_normalization_mode(%DiscoveryResult{normalization_mode: :native_v3_review}),
+    do: {:error, :inconsistent_native_v3_discovery}
+
+  defp validate_normalization_mode(_discovery), do: {:error, :unsupported_normalization_mode}
+
+  defp native_source_risk_findings(%DiscoveryResult{
+         normalization_mode: :native_v3_review,
+         canonical_source_risk_findings: results
+       })
+       when is_list(results) do
+    Enum.reduce_while(results, {:ok, []}, fn result, {:ok, acc} ->
+      case native_finding(result) do
+        {:ok, finding} -> {:cont, {:ok, [finding | acc]}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, findings} -> {:ok, Enum.reverse(findings)}
+      error -> error
+    end
+  end
+
+  defp native_source_risk_findings(_discovery), do: {:ok, []}
+
+  # Projection only. Severity and disposition are owned by SourceRiskV3.FindingPolicy;
+  # the planner never re-evaluates policy and never creates atoms from producer input.
+  defp native_finding(result) when is_map(result) do
+    code = native_field(result, :qualified_finding_id)
+    severity = native_field(result, :severity)
+    disposition = native_field(result, :disposition)
+
+    cond do
+      not (is_binary(code) and code != "" and severity in @native_severities and
+               is_binary(disposition)) ->
+        {:error, :invalid_native_source_risk_finding}
+
+      byte_size(String.trim(code)) > 120 ->
+        # Never truncate/alias. Oversized codes cannot become falsely dry_run_ready.
+        {:error, :unpersistable_native_finding_code}
+
+      true ->
+        {:ok,
+         %Finding{
+           severity: severity,
+           code: code,
+           message: "Native source-risk finding: #{code} (#{disposition})",
+           metadata: native_finding_metadata(result, disposition)
+         }}
+    end
+  end
+
+  defp native_finding(_result), do: {:error, :invalid_native_source_risk_finding}
+
+  defp native_finding_metadata(result, disposition) do
+    case native_field(result, :dimension_local_only?) do
+      value when is_boolean(value) ->
+        %{"disposition" => disposition, "dimension_local_only" => value}
+
+      _other ->
+        %{"disposition" => disposition}
+    end
+  end
+
+  defp native_field(result, key) do
+    case Map.fetch(result, key) do
+      {:ok, value} -> value
+      :error -> Map.get(result, Atom.to_string(key))
     end
   end
 
@@ -365,6 +455,43 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
 
   defp build_snapshot(
          source_system_id,
+         %DiscoveryResult{normalization_mode: :native_v3_review} = discovery,
+         planned,
+         findings,
+         _source_risks,
+         historical_impact
+       ) do
+    snapshot = %{
+      "snapshot_schema_version" => SnapshotCanonicalizer.v3_schema_version(),
+      "source_system_id" => source_system_id,
+      "origin" => Atom.to_string(discovery.origin),
+      "source" => v3_source(discovery),
+      "event_actions" => json_safe(planned.event_changes),
+      "ticket_type_actions" => json_safe(planned.ticket_type_changes),
+      "product_mapping_actions" => json_safe(planned.product_mapping_changes),
+      "findings" =>
+        findings |> Enum.map(&v3_finding_snapshot/1) |> Enum.sort_by(&v3_finding_sort_key/1),
+      "canonical_source_risk_facts" =>
+        discovery.canonical_source_risk_facts
+        |> CanonicalFact.sort_facts()
+        |> Enum.map(&v3_fact_snapshot/1),
+      "canonical_source_risk_findings" =>
+        discovery.canonical_source_risk_findings
+        |> Enum.map(&v3_risk_finding_snapshot/1)
+        |> Enum.sort_by(&{&1["qualified_finding_id"], &1["severity"], &1["disposition"]}),
+      "historical_impact" => v2_historical_impact(historical_impact),
+      "identity_membership_proof" => identity_membership_proof(source_system_id, planned),
+      "touched_identifiers" => touched_identifiers(planned)
+    }
+
+    case SnapshotCanonicalizer.canonicalize(snapshot) do
+      {:ok, _bytes, hash} -> {:ok, snapshot, hash}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp build_snapshot(
+         source_system_id,
          %DiscoveryResult{schema_version: "2026-07-22.v2"} = discovery,
          planned,
          findings,
@@ -386,7 +513,7 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
     }
 
     {:ok, _bytes, hash} = SnapshotCanonicalizer.canonicalize(snapshot)
-    {snapshot, hash}
+    {:ok, snapshot, hash}
   end
 
   defp build_snapshot(
@@ -410,17 +537,95 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
       })
 
     hash = hash_snapshot(snapshot)
-    {Map.put(snapshot, "dry_run_hash", hash), hash}
+    {:ok, Map.put(snapshot, "dry_run_hash", hash), hash}
+  end
+
+  defp v3_source(%DiscoveryResult{} = discovery) do
+    %{
+      "schema_version" => discovery.schema_version,
+      "canonical_contract_version" => discovery.canonical_contract_version,
+      "producer_version" => discovery.producer_version,
+      "source_system_id" => discovery.source_system_id,
+      "discovery_snapshot_id" => discovery.discovery_snapshot_id,
+      "source_snapshot_at" => json_safe(discovery.source_snapshot_at),
+      "evidence_origin" => Atom.to_string(discovery.evidence_origin)
+    }
+  end
+
+  defp v3_finding_snapshot(%Finding{} = finding) do
+    {target_type, target_id} = finding_target(finding)
+
+    %{
+      "severity" => Atom.to_string(finding.severity),
+      "code" => to_string(finding.code),
+      "target_type" => target_type,
+      "target_id" => target_id,
+      "context" => v3_finding_context(finding)
+    }
+  end
+
+  defp v3_finding_context(%Finding{metadata: metadata}) when is_map(metadata) do
+    %{}
+    |> maybe_put_context(
+      "event_lifecycle",
+      metadata["event_lifecycle"],
+      &(&1 in ~w(past current future unknown))
+    )
+    |> maybe_put_context("disposition", metadata["disposition"], &is_binary/1)
+    |> maybe_put_context("dimension_local_only", metadata["dimension_local_only"], &is_boolean/1)
+  end
+
+  defp v3_finding_context(_finding), do: %{}
+
+  defp maybe_put_context(context, key, value, valid?) do
+    if valid?.(value), do: Map.put(context, key, value), else: context
+  end
+
+  defp v3_finding_sort_key(finding),
+    do: {finding["severity"], finding["code"], finding["target_type"], finding["target_id"] || 0}
+
+  defp v3_fact_snapshot(%CanonicalFact{} = fact) do
+    %{
+      "run_id" => fact.run_id,
+      "dimension" => fact.dimension,
+      "semantic_scope" => fact.semantic_scope,
+      "target" => Map.new(fact.target, fn {key, value} -> {to_string(key), value} end),
+      "authority_slot" => fact.authority_slot,
+      "authority" => fact.authority,
+      "state" => fact.state,
+      "completeness" => fact.completeness,
+      "origin" => fact.origin,
+      "value" => fact.value,
+      "provenance" =>
+        fact.provenance
+        |> CanonicalFact.sort_provenance_records()
+        |> Enum.map(fn record ->
+          Map.new(record, fn {key, value} -> {to_string(key), value} end)
+        end)
+    }
+  end
+
+  defp v3_risk_finding_snapshot(result) do
+    %{
+      "qualified_finding_id" => native_field(result, :qualified_finding_id),
+      "severity" => to_string(native_field(result, :severity)),
+      "disposition" => native_field(result, :disposition),
+      "dimension_local_only" => native_field(result, :dimension_local_only?) == true,
+      "implies_apply_eligible" => native_field(result, :implies_apply_eligible?) == true
+    }
+  end
+
+  defp finding_target(%Finding{} = finding) do
+    cond do
+      finding.woo_variation_id -> {"variation", finding.woo_variation_id}
+      finding.woo_product_id -> {"product", finding.woo_product_id}
+      finding.tickera_event_id -> {"event", finding.tickera_event_id}
+      true -> {"run", nil}
+    end
   end
 
   defp v2_finding_snapshot(%Finding{} = finding) do
-    {target_type, target_id} =
-      cond do
-        finding.woo_variation_id -> {"variation", finding.woo_variation_id}
-        finding.woo_product_id -> {"product", finding.woo_product_id}
-        finding.tickera_event_id -> {"event", finding.tickera_event_id}
-        true -> {"run", nil}
-      end
+    {target_type, target_id} = finding_target(finding)
 
     context =
       case finding.metadata["event_lifecycle"] do
