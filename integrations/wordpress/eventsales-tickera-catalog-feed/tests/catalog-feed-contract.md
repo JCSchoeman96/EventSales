@@ -451,6 +451,33 @@ larger pages are safe when products share events or carry several variations.
 Conflict preservation can add items beyond the identity count, so the bound is
 checked against the emitted records rather than the identity count.
 
+### Phase 5D evidence-density preflight
+
+Phase 5D must preflight the producer page size before consuming the one
+reserved fresh native-v3 dry-run. Do not raise the bound after discovery has
+started.
+
+Current worst-case density (fully distinct variation observations):
+
+```text
+non-variation observation   10 evidence
+variation observation       11 evidence
+45 variation rows           495 evidence  → accepted
+46 variation rows           506 evidence  → fail closed
+```
+
+Guaranteed-safe Phase 5D preflight setting:
+
+```text
+TICKERA_CATALOG_FEED_PER_PAGE <= 45
+```
+
+This is a Phase 5D execution precondition only. It does not change the native
+hard producer maximum (`per_page <= 100`) and must not be used to weaken the
+500-evidence fail-closed bound. Sentinel `LIMIT per_page + 1` rows used for
+`has_more` are sliced away before native evidence generation, so evidence
+density is based on `per_page`, not `per_page + 1`.
+
 ### Oversized and malformed raw producer codes
 
 `raw_producer_code` is bounded to 64 bytes and must be valid UTF-8. An

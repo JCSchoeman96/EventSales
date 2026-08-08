@@ -761,6 +761,46 @@ T::ok(
     && strpos($catalogue_sql, 'MAX(ticket_template_meta.meta_value)') === false
 );
 
+// has_more uses LIMIT per_page + 1. The sentinel must never contribute evidence.
+T::ok(
+    'catalogue SQL LIMIT fetches the has_more sentinel (per_page + 1)',
+    count($catalogue_values) >= 2
+    && (int) $catalogue_values[count($catalogue_values) - 2] === 101
+    && (int) $catalogue_values[count($catalogue_values) - 1] === 0
+);
+T::ok(
+    'sentinel observations are sliced before native evidence generation',
+    (static function (string $source): bool {
+        $slice = strpos($source, "array_slice(\$catalog['observations'], 0, \$per_page)");
+        $evidence = strpos($source, 'build_native_evidence($observations');
+
+        return $slice !== false && $evidence !== false && $slice < $evidence;
+    })($plugin_source)
+);
+
+// Subscription supporting-meta MAX aggregation is boolean detection only:
+// any positive proof → present; otherwise unknown. It must not emit a varying
+// canonical subscription value that would require F2-style multiplicity.
+T::ok(
+    'subscription meta remains MAX-aggregated only as positive boolean support',
+    strpos($catalogue_sql, "MAX(CASE WHEN pm.meta_key = '_subscription_period'") !== false
+    && strpos($catalogue_sql, "MAX(CASE WHEN pm.meta_key = '_subscription_price'") !== false
+);
+$subscription_present = find_item(
+    Feed::build_native_evidence_for_row(observation(['is_subscription' => true]), SNAPSHOT_ID),
+    'subscription',
+    'parent_product'
+);
+$subscription_unknown = find_item(
+    Feed::build_native_evidence_for_row(observation(['is_subscription' => false]), SNAPSHOT_ID),
+    'subscription',
+    'parent_product'
+);
+T::same('positive subscription proof is present without a canonical value', 'present', $subscription_present['state']);
+T::ok('present subscription carries no varying value', !array_key_exists('value', $subscription_present));
+T::same('no positive subscription proof stays unknown', 'unknown', $subscription_unknown['state']);
+T::ok('unknown subscription is never absent', $subscription_unknown['state'] !== 'absent');
+
 // ---------------------------------------------------------------------------
 T::section('typed evidence for a fixture row');
 
@@ -1279,20 +1319,31 @@ for ($i = 0; $i < 45; $i++) {
     ]);
 }
 $under_bound_evidence = Feed::build_native_evidence($under_bound, SNAPSHOT_ID);
-T::same('45 fully distinct rows stay inside the bound', 495, count($under_bound_evidence));
+T::same('45 fully distinct variation rows stay inside the bound', 495, count($under_bound_evidence));
 T::ok('page bound is 500 items', count($under_bound_evidence) <= 500);
+T::same(
+    'worst-case variation density remains 11 evidence per row',
+    11,
+    (int) (count($under_bound_evidence) / count($under_bound))
+);
 
-$over_bound = $under_bound;
-for ($i = 45; $i < 60; $i++) {
-    $over_bound[] = observation([
-        'woo_product_id' => 200000 + $i,
-        'woo_variation_id' => 300000 + $i,
-        'variation_status' => 'publish',
-        'tickera_event_id' => 400000 + $i,
-    ]);
+// Exact Phase 5D worst-case boundary: 46 distinct variation observations emit
+// 506 evidence records and must fail closed. Do not weaken this to a looser
+// oversize fixture — 506 is the first closed failure for current density.
+$exact_over_bound = $under_bound;
+$exact_over_bound[] = observation([
+    'woo_product_id' => 200045,
+    'woo_variation_id' => 300045,
+    'variation_status' => 'publish',
+    'tickera_event_id' => 400045,
+]);
+$exact_over_density = 0;
+foreach ($exact_over_bound as $row) {
+    $exact_over_density += count(Feed::build_native_evidence_for_row($row, SNAPSHOT_ID));
 }
-T::throws('exceeding the evidence bound fails closed', static function () use ($over_bound): void {
-    Feed::build_native_evidence($over_bound, SNAPSHOT_ID);
+T::same('46 fully distinct variation rows emit 506 evidence before the page bound', 506, $exact_over_density);
+T::throws('46 variation rows fail closed at 506 evidence', static function () use ($exact_over_bound): void {
+    Feed::build_native_evidence($exact_over_bound, SNAPSHOT_ID);
 }, 'evidence_page_limit_exceeded');
 
 T::same('an empty page emits no evidence', [], Feed::build_native_evidence([], SNAPSHOT_ID));
