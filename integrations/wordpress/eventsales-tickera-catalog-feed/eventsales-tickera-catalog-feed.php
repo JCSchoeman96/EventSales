@@ -994,6 +994,39 @@ final class EventSales_Tickera_Catalog_Feed
     }
 
     /**
+     * Native v3 event-relationship join and filter contract.
+     *
+     * Both relationship joins are always LEFT JOINs so a published ticket
+     * product with a missing, malformed, or unresolved `_event_name` still
+     * reaches evidence generation as absent/invalid instead of vanishing from
+     * discovery. The REGEXP guard runs before CAST so MySQL never coerces
+     * `55501abc` into a false relationship, and public mode keeps filtering
+     * resolved events without deleting broken links from the page.
+     *
+     * @return array{
+     *     event_meta_join: string,
+     *     event_join: string,
+     *     event_join_predicate: string,
+     *     public_event_where: string,
+     *     uses_inner_event_joins: bool
+     * }
+     */
+    public static function native_catalog_relationship_sql(string $posts = 'wp_posts', string $postmeta = 'wp_postmeta'): array
+    {
+        $event_join_predicate = "ev.post_type = 'tc_events'"
+            . " AND event_meta.meta_value REGEXP '^[1-9][0-9]*$'"
+            . ' AND ev.ID = CAST(event_meta.meta_value AS UNSIGNED)';
+
+        return [
+            'event_meta_join' => "LEFT JOIN {$postmeta} event_meta ON event_meta.post_id = p.ID AND event_meta.meta_key = '_event_name'",
+            'event_join' => "LEFT JOIN {$posts} ev ON " . $event_join_predicate,
+            'event_join_predicate' => $event_join_predicate,
+            'public_event_where' => "(ev.ID IS NULL OR ev.post_status = 'publish')",
+            'uses_inner_event_joins' => false,
+        ];
+    }
+
+    /**
      * @param array<string, mixed> $params
      * @return array{rows: array<int, array<string, mixed>>, observations: array<int, array<string, mixed>>}
      */
@@ -1010,10 +1043,12 @@ final class EventSales_Tickera_Catalog_Feed
         ];
         $values = [];
 
+        $relationship = self::native_catalog_relationship_sql($posts, $postmeta);
+
         $joins = [
             "JOIN {$postmeta} is_ticket ON is_ticket.post_id = p.ID AND is_ticket.meta_key = '_tc_is_ticket'",
-            ($targeted ? 'LEFT JOIN' : 'JOIN') . " {$postmeta} event_meta ON event_meta.post_id = p.ID AND event_meta.meta_key = '_event_name'",
-            ($targeted ? 'LEFT JOIN' : 'JOIN') . " {$posts} ev ON ev.ID = CAST(event_meta.meta_value AS UNSIGNED) AND ev.post_type = 'tc_events'",
+            $relationship['event_meta_join'],
+            $relationship['event_join'],
             "LEFT JOIN {$postmeta} pm ON pm.post_id = p.ID AND pm.meta_key IN (" . $this->sql_placeholders(count(self::ALLOWED_META_KEYS)) . ')',
             "LEFT JOIN {$posts} variation ON variation.post_parent = p.ID AND variation.post_type = 'product_variation'",
         ];
@@ -1021,7 +1056,7 @@ final class EventSales_Tickera_Catalog_Feed
 
         if (!$targeted) {
             $where[] = "p.post_status = 'publish'";
-            $where[] = "ev.post_status = 'publish'";
+            $where[] = $relationship['public_event_where'];
             $where[] = "(variation.ID IS NULL OR variation.post_status = 'publish')";
         } else {
             $where[] = "(variation.ID IS NULL OR variation.post_type = 'product_variation')";
@@ -1447,10 +1482,11 @@ final class EventSales_Tickera_Catalog_Feed
     /**
      * Builds the deduplicated, bounded native evidence list for one page.
      *
-     * Parent-level observations repeat across variation rows of the same
-     * product, so identity `(dimension, producer_scope, target)` is emitted
-     * once per page. Exceeding the page bound fails closed: evidence is never
-     * truncated.
+     * Producer dedup removes only fully identical raw evidence records. Same
+     * dimension/scope/target with different state, value, completeness, or
+     * provenance must both survive so Phoenix can collapse duplicates or emit
+     * blocking_conflict. Exceeding the page bound fails closed: evidence is
+     * never truncated.
      *
      * @param array<int, array<string, mixed>> $observations
      * @return array<int, array<string, mixed>>
@@ -1466,13 +1502,13 @@ final class EventSales_Tickera_Catalog_Feed
             }
 
             foreach (self::build_native_evidence_for_row($observation, $discovery_snapshot_id) as $item) {
-                $identity = $item['dimension'] . '|' . $item['producer_scope'] . '|' . self::canonical_json($item['target']);
+                $fingerprint = self::canonical_json($item);
 
-                if (isset($seen[$identity])) {
+                if (isset($seen[$fingerprint])) {
                     continue;
                 }
 
-                $seen[$identity] = true;
+                $seen[$fingerprint] = true;
                 $evidence[] = $item;
             }
         }
@@ -1592,8 +1628,18 @@ final class EventSales_Tickera_Catalog_Feed
     {
         $source_key = self::PRODUCER_SOURCE_KEYS['event_link'];
         $target = ['woo_product_id' => $product_id];
+        $reference = self::nullable_trimmed($event_reference_raw);
+        $parsed_reference = self::positive_int_or_null($reference);
+        $identity = ['woo_product_id' => $product_id];
 
-        if ($event_id !== null) {
+        // Positive present requires a valid raw positive-integer reference that
+        // resolves to the same tc_events id. Never trust SQL CAST alone.
+        if (
+            $reference !== null
+            && $parsed_reference !== null
+            && $event_id !== null
+            && $parsed_reference === $event_id
+        ) {
             return self::evidence_item(
                 'event_link',
                 'event_product_relationship',
@@ -1608,16 +1654,18 @@ final class EventSales_Tickera_Catalog_Feed
             );
         }
 
-        $reference = self::nullable_trimmed($event_reference_raw);
-        $identity = ['woo_product_id' => $product_id];
-
-        if ($reference !== null) {
-            // A reference exists but does not resolve to a tc_events post.
-            return self::evidence_item('event_link', 'event_product_relationship', $target, 'invalid', null, $source_key, 'exhaustive', $identity, $reference, $discovery_snapshot_id);
+        if ($reference === null && $event_id === null) {
+            // Absent is only claimed after an exhaustive no-reference observation.
+            return self::evidence_item('event_link', 'event_product_relationship', $target, 'absent', null, $source_key, 'exhaustive', $identity, null, $discovery_snapshot_id);
         }
 
-        // Absent is only claimed after an exhaustive no-reference observation.
-        return self::evidence_item('event_link', 'event_product_relationship', $target, 'absent', null, $source_key, 'exhaustive', $identity, null, $discovery_snapshot_id);
+        if ($reference === null && $event_id !== null) {
+            // Impossible observation: resolved event without a raw reference.
+            return self::evidence_item('event_link', 'event_product_relationship', $target, 'producer_error', null, $source_key, 'unknown', $identity, null, $discovery_snapshot_id);
+        }
+
+        // Malformed, non-positive, or unresolved raw relationship references.
+        return self::evidence_item('event_link', 'event_product_relationship', $target, 'invalid', null, $source_key, 'exhaustive', $identity, $reference, $discovery_snapshot_id);
     }
 
     /**
@@ -1648,15 +1696,17 @@ final class EventSales_Tickera_Catalog_Feed
         $type = self::nullable_trimmed($product_type);
 
         if ($type === null) {
-            return self::evidence_item('product_type', 'parent_product', $target, 'unknown', null, $source_key, 'unknown', $identity, null, $discovery_snapshot_id);
+            // Truly unevaluable product type — the source produced no observation.
+            return self::evidence_item('product_type', 'parent_product', $target, 'unsupported', null, $source_key, 'unknown', $identity, null, $discovery_snapshot_id);
         }
 
         if (in_array($type, self::SUPPORTED_PRODUCT_TYPES, true)) {
             return self::evidence_item('product_type', 'parent_product', $target, 'present', $type, $source_key, 'exhaustive', $identity, null, $discovery_snapshot_id);
         }
 
-        // Undeclared WooCommerce types fail closed with the raw code only.
-        return self::evidence_item('product_type', 'parent_product', $target, 'unsupported', null, $source_key, 'exhaustive', $identity, $type, $discovery_snapshot_id);
+        // An observed but undeclared runtime token fails closed as invalid.
+        // Do not treat it as unsupported (unsupported = cannot evaluate).
+        return self::evidence_item('product_type', 'parent_product', $target, 'invalid', null, $source_key, 'exhaustive', $identity, $type, $discovery_snapshot_id);
     }
 
     /**
@@ -1708,7 +1758,16 @@ final class EventSales_Tickera_Catalog_Feed
             }
         }
 
-        if ($raw_producer_code !== null && strlen($raw_producer_code) <= self::MAX_RAW_PRODUCER_CODE_BYTES) {
+        if ($raw_producer_code !== null) {
+            if (!is_string($raw_producer_code) || !self::valid_utf8_string($raw_producer_code)) {
+                throw new RuntimeException('invalid_raw_producer_code');
+            }
+
+            if (strlen($raw_producer_code) > self::MAX_RAW_PRODUCER_CODE_BYTES) {
+                // Oversized raw evidence fails closed. Never truncate or omit.
+                throw new RuntimeException('oversized_raw_producer_code');
+            }
+
             $provenance['raw_producer_code'] = $raw_producer_code;
         }
 
@@ -1727,6 +1786,15 @@ final class EventSales_Tickera_Catalog_Feed
         }
 
         return $item;
+    }
+
+    private static function valid_utf8_string(string $value): bool
+    {
+        if (function_exists('mb_check_encoding')) {
+            return mb_check_encoding($value, 'UTF-8');
+        }
+
+        return @preg_match('//u', $value) === 1;
     }
 
     private static function positive_int_or_null($value): ?int

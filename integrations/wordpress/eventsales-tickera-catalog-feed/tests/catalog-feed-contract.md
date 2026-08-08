@@ -321,14 +321,19 @@ lifecycle        event | parent_product | variation
                  invalid for any undeclared WordPress status, raw code in provenance
 
 ticket_template  parent_product
-                 present with the template id
+                 present with the template id, up to 64 bytes
                  absent after an exhaustive no-reference observation
-                 invalid when the stored value exceeds the value bound
+                 a stored value over 64 bytes fails the page closed rather than
+                 emitting invalid, because the value bound and the raw bound are
+                 both 64 bytes
 
 event_link       event_product_relationship
-                 present with the resolved tickera_event_id as an integer value
-                 invalid when a reference exists but does not resolve
+                 present only when the raw _event_name is a positive integer AND
+                 parses to exactly the resolved tickera_event_id
+                 invalid for a malformed, non-positive, unresolved, or
+                 disagreeing reference, raw code in provenance
                  absent only after an exhaustive no-reference observation
+                 producer_error when an event resolved with no raw reference
 
 subscription     parent_product
                  present for a positive subscription signal, no value
@@ -336,8 +341,9 @@ subscription     parent_product
 
 product_type     parent_product
                  present only with the supported value simple
-                 unsupported for any other declared type, raw code in provenance
-                 unknown when the type cannot be observed
+                 invalid for an observed but undeclared runtime type such as
+                 variable, grouped, or external, raw code in provenance
+                 unsupported when no type could be observed at all, no raw code
 
 payment_plan
 membership
@@ -346,14 +352,41 @@ add_on           parent_product
                  unsupported only, value null, never present or absent
 ```
 
+`invalid` and `unsupported` are not interchangeable. `invalid` means the producer
+made a real observation that the closed contract rejects, so the raw token is
+always carried in `raw_producer_code`. `unsupported` means the producer could not
+evaluate the dimension at all, so there is nothing raw to carry. An undeclared
+`product_type` such as `variable` is therefore `invalid`, never `unsupported`.
+
+### event_link resolution matrix
+
+```text
+raw           resolved event_id   state
+55501         55501               present, value 55501
+"  55501  "   55501               present, value 55501 (trimmed)
+55501         nil                 invalid, raw_producer_code 55501
+55501         55502               invalid, raw_producer_code 55501
+55501abc      55501               invalid, raw_producer_code 55501abc
+abc           nil                 invalid, raw_producer_code abc
+0 | -1        nil                 invalid, raw code preserved
+nil           nil                 absent
+nil           55501               producer_error
+```
+
+The `55501abc` row is the reason the producer never trusts the SQL join alone:
+MySQL `CAST('55501abc' AS UNSIGNED)` yields `55501`, which would fabricate a
+relationship that does not exist in the source. The raw reference is re-parsed in
+PHP and must equal the resolved id before `present` is claimed.
+
 ### Completeness policy
 
 ```text
 exhaustive   direct closed-authority reads and exhaustive no-reference proofs
-             (lifecycle present/invalid, ticket_template, event_link, product_type
-             present/unsupported)
+             (lifecycle present/invalid, ticket_template present/absent,
+             event_link present/absent/invalid, product_type present/invalid)
 partial      lifecycle missing, subscription present
-unknown      product_type unknown, subscription unknown, all capability dimensions
+unknown      product_type unsupported, event_link producer_error,
+             subscription unknown, all capability dimensions
 ```
 
 ### Variation observations
@@ -365,16 +398,76 @@ status is never copied onto a variation. A variation target always carries both
 ### Deduplication and bounds
 
 Parent-level and event-level observations repeat across the variation rows of the
-same product on one page. The producer emits each
-`(dimension, producer_scope, target)` identity once per page. All values behind a
-deduplicated identity come from the same aggregated SQL columns, so no
-observation is lost.
+same product on one page. The producer deduplicates on the complete canonical
+fingerprint of the evidence record, so only fully identical records collapse.
+
+```text
+identical dimension/scope/target/state/value/completeness/provenance  collapses
+any difference in state, value, completeness, or provenance           preserved
+```
+
+`(dimension, producer_scope, target)` is deliberately **not** the dedup key. When
+one product carries two conflicting observations of the same identity — for
+example a product that resolves to both event `10` and event `20` — both records
+must reach Phoenix so it can collapse them or raise `blocking_conflict`. A
+producer that kept only one would silently pick a winner and hide the conflict.
+Two different malformed references for the same identity are likewise two
+distinct `invalid` records, because their `raw_producer_code` differs.
 
 If a page would exceed 500 evidence items the producer fails closed with HTTP
 `500`. Evidence is never truncated. A page of fully distinct
 product/variation/event triples costs eleven items per row, so choose a
 `per_page` that fits the bound; `per_page=45` is safe in the worst case, and
 larger pages are safe when products share events or carry several variations.
+Conflict preservation can add items beyond the identity count, so the bound is
+checked against the emitted records rather than the identity count.
+
+### Oversized and malformed raw producer codes
+
+`raw_producer_code` is bounded to 64 bytes and must be valid UTF-8. An
+unemittable raw code is never truncated and never silently omitted, because an
+evidence record missing its raw token is indistinguishable from a clean read.
+The page fails closed instead:
+
+```text
+raw code longer than 64 bytes   RuntimeException oversized_raw_producer_code
+raw code that is not UTF-8      RuntimeException invalid_raw_producer_code
+```
+
+Both surface as HTTP `500` with no body. This applies to every raw-carrying
+dimension, including lifecycle statuses, ticket template ids, product types, and
+event references. A raw code of exactly 64 bytes is emitted normally, and the
+bound counts bytes rather than characters, so 33 two-byte characters fail closed.
+
+### Full-catalogue relationship discovery
+
+The catalogue query LEFT JOINs both relationship tables in every mode, so a
+published ticket product with a missing, malformed, or unresolved `_event_name`
+still reaches evidence generation instead of disappearing from discovery:
+
+```text
+LEFT JOIN <postmeta> event_meta ON event_meta.post_id = p.ID
+                              AND event_meta.meta_key = '_event_name'
+LEFT JOIN <posts> ev ON ev.post_type = 'tc_events'
+                    AND event_meta.meta_value REGEXP '^[1-9][0-9]*$'
+                    AND ev.ID = CAST(event_meta.meta_value AS UNSIGNED)
+```
+
+Rules:
+
+```text
+The joins are never switched to INNER based on targeting or include_private.
+The REGEXP guard runs before the CAST so a malformed reference cannot resolve.
+Public mode filters on (ev.ID IS NULL OR ev.post_status = 'publish'), which keeps
+  products whose event is missing or unresolved while still excluding products
+  attached to a non-published event.
+```
+
+The consequence is that broken event links remain discoverable as `invalid` or
+`absent` `event_link` evidence. Previously an unresolved reference removed the
+whole product row from a public page, which reported a broken catalogue as a
+clean one. The separate `events` listing query is unaffected: `tc_events` is its
+base table, so public mode still restricts it to published events.
 
 ## Structural transport rows
 
@@ -457,8 +550,8 @@ Expected:
 - The response is bounded to matching product or variation rows.
 - `filters` echoes the applied identifiers, so `discovery_snapshot_id` differs
   from a full-catalogue run.
-- Private, draft, subscription, unsupported-type, variation, missing-event, and
-  missing-template cases are expressed as typed evidence rather than raw
+- Private, draft, subscription, undeclared-type, variation, broken-event-link,
+  and missing-template cases are expressed as typed evidence rather than raw
   WordPress data.
 
 ## Incremental Lookup Check

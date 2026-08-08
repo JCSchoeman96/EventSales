@@ -551,6 +551,58 @@ T::ok('cache key carries the cache version prefix', strpos($key_a, 'eventsales_t
 T::ok('cache key fits a transient name', strlen($key_a) <= 172);
 
 // ---------------------------------------------------------------------------
+T::section('full-mode relationship discovery sql');
+
+$rel = Feed::native_catalog_relationship_sql();
+
+T::same('relationship seam exposes a closed key set', [
+    'event_join',
+    'event_join_predicate',
+    'event_meta_join',
+    'public_event_where',
+    'uses_inner_event_joins',
+], (static function (array $rel): array {
+    $keys = array_keys($rel);
+    sort($keys, SORT_STRING);
+
+    return $keys;
+})($rel));
+
+T::ok('event_meta is LEFT JOINed', strpos($rel['event_meta_join'], 'LEFT JOIN ') === 0);
+T::ok('tc_events is LEFT JOINed', strpos($rel['event_join'], 'LEFT JOIN ') === 0);
+T::same('full mode never uses inner event joins', false, $rel['uses_inner_event_joins']);
+T::ok('event_meta join is keyed on _event_name', strpos($rel['event_meta_join'], "event_meta.meta_key = '_event_name'") !== false);
+T::ok('event join is restricted to tc_events', strpos($rel['event_join_predicate'], "ev.post_type = 'tc_events'") !== false);
+
+// Public mode still filters resolved events, but an unresolved or missing
+// relationship must survive so event_link evidence can report it.
+T::ok('public mode keeps unresolved relationships', strpos($rel['public_event_where'], 'ev.ID IS NULL OR') !== false);
+T::ok('public mode still requires published resolved events', strpos($rel['public_event_where'], "ev.post_status = 'publish'") !== false);
+
+// MySQL would happily CAST '55501abc' to 55501, so the REGEXP guard has to run
+// before the CAST comparison or a malformed reference becomes a false link.
+T::ok('event join guards CAST with a positive-integer REGEXP', strpos($rel['event_join_predicate'], "REGEXP '^[1-9][0-9]*$'") !== false);
+T::ok(
+    'REGEXP guard precedes the CAST comparison',
+    strpos($rel['event_join_predicate'], 'REGEXP') < strpos($rel['event_join_predicate'], 'CAST(')
+);
+T::ok('event join compares the casted id', strpos($rel['event_join_predicate'], 'ev.ID = CAST(event_meta.meta_value AS UNSIGNED)') !== false);
+
+$prefixed = Feed::native_catalog_relationship_sql('es_posts', 'es_postmeta');
+T::ok('relationship joins honour the postmeta table', strpos($prefixed['event_meta_join'], 'es_postmeta ') !== false);
+T::ok('relationship joins honour the posts table', strpos($prefixed['event_join'], 'es_posts ') !== false);
+
+// Regression guards: the catalog query must build its relationship joins and
+// its public filter from this seam only, never from a targeting conditional.
+T::ok('relationship joins are no longer switched on targeting', strpos($plugin_source, "? 'LEFT JOIN' : 'JOIN'") === false);
+T::ok('catalog rows join through the seam', strpos($plugin_source, "\$relationship['event_meta_join']") !== false);
+T::ok('catalog rows resolve events through the seam', strpos($plugin_source, "\$relationship['event_join']") !== false);
+T::ok(
+    'catalog rows filter public events through the seam',
+    strpos($plugin_source, "\$where[] = \$relationship['public_event_where'];") !== false
+);
+
+// ---------------------------------------------------------------------------
 T::section('typed evidence for a fixture row');
 
 $happy = Feed::build_native_evidence_for_row(observation(), SNAPSHOT_ID);
@@ -663,14 +715,25 @@ T::same('missing template is absent', 'absent', $no_template['state']);
 T::ok('absent template carries no value', !array_key_exists('value', $no_template));
 T::same('absent template claims exhaustive no-ref proof', 'exhaustive', $no_template['completeness']);
 
-$oversized_template = find_item(
-    Feed::build_native_evidence_for_row(observation(['ticket_template_id' => str_repeat('9', 80)]), SNAPSHOT_ID),
+// An oversized template can neither be emitted as a value nor silently
+// dropped from provenance, so the page fails closed instead.
+T::throws('oversized template fails the page closed', static function (): void {
+    Feed::build_native_evidence_for_row(observation(['ticket_template_id' => str_repeat('9', 80)]), SNAPSHOT_ID);
+}, 'oversized_raw_producer_code');
+
+$bounded_template = find_item(
+    Feed::build_native_evidence_for_row(observation(['ticket_template_id' => str_repeat('9', 64)]), SNAPSHOT_ID),
     'ticket_template',
     'parent_product'
 );
-T::same('oversized template value is invalid', 'invalid', $oversized_template['state']);
-T::ok('oversized template emits no value', !array_key_exists('value', $oversized_template));
-T::ok('oversized raw code is not emitted unbounded', !array_key_exists('raw_producer_code', $oversized_template['provenance']));
+T::same('a template at the byte bound stays present', 'present', $bounded_template['state']);
+T::same('bounded template keeps its exact value', str_repeat('9', 64), $bounded_template['value']);
+
+// The value bound and the raw bound are both 64 bytes, so the first byte past
+// the bound fails the page closed and ticket_template invalid is unreachable.
+T::throws('one byte past the template bound fails closed', static function (): void {
+    Feed::build_native_evidence_for_row(observation(['ticket_template_id' => str_repeat('9', 65)]), SNAPSHOT_ID);
+}, 'oversized_raw_producer_code');
 
 $unresolved_link = find_item(
     Feed::build_native_evidence_for_row(observation(['tickera_event_id' => null, 'event_status' => null, 'event_reference_raw' => '99999']), SNAPSHOT_ID),
@@ -700,16 +763,207 @@ foreach ([true, false] as $is_subscription) {
     T::ok('subscription never claims absent (' . var_export($is_subscription, true) . ')', $item['state'] !== 'absent');
 }
 
-$unsupported_type = find_item(Feed::build_native_evidence_for_row(observation(['product_type' => 'variable']), SNAPSHOT_ID), 'product_type', 'parent_product');
-T::same('undeclared product type is unsupported', 'unsupported', $unsupported_type['state']);
-T::ok('unsupported product type carries no value', !array_key_exists('value', $unsupported_type));
-T::same('unsupported product type keeps the raw code', 'variable', $unsupported_type['provenance']['raw_producer_code']);
+// An observed but undeclared runtime token is a real conflicting observation,
+// so it is invalid rather than unsupported.
+$invalid_type = find_item(Feed::build_native_evidence_for_row(observation(['product_type' => 'variable']), SNAPSHOT_ID), 'product_type', 'parent_product');
+T::same('observed undeclared product type is invalid', 'invalid', $invalid_type['state']);
+T::ok('invalid product type carries no value', !array_key_exists('value', $invalid_type));
+T::same('invalid product type keeps the raw code', 'variable', $invalid_type['provenance']['raw_producer_code']);
 
-$unknown_type = find_item(Feed::build_native_evidence_for_row(observation(['product_type' => null]), SNAPSHOT_ID), 'product_type', 'parent_product');
-T::same('unobservable product type is unknown', 'unknown', $unknown_type['state']);
-T::ok('unknown product type carries no value', !array_key_exists('value', $unknown_type));
+// Unsupported means the producer could not evaluate the dimension at all.
+$unsupported_type = find_item(Feed::build_native_evidence_for_row(observation(['product_type' => null]), SNAPSHOT_ID), 'product_type', 'parent_product');
+T::same('unobservable product type is unsupported', 'unsupported', $unsupported_type['state']);
+T::ok('unsupported product type carries no value', !array_key_exists('value', $unsupported_type));
+T::same('unsupported product type cannot claim proof', 'unknown', $unsupported_type['completeness']);
+T::ok('unsupported product type has no raw code to keep', !array_key_exists('raw_producer_code', $unsupported_type['provenance']));
 
 T::same('a row without a product identity emits nothing', [], Feed::build_native_evidence_for_row(observation(['woo_product_id' => null]), SNAPSHOT_ID));
+
+// ---------------------------------------------------------------------------
+T::section('event link raw/resolved matrix');
+
+/**
+ * @return array<string, mixed>
+ */
+function event_link_for($raw, $event_id): array
+{
+    $row = Feed::build_native_evidence_for_row(
+        observation([
+            'event_reference_raw' => $raw,
+            'tickera_event_id' => $event_id,
+            'event_status' => $event_id === null ? null : 'publish',
+        ]),
+        SNAPSHOT_ID
+    );
+
+    return find_item($row, 'event_link', 'event_product_relationship');
+}
+
+// present is the only positive claim, and it requires a valid raw positive
+// integer that resolves to the same tc_events id.
+$matched = event_link_for('55501', 55501);
+T::same('matching raw and resolved id is present', 'present', $matched['state']);
+T::same('present event link value is the resolved id', 55501, $matched['value']);
+T::ok('present event link keeps no raw code', !array_key_exists('raw_producer_code', $matched['provenance']));
+T::same('present event link provenance carries the event id', 55501, $matched['provenance']['tickera_event_id']);
+
+$whitespace_matched = event_link_for('  55501  ', 55501);
+T::same('surrounding whitespace still resolves to present', 'present', $whitespace_matched['state']);
+T::same('trimmed reference keeps the integer value', 55501, $whitespace_matched['value']);
+
+$unresolved = event_link_for('55501', null);
+T::same('a valid reference that resolves to nothing is invalid', 'invalid', $unresolved['state']);
+T::ok('unresolved event link carries no value', !array_key_exists('value', $unresolved));
+T::same('unresolved event link keeps the raw reference', '55501', $unresolved['provenance']['raw_producer_code']);
+
+// The SQL CAST of '55501abc' is 55501; the producer must not inherit that lie.
+$cast_truncated = event_link_for('55501abc', 55501);
+T::same('a CAST-truncated reference is invalid', 'invalid', $cast_truncated['state']);
+T::ok('a CAST-truncated reference is never present', $cast_truncated['state'] !== 'present');
+T::ok('CAST-truncated event link carries no value', !array_key_exists('value', $cast_truncated));
+T::same('CAST-truncated event link keeps the exact raw bytes', '55501abc', $cast_truncated['provenance']['raw_producer_code']);
+T::ok('CAST-truncated event link claims no event identity', !array_key_exists('tickera_event_id', $cast_truncated['provenance']));
+
+$mismatched = event_link_for('55501', 55502);
+T::same('a reference disagreeing with the resolved id is invalid', 'invalid', $mismatched['state']);
+T::same('mismatched event link keeps the raw reference', '55501', $mismatched['provenance']['raw_producer_code']);
+
+$non_numeric = event_link_for('abc', null);
+T::same('a non-numeric reference is invalid', 'invalid', $non_numeric['state']);
+T::same('non-numeric event link keeps the raw reference', 'abc', $non_numeric['provenance']['raw_producer_code']);
+
+$no_reference = event_link_for(null, null);
+T::same('no reference and no resolution is absent', 'absent', $no_reference['state']);
+T::same('absent event link claims exhaustive proof', 'exhaustive', $no_reference['completeness']);
+T::ok('absent event link keeps no raw code', !array_key_exists('raw_producer_code', $no_reference['provenance']));
+
+// A resolved event without any raw reference cannot happen from this SQL, so it
+// is reported as a producer fault instead of a source finding.
+$impossible = event_link_for(null, 55501);
+T::same('a resolved event without a reference is a producer error', 'producer_error', $impossible['state']);
+T::same('producer_error claims no completeness', 'unknown', $impossible['completeness']);
+T::ok('producer_error carries no value', !array_key_exists('value', $impossible));
+T::ok('producer_error keeps no raw code', !array_key_exists('raw_producer_code', $impossible['provenance']));
+
+foreach (['0', '-1', '00', '1.0', '+1', ' '] as $non_positive) {
+    $item = event_link_for($non_positive, null);
+    T::same('non-positive reference ' . json_encode($non_positive) . ' is not present', true, $item['state'] !== 'present');
+}
+
+$zero_reference = event_link_for('0', null);
+T::same('a zero reference is invalid', 'invalid', $zero_reference['state']);
+T::same('zero reference keeps its raw bytes', '0', $zero_reference['provenance']['raw_producer_code']);
+
+$negative_reference = event_link_for('-1', null);
+T::same('a negative reference is invalid', 'invalid', $negative_reference['state']);
+T::same('negative reference keeps its raw bytes', '-1', $negative_reference['provenance']['raw_producer_code']);
+
+// A whitespace-only reference trims to nothing, so it is an absent observation.
+T::same('a whitespace-only reference is absent', 'absent', event_link_for(' ', null)['state']);
+
+// ---------------------------------------------------------------------------
+T::section('product type matrix');
+
+/**
+ * @return array<string, mixed>
+ */
+function product_type_for($type): array
+{
+    return find_item(
+        Feed::build_native_evidence_for_row(observation(['product_type' => $type]), SNAPSHOT_ID),
+        'product_type',
+        'parent_product'
+    );
+}
+
+$simple = product_type_for('simple');
+T::same('simple is the only supported declared type', 'present', $simple['state']);
+T::same('simple keeps its value', 'simple', $simple['value']);
+T::same('simple claims exhaustive proof', 'exhaustive', $simple['completeness']);
+T::ok('simple keeps no raw code', !array_key_exists('raw_producer_code', $simple['provenance']));
+
+foreach (['variable', 'grouped', 'external', 'subscription', 'variable-subscription'] as $observed) {
+    $item = product_type_for($observed);
+    T::same('observed undeclared type ' . $observed . ' is invalid', 'invalid', $item['state']);
+    T::ok('invalid type ' . $observed . ' carries no value', !array_key_exists('value', $item));
+    T::same('invalid type ' . $observed . ' keeps the raw code', $observed, $item['provenance']['raw_producer_code']);
+    T::same('invalid type ' . $observed . ' claims exhaustive proof', 'exhaustive', $item['completeness']);
+}
+
+foreach ([null, '', '   '] as $unobservable) {
+    $item = product_type_for($unobservable);
+    T::same('unobservable type ' . json_encode($unobservable) . ' is unsupported', 'unsupported', $item['state']);
+    T::same('unobservable type ' . json_encode($unobservable) . ' completeness', 'unknown', $item['completeness']);
+    T::ok('unobservable type ' . json_encode($unobservable) . ' carries no value', !array_key_exists('value', $item));
+    T::ok(
+        'unobservable type ' . json_encode($unobservable) . ' keeps no raw code',
+        !array_key_exists('raw_producer_code', $item['provenance'])
+    );
+}
+
+T::ok('undeclared types are never reported as unsupported', product_type_for('variable')['state'] !== 'unsupported');
+T::ok('unobservable types are never reported as invalid', product_type_for(null)['state'] !== 'invalid');
+
+// ---------------------------------------------------------------------------
+T::section('oversized and malformed raw producer codes fail closed');
+
+// Raw evidence is never truncated and never silently omitted: an unemittable
+// raw code fails the whole page so Phoenix cannot mistake it for a clean read.
+T::throws('oversized lifecycle raw code fails closed', static function (): void {
+    Feed::build_native_evidence_for_row(observation(['product_status' => str_repeat('x', 65)]), SNAPSHOT_ID);
+}, 'oversized_raw_producer_code');
+
+T::throws('oversized ticket template raw code fails closed', static function (): void {
+    Feed::build_native_evidence_for_row(observation(['ticket_template_id' => str_repeat('9', 80)]), SNAPSHOT_ID);
+}, 'oversized_raw_producer_code');
+
+T::throws('oversized product type raw code fails closed', static function (): void {
+    Feed::build_native_evidence_for_row(observation(['product_type' => str_repeat('v', 65)]), SNAPSHOT_ID);
+}, 'oversized_raw_producer_code');
+
+T::throws('oversized event reference raw code fails closed', static function (): void {
+    Feed::build_native_evidence_for_row(
+        observation([
+            'event_reference_raw' => str_repeat('9', 65),
+            'tickera_event_id' => null,
+            'event_status' => null,
+        ]),
+        SNAPSHOT_ID
+    );
+}, 'oversized_raw_producer_code');
+
+T::throws('oversized variation lifecycle raw code fails closed', static function (): void {
+    Feed::build_native_evidence_for_row(
+        observation(['woo_variation_id' => 109741, 'variation_status' => str_repeat('z', 65)]),
+        SNAPSHOT_ID
+    );
+}, 'oversized_raw_producer_code');
+
+$at_bound = find_item(
+    Feed::build_native_evidence_for_row(observation(['product_status' => str_repeat('x', 64)]), SNAPSHOT_ID),
+    'lifecycle',
+    'parent_product'
+);
+T::same('a raw code at exactly 64 bytes is emitted', str_repeat('x', 64), $at_bound['provenance']['raw_producer_code']);
+T::same('a raw code at the bound is still invalid state', 'invalid', $at_bound['state']);
+
+foreach (["\x80", "\xC3\x28", "abc\xFF"] as $index => $malformed) {
+    T::throws('malformed utf-8 raw code ' . $index . ' fails closed', static function () use ($malformed): void {
+        Feed::build_native_evidence_for_row(observation(['product_status' => $malformed]), SNAPSHOT_ID);
+    }, 'invalid_raw_producer_code');
+}
+
+// Valid multibyte UTF-8 is bounded by bytes, not characters.
+$multibyte = find_item(
+    Feed::build_native_evidence_for_row(observation(['product_status' => 'gepubliseer_ë']), SNAPSHOT_ID),
+    'lifecycle',
+    'parent_product'
+);
+T::same('valid multibyte raw code is preserved exactly', 'gepubliseer_ë', $multibyte['provenance']['raw_producer_code']);
+
+T::throws('multibyte raw code over 64 bytes fails closed', static function (): void {
+    Feed::build_native_evidence_for_row(observation(['product_status' => str_repeat('ë', 33)]), SNAPSHOT_ID);
+}, 'oversized_raw_producer_code');
 
 // ---------------------------------------------------------------------------
 T::section('evidence transport contract');
@@ -819,10 +1073,13 @@ T::same(
     }))
 );
 
-$identities = array_map(static function (array $item): string {
-    return $item['dimension'] . '|' . $item['producer_scope'] . '|' . json_encode($item['target']);
+// Dedup is fingerprint-based: only fully identical records collapse. Identity
+// alone is deliberately not unique, because two conflicting observations of the
+// same identity must both reach Phoenix.
+$fingerprints = array_map(static function (array $item): string {
+    return Feed::canonical_json($item);
 }, $deduped);
-T::same('no duplicate evidence identity on a page', count($identities), count(array_unique($identities)));
+T::same('no fully identical evidence record repeats on a page', count($fingerprints), count(array_unique($fingerprints)));
 
 $under_bound = [];
 for ($i = 0; $i < 45; $i++) {
@@ -851,6 +1108,93 @@ T::throws('exceeding the evidence bound fails closed', static function () use ($
 }, 'evidence_page_limit_exceeded');
 
 T::same('an empty page emits no evidence', [], Feed::build_native_evidence([], SNAPSHOT_ID));
+
+// ---------------------------------------------------------------------------
+T::section('conflicting observations are preserved for phoenix');
+
+/**
+ * @param array<int, array<string, mixed>> $items
+ * @return array<int, array<string, mixed>>
+ */
+function items_for_dimension(array $items, string $dimension): array
+{
+    return array_values(array_filter($items, static function (array $item) use ($dimension): bool {
+        return $item['dimension'] === $dimension;
+    }));
+}
+
+// One product resolving to two different events is a real source conflict. The
+// producer must not pick a winner or collapse it away: Phoenix needs both
+// records to raise a blocking_conflict.
+$conflicting = [
+    observation(['event_reference_raw' => '10', 'tickera_event_id' => 10]),
+    observation(['event_reference_raw' => '20', 'tickera_event_id' => 20]),
+];
+$conflict_evidence = Feed::build_native_evidence($conflicting, SNAPSHOT_ID);
+$conflicting_links = items_for_dimension($conflict_evidence, 'event_link');
+
+T::same('both conflicting event links survive dedup', 2, count($conflicting_links));
+T::same('conflicting event link values are both preserved', [10, 20], (static function (array $links): array {
+    $values = array_map(static function (array $link) {
+        return $link['value'];
+    }, $links);
+    sort($values, SORT_NUMERIC);
+
+    return $values;
+})($conflicting_links));
+T::same('both conflicting links are positive present claims', ['present', 'present'], array_map(static function (array $link): string {
+    return $link['state'];
+}, $conflicting_links));
+
+// The conflict shares one (dimension, scope, target) identity, which is exactly
+// why identity alone can no longer be the dedup key.
+T::same('conflicting links share a single identity', 1, count(array_unique(array_map(static function (array $link): string {
+    return $link['dimension'] . '|' . $link['producer_scope'] . '|' . Feed::canonical_json($link['target']);
+}, $conflicting_links))));
+T::same('each conflicting link keeps its own event provenance', [10, 20], (static function (array $links): array {
+    $ids = array_map(static function (array $link): int {
+        return $link['provenance']['tickera_event_id'];
+    }, $links);
+    sort($ids, SORT_NUMERIC);
+
+    return $ids;
+})($conflicting_links));
+
+// Identical parent-level records still collapse, so only the genuinely
+// conflicting dimensions repeat.
+T::same('identical parent records still collapse to one', 1, count(items_for_dimension($conflict_evidence, 'ticket_template')));
+T::same('identical parent lifecycle still collapses to one', 1, count(array_filter($conflict_evidence, static function (array $item): bool {
+    return $item['dimension'] === 'lifecycle' && $item['producer_scope'] === 'parent_product';
+})));
+T::same('each distinct event keeps its own lifecycle', 2, count(array_filter($conflict_evidence, static function (array $item): bool {
+    return $item['dimension'] === 'lifecycle' && $item['producer_scope'] === 'event';
+})));
+T::same('only conflicting dimensions repeat across the page', 12, count($conflict_evidence));
+
+// Two different malformed references are two distinct invalid observations even
+// though both claim the same state and identity.
+$invalid_variants = Feed::build_native_evidence(
+    [
+        observation(['event_reference_raw' => 'abc', 'tickera_event_id' => null, 'event_status' => null]),
+        observation(['event_reference_raw' => 'def', 'tickera_event_id' => null, 'event_status' => null]),
+    ],
+    SNAPSHOT_ID
+);
+$invalid_links = items_for_dimension($invalid_variants, 'event_link');
+T::same('invalid claims with different raw provenance both survive', 2, count($invalid_links));
+T::same('each invalid claim keeps its own raw code', ['abc', 'def'], (static function (array $links): array {
+    $codes = array_map(static function (array $link): string {
+        return $link['provenance']['raw_producer_code'];
+    }, $links);
+    sort($codes, SORT_STRING);
+
+    return $codes;
+})($invalid_links));
+
+// A truly repeated observation of the same product across variation rows is
+// still emitted once.
+$repeated = Feed::build_native_evidence([observation(), observation(), observation()], SNAPSHOT_ID);
+T::same('a repeated identical row adds nothing', 10, count($repeated));
 
 // ---------------------------------------------------------------------------
 if (T::$failures !== []) {
