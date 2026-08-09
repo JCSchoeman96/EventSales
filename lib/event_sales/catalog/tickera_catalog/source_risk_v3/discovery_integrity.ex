@@ -156,56 +156,81 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.DiscoveryIntegrity do
 
   defp require_cross_page_agreement([first | rest]) do
     Enum.reduce_while(rest, :ok, fn page, :ok ->
-      cond do
-        page.schema_version != first.schema_version ->
-          {:halt, {:error, :schema_version_mismatch}}
-
-        page.canonical_contract_version != first.canonical_contract_version ->
-          {:halt, {:error, :canonical_contract_version_mismatch}}
-
-        page.producer_version != first.producer_version ->
-          {:halt, {:error, :producer_version_mismatch}}
-
-        page.source_system_id != first.source_system_id ->
-          {:halt, {:error, :source_system_id_mismatch}}
-
-        page.discovery_snapshot_id != first.discovery_snapshot_id ->
-          {:halt, {:error, :discovery_snapshot_id_mismatch}}
-
-        not datetime_equal?(page.source_snapshot_at, first.source_snapshot_at) ->
-          {:halt, {:error, :source_snapshot_at_mismatch}}
-
-        not filters_equal?(page.filters, first.filters) ->
-          {:halt, {:error, :filters_mismatch}}
-
-        page.per_page != first.per_page ->
-          {:halt, {:error, :per_page_mismatch}}
-
-        page.canonical_contract_version != @canonical_contract_version ->
-          {:halt, {:error, :invalid_canonical_contract_version}}
-
-        page.producer_version != @producer_version ->
-          {:halt, {:error, :invalid_producer_version}}
-
-        true ->
-          {:cont, :ok}
+      case page_agreement_error(page, first) do
+        nil -> {:cont, :ok}
+        reason -> {:halt, {:error, reason}}
       end
     end)
     |> case do
-      :ok ->
-        cond do
-          first.canonical_contract_version != @canonical_contract_version ->
-            {:error, :invalid_canonical_contract_version}
+      :ok -> first_page_version_ok(first)
+      other -> other
+    end
+  end
 
-          first.producer_version != @producer_version ->
-            {:error, :invalid_producer_version}
+  defp page_agreement_error(page, first) do
+    with nil <-
+           field_mismatch(page.schema_version, first.schema_version, :schema_version_mismatch),
+         nil <-
+           field_mismatch(
+             page.canonical_contract_version,
+             first.canonical_contract_version,
+             :canonical_contract_version_mismatch
+           ),
+         nil <-
+           field_mismatch(
+             page.producer_version,
+             first.producer_version,
+             :producer_version_mismatch
+           ),
+         nil <-
+           field_mismatch(
+             page.source_system_id,
+             first.source_system_id,
+             :source_system_id_mismatch
+           ),
+         nil <-
+           field_mismatch(
+             page.discovery_snapshot_id,
+             first.discovery_snapshot_id,
+             :discovery_snapshot_id_mismatch
+           ),
+         nil <-
+           unless_true(
+             datetime_equal?(page.source_snapshot_at, first.source_snapshot_at),
+             :source_snapshot_at_mismatch
+           ),
+         nil <-
+           unless_true(filters_equal?(page.filters, first.filters), :filters_mismatch),
+         nil <- field_mismatch(page.per_page, first.per_page, :per_page_mismatch) do
+      page_contract_version_error(page)
+    end
+  end
 
-          true ->
-            :ok
-        end
+  defp field_mismatch(left, right, reason) when left != right, do: reason
+  defp field_mismatch(_left, _right, _reason), do: nil
 
-      other ->
-        other
+  defp unless_true(true, _reason), do: nil
+  defp unless_true(false, reason), do: reason
+
+  defp page_contract_version_error(page) do
+    with nil <-
+           field_mismatch(
+             page.canonical_contract_version,
+             @canonical_contract_version,
+             :invalid_canonical_contract_version
+           ) do
+      field_mismatch(
+        page.producer_version,
+        @producer_version,
+        :invalid_producer_version
+      )
+    end
+  end
+
+  defp first_page_version_ok(first) do
+    case page_contract_version_error(first) do
+      nil -> :ok
+      reason -> {:error, reason}
     end
   end
 

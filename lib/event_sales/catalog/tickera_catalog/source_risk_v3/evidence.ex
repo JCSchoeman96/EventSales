@@ -8,6 +8,13 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Evidence do
 
   alias EventSales.Catalog.TickeraCatalog.SourceRiskV3.ContractRegistry
 
+  # Constant MapSet allowlists from ContractRegistry are concrete to Dialyzer and
+  # conflict with MapSet's opaque stdlib contracts at call sites.
+  @dialyzer {:nowarn_function,
+             ensure_related_target_allowlist: 1,
+             reject_forbidden_provenance_keys: 1,
+             ensure_provenance_allowlist: 1}
+
   @enforce_keys [
     :dimension,
     :producer_scope,
@@ -96,19 +103,17 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Evidence do
         {:error, {:missing_field, key}}
 
       {:ok, value} when is_binary(value) ->
-        case ContractRegistry.validate_closed_id(value) do
-          :ok ->
-            case fetch_fun.(value) do
-              {:ok, fetched} -> {:ok, fetched}
-              {:error, reason} -> {:error, reason}
-            end
-
-          {:error, reason} ->
-            {:error, reason}
-        end
+        fetch_closed_string(value, fetch_fun)
 
       {:ok, _} ->
         {:error, {:invalid_field_type, key}}
+    end
+  end
+
+  defp fetch_closed_string(value, fetch_fun) do
+    case ContractRegistry.validate_closed_id(value) do
+      :ok -> fetch_fun.(value)
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -150,9 +155,10 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Evidence do
     expected = MapSet.new(Enum.map(required_keys, &Atom.to_string/1))
     actual = MapSet.new(Map.keys(target))
 
-    cond do
-      MapSet.equal?(expected, actual) -> :ok
-      true -> {:error, :invalid_target_shape}
+    if MapSet.equal?(expected, actual) do
+      :ok
+    else
+      {:error, :invalid_target_shape}
     end
   end
 
@@ -209,24 +215,28 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Evidence do
     with :ok <- reject_non_string_map_keys(related),
          :ok <- ensure_related_target_allowlist(related) do
       Enum.reduce_while(related, {:ok, %{}}, fn {key, value}, {:ok, acc} ->
-        atom_key =
-          case key do
-            "tickera_event_id" -> :tickera_event_id
-            "woo_product_id" -> :woo_product_id
-            "woo_variation_id" -> :woo_variation_id
-            "ticket_template_id" -> :ticket_template_id
-          end
-
-        if is_integer(value) and value > 0 do
-          {:cont, {:ok, Map.put(acc, atom_key, value)}}
-        else
-          {:halt, {:error, :invalid_related_target}}
-        end
+        put_related_target(acc, key, value)
       end)
     end
   end
 
   defp validate_related_targets(_), do: {:error, :invalid_related_targets}
+
+  defp put_related_target(acc, key, value) do
+    atom_key =
+      case key do
+        "tickera_event_id" -> :tickera_event_id
+        "woo_product_id" -> :woo_product_id
+        "woo_variation_id" -> :woo_variation_id
+        "ticket_template_id" -> :ticket_template_id
+      end
+
+    if is_integer(value) and value > 0 do
+      {:cont, {:ok, Map.put(acc, atom_key, value)}}
+    else
+      {:halt, {:error, :invalid_related_target}}
+    end
+  end
 
   defp ensure_related_target_allowlist(related) do
     allowed = MapSet.new(~w(tickera_event_id woo_product_id woo_variation_id ticket_template_id))
@@ -243,9 +253,8 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Evidence do
   defp validate_provenance(provenance) when is_map(provenance) do
     with :ok <- reject_non_string_map_keys(provenance),
          :ok <- reject_forbidden_provenance_keys(provenance),
-         :ok <- ensure_provenance_allowlist(provenance),
-         {:ok, normalized} <- normalize_provenance(provenance) do
-      {:ok, normalized}
+         :ok <- ensure_provenance_allowlist(provenance) do
+      normalize_provenance(provenance)
     end
   end
 

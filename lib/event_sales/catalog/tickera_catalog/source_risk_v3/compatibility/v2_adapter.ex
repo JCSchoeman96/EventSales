@@ -48,6 +48,8 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
       :lossy_derivative_of,
       :compatibility_regrouping?
     ]
+
+    @type t :: %__MODULE__{}
   end
 
   @adapter_version "compat.v2_to_source_risk_v3.v1"
@@ -102,6 +104,10 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
 
   @spec automation_eligible?() :: false
   def automation_eligible?, do: false
+
+  # Dialyzer treats constant MapSet module attributes as concrete structs, which
+  # conflicts with MapSet's opaque @spec. Suppress only these constant getters.
+  @dialyzer {:nowarn_function, emitters: 0, translation_results: 0}
 
   @spec emitters() :: MapSet.t(String.t())
   def emitters, do: @emitters
@@ -260,129 +266,172 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
   defp dispatch(%{raw_code: nil} = input, run_id), do: dispatch_class_a(input, run_id)
 
   defp dispatch(%{raw_code: code} = input, run_id) do
-    case {code, input.source_owner, input.source_emitter} do
-      {"trash_event", "WordPress", "wp.event_risk_codes"} ->
-        event_lifecycle(input, run_id, "t.trash_event", "trash", "translated", "preserved")
-
-      {"private_event", "WordPress", emitter}
-      when emitter in ["wp.event_risk_codes", "wp.review_reasons"] ->
-        rule =
-          if emitter == "wp.event_risk_codes",
-            do: "t.private_event.event_risk_codes",
-            else: "t.private_event.review_reasons"
-
-        event_lifecycle(input, run_id, rule, "private", "translated", "preserved")
-
-      {"draft_event", "WordPress", "wp.event_risk_codes"} ->
-        event_lifecycle(
-          input,
-          run_id,
-          "t.draft_event.event_risk_codes",
-          "draft",
-          "translated",
-          "preserved"
-        )
-
-      {"draft_event", "WordPress", "wp.review_reasons"} ->
-        draft_event_review_reasons(input, run_id)
-
-      {"draft_event", "WordPress", "unknown"} ->
-        diagnostic(
-          input,
-          "t.draft_event.unknown_emitter",
-          "lifecycle unresolved; emitter unknown"
-        )
-
-      {"trashed_event", "Phoenix", "phoenix.vocab"} ->
-        event_lifecycle(input, run_id, "t.trashed_event", "trash", "translated", "preserved")
-
-      {"deleted_event", "Phoenix", "phoenix.vocab"} ->
-        event_lifecycle(input, run_id, "t.deleted_event", "deleted", "translated", "preserved")
-
-      {"private_product", "WordPress", "wp.review_reasons"} ->
-        parent_lifecycle(input, run_id, "t.private_product", "private", "translated", "preserved")
-
-      {"draft_product", "WordPress", "wp.review_reasons"} ->
-        draft_product(input, run_id)
-
-      {"trashed_product", "Phoenix", "phoenix.vocab"} ->
-        parent_lifecycle(input, run_id, "t.trashed_product", "trash", "translated", "preserved")
-
-      {"deleted_product", "Phoenix", "phoenix.vocab"} ->
-        parent_lifecycle(input, run_id, "t.deleted_product", "deleted", "translated", "preserved")
-
-      {"draft_variation", "Phoenix", "phoenix.vocab"} ->
-        variation_lifecycle(input, run_id, "t.draft_variation", "draft")
-
-      {"private_variation", "Phoenix", "phoenix.normalizer"} ->
-        private_variation(input, run_id)
-
-      {"subscription_product", "WordPress", "wp.review_reasons"} ->
-        subscription_present(input, run_id)
-
-      {"subscription", "Phoenix", "phoenix.normalizer"} ->
-        subscription_from_phoenix(input, run_id)
-
-      {"payment_plan_product", "WordPress", "wp.review_reasons"} ->
-        rejected(
-          input,
-          "t.payment_plan_product",
-          "rejected alias; not payment_plan",
-          "contract.unknown_source_risk_code"
-        )
-
-      {"missing_ticket_template", "WordPress", "wp.review_reasons"} ->
-        ticket_template_absent(input, run_id)
-
-      {"missing_tickera_event", "WordPress", "wp.review_reasons"} ->
-        missing_tickera_event(input, run_id)
-
-      {"unknown_product_semantics", "WordPress", "wp.review_reasons"} ->
-        derived_summary(input, "t.unknown_product_semantics")
-
-      {dim, "Phoenix", "phoenix.normalizer"}
-      when dim in ["payment_plan", "membership", "bundle", "add_on"] ->
-        capability_unknown(input, run_id, dim)
-
-      {"unsupported_product_type", "Phoenix", "phoenix.normalizer"} ->
-        unsupported_product_type(input, run_id)
-
-      {"variation_mapping_required", "WordPress", "wp.review_reasons"} ->
-        structural_planner(
-          input,
-          "t.variation_mapping_required.review_reasons",
-          "structural_projection"
-        )
-
-      {"variation_mapping_required", "Phoenix", "phoenix.normalizer"} ->
-        structural_planner(
-          input,
-          "t.variation_mapping_required.normalizer",
-          "structural_projection"
-        )
-
-      {"missing_source_risk_data", "WordPress", "wp.event_risk_codes"} ->
-        event_lifecycle_unknown(input, run_id, "t.missing_source_risk_data.wp_event_unknown")
-
-      {"missing_source_risk_data", "Phoenix", "phoenix.source_risk.from_code"} ->
-        unrecoverable(input, "t.missing_source_risk_data.phoenix_fallback")
-
-      {code, "planner", "planner"}
-      when code in [
-             "ambiguous_variation_name",
-             "ambiguous_variation_ticket_type_name",
-             "duplicate_ticket_name",
-             "duplicate_ticket_type_name",
-             "existing_mapping_conflict",
-             "product_moved_between_events",
-             "ambiguous_identity"
-           ] ->
-        structural_planner(input, "t.planner.#{code}", "planner_projection")
-
-      _ ->
-        undeclared_raw(input)
-    end
+    dispatch_raw(code, input.source_owner, input.source_emitter, input, run_id)
   end
+
+  defp dispatch_raw("trash_event", "WordPress", "wp.event_risk_codes", input, run_id) do
+    event_lifecycle(input, run_id, "t.trash_event", "trash", "translated", "preserved")
+  end
+
+  defp dispatch_raw("private_event", "WordPress", emitter, input, run_id)
+       when emitter in ["wp.event_risk_codes", "wp.review_reasons"] do
+    rule =
+      if emitter == "wp.event_risk_codes",
+        do: "t.private_event.event_risk_codes",
+        else: "t.private_event.review_reasons"
+
+    event_lifecycle(input, run_id, rule, "private", "translated", "preserved")
+  end
+
+  defp dispatch_raw("draft_event", "WordPress", "wp.event_risk_codes", input, run_id) do
+    event_lifecycle(
+      input,
+      run_id,
+      "t.draft_event.event_risk_codes",
+      "draft",
+      "translated",
+      "preserved"
+    )
+  end
+
+  defp dispatch_raw("draft_event", "WordPress", "wp.review_reasons", input, run_id) do
+    draft_event_review_reasons(input, run_id)
+  end
+
+  defp dispatch_raw("draft_event", "WordPress", "unknown", input, _run_id) do
+    diagnostic(
+      input,
+      "t.draft_event.unknown_emitter",
+      "lifecycle unresolved; emitter unknown"
+    )
+  end
+
+  defp dispatch_raw("trashed_event", "Phoenix", "phoenix.vocab", input, run_id) do
+    event_lifecycle(input, run_id, "t.trashed_event", "trash", "translated", "preserved")
+  end
+
+  defp dispatch_raw("deleted_event", "Phoenix", "phoenix.vocab", input, run_id) do
+    event_lifecycle(input, run_id, "t.deleted_event", "deleted", "translated", "preserved")
+  end
+
+  defp dispatch_raw("private_product", "WordPress", "wp.review_reasons", input, run_id) do
+    parent_lifecycle(input, run_id, "t.private_product", "private", "translated", "preserved")
+  end
+
+  defp dispatch_raw("draft_product", "WordPress", "wp.review_reasons", input, run_id) do
+    draft_product(input, run_id)
+  end
+
+  defp dispatch_raw("trashed_product", "Phoenix", "phoenix.vocab", input, run_id) do
+    parent_lifecycle(input, run_id, "t.trashed_product", "trash", "translated", "preserved")
+  end
+
+  defp dispatch_raw("deleted_product", "Phoenix", "phoenix.vocab", input, run_id) do
+    parent_lifecycle(input, run_id, "t.deleted_product", "deleted", "translated", "preserved")
+  end
+
+  defp dispatch_raw("draft_variation", "Phoenix", "phoenix.vocab", input, run_id) do
+    variation_lifecycle(input, run_id, "t.draft_variation", "draft")
+  end
+
+  defp dispatch_raw("private_variation", "Phoenix", "phoenix.normalizer", input, run_id) do
+    private_variation(input, run_id)
+  end
+
+  defp dispatch_raw("subscription_product", "WordPress", "wp.review_reasons", input, run_id) do
+    subscription_present(input, run_id)
+  end
+
+  defp dispatch_raw("subscription", "Phoenix", "phoenix.normalizer", input, run_id) do
+    subscription_from_phoenix(input, run_id)
+  end
+
+  defp dispatch_raw("payment_plan_product", "WordPress", "wp.review_reasons", input, _run_id) do
+    rejected(
+      input,
+      "t.payment_plan_product",
+      "rejected alias; not payment_plan",
+      "contract.unknown_source_risk_code"
+    )
+  end
+
+  defp dispatch_raw("missing_ticket_template", "WordPress", "wp.review_reasons", input, run_id) do
+    ticket_template_absent(input, run_id)
+  end
+
+  defp dispatch_raw("missing_tickera_event", "WordPress", "wp.review_reasons", input, run_id) do
+    missing_tickera_event(input, run_id)
+  end
+
+  defp dispatch_raw("unknown_product_semantics", "WordPress", "wp.review_reasons", input, _run_id) do
+    derived_summary(input, "t.unknown_product_semantics")
+  end
+
+  defp dispatch_raw(dim, "Phoenix", "phoenix.normalizer", input, run_id)
+       when dim in ["payment_plan", "membership", "bundle", "add_on"] do
+    capability_unknown(input, run_id, dim)
+  end
+
+  defp dispatch_raw("unsupported_product_type", "Phoenix", "phoenix.normalizer", input, run_id) do
+    unsupported_product_type(input, run_id)
+  end
+
+  defp dispatch_raw(
+         "variation_mapping_required",
+         "WordPress",
+         "wp.review_reasons",
+         input,
+         _run_id
+       ) do
+    structural_planner(
+      input,
+      "t.variation_mapping_required.review_reasons",
+      "structural_projection"
+    )
+  end
+
+  defp dispatch_raw(
+         "variation_mapping_required",
+         "Phoenix",
+         "phoenix.normalizer",
+         input,
+         _run_id
+       ) do
+    structural_planner(
+      input,
+      "t.variation_mapping_required.normalizer",
+      "structural_projection"
+    )
+  end
+
+  defp dispatch_raw("missing_source_risk_data", "WordPress", "wp.event_risk_codes", input, run_id) do
+    event_lifecycle_unknown(input, run_id, "t.missing_source_risk_data.wp_event_unknown")
+  end
+
+  defp dispatch_raw(
+         "missing_source_risk_data",
+         "Phoenix",
+         "phoenix.source_risk.from_code",
+         input,
+         _run_id
+       ) do
+    unrecoverable(input, "t.missing_source_risk_data.phoenix_fallback")
+  end
+
+  defp dispatch_raw(code, "planner", "planner", input, _run_id)
+       when code in [
+              "ambiguous_variation_name",
+              "ambiguous_variation_ticket_type_name",
+              "duplicate_ticket_name",
+              "duplicate_ticket_type_name",
+              "existing_mapping_conflict",
+              "product_moved_between_events",
+              "ambiguous_identity"
+            ] do
+    structural_planner(input, "t.planner.#{code}", "planner_projection")
+  end
+
+  defp dispatch_raw(_code, _owner, _emitter, input, _run_id), do: undeclared_raw(input)
 
   defp dispatch_class_a(input, run_id) do
     with :ok <- require_class_a_authority(input),
@@ -776,35 +825,36 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter
              origin: "compatibility_derived",
              exhaustive_proven?: false
            ) do
-        {:ok, fact} ->
-          if fact.completeness == "exhaustive" or fact.origin != "compatibility_derived" do
-            {:error, :compatibility_invariant_violation}
-          else
-            record = %{
-              base_record(
-                input,
-                Keyword.fetch!(opts, :rule_id),
-                Keyword.fetch!(opts, :translation_result),
-                Keyword.fetch!(opts, :certainty_change)
-              )
-              | canonical_dimension: fact.dimension,
-                canonical_state: fact.state,
-                canonical_value: fact.value,
-                canonical_scope: fact.semantic_scope,
-                canonical_target: fact.target,
-                translated_completeness: fact.completeness,
-                qualified_finding_id: Keyword.get(opts, :finding),
-                lossy_derivative_of: Keyword.get(opts, :lossy),
-                compatibility_regrouping?: Keyword.get(opts, :regrouping?, false) == true,
-                reason: Keyword.get(opts, :reason) || "historical compatibility translation"
-            }
-
-            {:ok, wrap(record, fact, nil)}
-          end
-
-        {:error, reason} ->
-          {:error, reason}
+        {:ok, fact} -> wrap_compatibility_fact(input, fact, opts)
+        {:error, reason} -> {:error, reason}
       end
+    end
+  end
+
+  defp wrap_compatibility_fact(input, fact, opts) do
+    if fact.completeness == "exhaustive" or fact.origin != "compatibility_derived" do
+      {:error, :compatibility_invariant_violation}
+    else
+      record = %{
+        base_record(
+          input,
+          Keyword.fetch!(opts, :rule_id),
+          Keyword.fetch!(opts, :translation_result),
+          Keyword.fetch!(opts, :certainty_change)
+        )
+        | canonical_dimension: fact.dimension,
+          canonical_state: fact.state,
+          canonical_value: fact.value,
+          canonical_scope: fact.semantic_scope,
+          canonical_target: fact.target,
+          translated_completeness: fact.completeness,
+          qualified_finding_id: Keyword.get(opts, :finding),
+          lossy_derivative_of: Keyword.get(opts, :lossy),
+          compatibility_regrouping?: Keyword.get(opts, :regrouping?, false) == true,
+          reason: Keyword.get(opts, :reason) || "historical compatibility translation"
+      }
+
+      {:ok, wrap(record, fact, nil)}
     end
   end
 
