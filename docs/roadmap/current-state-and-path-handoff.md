@@ -62,7 +62,7 @@ Phase 5E belongs to the paused catalogue / source-risk automation track (Path 2)
 ## 2. Current Program State
 
 ```text
-Current verified Phase 5D-complete main:
+Phase 5D certification checkpoint commit:
 c286fd0e647199a261b6ef2ec3791617dacb5834
 
 Phase 5C:
@@ -331,6 +331,10 @@ Critical sales-truth rule:
 Historical sales may predate local EventSales event creation.
 
 Local event creation timestamp is therefore **NOT** the beginning of sales truth.
+
+Sales may predate creation of the local EventSales event, but the current
+initial-backfill contract remains bounded from the selected source/Tickera
+event creation date unless M1 explicitly revises that decision.
 
 ---
 
