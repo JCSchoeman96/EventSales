@@ -4,7 +4,7 @@
 | --- | --- |
 | Document | Canonical Path 1 execution roadmap |
 | Plan ID | `path-1-phase-breakdown` |
-| Plan version | `v6` |
+| Plan version | `v7` |
 | Status | ACTIVE — repository-native execution contract |
 | Scope | Path 1 M1–M7 gated implementation sequence |
 | Authority | This file wins for Path 1 task sequencing and physical ownership assumptions |
@@ -14,6 +14,7 @@
 | Attribution contract | `docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md` |
 | Lifecycle / recognised-sale contract | `docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md` |
 | Refund / financial-adjustment contract | `docs/path-1/m1-05-refund-and-financial-adjustment-contract.md` |
+| Financial metric dictionary | `docs/path-1/m1-06-financial-metric-dictionary.md` |
 | Historical planning source | Supplied `EVENTSALES_PATH_1_UPDATED_PHASE_BREAKDOWN.md` (v1 conceptual plan; superseded for physical assumptions) |
 | Path 2 / Phase 5E | PAUSED |
 | Prepared | 2026-08-09 |
@@ -27,6 +28,7 @@
 - `v4` — M1-03 closeout: COMPLETE (PASS); next task M1-04 (requires owner authorization); record REQUIRED_BEFORE_M2 TicketType variation-parent fail-closed gap for M1-09 PRE-M2 gate
 - `v5` — M1-04 closeout: COMPLETE (PASS); next task M1-05 (requires owner authorization); lock recognised-sale predicate for refund contract design
 - `v6` — M1-05 closeout: COMPLETE (PASS); next task M1-06 (requires owner authorization); carry refund implementation gaps unresolved (M3/M4/M5 timing; MetricRules IMPLEMENTATION_CHANGE_REQUIRED)
+- `v7` — M1-06 closeout: COMPLETE (PASS); next task M1-07 (requires owner authorization); lock tax-inclusive Gross as `line_total + line_total_tax` (MG1 REQUIRED_DURING_M3; MG2–MG8 REQUIRED_BEFORE_M5)
 
 ### Conflict rule
 
@@ -104,10 +106,16 @@ M1-04: COMPLETE (PASS)
 M1-04 contract: docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md
 M1-05: COMPLETE (PASS)
 M1-05 contract: docs/path-1/m1-05-refund-and-financial-adjustment-contract.md
+M1-06: COMPLETE (PASS)
+M1-06 contract: docs/path-1/m1-06-financial-metric-dictionary.md
+TAX-INCLUSIVE REVENUE CONTRACT: IMPLEMENTATION_CHANGE_REQUIRED
 Known REQUIRED_BEFORE_M2 gap: TicketType variation-parent fail-closed enforcement (unresolved; defer to M1-09 PRE-M2 gate)
-Known M1-05 carry-forward gaps (unresolved): refund persistence/import REQUIRED_DURING_M3; refund completeness BEFORE_M4; MetricRules net-after-refund IMPLEMENTATION_CHANGE_REQUIRED BEFORE_M5
-Current Path 1 task: M1-06 — Financial Metric Dictionary
-M1-06: REQUIRES OWNER AUTHORIZATION
+Known M1-05/M1-06 carry-forward gaps (unresolved):
+  MG1 persist OrderItem.line_total_tax REQUIRED_DURING_M3 (before authoritative Gross Ticket Sales; not M2)
+  MG2–MG8 refund-aware Gross/Net, distinct Order Count, ATV, currency partitioning, MetricRules/snapshot changes REQUIRED_BEFORE_M5
+  refund persistence/import REQUIRED_DURING_M3; refund completeness BEFORE_M4
+Current Path 1 task: M1-07 — Timestamp, Johannesburg Period and Freshness Contract
+M1-07: REQUIRES OWNER AUTHORIZATION
 ```
 
 ---
@@ -322,8 +330,8 @@ M1-02   COMPLETE — source identity
 M1-03   COMPLETE — attribution contract
 M1-04   COMPLETE — order lifecycle / recognised sale
 M1-05   COMPLETE — refund / financial adjustment
-M1-06   metric dictionary (requires owner authorization)
-M1-07   time / period / freshness
+M1-06   COMPLETE — financial metric dictionary
+M1-07   time / period / freshness (requires owner authorization)
 M1-08   completeness / reconciliation / ANALYTICS_READY
 M1-09   certification
 ```
@@ -463,13 +471,16 @@ Gross preserved + independent refund adjustments locked. MetricRules IMPLEMENTAT
 
 | Field | Value |
 | --- | --- |
-| Status | **REQUIRES OWNER AUTHORIZATION** |
-| Strategy | CERTIFY + EXTEND |
+| Status | **COMPLETE (PASS)** |
+| Strategy | CERTIFY + EXTEND METRIC CONTRACT |
+| Contract | `docs/path-1/m1-06-financial-metric-dictionary.md` |
 | Existing foundation | MetricRules; Order.raw_*; OrderItem.line_*; Decimal types; M1-05 refund primitives |
-| Expected change | Lock named metrics (sold tickets, revenue, tax/discount visibility, exclusions) against existing fields; mark missing fields as contract gaps |
+| Expected change | Lock named Gross/Refund/Net qty & value, Order Count, ATV, exclusions, currency, additivity |
 | New resource expected | NO |
-| Migration expected | TBD only if new durable fields are authorized |
+| Migration expected | NO in M1-06; MG1 `line_total_tax` persistence during M3 |
 | Performance impact | Metrics must remain computable from bounded aggregates later |
+
+TAX-INCLUSIVE REVENUE CONTRACT: IMPLEMENTATION_CHANGE_REQUIRED (`line_total + line_total_tax`; current `line_total` alone is tax-exclusive). MetricRules IMPLEMENTATION_CHANGE_REQUIRED. Do not implement MG1–MG8 in M1-07.
 
 ---
 
@@ -477,6 +488,7 @@ Gross preserved + independent refund adjustments locked. MetricRules IMPLEMENTAT
 
 | Field | Value |
 | --- | --- |
+| Status | **REQUIRES OWNER AUTHORIZATION** |
 | Strategy | NEW CONTRACT REQUIRED (resolve open conflict) |
 | Existing foundation | created_at_source, updated_at_source, completed_at; MetricRules uses completed_at for “today”; HotStateAggregator 5‑min stale clock; programme 10‑min stale |
 | Expected change | Lock payment vs completion vs freshness clocks; **resolve OPEN M1-07 CONTRACT CONFLICT** (5m vs 10m); no `date_paid` field exists today |
@@ -758,8 +770,8 @@ Namespaced keys (`CacheKeys`); targeted invalidation; single-flight rebuild; def
 | M1-03 | Attribution contract (certify current architecture) — **COMPLETE** |
 | M1-04 | Order lifecycle / recognised-sale contract — **COMPLETE** |
 | M1-05 | Refund / financial adjustment contract — **COMPLETE** |
-| M1-06 | Financial metric dictionary — **REQUIRES OWNER AUTHORIZATION** |
-| M1-07 | Timestamp / Johannesburg period / freshness (resolve 5m vs 10m) |
+| M1-06 | Financial metric dictionary — **COMPLETE** |
+| M1-07 | Timestamp / Johannesburg period / freshness (resolve 5m vs 10m) — **REQUIRES OWNER AUTHORIZATION** |
 | M1-08 | Completeness / reconciliation / ANALYTICS_READY |
 | M1-09 | M1 certification pack |
 
@@ -819,7 +831,8 @@ Namespaced keys (`CacheKeys`); targeted invalidation; single-flight rebuild; def
 [x] M1-03 attribution contract locked
 [x] M1-04 order lifecycle / recognised-sale contract locked
 [x] M1-05 refund / financial-adjustment contract locked
-[ ] M1-06..M1-09 contracts locked
+[x] M1-06 financial metric dictionary locked
+[ ] M1-07..M1-09 contracts locked
 [ ] Existing Catalog/Sales/Ingestion/Analytics/Accounts reused
 [ ] Existing parser/OrderUpserter reused (no parallel writer)
 [x] Attribution certifies event-first + ProductMapping fallback
@@ -844,7 +857,8 @@ P1-00 COMPLETE
 → M1-03 COMPLETE
 → M1-04 COMPLETE
 → M1-05 COMPLETE
-→ M1-06 (requires owner authorization) … M1-09
+→ M1-06 COMPLETE
+→ M1-07 (requires owner authorization) … M1-09
 → M1-C (only if M1-09 PRE-M2 gate requires corrective implementation)
 → M2
 → M3
@@ -893,16 +907,27 @@ COMPLETE (PASS)
 M1-05 contract:
 docs/path-1/m1-05-refund-and-financial-adjustment-contract.md
 
+M1-06:
+COMPLETE (PASS)
+
+M1-06 contract:
+docs/path-1/m1-06-financial-metric-dictionary.md
+
+TAX-INCLUSIVE REVENUE CONTRACT:
+IMPLEMENTATION_CHANGE_REQUIRED
+
 Known REQUIRED_BEFORE_M2 gap:
 TicketType variation-parent fail-closed enforcement (unresolved; defer to M1-09 PRE-M2 gate)
 
-Known M1-05 carry-forward gaps (unresolved):
-refund persistence/import REQUIRED_DURING_M3; refund completeness BEFORE_M4; MetricRules net-after-refund IMPLEMENTATION_CHANGE_REQUIRED BEFORE_M5
+Known M1-05/M1-06 carry-forward gaps (unresolved):
+MG1 persist OrderItem.line_total_tax REQUIRED_DURING_M3 (before authoritative Gross Ticket Sales; not M2)
+MG2–MG8 refund-aware Gross/Net, distinct Order Count, ATV, currency partitioning, MetricRules/snapshot changes REQUIRED_BEFORE_M5
+refund persistence/import REQUIRED_DURING_M3; refund completeness BEFORE_M4
 
 Current Path 1 task:
-M1-06 — Financial Metric Dictionary
+M1-07 — Timestamp, Johannesburg Period and Freshness Contract
 
-M1-06:
+M1-07:
 REQUIRES OWNER AUTHORIZATION
 
 Path 2:
@@ -923,7 +948,10 @@ docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md
 Refund / financial-adjustment contract:
 docs/path-1/m1-05-refund-and-financial-adjustment-contract.md
 
-DO NOT START M1-06 WITHOUT OWNER AUTHORIZATION.
-USE A FRESH AGENT FOR M1-06.
-DO NOT IMPLEMENT REFUND RESOURCES OR RESOLVE M1-05 GAPS IN M1-06.
+Financial metric dictionary:
+docs/path-1/m1-06-financial-metric-dictionary.md
+
+DO NOT START M1-07 WITHOUT OWNER AUTHORIZATION.
+USE A FRESH AGENT FOR M1-07.
+DO NOT IMPLEMENT line_total_tax, MetricRules, snapshots, or refunds in M1-07.
 ```

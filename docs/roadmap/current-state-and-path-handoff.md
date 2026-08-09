@@ -15,6 +15,7 @@
 | Path 1 attribution contract | `docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md` |
 | Path 1 lifecycle / recognised-sale contract | `docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md` |
 | Path 1 refund / financial-adjustment contract | `docs/path-1/m1-05-refund-and-financial-adjustment-contract.md` |
+| Path 1 financial metric dictionary | `docs/path-1/m1-06-financial-metric-dictionary.md` |
 
 ### Revision log
 
@@ -24,6 +25,7 @@
 - `v4` — record M1-03 COMPLETE (PASS); next task M1-04 (requires owner authorization); note REQUIRED_BEFORE_M2 TicketType variation-parent gap
 - `v5` — record M1-04 COMPLETE (PASS); next task M1-05 (requires owner authorization)
 - `v6` — record M1-05 COMPLETE (PASS); next task M1-06 (requires owner authorization); carry refund implementation gaps unresolved
+- `v7` — record M1-06 COMPLETE (PASS); next task M1-07 (requires owner authorization); tax-inclusive revenue IMPLEMENTATION_CHANGE_REQUIRED; preserve MG1–MG8 gap ledger
 
 ### Conflict rule
 
@@ -116,12 +118,18 @@ Identity contract: docs/path-1/m1-02-source-scoped-external-identity-contract.md
 Attribution contract: docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md
 Lifecycle / recognised-sale contract: docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md
 Refund / financial-adjustment contract: docs/path-1/m1-05-refund-and-financial-adjustment-contract.md
+Financial metric dictionary: docs/path-1/m1-06-financial-metric-dictionary.md
 Known REQUIRED_BEFORE_M2 gap: TicketType variation-parent fail-closed enforcement (unresolved; defer to M1-09 PRE-M2 gate)
 M1-04: COMPLETE (PASS)
 M1-05: COMPLETE (PASS)
-Known M1-05 carry-forward gaps (unresolved): refund persistence/import REQUIRED_DURING_M3; refund completeness BEFORE_M4; MetricRules net-after-refund IMPLEMENTATION_CHANGE_REQUIRED BEFORE_M5
-Current Path 1 task: M1-06 — Financial Metric Dictionary
-M1-06: REQUIRES OWNER AUTHORIZATION
+M1-06: COMPLETE (PASS)
+TAX-INCLUSIVE REVENUE CONTRACT: IMPLEMENTATION_CHANGE_REQUIRED
+Known M1-05/M1-06 carry-forward gaps (unresolved):
+  MG1 persist OrderItem.line_total_tax REQUIRED_DURING_M3 (before authoritative Gross Ticket Sales; not M2)
+  MG2–MG8 refund-aware Gross/Net, distinct Order Count, ATV, currency partitioning, MetricRules/snapshot changes REQUIRED_BEFORE_M5
+  refund persistence/import REQUIRED_DURING_M3; refund completeness BEFORE_M4
+Current Path 1 task: M1-07 — Timestamp, Johannesburg Period and Freshness Contract
+M1-07: REQUIRES OWNER AUTHORIZATION
 
 PATH 2 — AUTOMATIC SYNC / CATALOGUE AUTOMATION
 Status: PAUSED AT CERTIFIED CHECKPOINT
@@ -512,7 +520,7 @@ M7 — Production Certification / Pilot
 
 ```text
 CURRENT NEXT STEP:
-M1-06 — Financial Metric Dictionary
+M1-07 — Timestamp, Johannesburg Period and Freshness Contract
 
 P1-00:
 COMPLETE
@@ -544,13 +552,24 @@ COMPLETE (PASS)
 M1-05 contract:
 docs/path-1/m1-05-refund-and-financial-adjustment-contract.md
 
+M1-06:
+COMPLETE (PASS)
+
+M1-06 contract:
+docs/path-1/m1-06-financial-metric-dictionary.md
+
+TAX-INCLUSIVE REVENUE CONTRACT:
+IMPLEMENTATION_CHANGE_REQUIRED
+
 Known REQUIRED_BEFORE_M2 gap:
 TicketType variation-parent fail-closed enforcement (unresolved; defer to M1-09 PRE-M2 gate)
 
-Known M1-05 carry-forward gaps (unresolved):
-refund persistence/import REQUIRED_DURING_M3; refund completeness BEFORE_M4; MetricRules net-after-refund IMPLEMENTATION_CHANGE_REQUIRED BEFORE_M5
+Known M1-05/M1-06 carry-forward gaps (unresolved):
+MG1 persist OrderItem.line_total_tax REQUIRED_DURING_M3 (before authoritative Gross Ticket Sales; not M2)
+MG2–MG8 refund-aware Gross/Net, distinct Order Count, ATV, currency partitioning, MetricRules/snapshot changes REQUIRED_BEFORE_M5
+refund persistence/import REQUIRED_DURING_M3; refund completeness BEFORE_M4
 
-M1-06:
+M1-07:
 REQUIRES OWNER AUTHORIZATION
 
 Repository truth:
@@ -570,9 +589,12 @@ docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md
 
 Refund / financial-adjustment contract:
 docs/path-1/m1-05-refund-and-financial-adjustment-contract.md
+
+Financial metric dictionary:
+docs/path-1/m1-06-financial-metric-dictionary.md
 ```
 
-M1-01 through M1-05 contracts are established. M1-06 requires owner authorization before work begins. Use a fresh agent for M1-06. Do not implement refund resources or resolve M1-05 gaps in M1-06.
+M1-01 through M1-06 contracts are established. M1-07 requires owner authorization before work begins. Use a fresh agent for M1-07. Do not implement `line_total_tax`, MetricRules, snapshots, or refunds in M1-07.
 
 ---
 
@@ -639,7 +661,7 @@ PATH 1 — TRUSTED MANAGEMENT ANALYTICS
 ACTIVE
 
 Current Path 1 task:
-M1-06 — Financial Metric Dictionary
+M1-07 — Timestamp, Johannesburg Period and Freshness Contract
 
 P1-00:
 COMPLETE
@@ -671,13 +693,24 @@ COMPLETE (PASS)
 M1-05 contract:
 docs/path-1/m1-05-refund-and-financial-adjustment-contract.md
 
+M1-06:
+COMPLETE (PASS)
+
+M1-06 contract:
+docs/path-1/m1-06-financial-metric-dictionary.md
+
+TAX-INCLUSIVE REVENUE CONTRACT:
+IMPLEMENTATION_CHANGE_REQUIRED
+
 Known REQUIRED_BEFORE_M2 gap:
 TicketType variation-parent fail-closed enforcement (unresolved; defer to M1-09 PRE-M2 gate)
 
-Known M1-05 carry-forward gaps (unresolved):
-refund persistence/import REQUIRED_DURING_M3; refund completeness BEFORE_M4; MetricRules net-after-refund IMPLEMENTATION_CHANGE_REQUIRED BEFORE_M5
+Known M1-05/M1-06 carry-forward gaps (unresolved):
+MG1 persist OrderItem.line_total_tax REQUIRED_DURING_M3 (before authoritative Gross Ticket Sales; not M2)
+MG2–MG8 refund-aware Gross/Net, distinct Order Count, ATV, currency partitioning, MetricRules/snapshot changes REQUIRED_BEFORE_M5
+refund persistence/import REQUIRED_DURING_M3; refund completeness BEFORE_M4
 
-M1-06:
+M1-07:
 REQUIRES OWNER AUTHORIZATION
 
 Repository truth:
@@ -697,6 +730,9 @@ docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md
 
 Refund / financial-adjustment contract:
 docs/path-1/m1-05-refund-and-financial-adjustment-contract.md
+
+Financial metric dictionary:
+docs/path-1/m1-06-financial-metric-dictionary.md
 
 PATH 2 — AUTOMATIC SYNC / CATALOGUE AUTOMATION
 PAUSED
