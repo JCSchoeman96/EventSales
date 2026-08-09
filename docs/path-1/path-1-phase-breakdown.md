@@ -4,13 +4,14 @@
 | --- | --- |
 | Document | Canonical Path 1 execution roadmap |
 | Plan ID | `path-1-phase-breakdown` |
-| Plan version | `v3` |
+| Plan version | `v4` |
 | Status | ACTIVE — repository-native execution contract |
 | Scope | Path 1 M1–M7 gated implementation sequence |
 | Authority | This file wins for Path 1 task sequencing and physical ownership assumptions |
 | Programme handoff | `docs/roadmap/current-state-and-path-handoff.md` |
 | Product decisions | `docs/roadmap/EVENTSALES_PRODUCT_DECISIONS.md` |
 | Repository truth | `docs/path-1/m1-01-current-repo-truth.md` |
+| Attribution contract | `docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md` |
 | Historical planning source | Supplied `EVENTSALES_PATH_1_UPDATED_PHASE_BREAKDOWN.md` (v1 conceptual plan; superseded for physical assumptions) |
 | Path 2 / Phase 5E | PAUSED |
 | Prepared | 2026-08-09 |
@@ -21,6 +22,7 @@
 - `v1` — conceptual Path 1 phase breakdown (external / Downloads copy)
 - `v2` — M1-01A repository-native reconciliation against `m1-01-current-repo-truth.md`
 - `v3` — M1-02 closeout: mark M1-01A/M1-02 COMPLETE; next task M1-03 (requires owner authorization)
+- `v4` — M1-03 closeout: COMPLETE (PASS); next task M1-04 (requires owner authorization); record REQUIRED_BEFORE_M2 TicketType variation-parent fail-closed gap for M1-09 PRE-M2 gate
 
 ### Conflict rule
 
@@ -92,8 +94,11 @@ P1-00: COMPLETE
 M1-01: COMPLETE (PASS)
 M1-01A: COMPLETE (PASS)
 M1-02: COMPLETE (PASS)
-Current Path 1 task: M1-03 — Event → Product → Variation → OrderLine Attribution Contract
-M1-03: REQUIRES OWNER AUTHORIZATION
+M1-03: COMPLETE (PASS)
+M1-03 contract: docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md
+Known REQUIRED_BEFORE_M2 gap: TicketType variation-parent fail-closed enforcement (unresolved; defer to M1-09 PRE-M2 gate)
+Current Path 1 task: M1-04 — Order Lifecycle and Recognised-Sale Contract
+M1-04: REQUIRES OWNER AUTHORIZATION
 ```
 
 ---
@@ -303,8 +308,8 @@ Lock identity, sales, refunds, metrics, timestamps, freshness, completeness, rec
 M1-01   COMPLETE — repository truth
 M1-01A  COMPLETE — roadmap reconciliation
 M1-02   COMPLETE — source identity
-M1-03   attribution (requires owner authorization)
-M1-04   order lifecycle
+M1-03   COMPLETE — attribution contract
+M1-04   order lifecycle (requires owner authorization)
 M1-05   refund / financial adjustment
 M1-06   metric dictionary
 M1-07   time / period / freshness
@@ -386,13 +391,15 @@ OrderItem:
 
 | Field | Value |
 | --- | --- |
-| Status | **REQUIRES OWNER AUTHORIZATION** |
+| Status | **COMPLETE (PASS)** |
 | Strategy | CERTIFY (primary) / EXTEND (documentation gaps only) |
+| Contract | `docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md` |
 | Existing foundation | OrderAttributionResolver, MappingResolver, OrderItemMapper, AutomaticMappingPolicy, protect_mapped_source_identity, ProductMapping, TicketType |
 | Expected change | Lock event-first + ProductMapping fallback + immutability + conflict reasons as the Path 1 contract; clarify TicketType vs ProductMapping dual fields |
 | New resource expected | NO (do not invent Product / Event*Link) |
 | Migration expected | NO |
 | Performance impact | None at contract stage |
+| Known REQUIRED_BEFORE_M2 gap | TicketType variation-parent fail-closed enforcement (G1) — **not resolved**; inventory at M1-09 |
 
 Locks current bridge:
 
@@ -411,6 +418,7 @@ else
 
 | Field | Value |
 | --- | --- |
+| Status | **REQUIRES OWNER AUTHORIZATION** |
 | Strategy | CERTIFY |
 | Existing foundation | WoocommerceOrderParser statuses; Order status atoms; MetricRules.counts_as_sold?; AutomaticMappingPolicy |
 | Expected change | Lock status matrix (recognised sale/revenue/visibility/mapping eligibility) matching current MetricRules |
@@ -490,18 +498,20 @@ C. Path 1 financial source-vs-EventSales reconciliation (MISSING today)
 | --- | --- |
 | Strategy | CERTIFY |
 | Existing foundation | M1-02..M1-08 contract docs + tests as required |
-| Expected change | Pack proving all M1 contracts locked; no dashboard/backfill implementation |
+| Expected change | Pack proving all M1 contracts locked; consolidate evidence-backed implementation gaps into a mandatory **PRE-M2 CONTRACT IMPLEMENTATION GATE**; no dashboard/backfill implementation |
 | New resource expected | NO |
 | Migration expected | NO |
 | Performance impact | None |
 
+M1-09 must inventory unresolved REQUIRED_BEFORE_M2 gaps (including M1-03 G1 TicketType variation-parent fail-closed). If required gaps remain, authorise a small **M1-C** corrective implementation gate before M2 — do not bounce into implementation during each contract task.
+
 ### M1 MUST NOT implement
 
-Dashboards, historical backfill workers as production features, Apply/AutoApply, Phase 5E, parallel order writers, Cachex, Refund resources before M1-05 contract.
+Dashboards, historical backfill workers as production features, Apply/AutoApply, Phase 5E, parallel order writers, Cachex, Refund resources before M1-05 contract. Do not implement M1-03 G1 during M1-04..M1-08.
 
 ### M1 Completion Gate
 
-All M1-02..M1-09 contracts locked and certified. M2 unauthorized until then.
+All M1-02..M1-09 contracts locked and certified. REQUIRED_BEFORE_M2 gaps inventoried; M1-C completed if required. M2 unauthorized until then.
 
 ---
 
@@ -730,8 +740,8 @@ Namespaced keys (`CacheKeys`); targeted invalidation; single-flight rebuild; def
 | M1-01 | Repository identity and writer audit — **COMPLETE** |
 | M1-01A | Repository-native roadmap reconciliation — **COMPLETE** |
 | M1-02 | Source-scoped external identity contract — **COMPLETE** |
-| M1-03 | Attribution contract (certify current architecture) — **REQUIRES OWNER AUTHORIZATION** |
-| M1-04 | Order lifecycle / recognised-sale contract |
+| M1-03 | Attribution contract (certify current architecture) — **COMPLETE** |
+| M1-04 | Order lifecycle / recognised-sale contract — **REQUIRES OWNER AUTHORIZATION** |
 | M1-05 | Refund / financial adjustment contract |
 | M1-06 | Financial metric dictionary |
 | M1-07 | Timestamp / Johannesburg period / freshness (resolve 5m vs 10m) |
@@ -791,10 +801,11 @@ Namespaced keys (`CacheKeys`); targeted invalidation; single-flight rebuild; def
 [x] M1-01 repository truth exists
 [x] Roadmap is repository-native (this file)
 [x] M1-02 source-scoped external identity contract locked
-[ ] M1-03..M1-09 contracts locked
+[x] M1-03 attribution contract locked
+[ ] M1-04..M1-09 contracts locked
 [ ] Existing Catalog/Sales/Ingestion/Analytics/Accounts reused
 [ ] Existing parser/OrderUpserter reused (no parallel writer)
-[ ] Attribution certifies event-first + ProductMapping fallback
+[x] Attribution certifies event-first + ProductMapping fallback
 [ ] Refund contract exists before refund object implementation
 [ ] Financial reconciliation distinct from Tickera attendee recon
 [ ] Hot/warm/cold = ETS + Redis + Postgres (no mandatory Cachex)
@@ -813,7 +824,9 @@ P1-00 COMPLETE
 → M1-01 COMPLETE
 → M1-01A COMPLETE
 → M1-02 COMPLETE
-→ M1-03 (requires owner authorization) … M1-09
+→ M1-03 COMPLETE
+→ M1-04 (requires owner authorization) … M1-09
+→ M1-C (only if M1-09 PRE-M2 gate requires corrective implementation)
 → M2
 → M3
 → M4
@@ -843,10 +856,19 @@ COMPLETE (PASS)
 M1-02:
 COMPLETE (PASS)
 
-Current Path 1 task:
-M1-03 — Event → Product → Variation → OrderLine Attribution Contract
-
 M1-03:
+COMPLETE (PASS)
+
+M1-03 contract:
+docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md
+
+Known REQUIRED_BEFORE_M2 gap:
+TicketType variation-parent fail-closed enforcement (unresolved; defer to M1-09 PRE-M2 gate)
+
+Current Path 1 task:
+M1-04 — Order Lifecycle and Recognised-Sale Contract
+
+M1-04:
 REQUIRES OWNER AUTHORIZATION
 
 Path 2:
@@ -858,6 +880,10 @@ PAUSED
 Identity contract:
 docs/path-1/m1-02-source-scoped-external-identity-contract.md
 
-DO NOT START M1-03 WITHOUT OWNER AUTHORIZATION.
-USE A FRESH AGENT FOR M1-03.
+Attribution contract:
+docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md
+
+DO NOT START M1-04 WITHOUT OWNER AUTHORIZATION.
+USE A FRESH AGENT FOR M1-04.
+DO NOT REDESIGN ATTRIBUTION IN M1-04.
 ```

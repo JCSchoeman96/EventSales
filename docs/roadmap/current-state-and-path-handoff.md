@@ -12,12 +12,14 @@
 | Path 1 repository truth | `docs/path-1/m1-01-current-repo-truth.md` |
 | Path 1 execution roadmap | `docs/path-1/path-1-phase-breakdown.md` |
 | Path 1 identity contract | `docs/path-1/m1-02-source-scoped-external-identity-contract.md` |
+| Path 1 attribution contract | `docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md` |
 
 ### Revision log
 
 - `v1` — initial authoritative Path 1 / Path 2 handoff after Phase 5D COMPLETE
 - `v2` — record M1-01 COMPLETE; point to repository truth and repository-native Path 1 roadmap; next task M1-02
 - `v3` — record M1-01A/M1-02 COMPLETE; next task M1-03 (requires owner authorization)
+- `v4` — record M1-03 COMPLETE (PASS); next task M1-04 (requires owner authorization); note REQUIRED_BEFORE_M2 TicketType variation-parent gap
 
 ### Conflict rule
 
@@ -103,11 +105,14 @@ P1-00: COMPLETE
 M1-01: COMPLETE (PASS)
 M1-01A: COMPLETE (PASS)
 M1-02: COMPLETE (PASS)
+M1-03: COMPLETE (PASS)
 Repository truth: docs/path-1/m1-01-current-repo-truth.md
 Execution roadmap: docs/path-1/path-1-phase-breakdown.md
 Identity contract: docs/path-1/m1-02-source-scoped-external-identity-contract.md
-Current Path 1 task: M1-03 — Event → Product → Variation → OrderLine Attribution Contract
-M1-03: REQUIRES OWNER AUTHORIZATION
+Attribution contract: docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md
+Known REQUIRED_BEFORE_M2 gap: TicketType variation-parent fail-closed enforcement (unresolved; defer to M1-09 PRE-M2 gate)
+Current Path 1 task: M1-04 — Order Lifecycle and Recognised-Sale Contract
+M1-04: REQUIRES OWNER AUTHORIZATION
 
 PATH 2 — AUTOMATIC SYNC / CATALOGUE AUTOMATION
 Status: PAUSED AT CERTIFIED CHECKPOINT
@@ -498,7 +503,7 @@ M7 — Production Certification / Pilot
 
 ```text
 CURRENT NEXT STEP:
-M1-03 — Event → Product → Variation → OrderLine Attribution Contract
+M1-04 — Order Lifecycle and Recognised-Sale Contract
 
 P1-00:
 COMPLETE
@@ -513,6 +518,15 @@ M1-02:
 COMPLETE (PASS)
 
 M1-03:
+COMPLETE (PASS)
+
+M1-03 contract:
+docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md
+
+Known REQUIRED_BEFORE_M2 gap:
+TicketType variation-parent fail-closed enforcement (unresolved; defer to M1-09 PRE-M2 gate)
+
+M1-04:
 REQUIRES OWNER AUTHORIZATION
 
 Repository truth:
@@ -523,9 +537,12 @@ docs/path-1/path-1-phase-breakdown.md
 
 Identity contract:
 docs/path-1/m1-02-source-scoped-external-identity-contract.md
+
+Attribution contract:
+docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md
 ```
 
-M1-01 repository truth, the repository-native Path 1 roadmap, and the M1-02 source-scoped external identity contract are established. M1-03 requires owner authorization before work begins.
+M1-01 repository truth, the repository-native Path 1 roadmap, the M1-02 identity contract, and the M1-03 attribution contract are established. M1-04 requires owner authorization before work begins. Do not redesign attribution in M1-04.
 
 ---
 
@@ -592,7 +609,7 @@ PATH 1 — TRUSTED MANAGEMENT ANALYTICS
 ACTIVE
 
 Current Path 1 task:
-M1-03 — Event → Product → Variation → OrderLine Attribution Contract
+M1-04 — Order Lifecycle and Recognised-Sale Contract
 
 P1-00:
 COMPLETE
@@ -607,6 +624,15 @@ M1-02:
 COMPLETE (PASS)
 
 M1-03:
+COMPLETE (PASS)
+
+M1-03 contract:
+docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md
+
+Known REQUIRED_BEFORE_M2 gap:
+TicketType variation-parent fail-closed enforcement (unresolved; defer to M1-09 PRE-M2 gate)
+
+M1-04:
 REQUIRES OWNER AUTHORIZATION
 
 Repository truth:
@@ -617,6 +643,9 @@ docs/path-1/path-1-phase-breakdown.md
 
 Identity contract:
 docs/path-1/m1-02-source-scoped-external-identity-contract.md
+
+Attribution contract:
+docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md
 
 PATH 2 — AUTOMATIC SYNC / CATALOGUE AUTOMATION
 PAUSED
