@@ -9,10 +9,13 @@
 | Durable Phase 5D evidence | `docs/phase-5d/native-v3-e2e-run-report.md` |
 | Historical Phase 5D certification commit | `c286fd0e647199a261b6ef2ec3791617dacb5834` |
 | Last updated | 2026-08-09 |
+| Path 1 repository truth | `docs/path-1/m1-01-current-repo-truth.md` |
+| Path 1 execution roadmap | `docs/path-1/path-1-phase-breakdown.md` |
 
 ### Revision log
 
 - `v1` — initial authoritative Path 1 / Path 2 handoff after Phase 5D COMPLETE
+- `v2` — record M1-01 COMPLETE; point to repository truth and repository-native Path 1 roadmap; next task M1-02
 
 ### Conflict rule
 
@@ -94,6 +97,10 @@ Status: ESTABLISHED
 PATH 1 — MANAGEMENT ANALYTICS
 Status: ACTIVE
 Next milestone: M1 Truth & Identity Contract
+M1-01: COMPLETE (PASS)
+Repository truth: docs/path-1/m1-01-current-repo-truth.md
+Execution roadmap: docs/path-1/path-1-phase-breakdown.md
+Current next Path 1 task: M1-02 — Source-Scoped External Identity Contract
 
 PATH 2 — AUTOMATIC SYNC / CATALOGUE AUTOMATION
 Status: PAUSED AT CERTIFIED CHECKPOINT
@@ -484,10 +491,19 @@ M7 — Production Certification / Pilot
 
 ```text
 CURRENT NEXT STEP:
-M1
+M1-02 — Source-Scoped External Identity Contract
+
+M1-01:
+COMPLETE
+
+Repository truth:
+docs/path-1/m1-01-current-repo-truth.md
+
+Execution roadmap:
+docs/path-1/path-1-phase-breakdown.md
 ```
 
-This checkpoint does **not** implement M1.
+M1-01 repository truth and the repository-native Path 1 roadmap are established. M1-02 requires owner authorization before implementation.
 
 ---
 
@@ -554,7 +570,16 @@ PATH 1 — TRUSTED MANAGEMENT ANALYTICS
 ACTIVE
 
 Current Path 1 task:
-M1 — Truth & Identity Contract
+M1-02 — Source-Scoped External Identity Contract
+
+M1-01:
+COMPLETE
+
+Repository truth:
+docs/path-1/m1-01-current-repo-truth.md
+
+Execution roadmap:
+docs/path-1/path-1-phase-breakdown.md
 
 PATH 2 — AUTOMATIC SYNC / CATALOGUE AUTOMATION
 PAUSED
