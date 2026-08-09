@@ -73,13 +73,14 @@ defmodule EventSales.Catalog.OrderAttributionResolver do
     end
   end
 
-  defp ticket_type(%Event{id: event_id}, _woo_product_id, woo_variation_id) do
+  defp ticket_type(%Event{id: event_id}, woo_product_id, woo_variation_id) do
     TicketType
     |> Ash.Query.filter(
       event_id == ^event_id and
         active == true and
         external_ticket_type_kind == :woo_variation and
-        external_ticket_type_id == ^woo_variation_id
+        external_ticket_type_id == ^woo_variation_id and
+        (is_nil(external_product_id) or external_product_id == ^woo_product_id)
     )
     |> Ash.Query.limit(1)
     |> Ash.read_one(domain: Catalog)
