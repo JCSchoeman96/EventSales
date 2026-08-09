@@ -16,6 +16,7 @@
 | Path 1 lifecycle / recognised-sale contract | `docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md` |
 | Path 1 refund / financial-adjustment contract | `docs/path-1/m1-05-refund-and-financial-adjustment-contract.md` |
 | Path 1 financial metric dictionary | `docs/path-1/m1-06-financial-metric-dictionary.md` |
+| Path 1 timestamp / Johannesburg / freshness contract | `docs/path-1/m1-07-timestamp-johannesburg-period-and-freshness-contract.md` |
 
 ### Revision log
 
@@ -26,6 +27,7 @@
 - `v5` — record M1-04 COMPLETE (PASS); next task M1-05 (requires owner authorization)
 - `v6` — record M1-05 COMPLETE (PASS); next task M1-06 (requires owner authorization); carry refund implementation gaps unresolved
 - `v7` — record M1-06 COMPLETE (PASS); next task M1-07 (requires owner authorization); tax-inclusive revenue IMPLEMENTATION_CHANGE_REQUIRED; preserve MG1–MG8 gap ledger
+- `v8` — record M1-07 COMPLETE (PASS); next task M1-08 (requires owner authorization); lock paid→completed sale clock, refund `date_created_gmt`, Johannesburg periods, `>10m` source STALE; HotStateAggregator 5m = IMPLEMENTATION_CHANGE_REQUIRED
 
 ### Conflict rule
 
@@ -119,17 +121,21 @@ Attribution contract: docs/path-1/m1-03-event-product-variation-orderline-attrib
 Lifecycle / recognised-sale contract: docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md
 Refund / financial-adjustment contract: docs/path-1/m1-05-refund-and-financial-adjustment-contract.md
 Financial metric dictionary: docs/path-1/m1-06-financial-metric-dictionary.md
+Timestamp / Johannesburg / freshness contract: docs/path-1/m1-07-timestamp-johannesburg-period-and-freshness-contract.md
 Known REQUIRED_BEFORE_M2 gap: TicketType variation-parent fail-closed enforcement (unresolved; defer to M1-09 PRE-M2 gate)
 M1-04: COMPLETE (PASS)
 M1-05: COMPLETE (PASS)
 M1-06: COMPLETE (PASS)
+M1-07: COMPLETE (PASS)
 TAX-INCLUSIVE REVENUE CONTRACT: IMPLEMENTATION_CHANGE_REQUIRED
-Known M1-05/M1-06 carry-forward gaps (unresolved):
+FRESHNESS / STALE CONTRACT: LOCKED (`age > 10m` STALE on source age; HotStateAggregator 5m = IMPLEMENTATION_CHANGE_REQUIRED)
+Known M1-05/M1-06/M1-07 carry-forward gaps (unresolved):
   MG1 persist OrderItem.line_total_tax REQUIRED_DURING_M3 (before authoritative Gross Ticket Sales; not M2)
   MG2–MG8 refund-aware Gross/Net, distinct Order Count, ATV, currency partitioning, MetricRules/snapshot changes REQUIRED_BEFORE_M5
   refund persistence/import REQUIRED_DURING_M3; refund completeness BEFORE_M4
-Current Path 1 task: M1-07 — Timestamp, Johannesburg Period and Freshness Contract
-M1-07: REQUIRES OWNER AUTHORIZATION
+  persist date_paid_gmt + refund date_created_gmt REQUIRED_DURING_M3; sale/refund bucketing + 10m source-stale projection REQUIRED_BEFORE_M5
+Current Path 1 task: M1-08 — Backfill Completeness, Reconciliation and ANALYTICS_READY Contract
+M1-08: REQUIRES OWNER AUTHORIZATION
 
 PATH 2 — AUTOMATIC SYNC / CATALOGUE AUTOMATION
 Status: PAUSED AT CERTIFIED CHECKPOINT
@@ -520,7 +526,7 @@ M7 — Production Certification / Pilot
 
 ```text
 CURRENT NEXT STEP:
-M1-07 — Timestamp, Johannesburg Period and Freshness Contract
+M1-08 — Backfill Completeness, Reconciliation and ANALYTICS_READY Contract
 
 P1-00:
 COMPLETE
@@ -558,18 +564,28 @@ COMPLETE (PASS)
 M1-06 contract:
 docs/path-1/m1-06-financial-metric-dictionary.md
 
+M1-07:
+COMPLETE (PASS)
+
+M1-07 contract:
+docs/path-1/m1-07-timestamp-johannesburg-period-and-freshness-contract.md
+
 TAX-INCLUSIVE REVENUE CONTRACT:
 IMPLEMENTATION_CHANGE_REQUIRED
+
+FRESHNESS / STALE CONTRACT:
+LOCKED (`age > 10m` STALE on source age; HotStateAggregator 5m = IMPLEMENTATION_CHANGE_REQUIRED)
 
 Known REQUIRED_BEFORE_M2 gap:
 TicketType variation-parent fail-closed enforcement (unresolved; defer to M1-09 PRE-M2 gate)
 
-Known M1-05/M1-06 carry-forward gaps (unresolved):
+Known M1-05/M1-06/M1-07 carry-forward gaps (unresolved):
 MG1 persist OrderItem.line_total_tax REQUIRED_DURING_M3 (before authoritative Gross Ticket Sales; not M2)
 MG2–MG8 refund-aware Gross/Net, distinct Order Count, ATV, currency partitioning, MetricRules/snapshot changes REQUIRED_BEFORE_M5
 refund persistence/import REQUIRED_DURING_M3; refund completeness BEFORE_M4
+persist date_paid_gmt + refund date_created_gmt REQUIRED_DURING_M3; sale/refund bucketing + 10m source-stale projection REQUIRED_BEFORE_M5
 
-M1-07:
+M1-08:
 REQUIRES OWNER AUTHORIZATION
 
 Repository truth:
@@ -592,9 +608,12 @@ docs/path-1/m1-05-refund-and-financial-adjustment-contract.md
 
 Financial metric dictionary:
 docs/path-1/m1-06-financial-metric-dictionary.md
+
+Timestamp / Johannesburg / freshness contract:
+docs/path-1/m1-07-timestamp-johannesburg-period-and-freshness-contract.md
 ```
 
-M1-01 through M1-06 contracts are established. M1-07 requires owner authorization before work begins. Use a fresh agent for M1-07. Do not implement `line_total_tax`, MetricRules, snapshots, or refunds in M1-07.
+M1-01 through M1-07 contracts are established. M1-08 requires owner authorization before work begins. Use a fresh agent for M1-08. Do not implement ANALYTICS_READY, reconciliation workers, `date_paid`, MetricRules, snapshots, or refunds in M1-08.
 
 ---
 
@@ -661,7 +680,7 @@ PATH 1 — TRUSTED MANAGEMENT ANALYTICS
 ACTIVE
 
 Current Path 1 task:
-M1-07 — Timestamp, Johannesburg Period and Freshness Contract
+M1-08 — Backfill Completeness, Reconciliation and ANALYTICS_READY Contract
 
 P1-00:
 COMPLETE
@@ -699,18 +718,28 @@ COMPLETE (PASS)
 M1-06 contract:
 docs/path-1/m1-06-financial-metric-dictionary.md
 
+M1-07:
+COMPLETE (PASS)
+
+M1-07 contract:
+docs/path-1/m1-07-timestamp-johannesburg-period-and-freshness-contract.md
+
 TAX-INCLUSIVE REVENUE CONTRACT:
 IMPLEMENTATION_CHANGE_REQUIRED
+
+FRESHNESS / STALE CONTRACT:
+LOCKED (`age > 10m` STALE on source age; HotStateAggregator 5m = IMPLEMENTATION_CHANGE_REQUIRED)
 
 Known REQUIRED_BEFORE_M2 gap:
 TicketType variation-parent fail-closed enforcement (unresolved; defer to M1-09 PRE-M2 gate)
 
-Known M1-05/M1-06 carry-forward gaps (unresolved):
+Known M1-05/M1-06/M1-07 carry-forward gaps (unresolved):
 MG1 persist OrderItem.line_total_tax REQUIRED_DURING_M3 (before authoritative Gross Ticket Sales; not M2)
 MG2–MG8 refund-aware Gross/Net, distinct Order Count, ATV, currency partitioning, MetricRules/snapshot changes REQUIRED_BEFORE_M5
 refund persistence/import REQUIRED_DURING_M3; refund completeness BEFORE_M4
+persist date_paid_gmt + refund date_created_gmt REQUIRED_DURING_M3; sale/refund bucketing + 10m source-stale projection REQUIRED_BEFORE_M5
 
-M1-07:
+M1-08:
 REQUIRES OWNER AUTHORIZATION
 
 Repository truth:
@@ -733,6 +762,9 @@ docs/path-1/m1-05-refund-and-financial-adjustment-contract.md
 
 Financial metric dictionary:
 docs/path-1/m1-06-financial-metric-dictionary.md
+
+Timestamp / Johannesburg / freshness contract:
+docs/path-1/m1-07-timestamp-johannesburg-period-and-freshness-contract.md
 
 PATH 2 — AUTOMATIC SYNC / CATALOGUE AUTOMATION
 PAUSED

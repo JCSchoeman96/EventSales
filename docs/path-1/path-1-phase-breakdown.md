@@ -4,7 +4,7 @@
 | --- | --- |
 | Document | Canonical Path 1 execution roadmap |
 | Plan ID | `path-1-phase-breakdown` |
-| Plan version | `v7` |
+| Plan version | `v8` |
 | Status | ACTIVE — repository-native execution contract |
 | Scope | Path 1 M1–M7 gated implementation sequence |
 | Authority | This file wins for Path 1 task sequencing and physical ownership assumptions |
@@ -15,6 +15,7 @@
 | Lifecycle / recognised-sale contract | `docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md` |
 | Refund / financial-adjustment contract | `docs/path-1/m1-05-refund-and-financial-adjustment-contract.md` |
 | Financial metric dictionary | `docs/path-1/m1-06-financial-metric-dictionary.md` |
+| Timestamp / Johannesburg / freshness contract | `docs/path-1/m1-07-timestamp-johannesburg-period-and-freshness-contract.md` |
 | Historical planning source | Supplied `EVENTSALES_PATH_1_UPDATED_PHASE_BREAKDOWN.md` (v1 conceptual plan; superseded for physical assumptions) |
 | Path 2 / Phase 5E | PAUSED |
 | Prepared | 2026-08-09 |
@@ -29,6 +30,7 @@
 - `v5` — M1-04 closeout: COMPLETE (PASS); next task M1-05 (requires owner authorization); lock recognised-sale predicate for refund contract design
 - `v6` — M1-05 closeout: COMPLETE (PASS); next task M1-06 (requires owner authorization); carry refund implementation gaps unresolved (M3/M4/M5 timing; MetricRules IMPLEMENTATION_CHANGE_REQUIRED)
 - `v7` — M1-06 closeout: COMPLETE (PASS); next task M1-07 (requires owner authorization); lock tax-inclusive Gross as `line_total + line_total_tax` (MG1 REQUIRED_DURING_M3; MG2–MG8 REQUIRED_BEFORE_M5)
+- `v8` — M1-07 closeout: COMPLETE (PASS); next task M1-08 (requires owner authorization); lock paid→completed sale clock, refund `date_created_gmt`, Johannesburg `[start,end)`, `<5m` NORMAL / `>10m` STALE; HotStateAggregator 5m stale = IMPLEMENTATION_CHANGE_REQUIRED
 
 ### Conflict rule
 
@@ -108,14 +110,19 @@ M1-05: COMPLETE (PASS)
 M1-05 contract: docs/path-1/m1-05-refund-and-financial-adjustment-contract.md
 M1-06: COMPLETE (PASS)
 M1-06 contract: docs/path-1/m1-06-financial-metric-dictionary.md
+M1-07: COMPLETE (PASS)
+M1-07 contract: docs/path-1/m1-07-timestamp-johannesburg-period-and-freshness-contract.md
 TAX-INCLUSIVE REVENUE CONTRACT: IMPLEMENTATION_CHANGE_REQUIRED
+FRESHNESS / STALE CONTRACT: LOCKED (`age > 10m` STALE; `<5m` NORMAL; `5m–10m` AGING)
+HotStateAggregator 5m stale_after_ms: IMPLEMENTATION_CHANGE_REQUIRED
 Known REQUIRED_BEFORE_M2 gap: TicketType variation-parent fail-closed enforcement (unresolved; defer to M1-09 PRE-M2 gate)
-Known M1-05/M1-06 carry-forward gaps (unresolved):
+Known M1-05/M1-06/M1-07 carry-forward gaps (unresolved):
   MG1 persist OrderItem.line_total_tax REQUIRED_DURING_M3 (before authoritative Gross Ticket Sales; not M2)
   MG2–MG8 refund-aware Gross/Net, distinct Order Count, ATV, currency partitioning, MetricRules/snapshot changes REQUIRED_BEFORE_M5
   refund persistence/import REQUIRED_DURING_M3; refund completeness BEFORE_M4
-Current Path 1 task: M1-07 — Timestamp, Johannesburg Period and Freshness Contract
-M1-07: REQUIRES OWNER AUTHORIZATION
+  persist date_paid_gmt + refund date_created_gmt REQUIRED_DURING_M3; sale/refund bucketing + 10m source-stale projection REQUIRED_BEFORE_M5
+Current Path 1 task: M1-08 — Backfill Completeness, Reconciliation and ANALYTICS_READY Contract
+M1-08: REQUIRES OWNER AUTHORIZATION
 ```
 
 ---
@@ -225,21 +232,25 @@ Cold: Postgres (Order/OrderItem + aggregate snapshots)
 
 Preserve outcomes: bounded reads, single-flight rebuild, targeted invalidation, hot/warm/cold separation, PubSub updates, no peak full-table scans.
 
-### 3.8 OPEN M1-07 CONTRACT CONFLICT
+### 3.8 Freshness / stale contract (M1-07 LOCKED)
 
 ```text
-programme contract:
-  expected visibility < 5 minutes
-  stale > 10 minutes
+programme + M1-07 contract:
+  age < 5 minutes           → NORMAL visibility target
+  5 minutes ≤ age ≤ 10 minutes → AGING (outside normal; not stale)
+  age > 10 minutes          → STALE
+
+age = SOURCE DATA AGE (not cache rebuild age)
 
 current implementation:
   HotStateAggregator default stale_after_ms = 300_000 (5 minutes)
+  on last_fresh_at (read-model / rebuild age)
 
 status:
-  OPEN M1-07 CONTRACT CONFLICT
+  CONTRACT LOCKED — IMPLEMENTATION_CHANGE_REQUIRED before M5 freshness projection
 ```
 
-Do **not** resolve here. M1-07 decides; later implementation conforms.
+Contract: `docs/path-1/m1-07-timestamp-johannesburg-period-and-freshness-contract.md`.
 
 ### 3.9 Refund truth (current)
 
@@ -285,7 +296,7 @@ Apply/AutoApply independent of Path 1 analytics
 LiveView/controllers must not call WooCommerce inline
 ```
 
-Freshness numeric thresholds: see §3.8 (open conflict for M1-07).
+Freshness numeric thresholds: see §3.8 (M1-07 LOCKED; implementation still 5m rebuild clock).
 
 ---
 
@@ -331,7 +342,8 @@ M1-03   COMPLETE — attribution contract
 M1-04   COMPLETE — order lifecycle / recognised sale
 M1-05   COMPLETE — refund / financial adjustment
 M1-06   COMPLETE — financial metric dictionary
-M1-07   time / period / freshness (requires owner authorization)
+M1-07   time / period / freshness — COMPLETE (PASS)
+M1-08   completeness / reconciliation / ANALYTICS_READY (requires owner authorization)
 M1-08   completeness / reconciliation / ANALYTICS_READY
 M1-09   certification
 ```
@@ -488,12 +500,13 @@ TAX-INCLUSIVE REVENUE CONTRACT: IMPLEMENTATION_CHANGE_REQUIRED (`line_total + li
 
 | Field | Value |
 | --- | --- |
-| Status | **REQUIRES OWNER AUTHORIZATION** |
-| Strategy | NEW CONTRACT REQUIRED (resolve open conflict) |
-| Existing foundation | created_at_source, updated_at_source, completed_at; MetricRules uses completed_at for “today”; HotStateAggregator 5‑min stale clock; programme 10‑min stale |
-| Expected change | Lock payment vs completion vs freshness clocks; **resolve OPEN M1-07 CONTRACT CONFLICT** (5m vs 10m); no `date_paid` field exists today |
-| New resource expected | NO |
-| Migration expected | TBD if new timestamp fields authorized |
+| Status | **COMPLETE (PASS)** |
+| Strategy | CERTIFY + NEW CONTRACT LOCKED |
+| Contract | `docs/path-1/m1-07-timestamp-johannesburg-period-and-freshness-contract.md` |
+| Existing foundation | created_at_source, updated_at_source, completed_at; MetricRules uses completed_at for “today”; HotStateAggregator 5‑min rebuild stale clock |
+| Locked change | Sale effective = `date_paid_gmt` → `date_completed_gmt` → withhold; refund effective = refund `date_created_gmt`; Johannesburg `[start,end)`; `<5m` NORMAL / `>10m` STALE on **source** age; HotStateAggregator 5m = IMPLEMENTATION_CHANGE_REQUIRED |
+| New resource expected | NO in M1-07 |
+| Migration expected | NO in M1-07; `date_paid` + refund created-gmt persistence during M3 |
 | Performance impact | Freshness must not require Woo REST from LiveView |
 
 ---
@@ -655,7 +668,7 @@ Trusted bounded projections for management — **reuse current Analytics infrast
 | M5-04 Period Comparisons | EXTEND | DailySalesAggregateSnapshot; business timezone | Johannesburg periods per M1-07 | TBD | TBD | Pre-aggregated |
 | M5-05 Deterministic Sales Velocity | NEW / EXTEND | Hot summaries | Velocity metrics from aggregates/hot state | TBD | TBD | No raw scans |
 | M5-06 Capacity / Occupancy | NEW / EXTEND | Event capacity fields if present | Occupancy from sold vs capacity | TBD | TBD | Event-scoped |
-| M5-07 Freshness and Data-Quality Projection | EXTEND | HotStateAggregator lifecycle; stale banner | Conform to **M1-07 decision** (open 5m vs 10m conflict) | NO | TBD | PubSub |
+| M5-07 Freshness and Data-Quality Projection | EXTEND | HotStateAggregator lifecycle; stale banner | Conform to **M1-07** (`>10m` source STALE; separate read-model age; 5m impl change) | NO | TBD | PubSub |
 | M5-08 Hot/Warm/Cold Caching | REUSE / EXTEND / REMOVE_AS_ALREADY_PRESENT | **ETS DashboardCache + Redis warm + Postgres cold**; RebuildHotStateWorker; single-flight; OrderProcessedNotifier; DashboardPubSub | Extend TTLs/keys as needed; **do not add Cachex** | NO | NO | Preserve stampede protection |
 | M5-09 Analytics Certification | CERTIFY | — | Projections match M4 reconciled totals | NO | NO | — |
 
@@ -669,7 +682,7 @@ Target sub-100ms common management reads from hot/warm where practical. Rebuild 
 
 ### M5 STOP
 
-Cachex dependency; peak full-table scans; analytics diverging from M4; resolving freshness conflict without M1-07.
+Cachex dependency; peak full-table scans; analytics diverging from M4; treating rebuild age as programme stale.
 
 ---
 
@@ -771,7 +784,8 @@ Namespaced keys (`CacheKeys`); targeted invalidation; single-flight rebuild; def
 | M1-04 | Order lifecycle / recognised-sale contract — **COMPLETE** |
 | M1-05 | Refund / financial adjustment contract — **COMPLETE** |
 | M1-06 | Financial metric dictionary — **COMPLETE** |
-| M1-07 | Timestamp / Johannesburg period / freshness (resolve 5m vs 10m) — **REQUIRES OWNER AUTHORIZATION** |
+| M1-07 | Timestamp / Johannesburg period / freshness — **COMPLETE (PASS)** |
+| M1-08 | Backfill completeness / reconciliation / ANALYTICS_READY — **REQUIRES OWNER AUTHORIZATION** |
 | M1-08 | Completeness / reconciliation / ANALYTICS_READY |
 | M1-09 | M1 certification pack |
 
@@ -832,14 +846,15 @@ Namespaced keys (`CacheKeys`); targeted invalidation; single-flight rebuild; def
 [x] M1-04 order lifecycle / recognised-sale contract locked
 [x] M1-05 refund / financial-adjustment contract locked
 [x] M1-06 financial metric dictionary locked
-[ ] M1-07..M1-09 contracts locked
+[x] M1-07 timestamp / Johannesburg / freshness contract locked
+[ ] M1-08..M1-09 contracts locked
 [ ] Existing Catalog/Sales/Ingestion/Analytics/Accounts reused
 [ ] Existing parser/OrderUpserter reused (no parallel writer)
 [x] Attribution certifies event-first + ProductMapping fallback
 [x] Refund contract exists before refund object implementation
 [ ] Financial reconciliation distinct from Tickera attendee recon
 [ ] Hot/warm/cold = ETS + Redis + Postgres (no mandatory Cachex)
-[ ] Freshness contract resolves OPEN M1-07 CONFLICT
+[x] Freshness contract resolves former OPEN M1-07 CONFLICT
 [ ] Management read-only; no Apply/AutoApply
 [ ] ANALYTICS_READY blocks on financial mismatch
 [ ] Production certification recorded
@@ -858,7 +873,8 @@ P1-00 COMPLETE
 → M1-04 COMPLETE
 → M1-05 COMPLETE
 → M1-06 COMPLETE
-→ M1-07 (requires owner authorization) … M1-09
+→ M1-07 COMPLETE
+→ M1-08 (requires owner authorization) … M1-09
 → M1-C (only if M1-09 PRE-M2 gate requires corrective implementation)
 → M2
 → M3
@@ -913,21 +929,31 @@ COMPLETE (PASS)
 M1-06 contract:
 docs/path-1/m1-06-financial-metric-dictionary.md
 
+M1-07:
+COMPLETE (PASS)
+
+M1-07 contract:
+docs/path-1/m1-07-timestamp-johannesburg-period-and-freshness-contract.md
+
 TAX-INCLUSIVE REVENUE CONTRACT:
 IMPLEMENTATION_CHANGE_REQUIRED
+
+FRESHNESS / STALE CONTRACT:
+LOCKED (`age > 10m` STALE on source age; HotStateAggregator 5m = IMPLEMENTATION_CHANGE_REQUIRED)
 
 Known REQUIRED_BEFORE_M2 gap:
 TicketType variation-parent fail-closed enforcement (unresolved; defer to M1-09 PRE-M2 gate)
 
-Known M1-05/M1-06 carry-forward gaps (unresolved):
+Known M1-05/M1-06/M1-07 carry-forward gaps (unresolved):
 MG1 persist OrderItem.line_total_tax REQUIRED_DURING_M3 (before authoritative Gross Ticket Sales; not M2)
 MG2–MG8 refund-aware Gross/Net, distinct Order Count, ATV, currency partitioning, MetricRules/snapshot changes REQUIRED_BEFORE_M5
 refund persistence/import REQUIRED_DURING_M3; refund completeness BEFORE_M4
+persist date_paid_gmt + refund date_created_gmt REQUIRED_DURING_M3; sale/refund bucketing + 10m source-stale projection REQUIRED_BEFORE_M5
 
 Current Path 1 task:
-M1-07 — Timestamp, Johannesburg Period and Freshness Contract
+M1-08 — Backfill Completeness, Reconciliation and ANALYTICS_READY Contract
 
-M1-07:
+M1-08:
 REQUIRES OWNER AUTHORIZATION
 
 Path 2:
@@ -951,7 +977,10 @@ docs/path-1/m1-05-refund-and-financial-adjustment-contract.md
 Financial metric dictionary:
 docs/path-1/m1-06-financial-metric-dictionary.md
 
-DO NOT START M1-07 WITHOUT OWNER AUTHORIZATION.
-USE A FRESH AGENT FOR M1-07.
-DO NOT IMPLEMENT line_total_tax, MetricRules, snapshots, or refunds in M1-07.
+Timestamp / Johannesburg / freshness contract:
+docs/path-1/m1-07-timestamp-johannesburg-period-and-freshness-contract.md
+
+DO NOT START M1-08 WITHOUT OWNER AUTHORIZATION.
+USE A FRESH AGENT FOR M1-08.
+DO NOT IMPLEMENT ANALYTICS_READY, reconciliation workers, date_paid, MetricRules, snapshots, or refunds in M1-08.
 ```
