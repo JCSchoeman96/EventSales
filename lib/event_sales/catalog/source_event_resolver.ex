@@ -40,7 +40,9 @@ defmodule EventSales.Catalog.SourceEventResolver do
 
   @type error ::
           :source_not_found
+          | :source_lookup_failed
           | :event_not_found
+          | :event_lookup_failed
           | :unsupported_external_event_kind
           | :invalid_source_ref
           | :invalid_external_event_id
@@ -51,6 +53,12 @@ defmodule EventSales.Catalog.SourceEventResolver do
   Options:
 
   - `:external_event_kind` — defaults to `:tickera_event`; any other value fails closed
+
+  Absence vs lookup failure:
+
+  - `:source_not_found` / `:event_not_found` — lookup succeeded; identity is absent
+    (`{:ok, nil}` or Ash `Query.NotFound`)
+  - `:source_lookup_failed` / `:event_lookup_failed` — identity truth could not be established
   """
   @spec resolve(source_ref(), integer(), keyword()) ::
           {:ok, resolution()} | {:error, error()}
@@ -77,7 +85,7 @@ defmodule EventSales.Catalog.SourceEventResolver do
     case Ash.get(SourceSystem, source_system_id, domain: Catalog) do
       {:ok, %SourceSystem{} = source} -> {:ok, source}
       {:ok, nil} -> {:error, :source_not_found}
-      {:error, _} -> {:error, :source_not_found}
+      {:error, reason} -> classify_source_lookup_error(reason)
     end
   end
 
@@ -105,7 +113,7 @@ defmodule EventSales.Catalog.SourceEventResolver do
     case Ash.get(SourceSystem, %{kind: kind, base_url: normalized_base_url}, domain: Catalog) do
       {:ok, %SourceSystem{} = source} -> {:ok, source}
       {:ok, nil} -> {:error, :source_not_found}
-      {:error, _} -> {:error, :source_not_found}
+      {:error, reason} -> classify_source_lookup_error(reason)
     end
   end
 
@@ -130,7 +138,22 @@ defmodule EventSales.Catalog.SourceEventResolver do
     |> case do
       {:ok, %Event{} = event} -> {:ok, event}
       {:ok, nil} -> {:error, :event_not_found}
-      {:error, _} -> {:error, :event_not_found}
+      {:error, reason} -> classify_event_lookup_error(reason)
     end
   end
+
+  # Ash.get expresses authoritative absence as Query.NotFound; Ash.read_one uses {:ok, nil}.
+  defp classify_source_lookup_error(%Ash.Error.Invalid{
+         errors: [%Ash.Error.Query.NotFound{} | _]
+       }),
+       do: {:error, :source_not_found}
+
+  defp classify_source_lookup_error(_reason), do: {:error, :source_lookup_failed}
+
+  defp classify_event_lookup_error(%Ash.Error.Invalid{
+         errors: [%Ash.Error.Query.NotFound{} | _]
+       }),
+       do: {:error, :event_not_found}
+
+  defp classify_event_lookup_error(_reason), do: {:error, :event_lookup_failed}
 end
