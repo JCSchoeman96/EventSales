@@ -4,7 +4,7 @@
 | --- | --- |
 | Document | Canonical Path 1 execution roadmap |
 | Plan ID | `path-1-phase-breakdown` |
-| Plan version | `v9` |
+| Plan version | `v10` |
 | Status | ACTIVE — repository-native execution contract |
 | Scope | Path 1 M1–M7 gated implementation sequence |
 | Authority | This file wins for Path 1 task sequencing and physical ownership assumptions |
@@ -17,6 +17,7 @@
 | Financial metric dictionary | `docs/path-1/m1-06-financial-metric-dictionary.md` |
 | Timestamp / Johannesburg / freshness contract | `docs/path-1/m1-07-timestamp-johannesburg-period-and-freshness-contract.md` |
 | Completeness / reconciliation / ANALYTICS_READY contract | `docs/path-1/m1-08-backfill-completeness-reconciliation-and-analytics-ready-contract.md` |
+| M1 certification / PRE-M2 gate | `docs/path-1/m1-09-m1-certification-and-pre-m2-gate.md` |
 | Historical planning source | Supplied `EVENTSALES_PATH_1_UPDATED_PHASE_BREAKDOWN.md` (v1 conceptual plan; superseded for physical assumptions) |
 | Path 2 / Phase 5E | PAUSED |
 | Prepared | 2026-08-09 |
@@ -33,6 +34,7 @@
 - `v7` — M1-06 closeout: COMPLETE (PASS); next task M1-07 (requires owner authorization); lock tax-inclusive Gross as `line_total + line_total_tax` (MG1 REQUIRED_DURING_M3; MG2–MG8 REQUIRED_BEFORE_M5)
 - `v8` — M1-07 closeout: COMPLETE (PASS); next task M1-08 (requires owner authorization); lock paid→completed sale clock, refund `date_created_gmt`, Johannesburg `[start,end)`, `<5m` NORMAL / `>10m` STALE; HotStateAggregator 5m stale = IMPLEMENTATION_CHANGE_REQUIRED
 - `v9` — M1-08 closeout: COMPLETE (PASS); next task M1-09 — M1 Certification and PRE-M2 Implementation Gate (requires owner authorization); lock A/B/C reconciliation separation, ORDER/REFUND completeness, exact financial recon, ANALYTICS_READY ≠ freshness, attendee recon DIAGNOSTIC; CG1–CG11 gap ledger
+- `v10` — M1-09 closeout: COMPLETE (PASS_WITH_PRE_M2_IMPLEMENTATION_GATE); sole BEFORE_M2 gap = GAP-PRE-M2-01 (M1-03 G1); next = M1-C PRE-M2 Contract Conformance Gate (branch+PR); M2 BLOCKED until M1-C merges
 
 ### Conflict rule
 
@@ -116,21 +118,20 @@ M1-07: COMPLETE (PASS)
 M1-07 contract: docs/path-1/m1-07-timestamp-johannesburg-period-and-freshness-contract.md
 M1-08: COMPLETE (PASS)
 M1-08 contract: docs/path-1/m1-08-backfill-completeness-reconciliation-and-analytics-ready-contract.md
+M1-09: COMPLETE (PASS_WITH_PRE_M2_IMPLEMENTATION_GATE)
+M1-09 certification: docs/path-1/m1-09-m1-certification-and-pre-m2-gate.md
 TAX-INCLUSIVE REVENUE CONTRACT: IMPLEMENTATION_CHANGE_REQUIRED
 FRESHNESS / STALE CONTRACT: LOCKED (`age > 10m` STALE; `<5m` NORMAL; `5m–10m` AGING)
 HotStateAggregator 5m stale_after_ms: IMPLEMENTATION_CHANGE_REQUIRED
 ANALYTICS_READY CONTRACT: LOCKED (derived from durable evidence; ≠ freshness)
 FINANCIAL RECONCILIATION CONTRACT: LOCKED (concept C; exact Decimal; ticket-scoped)
 ATTENDEE RECONCILIATION ROLE: DIAGNOSTIC (not financial gate)
-Known REQUIRED_BEFORE_M2 gap: TicketType variation-parent fail-closed enforcement (unresolved; defer to M1-09 PRE-M2 gate)
-Known M1-05/M1-06/M1-07/M1-08 carry-forward gaps (unresolved):
-  MG1 persist OrderItem.line_total_tax REQUIRED_DURING_M3 (before authoritative Gross Ticket Sales; not M2)
-  MG2–MG8 refund-aware Gross/Net, distinct Order Count, ATV, currency partitioning, MetricRules/snapshot changes REQUIRED_BEFORE_M5
-  refund persistence/import REQUIRED_DURING_M3; refund completeness BEFORE_M4
-  persist date_paid_gmt + refund date_created_gmt REQUIRED_DURING_M3; sale/refund bucketing + 10m source-stale projection REQUIRED_BEFORE_M5
-  CG1 persist Tickera event creation instant; CG2 cursor-after-success; CG3–CG11 watermark/recon/ANALYTICS_READY projection (see M1-08 §29)
-Current Path 1 task: M1-09 — M1 Certification and PRE-M2 Implementation Gate
-M1-09: REQUIRES OWNER AUTHORIZATION
+REQUIRED_BEFORE_M2 gaps: 1 — GAP-PRE-M2-01 (M1-03 G1 TicketType variation-parent fail-closed)
+PRE-M2 gate: M1-C — PRE-M2 Contract Conformance Gate (unresolved; branch+PR required)
+M2 AUTHORIZATION: BLOCKED_PENDING_PRE_M2_GATE
+Canonical gap ledger: docs/path-1/m1-09-m1-certification-and-pre-m2-gate.md §7
+Current Path 1 task: M1-C — PRE-M2 Contract Conformance Gate
+M1-C: REQUIRES OWNER AUTHORIZATION (fresh agent; short-lived branch; PR; no direct-to-main)
 ```
 
 ---
@@ -352,7 +353,8 @@ M1-05   COMPLETE — refund / financial adjustment
 M1-06   COMPLETE — financial metric dictionary
 M1-07   time / period / freshness — COMPLETE (PASS)
 M1-08   completeness / reconciliation / ANALYTICS_READY — COMPLETE (PASS)
-M1-09   certification and PRE-M2 implementation gate (requires owner authorization)
+M1-09   certification and PRE-M2 implementation gate — COMPLETE (PASS_WITH_PRE_M2_IMPLEMENTATION_GATE)
+M1-C    PRE-M2 Contract Conformance Gate (requires owner authorization; blocks M2)
 ```
 
 ---
@@ -437,7 +439,7 @@ OrderItem:
 | New resource expected | NO (do not invent Product / Event*Link) |
 | Migration expected | NO |
 | Performance impact | None at contract stage |
-| Known REQUIRED_BEFORE_M2 gap | TicketType variation-parent fail-closed enforcement (G1) — **not resolved**; inventory at M1-09 |
+| Known REQUIRED_BEFORE_M2 gap | TicketType variation-parent fail-closed enforcement (G1) — inventoried by M1-09 as `GAP-PRE-M2-01`; owned by M1-C |
 
 Locks current bridge:
 
@@ -545,22 +547,37 @@ C. Path 1 financial source-vs-EventSales reconciliation — NEW (implement M4)
 
 | Field | Value |
 | --- | --- |
+| Status | **COMPLETE (PASS_WITH_PRE_M2_IMPLEMENTATION_GATE)** |
 | Strategy | CERTIFY |
-| Existing foundation | M1-02..M1-08 contract docs + tests as required |
+| Deliverable | `docs/path-1/m1-09-m1-certification-and-pre-m2-gate.md` |
+| Existing foundation | M1-02..M1-08 contract docs |
 | Expected change | Pack proving all M1 contracts locked; consolidate evidence-backed implementation gaps into a mandatory **PRE-M2 CONTRACT IMPLEMENTATION GATE**; no dashboard/backfill implementation |
 | New resource expected | NO |
 | Migration expected | NO |
 | Performance impact | None |
+| Cross-contract contradictions | NONE |
+| REQUIRED_BEFORE_M2 gaps | 1 — `GAP-PRE-M2-01` (M1-03 G1) |
+| M2 authorization | BLOCKED_PENDING_PRE_M2_GATE |
 
-M1-09 must inventory unresolved REQUIRED_BEFORE_M2 gaps (including M1-03 G1 TicketType variation-parent fail-closed). If required gaps remain, authorise a small **M1-C** corrective implementation gate before M2 — do not bounce into implementation during each contract task.
+### M1-C — PRE-M2 Contract Conformance Gate
+
+| Field | Value |
+| --- | --- |
+| Status | **REQUIRES OWNER AUTHORIZATION** |
+| Strategy | IMPLEMENT (production conformance; not a new M1 contract) |
+| Scope | Sole gap `GAP-PRE-M2-01`: event-first TicketType variation-parent fail-closed |
+| Workflow | Fresh agent → short-lived branch → focused tests → PR → diff review → merge → clean main |
+| Direct-to-main production code | FORBIDDEN |
+| New resource expected | NO |
+| Migration expected | NO |
 
 ### M1 MUST NOT implement
 
-Dashboards, historical backfill workers as production features, Apply/AutoApply, Phase 5E, parallel order writers, Cachex, Refund resources before M1-05 contract. Do not implement M1-03 G1 during M1-04..M1-08.
+Dashboards, historical backfill workers as production features, Apply/AutoApply, Phase 5E, parallel order writers, Cachex, Refund resources before M1-05 contract. Do not implement M1-03 G1 during M1-04..M1-09 (M1-C owns the fix).
 
 ### M1 Completion Gate
 
-All M1-02..M1-09 contracts locked and certified. REQUIRED_BEFORE_M2 gaps inventoried; M1-C completed if required. M2 unauthorized until then.
+All M1-02..M1-09 contracts locked and certified. REQUIRED_BEFORE_M2 gaps inventoried. **M1-C must complete before M2.** M2 unauthorized until M1-C merges.
 
 ---
 
@@ -795,13 +812,14 @@ Namespaced keys (`CacheKeys`); targeted invalidation; single-flight rebuild; def
 | M1-06 | Financial metric dictionary — **COMPLETE** |
 | M1-07 | Timestamp / Johannesburg period / freshness — **COMPLETE (PASS)** |
 | M1-08 | Completeness / reconciliation / ANALYTICS_READY — **COMPLETE (PASS)** |
-| M1-09 | M1 Certification and PRE-M2 Implementation Gate — **REQUIRES OWNER AUTHORIZATION** |
+| M1-09 | M1 Certification and PRE-M2 Implementation Gate — **COMPLETE (PASS_WITH_PRE_M2_IMPLEMENTATION_GATE)** |
+| M1-C | PRE-M2 Contract Conformance Gate (`GAP-PRE-M2-01`) — **REQUIRES OWNER AUTHORIZATION**; blocks M2 |
 
 ### M2 — Event Onboarding
 
 | ID | Task |
 | --- | --- |
-| M2-01..M2-08 | Extend/certify Catalog foundations through structural certification |
+| M2-01..M2-08 | Extend/certify Catalog foundations through structural certification — **BLOCKED until M1-C** |
 
 ### M3 — Historical Sales
 
@@ -855,7 +873,9 @@ Namespaced keys (`CacheKeys`); targeted invalidation; single-flight rebuild; def
 [x] M1-05 refund / financial-adjustment contract locked
 [x] M1-06 financial metric dictionary locked
 [x] M1-07 timestamp / Johannesburg / freshness contract locked
-[ ] M1-08..M1-09 contracts locked
+[x] M1-08 completeness / reconciliation / ANALYTICS_READY contract locked
+[x] M1-09 M1 certification + PRE-M2 gate pack locked
+[ ] M1-C PRE-M2 conformance (`GAP-PRE-M2-01`) merged
 [ ] Existing Catalog/Sales/Ingestion/Analytics/Accounts reused
 [ ] Existing parser/OrderUpserter reused (no parallel writer)
 [x] Attribution certifies event-first + ProductMapping fallback
@@ -882,9 +902,10 @@ P1-00 COMPLETE
 → M1-05 COMPLETE
 → M1-06 COMPLETE
 → M1-07 COMPLETE
-→ M1-09 (requires owner authorization)
-→ M1-C (only if M1-09 PRE-M2 gate requires corrective implementation)
-→ M2
+→ M1-08 COMPLETE
+→ M1-09 COMPLETE (PASS_WITH_PRE_M2_IMPLEMENTATION_GATE)
+→ M1-C (REQUIRED; blocks M2; branch+PR)
+→ M2 (AUTHORIZED only after M1-C merges)
 → M3
 → M4
 → M5
@@ -943,21 +964,35 @@ COMPLETE (PASS)
 M1-07 contract:
 docs/path-1/m1-07-timestamp-johannesburg-period-and-freshness-contract.md
 
+M1-08:
+COMPLETE (PASS)
+
+M1-08 contract:
+docs/path-1/m1-08-backfill-completeness-reconciliation-and-analytics-ready-contract.md
+
+M1-09:
+COMPLETE (PASS_WITH_PRE_M2_IMPLEMENTATION_GATE)
+
+M1-09 certification:
+docs/path-1/m1-09-m1-certification-and-pre-m2-gate.md
+
 TAX-INCLUSIVE REVENUE CONTRACT:
 IMPLEMENTATION_CHANGE_REQUIRED
 
 FRESHNESS / STALE CONTRACT:
 LOCKED (`age > 10m` STALE on source age; HotStateAggregator 5m = IMPLEMENTATION_CHANGE_REQUIRED)
 
-Known REQUIRED_BEFORE_M2 gap:
-TicketType variation-parent fail-closed enforcement (unresolved; defer to M1-09 PRE-M2 gate)
+REQUIRED_BEFORE_M2 gaps:
+1 — GAP-PRE-M2-01 (M1-03 G1 TicketType variation-parent fail-closed)
 
-Known M1-05/M1-06/M1-07/M1-08 carry-forward gaps (unresolved):
-MG1 persist OrderItem.line_total_tax REQUIRED_DURING_M3 (before authoritative Gross Ticket Sales; not M2)
-MG2–MG8 refund-aware Gross/Net, distinct Order Count, ATV, currency partitioning, MetricRules/snapshot changes REQUIRED_BEFORE_M5
-refund persistence/import REQUIRED_DURING_M3; refund completeness BEFORE_M4
-persist date_paid_gmt + refund date_created_gmt REQUIRED_DURING_M3; sale/refund bucketing + 10m source-stale projection REQUIRED_BEFORE_M5
-CG1 persist Tickera event creation instant; CG2 cursor-after-success; CG3–CG11 watermark/recon/ANALYTICS_READY projection (see M1-08 §29)
+PRE-M2 gate:
+M1-C — PRE-M2 Contract Conformance Gate (unresolved)
+
+M2 AUTHORIZATION:
+BLOCKED_PENDING_PRE_M2_GATE
+
+Canonical gap ledger:
+docs/path-1/m1-09-m1-certification-and-pre-m2-gate.md §7
 
 ANALYTICS_READY CONTRACT:
 LOCKED (derived; ≠ freshness; attendee recon DIAGNOSTIC)
@@ -966,10 +1001,10 @@ FINANCIAL RECONCILIATION CONTRACT:
 LOCKED (concept C; exact Decimal; ticket-scoped)
 
 Current Path 1 task:
-M1-09 — M1 Certification and PRE-M2 Implementation Gate
+M1-C — PRE-M2 Contract Conformance Gate
 
-M1-09:
-REQUIRES OWNER AUTHORIZATION
+M1-C:
+REQUIRES OWNER AUTHORIZATION (fresh agent; short-lived branch; PR; no direct-to-main)
 
 Path 2:
 PAUSED
@@ -998,10 +1033,11 @@ docs/path-1/m1-07-timestamp-johannesburg-period-and-freshness-contract.md
 Completeness / reconciliation / ANALYTICS_READY contract:
 docs/path-1/m1-08-backfill-completeness-reconciliation-and-analytics-ready-contract.md
 
-M1-08:
-COMPLETE (PASS)
+M1 certification / PRE-M2 gate:
+docs/path-1/m1-09-m1-certification-and-pre-m2-gate.md
 
-DO NOT START M1-09 WITHOUT OWNER AUTHORIZATION.
-USE A FRESH AGENT FOR M1-09.
-DO NOT IMPLEMENT ANALYTICS_READY workers, reconciliation workers, date_paid, MetricRules, snapshots, or refunds in M1-09 (certification pack + gap inventory only).
+DO NOT START M2 WITHOUT M1-C MERGE.
+USE A FRESH AGENT FOR M1-C.
+M1-C SCOPE IS GAP-PRE-M2-01 ONLY (event-first TicketType variation-parent fail-closed).
+DO NOT IMPLEMENT REFUNDS, TAX, DATE_PAID, METRICRULES, SNAPSHOTS, RECONCILIATION, OR ANALYTICS_READY IN M1-C.
 ```
