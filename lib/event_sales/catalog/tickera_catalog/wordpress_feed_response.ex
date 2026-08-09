@@ -11,6 +11,9 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponse do
   alias EventSales.Catalog.TickeraCatalog.SourceRiskV3.DiscoveryIntegrity
   alias EventSales.Catalog.TickeraCatalog.SourceRiskV3.Evidence
 
+  # Constant MapSet envelope key sets conflict with MapSet's opaque stdlib contracts.
+  @dialyzer {:nowarn_function, require_exact_keys: 2}
+
   @schema_version "2026-07-22.v2"
   @legacy_schema_versions ["2026-07-08.v1", "2026-07-05.v1"]
   @native_schema_version "2026-08-07.v3"
@@ -243,42 +246,30 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponse do
 
   defp validate_filter_values(filters) do
     Enum.reduce_while(filters, :ok, fn {key, value}, :ok ->
-      case {key, value} do
-        {"updated_since", nil} ->
-          {:cont, :ok}
-
-        {"updated_since", value} when is_binary(value) ->
-          case require_native_utc_z_datetime(value) do
-            {:ok, _} -> {:cont, :ok}
-            _ -> {:halt, {:error, :invalid_filters}}
-          end
-
-        {"product_id", nil} ->
-          {:cont, :ok}
-
-        {"product_id", id} when is_integer(id) and id > 0 ->
-          {:cont, :ok}
-
-        {"variation_id", nil} ->
-          {:cont, :ok}
-
-        {"variation_id", id} when is_integer(id) and id > 0 ->
-          {:cont, :ok}
-
-        {"event_id", nil} ->
-          {:cont, :ok}
-
-        {"event_id", id} when is_integer(id) and id > 0 ->
-          {:cont, :ok}
-
-        {"include_private", value} when is_boolean(value) ->
-          {:cont, :ok}
-
-        _ ->
-          {:halt, {:error, :invalid_filters}}
+      case validate_filter_entry(key, value) do
+        :ok -> {:cont, :ok}
+        :error -> {:halt, {:error, :invalid_filters}}
       end
     end)
   end
+
+  defp validate_filter_entry("updated_since", nil), do: :ok
+
+  defp validate_filter_entry("updated_since", value) when is_binary(value) do
+    case require_native_utc_z_datetime(value) do
+      {:ok, _} -> :ok
+      _ -> :error
+    end
+  end
+
+  defp validate_filter_entry("product_id", nil), do: :ok
+  defp validate_filter_entry("product_id", id) when is_integer(id) and id > 0, do: :ok
+  defp validate_filter_entry("variation_id", nil), do: :ok
+  defp validate_filter_entry("variation_id", id) when is_integer(id) and id > 0, do: :ok
+  defp validate_filter_entry("event_id", nil), do: :ok
+  defp validate_filter_entry("event_id", id) when is_integer(id) and id > 0, do: :ok
+  defp validate_filter_entry("include_private", value) when is_boolean(value), do: :ok
+  defp validate_filter_entry(_key, _value), do: :error
 
   defp aggregate_native_pages(pages) do
     first = hd(pages)
@@ -310,29 +301,30 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponse do
   # exact complete-map duplicates collapse to the first occurrence;
   # any structural map difference for the same tickera_event_id fails closed.
   defp aggregate_native_events(events) do
-    Enum.reduce_while(events, {:ok, {[], %{}}}, fn event, {:ok, {acc, by_id}} ->
-      case event do
-        %{"tickera_event_id" => id} when is_integer(id) and id > 0 ->
-          case Map.fetch(by_id, id) do
-            :error ->
-              {:cont, {:ok, {[event | acc], Map.put(by_id, id, event)}}}
-
-            {:ok, ^event} ->
-              {:cont, {:ok, {acc, by_id}}}
-
-            {:ok, _other} ->
-              {:halt, {:error, :conflicting_event}}
-          end
-
-        _other ->
-          {:halt, {:error, :conflicting_event}}
-      end
+    Enum.reduce_while(events, {:ok, {[], %{}}}, fn event, {:ok, acc} ->
+      merge_native_event(acc, event)
     end)
     |> case do
       {:ok, {acc, _by_id}} -> {:ok, Enum.reverse(acc)}
       {:error, :conflicting_event} = error -> error
     end
   end
+
+  defp merge_native_event({acc, by_id}, %{"tickera_event_id" => id} = event)
+       when is_integer(id) and id > 0 do
+    case Map.fetch(by_id, id) do
+      :error ->
+        {:cont, {:ok, {[event | acc], Map.put(by_id, id, event)}}}
+
+      {:ok, ^event} ->
+        {:cont, {:ok, {acc, by_id}}}
+
+      {:ok, _other} ->
+        {:halt, {:error, :conflicting_event}}
+    end
+  end
+
+  defp merge_native_event(_acc, _event), do: {:halt, {:error, :conflicting_event}}
 
   defp valid_native_event_identity?(%{"tickera_event_id" => id})
        when is_integer(id) and id > 0,

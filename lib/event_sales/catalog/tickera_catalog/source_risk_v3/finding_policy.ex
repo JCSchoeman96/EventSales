@@ -59,40 +59,26 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.FindingPolicy do
     end
   end
 
+  @contract_error_results %{
+    scope_mismatch: {"blocking_scope_mismatch", "contract.scope_mismatch"},
+    authority_mismatch: {"blocking_authority_mismatch", "contract.authority_mismatch"},
+    unknown_dimension: {"blocking_contract_error", "contract.contract_violation"},
+    unknown_scope: {"blocking_contract_error", "contract.contract_violation"},
+    unknown_state: {"blocking_contract_error", "contract.contract_violation"},
+    unknown_value: {"blocking_contract_error", "contract.contract_violation"},
+    undeclared_product_type: {"blocking_invalid", "contract.contract_violation"},
+    unproven_exhaustive_completeness: {"blocking_contract_error", "contract.contract_violation"},
+    parser_error: {"blocking_error", "contract.parser_error"}
+  }
+
   @spec evaluate_contract_error(atom()) :: disposition_result()
   def evaluate_contract_error(reason) when is_atom(reason) do
     {disposition, finding_id} =
-      case reason do
-        :scope_mismatch ->
-          {"blocking_scope_mismatch", "contract.scope_mismatch"}
-
-        :authority_mismatch ->
-          {"blocking_authority_mismatch", "contract.authority_mismatch"}
-
-        :unknown_dimension ->
-          {"blocking_contract_error", "contract.contract_violation"}
-
-        :unknown_scope ->
-          {"blocking_contract_error", "contract.contract_violation"}
-
-        :unknown_state ->
-          {"blocking_contract_error", "contract.contract_violation"}
-
-        :unknown_value ->
-          {"blocking_contract_error", "contract.contract_violation"}
-
-        :undeclared_product_type ->
-          {"blocking_invalid", "contract.contract_violation"}
-
-        :unproven_exhaustive_completeness ->
-          {"blocking_contract_error", "contract.contract_violation"}
-
-        :parser_error ->
-          {"blocking_error", "contract.parser_error"}
-
-        _ ->
-          {"blocking_contract_error", "contract.contract_violation"}
-      end
+      Map.get(
+        @contract_error_results,
+        reason,
+        {"blocking_contract_error", "contract.contract_violation"}
+      )
 
     finalize(%{
       disposition: disposition,

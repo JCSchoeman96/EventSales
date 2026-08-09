@@ -125,31 +125,7 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedDiscoverySource do
              exhaustive_proven?: exhaustive_proven?
            ) do
         {:ok, fact} ->
-          classification = Normalizer.classify_against_existing(fact, facts)
-
-          cond do
-            classification.duplicate_of ->
-              case Normalizer.merge_duplicate(classification.duplicate_of, fact) do
-                {:ok, merged} ->
-                  updated_facts =
-                    Enum.map(facts, fn existing ->
-                      if existing == classification.duplicate_of, do: merged, else: existing
-                    end)
-
-                  {:cont, {:ok, updated_facts, findings}}
-
-                {:error, _reason} ->
-                  {:halt, {:error, :invalid_feed_response}}
-              end
-
-            true ->
-              findings =
-                findings
-                |> prepend_actual_finding(FindingPolicy.evaluate(fact))
-                |> prepend_conflict_findings(fact, classification.conflicts_with)
-
-              {:cont, {:ok, [fact | facts], findings}}
-          end
+          absorb_normalized_fact(facts, findings, fact)
 
         {:error, _reason} ->
           {:halt, {:error, :invalid_feed_response}}
@@ -162,6 +138,37 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedDiscoverySource do
       other ->
         other
     end
+  end
+
+  defp absorb_normalized_fact(facts, findings, fact) do
+    classification = Normalizer.classify_against_existing(fact, facts)
+
+    if classification.duplicate_of do
+      merge_duplicate_fact(facts, findings, classification.duplicate_of, fact)
+    else
+      findings =
+        findings
+        |> prepend_actual_finding(FindingPolicy.evaluate(fact))
+        |> prepend_conflict_findings(fact, classification.conflicts_with)
+
+      {:cont, {:ok, [fact | facts], findings}}
+    end
+  end
+
+  defp merge_duplicate_fact(facts, findings, duplicate_of, fact) do
+    case Normalizer.merge_duplicate(duplicate_of, fact) do
+      {:ok, merged} ->
+        {:cont, {:ok, replace_fact(facts, duplicate_of, merged), findings}}
+
+      {:error, _reason} ->
+        {:halt, {:error, :invalid_feed_response}}
+    end
+  end
+
+  defp replace_fact(facts, duplicate_of, merged) do
+    Enum.map(facts, fn existing ->
+      if existing == duplicate_of, do: merged, else: existing
+    end)
   end
 
   defp prepend_conflict_findings(findings, fact, conflicts) do
@@ -182,8 +189,6 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedDiscoverySource do
     is_binary(result[:qualified_finding_id]) and result[:qualified_finding_id] != "" and
       result[:severity] in [:info, :warning, :blocking]
   end
-
-  defp actual_finding?(_), do: false
 
   defp normalize_scope(scope) do
     scope = string_key_map(scope)

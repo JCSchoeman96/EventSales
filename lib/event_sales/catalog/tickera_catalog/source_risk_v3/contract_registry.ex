@@ -298,6 +298,10 @@ defmodule EventSales.Catalog.TickeraCatalog.SourceRiskV3.ContractRegistry do
   @spec safe_positive_rules() :: [map()]
   def safe_positive_rules, do: @safe_positive_rules
 
+  # Dialyzer treats constant MapSet module attributes as concrete structs, which
+  # conflicts with MapSet's opaque @spec. Suppress only these constant getters.
+  @dialyzer {:nowarn_function, producer_provenance_keys: 0, rejected_producer_provenance_keys: 0}
+
   @spec producer_provenance_keys() :: MapSet.t(String.t())
   def producer_provenance_keys, do: @producer_provenance_keys
 
