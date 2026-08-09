@@ -24,8 +24,8 @@ CERTIFY + SEQUENCE (documentation only; no production code)
 | --- | --- |
 | Document | M1 certification pack + deduplicated implementation-gap ledger + PRE-M2 gate |
 | Plan ID | `m1-09-m1-certification-and-pre-m2-gate` |
-| Plan version | `v1` |
-| Status | LOCKED — M1 contract certification COMPLETE; M2 blocked pending M1-C |
+| Plan version | `v2` |
+| Status | LOCKED — M1 contract certification COMPLETE; M1-C COMPLETE; M2 AUTHORIZED |
 | Scope | Cross-contract consistency; end-to-end truth chain; canonical gap ledger; M1-C PRE-M2 gate; M2–M6 sequencing |
 | Strategy | CERTIFY M1-02..M1-08 as one programme contract; invent no new domain truth; implement nothing |
 | Path 2 / Phase 5E | PAUSED |
@@ -33,6 +33,7 @@ CERTIFY + SEQUENCE (documentation only; no production code)
 ### Revision log
 
 - `v1` — initial M1 certification at baseline `b86f4c81d53e638d4dca2f188b979d1a06cd30dc`; sole REQUIRED_BEFORE_M2 gap confirmed as M1-03 G1; M1-C named
+- `v2` — M1-C closeout: `GAP-PRE-M2-01` RESOLVED via PR #167 (`285858a` / merge `9ddfd38`); REQUIRED_BEFORE_M2 gaps = 0; M2 AUTHORIZED
 
 ### Conflict rule
 
@@ -101,8 +102,8 @@ lib/event_sales/sales/order_attribution_resolver.ex:76-89
 M1 CONTRACT CERTIFICATION = PASS
 M1-09 PROGRAMME VERDICT     = PASS_WITH_PRE_M2_IMPLEMENTATION_GATE
 CROSS-CONTRACT CONTRADICTIONS = NONE
-REQUIRED_BEFORE_M2 GAPS     = 1 (GAP-PRE-M2-01 / M1-03 G1)
-M2 AUTHORIZATION            = BLOCKED_PENDING_PRE_M2_GATE
+REQUIRED_BEFORE_M2 GAPS     = 0 (GAP-PRE-M2-01 RESOLVED via M1-C / PR #167)
+M2 AUTHORIZATION            = AUTHORIZED
 ```
 
 Reasons:
@@ -111,12 +112,10 @@ Reasons:
 M1-02..M1-08 are present, COMPLETE (PASS), and mutually consistent.
 Every material relationship is CONSISTENT or REFINED_BY_LATER_CONTRACT
   or IMPLEMENTATION_GAP_ONLY — never CONTRADICTION.
-One production behaviour still violates a locked M1-03 contract:
-  event-first TicketType variation-parent fail-closed (G1).
-That gap blocks M2 because onboarding creates TicketType parent mirrors
-  that attribution must enforce before structural certification / backfill.
+M1-C closed the sole BEFORE_M2 production behaviour gap:
+  event-first TicketType variation-parent fail-closed (G1 / GAP-PRE-M2-01).
 All other known gaps have deterministic owners in M3–M6 / later / optional.
-M1 may close as a contract phase while M1-C corrects production conformance.
+M1 may close as a contract phase; M1-C production conformance is COMPLETE.
 ```
 
 Production code changes in M1-09: **NONE**.  
@@ -291,6 +290,7 @@ Canonical IDs below supersede scattered G/MG/CG/R-G labels for sequencing. Origi
 | Performance/index concern | None beyond existing `limit(1)` source-scoped lookup |
 | Dependency gaps | None |
 | Acceptance evidence | Focused test: present mismatched `external_product_id` → fail closed; matching parent still maps; ProductMapping path unchanged |
+| Resolution | **RESOLVED** — M1-C / PR #167; commit `285858ad8d8ea50f77a006b18b148d24890065cf`; merge `9ddfd38de833dc4575d803d984a29478dd39592c` |
 
 **Independent confirmation this is REQUIRED_BEFORE_M2 (not merely “nice before M3”):**
 
@@ -411,9 +411,11 @@ Explicit non-promotions (remain later despite appearing “foundational”):
 | --- | --- |
 | Gate name | **M1-C — PRE-M2 Contract Conformance Gate** |
 | Nature | Production-code correction gate (not an M1 contract investigation) |
-| Authorization | Required before M2; not started by M1-09 |
+| Authorization | Complete — PR #167 merged |
+| Status | **COMPLETE (PASS)** |
+| Evidence | commit `285858ad8d8ea50f77a006b18b148d24890065cf`; merge `9ddfd38de833dc4575d803d984a29478dd39592c` |
 | Branch policy | Fresh implementation agent → short-lived branch → PR → diff review → merge (see §18) |
-| Direct-to-main production code | **FORBIDDEN** for this gate |
+| Direct-to-main production code | **FORBIDDEN** for this gate (honoured) |
 
 ### Initial scope (sole blocker)
 
@@ -769,29 +771,28 @@ CROSS-CONTRACT CONTRADICTIONS:
 NONE
 
 REQUIRED_BEFORE_M2 GAPS:
-1 (GAP-PRE-M2-01)
+0 (GAP-PRE-M2-01 RESOLVED via M1-C / PR #167)
 
 PRE-M2 GATE:
 M1-C — PRE-M2 Contract Conformance Gate
-(event-first TicketType variation-parent fail-closed only)
+COMPLETE (PASS)
 
 M2 AUTHORIZATION:
-BLOCKED_PENDING_PRE_M2_GATE
+AUTHORIZED
 ```
 
-M1 contract work is complete. Implementation must conform on G1 before M2.
+M1 contract work is complete. M1-C closed the sole BEFORE_M2 production gap.
 
 ---
 
 ## 23. Immediate Next Action
 
 ```text
-Authorize a fresh agent to execute M1-C on a short-lived branch + PR:
-implement GAP-PRE-M2-01 fail-closed parent check with focused tests;
-merge; synchronize clean main; then authorize M2.
+Authorize a fresh agent to start M2 on a short-lived branch + PR.
+Do not reopen M1-C. Path 2 / Phase 5E remains PAUSED.
 ```
 
-Do not start M2, M3, or Path 2.
+Do not start M3 or Path 2 without separate authorization.
 
 ---
 
