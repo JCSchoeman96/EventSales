@@ -4,7 +4,7 @@
 | --- | --- |
 | Document | Canonical Path 1 execution roadmap |
 | Plan ID | `path-1-phase-breakdown` |
-| Plan version | `v2` |
+| Plan version | `v3` |
 | Status | ACTIVE — repository-native execution contract |
 | Scope | Path 1 M1–M7 gated implementation sequence |
 | Authority | This file wins for Path 1 task sequencing and physical ownership assumptions |
@@ -20,6 +20,7 @@
 
 - `v1` — conceptual Path 1 phase breakdown (external / Downloads copy)
 - `v2` — M1-01A repository-native reconciliation against `m1-01-current-repo-truth.md`
+- `v3` — M1-02 closeout: mark M1-01A/M1-02 COMPLETE; next task M1-03 (requires owner authorization)
 
 ### Conflict rule
 
@@ -87,8 +88,12 @@ Verified programme state:
 Phase 5C / 5D: COMPLETE
 Path 1: ACTIVE
 Path 2 / Phase 5E: PAUSED
+P1-00: COMPLETE
 M1-01: COMPLETE (PASS)
-Current next Path 1 task: M1-02 (requires owner authorization)
+M1-01A: COMPLETE (PASS)
+M1-02: COMPLETE (PASS)
+Current Path 1 task: M1-03 — Event → Product → Variation → OrderLine Attribution Contract
+M1-03: REQUIRES OWNER AUTHORIZATION
 ```
 
 ---
@@ -296,9 +301,9 @@ Lock identity, sales, refunds, metrics, timestamps, freshness, completeness, rec
 
 ```text
 M1-01   COMPLETE — repository truth
-M1-01A  roadmap reconciliation (this document)
-M1-02   source identity
-M1-03   attribution
+M1-01A  COMPLETE — roadmap reconciliation
+M1-02   COMPLETE — source identity
+M1-03   attribution (requires owner authorization)
 M1-04   order lifecycle
 M1-05   refund / financial adjustment
 M1-06   metric dictionary
@@ -327,13 +332,14 @@ M1-09   certification
 
 | Field | Value |
 | --- | --- |
-| Status | **THIS TASK** |
+| Status | **COMPLETE (PASS)** |
 | Strategy | CERTIFY / REMOVE_AS_ALREADY_PRESENT (greenfield assumptions) |
 | Existing foundation | M1-01 truth + v1 phase plan |
 | Expected change | Canonical `docs/path-1/path-1-phase-breakdown.md` + minimal handoff update |
 | New resource expected | NO |
 | Migration expected | NO |
 | Performance impact | None |
+| Deliverable | `docs/path-1/path-1-phase-breakdown.md` |
 
 ---
 
@@ -341,12 +347,14 @@ M1-09   certification
 
 | Field | Value |
 | --- | --- |
+| Status | **COMPLETE (PASS)** |
 | Strategy | CERTIFY + EXTEND (contract lock) |
 | Existing foundation | SourceSystem; Event external DB unique; ProductMapping uniques; Order `unique_source_order`; OrderItem `unique_order_line`; DiscoveryIntegrity producer verify |
 | Expected change | Lock vocabulary for three source layers + external IDs; document lookup paths; Ash identity for Event external ID if required; webhook multi-source routing policy note |
 | New resource expected | NO |
-| Migration expected | TBD (only if Ash/DB identity alignment requires it) |
+| Migration expected | NO (contract only; implementation gaps deferred) |
 | Performance impact | Index review only — no speculative indexes |
+| Deliverable | `docs/path-1/m1-02-source-scoped-external-identity-contract.md` |
 
 Must lock (using repository field names):
 
@@ -372,14 +380,13 @@ OrderItem:
 
 **STOP** if a proposed unique constraint would invalidate legitimate existing data without an explicit migration plan.
 
-**M1-02 is out of scope for the agent that only completes M1-01A.**
-
 ---
 
 ### M1-03 — Event → Product → Variation → OrderLine Attribution Contract
 
 | Field | Value |
 | --- | --- |
+| Status | **REQUIRES OWNER AUTHORIZATION** |
 | Strategy | CERTIFY (primary) / EXTEND (documentation gaps only) |
 | Existing foundation | OrderAttributionResolver, MappingResolver, OrderItemMapper, AutomaticMappingPolicy, protect_mapped_source_identity, ProductMapping, TicketType |
 | Expected change | Lock event-first + ProductMapping fallback + immutability + conflict reasons as the Path 1 contract; clarify TicketType vs ProductMapping dual fields |
@@ -721,9 +728,9 @@ Namespaced keys (`CacheKeys`); targeted invalidation; single-flight rebuild; def
 | ID | Task |
 | --- | --- |
 | M1-01 | Repository identity and writer audit — **COMPLETE** |
-| M1-01A | Repository-native roadmap reconciliation — **this document** |
-| M1-02 | Source-scoped external identity contract |
-| M1-03 | Attribution contract (certify current architecture) |
+| M1-01A | Repository-native roadmap reconciliation — **COMPLETE** |
+| M1-02 | Source-scoped external identity contract — **COMPLETE** |
+| M1-03 | Attribution contract (certify current architecture) — **REQUIRES OWNER AUTHORIZATION** |
 | M1-04 | Order lifecycle / recognised-sale contract |
 | M1-05 | Refund / financial adjustment contract |
 | M1-06 | Financial metric dictionary |
@@ -783,7 +790,8 @@ Namespaced keys (`CacheKeys`); targeted invalidation; single-flight rebuild; def
 ```text
 [x] M1-01 repository truth exists
 [x] Roadmap is repository-native (this file)
-[ ] M1-02..M1-09 contracts locked
+[x] M1-02 source-scoped external identity contract locked
+[ ] M1-03..M1-09 contracts locked
 [ ] Existing Catalog/Sales/Ingestion/Analytics/Accounts reused
 [ ] Existing parser/OrderUpserter reused (no parallel writer)
 [ ] Attribution certifies event-first + ProductMapping fallback
@@ -803,8 +811,9 @@ Namespaced keys (`CacheKeys`); targeted invalidation; single-flight rebuild; def
 ```text
 P1-00 COMPLETE
 → M1-01 COMPLETE
-→ M1-01A (canonical roadmap) COMPLETE when this file + handoff update land
-→ M1-02 … M1-09
+→ M1-01A COMPLETE
+→ M1-02 COMPLETE
+→ M1-03 (requires owner authorization) … M1-09
 → M2
 → M3
 → M4
@@ -819,20 +828,36 @@ Path 2 / Phase 5E remain PAUSED unless explicitly authorized.
 
 ---
 
-## 19. M1-01A Closing Statement
+## 19. Phase Status Closeout
 
 ```text
-M1-01A VERDICT:
-PASS
-
-M1-01:
+P1-00:
 COMPLETE
 
-M1-02 AUTHORIZATION:
-READY FOR OWNER AUTHORIZATION
+M1-01:
+COMPLETE (PASS)
 
-NEXT:
-M1-02 — Source-Scoped External Identity Contract
+M1-01A:
+COMPLETE (PASS)
 
-DO NOT START M1-02 IN THIS AGENT CONTEXT.
+M1-02:
+COMPLETE (PASS)
+
+Current Path 1 task:
+M1-03 — Event → Product → Variation → OrderLine Attribution Contract
+
+M1-03:
+REQUIRES OWNER AUTHORIZATION
+
+Path 2:
+PAUSED
+
+Phase 5E:
+PAUSED
+
+Identity contract:
+docs/path-1/m1-02-source-scoped-external-identity-contract.md
+
+DO NOT START M1-03 WITHOUT OWNER AUTHORIZATION.
+USE A FRESH AGENT FOR M1-03.
 ```

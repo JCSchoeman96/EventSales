@@ -11,11 +11,13 @@
 | Last updated | 2026-08-09 |
 | Path 1 repository truth | `docs/path-1/m1-01-current-repo-truth.md` |
 | Path 1 execution roadmap | `docs/path-1/path-1-phase-breakdown.md` |
+| Path 1 identity contract | `docs/path-1/m1-02-source-scoped-external-identity-contract.md` |
 
 ### Revision log
 
 - `v1` — initial authoritative Path 1 / Path 2 handoff after Phase 5D COMPLETE
 - `v2` — record M1-01 COMPLETE; point to repository truth and repository-native Path 1 roadmap; next task M1-02
+- `v3` — record M1-01A/M1-02 COMPLETE; next task M1-03 (requires owner authorization)
 
 ### Conflict rule
 
@@ -97,10 +99,15 @@ Status: ESTABLISHED
 PATH 1 — MANAGEMENT ANALYTICS
 Status: ACTIVE
 Next milestone: M1 Truth & Identity Contract
+P1-00: COMPLETE
 M1-01: COMPLETE (PASS)
+M1-01A: COMPLETE (PASS)
+M1-02: COMPLETE (PASS)
 Repository truth: docs/path-1/m1-01-current-repo-truth.md
 Execution roadmap: docs/path-1/path-1-phase-breakdown.md
-Current next Path 1 task: M1-02 — Source-Scoped External Identity Contract
+Identity contract: docs/path-1/m1-02-source-scoped-external-identity-contract.md
+Current Path 1 task: M1-03 — Event → Product → Variation → OrderLine Attribution Contract
+M1-03: REQUIRES OWNER AUTHORIZATION
 
 PATH 2 — AUTOMATIC SYNC / CATALOGUE AUTOMATION
 Status: PAUSED AT CERTIFIED CHECKPOINT
@@ -491,19 +498,34 @@ M7 — Production Certification / Pilot
 
 ```text
 CURRENT NEXT STEP:
-M1-02 — Source-Scoped External Identity Contract
+M1-03 — Event → Product → Variation → OrderLine Attribution Contract
+
+P1-00:
+COMPLETE
 
 M1-01:
-COMPLETE
+COMPLETE (PASS)
+
+M1-01A:
+COMPLETE (PASS)
+
+M1-02:
+COMPLETE (PASS)
+
+M1-03:
+REQUIRES OWNER AUTHORIZATION
 
 Repository truth:
 docs/path-1/m1-01-current-repo-truth.md
 
 Execution roadmap:
 docs/path-1/path-1-phase-breakdown.md
+
+Identity contract:
+docs/path-1/m1-02-source-scoped-external-identity-contract.md
 ```
 
-M1-01 repository truth and the repository-native Path 1 roadmap are established. M1-02 requires owner authorization before implementation.
+M1-01 repository truth, the repository-native Path 1 roadmap, and the M1-02 source-scoped external identity contract are established. M1-03 requires owner authorization before work begins.
 
 ---
 
@@ -570,16 +592,31 @@ PATH 1 — TRUSTED MANAGEMENT ANALYTICS
 ACTIVE
 
 Current Path 1 task:
-M1-02 — Source-Scoped External Identity Contract
+M1-03 — Event → Product → Variation → OrderLine Attribution Contract
+
+P1-00:
+COMPLETE
 
 M1-01:
-COMPLETE
+COMPLETE (PASS)
+
+M1-01A:
+COMPLETE (PASS)
+
+M1-02:
+COMPLETE (PASS)
+
+M1-03:
+REQUIRES OWNER AUTHORIZATION
 
 Repository truth:
 docs/path-1/m1-01-current-repo-truth.md
 
 Execution roadmap:
 docs/path-1/path-1-phase-breakdown.md
+
+Identity contract:
+docs/path-1/m1-02-source-scoped-external-identity-contract.md
 
 PATH 2 — AUTOMATIC SYNC / CATALOGUE AUTOMATION
 PAUSED
