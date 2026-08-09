@@ -143,6 +143,60 @@ defmodule EventSales.Catalog.OrderAttributionResolverTest do
     assert result.attribution_status_reason == :source_ticket_type_not_found
   end
 
+  test "mismatched present TicketType parent product fails closed and is not rescued by ProductMapping",
+       %{source: source, wr_event: wr_event} do
+    mismatched_ticket =
+      SalesHelpers.create_ticket_type!(wr_event, %{
+        name: "WR Wrong Parent Variation",
+        external_ticket_type_kind: :woo_variation,
+        external_ticket_type_id: 209_167,
+        external_product_id: 999_999,
+        external_variation_id: 209_167
+      })
+
+    create_mapping!(source, wr_event, mismatched_ticket, %{
+      woo_product_id: 209_132,
+      woo_variation_id: 209_167
+    })
+
+    assert {:ok, result} =
+             OrderAttributionResolver.resolve(source.id, 109_120, 209_132, 209_167)
+
+    assert result.status == :pending
+    assert result.event_id == nil
+    assert result.ticket_type_id == nil
+    assert result.source_tickera_event_id == 109_120
+    assert result.attribution_status_reason == :source_ticket_type_not_found
+  end
+
+  test "nil TicketType external_product_id remains compatible for variation attribution", %{
+    source: source,
+    wr_event: wr_event
+  } do
+    nil_parent_ticket =
+      SalesHelpers.create_ticket_type!(wr_event, %{
+        name: "WR Nil Parent Variation",
+        external_ticket_type_kind: :woo_variation,
+        external_ticket_type_id: 309_167,
+        external_product_id: nil,
+        external_variation_id: 309_167
+      })
+
+    create_mapping!(source, wr_event, nil_parent_ticket, %{
+      woo_product_id: 309_132,
+      woo_variation_id: 309_167
+    })
+
+    assert {:ok, result} =
+             OrderAttributionResolver.resolve(source.id, 109_120, 309_132, 309_167)
+
+    assert result.status == :mapped
+    assert result.event_id == wr_event.id
+    assert result.ticket_type_id == nil_parent_ticket.id
+    assert result.source_tickera_event_id == 109_120
+    assert result.attribution_status_reason == nil
+  end
+
   defp create_mapping!(source, event, ticket, attrs) do
     defaults = %{
       source_system_id: source.id,
