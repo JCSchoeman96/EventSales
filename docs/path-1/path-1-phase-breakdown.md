@@ -4,7 +4,7 @@
 | --- | --- |
 | Document | Canonical Path 1 execution roadmap |
 | Plan ID | `path-1-phase-breakdown` |
-| Plan version | `v5` |
+| Plan version | `v6` |
 | Status | ACTIVE — repository-native execution contract |
 | Scope | Path 1 M1–M7 gated implementation sequence |
 | Authority | This file wins for Path 1 task sequencing and physical ownership assumptions |
@@ -13,6 +13,7 @@
 | Repository truth | `docs/path-1/m1-01-current-repo-truth.md` |
 | Attribution contract | `docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md` |
 | Lifecycle / recognised-sale contract | `docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md` |
+| Refund / financial-adjustment contract | `docs/path-1/m1-05-refund-and-financial-adjustment-contract.md` |
 | Historical planning source | Supplied `EVENTSALES_PATH_1_UPDATED_PHASE_BREAKDOWN.md` (v1 conceptual plan; superseded for physical assumptions) |
 | Path 2 / Phase 5E | PAUSED |
 | Prepared | 2026-08-09 |
@@ -25,6 +26,7 @@
 - `v3` — M1-02 closeout: mark M1-01A/M1-02 COMPLETE; next task M1-03 (requires owner authorization)
 - `v4` — M1-03 closeout: COMPLETE (PASS); next task M1-04 (requires owner authorization); record REQUIRED_BEFORE_M2 TicketType variation-parent fail-closed gap for M1-09 PRE-M2 gate
 - `v5` — M1-04 closeout: COMPLETE (PASS); next task M1-05 (requires owner authorization); lock recognised-sale predicate for refund contract design
+- `v6` — M1-05 closeout: COMPLETE (PASS); next task M1-06 (requires owner authorization); carry refund implementation gaps unresolved (M3/M4/M5 timing; MetricRules IMPLEMENTATION_CHANGE_REQUIRED)
 
 ### Conflict rule
 
@@ -100,9 +102,12 @@ M1-03: COMPLETE (PASS)
 M1-03 contract: docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md
 M1-04: COMPLETE (PASS)
 M1-04 contract: docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md
+M1-05: COMPLETE (PASS)
+M1-05 contract: docs/path-1/m1-05-refund-and-financial-adjustment-contract.md
 Known REQUIRED_BEFORE_M2 gap: TicketType variation-parent fail-closed enforcement (unresolved; defer to M1-09 PRE-M2 gate)
-Current Path 1 task: M1-05 — Refund and Financial Adjustment Contract
-M1-05: REQUIRES OWNER AUTHORIZATION
+Known M1-05 carry-forward gaps (unresolved): refund persistence/import REQUIRED_DURING_M3; refund completeness BEFORE_M4; MetricRules net-after-refund IMPLEMENTATION_CHANGE_REQUIRED BEFORE_M5
+Current Path 1 task: M1-06 — Financial Metric Dictionary
+M1-06: REQUIRES OWNER AUTHORIZATION
 ```
 
 ---
@@ -134,7 +139,7 @@ Do **not** plan new Ash domains named Sources, Reconciliation, or Management unl
 | EventProductLink / EventVariationLink | `ProductMapping` | REUSE |
 | Order / OrderItem | `Sales.Resources.Order` / `OrderItem` | REUSE |
 | SaleFact | Order + OrderItem | REMOVE_AS_ALREADY_PRESENT (as separate resource) |
-| Refund / RefundLine | Status `:refunded` only | NEW CONTRACT REQUIRED (M1-05) — physical form TBD |
+| Refund / RefundLine | Status `:refunded` only; contract locked | NEW CONTRACT LOCKED (M1-05) — physical form TBD |
 | SalesImportRun | Prefer EXTEND `SyncRun` / `SyncCursor` | EXTEND / TBD |
 | Analytics aggregates | Event/Daily snapshots + hot state | REUSE / EXTEND |
 | Attendee reconciliation | TickeraReconciliation* | REUSE (not financial) |
@@ -232,10 +237,12 @@ Do **not** resolve here. M1-07 decides; later implementation conforms.
 
 ```text
 order status :refunded — EXISTS
-independent refund objects — MISSING
+independent refund objects — MISSING (implementation)
+M1-05 refund / financial-adjustment contract — LOCKED (PASS)
 ```
 
-M1-05 designs the missing refund/financial-adjustment **contract**. M3 implements only the physical model M1-05 authorizes. Do not pre-design Refund/RefundLine resources in this roadmap.
+M1-05 contract: `docs/path-1/m1-05-refund-and-financial-adjustment-contract.md`.
+M3 implements only the physical model M1-05 authorizes. Do not invent Refund/RefundLine resources ahead of that contract’s physical-ownership decision.
 
 ---
 
@@ -314,8 +321,8 @@ M1-01A  COMPLETE — roadmap reconciliation
 M1-02   COMPLETE — source identity
 M1-03   COMPLETE — attribution contract
 M1-04   COMPLETE — order lifecycle / recognised sale
-M1-05   refund / financial adjustment (requires owner authorization)
-M1-06   metric dictionary
+M1-05   COMPLETE — refund / financial adjustment
+M1-06   metric dictionary (requires owner authorization)
 M1-07   time / period / freshness
 M1-08   completeness / reconciliation / ANALYTICS_READY
 M1-09   certification
@@ -439,15 +446,16 @@ Recognised sale locked: completed + mapped + ticket + qty > 0 → revenue from `
 
 | Field | Value |
 | --- | --- |
-| Status | **REQUIRES OWNER AUTHORIZATION** |
+| Status | **COMPLETE (PASS)** |
 | Strategy | NEW CONTRACT REQUIRED |
+| Contract | `docs/path-1/m1-05-refund-and-financial-adjustment-contract.md` |
 | Existing foundation | Order status `:refunded` only; no Refund/RefundLine resources; parser ignores Woo `refunds` array |
 | Expected change | Design refund/partial-refund/adjustment semantics, idempotency, timestamps, and analytics impact — **without pre-deciding Ash resources** |
 | New resource expected | TBD (contract first) |
 | Migration expected | TBD after contract |
 | Performance impact | Contract must keep money Decimal/numeric; no float |
 
-M3 may implement only what this contract authorizes.
+Gross preserved + independent refund adjustments locked. MetricRules IMPLEMENTATION_CHANGE_REQUIRED (carry forward; do not fix in M1-06 documentation alone). M3 implements only what this contract authorizes.
 
 ---
 
@@ -455,8 +463,9 @@ M3 may implement only what this contract authorizes.
 
 | Field | Value |
 | --- | --- |
+| Status | **REQUIRES OWNER AUTHORIZATION** |
 | Strategy | CERTIFY + EXTEND |
-| Existing foundation | MetricRules; Order.raw_*; OrderItem.line_*; Decimal types |
+| Existing foundation | MetricRules; Order.raw_*; OrderItem.line_*; Decimal types; M1-05 refund primitives |
 | Expected change | Lock named metrics (sold tickets, revenue, tax/discount visibility, exclusions) against existing fields; mark missing fields as contract gaps |
 | New resource expected | NO |
 | Migration expected | TBD only if new durable fields are authorized |
@@ -748,8 +757,8 @@ Namespaced keys (`CacheKeys`); targeted invalidation; single-flight rebuild; def
 | M1-02 | Source-scoped external identity contract — **COMPLETE** |
 | M1-03 | Attribution contract (certify current architecture) — **COMPLETE** |
 | M1-04 | Order lifecycle / recognised-sale contract — **COMPLETE** |
-| M1-05 | Refund / financial adjustment contract — **REQUIRES OWNER AUTHORIZATION** |
-| M1-06 | Financial metric dictionary |
+| M1-05 | Refund / financial adjustment contract — **COMPLETE** |
+| M1-06 | Financial metric dictionary — **REQUIRES OWNER AUTHORIZATION** |
 | M1-07 | Timestamp / Johannesburg period / freshness (resolve 5m vs 10m) |
 | M1-08 | Completeness / reconciliation / ANALYTICS_READY |
 | M1-09 | M1 certification pack |
@@ -809,11 +818,12 @@ Namespaced keys (`CacheKeys`); targeted invalidation; single-flight rebuild; def
 [x] M1-02 source-scoped external identity contract locked
 [x] M1-03 attribution contract locked
 [x] M1-04 order lifecycle / recognised-sale contract locked
-[ ] M1-05..M1-09 contracts locked
+[x] M1-05 refund / financial-adjustment contract locked
+[ ] M1-06..M1-09 contracts locked
 [ ] Existing Catalog/Sales/Ingestion/Analytics/Accounts reused
 [ ] Existing parser/OrderUpserter reused (no parallel writer)
 [x] Attribution certifies event-first + ProductMapping fallback
-[ ] Refund contract exists before refund object implementation
+[x] Refund contract exists before refund object implementation
 [ ] Financial reconciliation distinct from Tickera attendee recon
 [ ] Hot/warm/cold = ETS + Redis + Postgres (no mandatory Cachex)
 [ ] Freshness contract resolves OPEN M1-07 CONFLICT
@@ -833,7 +843,8 @@ P1-00 COMPLETE
 → M1-02 COMPLETE
 → M1-03 COMPLETE
 → M1-04 COMPLETE
-→ M1-05 (requires owner authorization) … M1-09
+→ M1-05 COMPLETE
+→ M1-06 (requires owner authorization) … M1-09
 → M1-C (only if M1-09 PRE-M2 gate requires corrective implementation)
 → M2
 → M3
@@ -876,13 +887,22 @@ COMPLETE (PASS)
 M1-04 contract:
 docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md
 
+M1-05:
+COMPLETE (PASS)
+
+M1-05 contract:
+docs/path-1/m1-05-refund-and-financial-adjustment-contract.md
+
 Known REQUIRED_BEFORE_M2 gap:
 TicketType variation-parent fail-closed enforcement (unresolved; defer to M1-09 PRE-M2 gate)
 
-Current Path 1 task:
-M1-05 — Refund and Financial Adjustment Contract
+Known M1-05 carry-forward gaps (unresolved):
+refund persistence/import REQUIRED_DURING_M3; refund completeness BEFORE_M4; MetricRules net-after-refund IMPLEMENTATION_CHANGE_REQUIRED BEFORE_M5
 
-M1-05:
+Current Path 1 task:
+M1-06 — Financial Metric Dictionary
+
+M1-06:
 REQUIRES OWNER AUTHORIZATION
 
 Path 2:
@@ -900,7 +920,10 @@ docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md
 Lifecycle / recognised-sale contract:
 docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md
 
-DO NOT START M1-05 WITHOUT OWNER AUTHORIZATION.
-USE A FRESH AGENT FOR M1-05.
-DO NOT REDESIGN LIFECYCLE RECOGNITION IN M1-05.
+Refund / financial-adjustment contract:
+docs/path-1/m1-05-refund-and-financial-adjustment-contract.md
+
+DO NOT START M1-06 WITHOUT OWNER AUTHORIZATION.
+USE A FRESH AGENT FOR M1-06.
+DO NOT IMPLEMENT REFUND RESOURCES OR RESOLVE M1-05 GAPS IN M1-06.
 ```

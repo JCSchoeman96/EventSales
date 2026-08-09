@@ -14,6 +14,7 @@
 | Path 1 identity contract | `docs/path-1/m1-02-source-scoped-external-identity-contract.md` |
 | Path 1 attribution contract | `docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md` |
 | Path 1 lifecycle / recognised-sale contract | `docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md` |
+| Path 1 refund / financial-adjustment contract | `docs/path-1/m1-05-refund-and-financial-adjustment-contract.md` |
 
 ### Revision log
 
@@ -22,6 +23,7 @@
 - `v3` — record M1-01A/M1-02 COMPLETE; next task M1-03 (requires owner authorization)
 - `v4` — record M1-03 COMPLETE (PASS); next task M1-04 (requires owner authorization); note REQUIRED_BEFORE_M2 TicketType variation-parent gap
 - `v5` — record M1-04 COMPLETE (PASS); next task M1-05 (requires owner authorization)
+- `v6` — record M1-05 COMPLETE (PASS); next task M1-06 (requires owner authorization); carry refund implementation gaps unresolved
 
 ### Conflict rule
 
@@ -113,10 +115,13 @@ Execution roadmap: docs/path-1/path-1-phase-breakdown.md
 Identity contract: docs/path-1/m1-02-source-scoped-external-identity-contract.md
 Attribution contract: docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md
 Lifecycle / recognised-sale contract: docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md
+Refund / financial-adjustment contract: docs/path-1/m1-05-refund-and-financial-adjustment-contract.md
 Known REQUIRED_BEFORE_M2 gap: TicketType variation-parent fail-closed enforcement (unresolved; defer to M1-09 PRE-M2 gate)
 M1-04: COMPLETE (PASS)
-Current Path 1 task: M1-05 — Refund and Financial Adjustment Contract
-M1-05: REQUIRES OWNER AUTHORIZATION
+M1-05: COMPLETE (PASS)
+Known M1-05 carry-forward gaps (unresolved): refund persistence/import REQUIRED_DURING_M3; refund completeness BEFORE_M4; MetricRules net-after-refund IMPLEMENTATION_CHANGE_REQUIRED BEFORE_M5
+Current Path 1 task: M1-06 — Financial Metric Dictionary
+M1-06: REQUIRES OWNER AUTHORIZATION
 
 PATH 2 — AUTOMATIC SYNC / CATALOGUE AUTOMATION
 Status: PAUSED AT CERTIFIED CHECKPOINT
@@ -507,7 +512,7 @@ M7 — Production Certification / Pilot
 
 ```text
 CURRENT NEXT STEP:
-M1-05 — Refund and Financial Adjustment Contract
+M1-06 — Financial Metric Dictionary
 
 P1-00:
 COMPLETE
@@ -533,10 +538,19 @@ COMPLETE (PASS)
 M1-04 contract:
 docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md
 
+M1-05:
+COMPLETE (PASS)
+
+M1-05 contract:
+docs/path-1/m1-05-refund-and-financial-adjustment-contract.md
+
 Known REQUIRED_BEFORE_M2 gap:
 TicketType variation-parent fail-closed enforcement (unresolved; defer to M1-09 PRE-M2 gate)
 
-M1-05:
+Known M1-05 carry-forward gaps (unresolved):
+refund persistence/import REQUIRED_DURING_M3; refund completeness BEFORE_M4; MetricRules net-after-refund IMPLEMENTATION_CHANGE_REQUIRED BEFORE_M5
+
+M1-06:
 REQUIRES OWNER AUTHORIZATION
 
 Repository truth:
@@ -553,9 +567,12 @@ docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md
 
 Lifecycle / recognised-sale contract:
 docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md
+
+Refund / financial-adjustment contract:
+docs/path-1/m1-05-refund-and-financial-adjustment-contract.md
 ```
 
-M1-01 through M1-04 contracts are established. M1-05 requires owner authorization before work begins. Use a fresh agent for M1-05. Do not redesign lifecycle recognition in M1-05.
+M1-01 through M1-05 contracts are established. M1-06 requires owner authorization before work begins. Use a fresh agent for M1-06. Do not implement refund resources or resolve M1-05 gaps in M1-06.
 
 ---
 
@@ -622,7 +639,7 @@ PATH 1 — TRUSTED MANAGEMENT ANALYTICS
 ACTIVE
 
 Current Path 1 task:
-M1-05 — Refund and Financial Adjustment Contract
+M1-06 — Financial Metric Dictionary
 
 P1-00:
 COMPLETE
@@ -648,10 +665,19 @@ COMPLETE (PASS)
 M1-04 contract:
 docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md
 
+M1-05:
+COMPLETE (PASS)
+
+M1-05 contract:
+docs/path-1/m1-05-refund-and-financial-adjustment-contract.md
+
 Known REQUIRED_BEFORE_M2 gap:
 TicketType variation-parent fail-closed enforcement (unresolved; defer to M1-09 PRE-M2 gate)
 
-M1-05:
+Known M1-05 carry-forward gaps (unresolved):
+refund persistence/import REQUIRED_DURING_M3; refund completeness BEFORE_M4; MetricRules net-after-refund IMPLEMENTATION_CHANGE_REQUIRED BEFORE_M5
+
+M1-06:
 REQUIRES OWNER AUTHORIZATION
 
 Repository truth:
@@ -668,6 +694,9 @@ docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md
 
 Lifecycle / recognised-sale contract:
 docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md
+
+Refund / financial-adjustment contract:
+docs/path-1/m1-05-refund-and-financial-adjustment-contract.md
 
 PATH 2 — AUTOMATIC SYNC / CATALOGUE AUTOMATION
 PAUSED
