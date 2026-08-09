@@ -4,7 +4,7 @@
 | --- | --- |
 | Document | Canonical Path 1 execution roadmap |
 | Plan ID | `path-1-phase-breakdown` |
-| Plan version | `v4` |
+| Plan version | `v5` |
 | Status | ACTIVE — repository-native execution contract |
 | Scope | Path 1 M1–M7 gated implementation sequence |
 | Authority | This file wins for Path 1 task sequencing and physical ownership assumptions |
@@ -12,6 +12,7 @@
 | Product decisions | `docs/roadmap/EVENTSALES_PRODUCT_DECISIONS.md` |
 | Repository truth | `docs/path-1/m1-01-current-repo-truth.md` |
 | Attribution contract | `docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md` |
+| Lifecycle / recognised-sale contract | `docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md` |
 | Historical planning source | Supplied `EVENTSALES_PATH_1_UPDATED_PHASE_BREAKDOWN.md` (v1 conceptual plan; superseded for physical assumptions) |
 | Path 2 / Phase 5E | PAUSED |
 | Prepared | 2026-08-09 |
@@ -23,6 +24,7 @@
 - `v2` — M1-01A repository-native reconciliation against `m1-01-current-repo-truth.md`
 - `v3` — M1-02 closeout: mark M1-01A/M1-02 COMPLETE; next task M1-03 (requires owner authorization)
 - `v4` — M1-03 closeout: COMPLETE (PASS); next task M1-04 (requires owner authorization); record REQUIRED_BEFORE_M2 TicketType variation-parent fail-closed gap for M1-09 PRE-M2 gate
+- `v5` — M1-04 closeout: COMPLETE (PASS); next task M1-05 (requires owner authorization); lock recognised-sale predicate for refund contract design
 
 ### Conflict rule
 
@@ -96,9 +98,11 @@ M1-01A: COMPLETE (PASS)
 M1-02: COMPLETE (PASS)
 M1-03: COMPLETE (PASS)
 M1-03 contract: docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md
+M1-04: COMPLETE (PASS)
+M1-04 contract: docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md
 Known REQUIRED_BEFORE_M2 gap: TicketType variation-parent fail-closed enforcement (unresolved; defer to M1-09 PRE-M2 gate)
-Current Path 1 task: M1-04 — Order Lifecycle and Recognised-Sale Contract
-M1-04: REQUIRES OWNER AUTHORIZATION
+Current Path 1 task: M1-05 — Refund and Financial Adjustment Contract
+M1-05: REQUIRES OWNER AUTHORIZATION
 ```
 
 ---
@@ -309,8 +313,8 @@ M1-01   COMPLETE — repository truth
 M1-01A  COMPLETE — roadmap reconciliation
 M1-02   COMPLETE — source identity
 M1-03   COMPLETE — attribution contract
-M1-04   order lifecycle (requires owner authorization)
-M1-05   refund / financial adjustment
+M1-04   COMPLETE — order lifecycle / recognised sale
+M1-05   refund / financial adjustment (requires owner authorization)
 M1-06   metric dictionary
 M1-07   time / period / freshness
 M1-08   completeness / reconciliation / ANALYTICS_READY
@@ -418,15 +422,16 @@ else
 
 | Field | Value |
 | --- | --- |
-| Status | **REQUIRES OWNER AUTHORIZATION** |
+| Status | **COMPLETE (PASS)** |
 | Strategy | CERTIFY |
+| Contract | `docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md` |
 | Existing foundation | WoocommerceOrderParser statuses; Order status atoms; MetricRules.counts_as_sold?; AutomaticMappingPolicy |
 | Expected change | Lock status matrix (recognised sale/revenue/visibility/mapping eligibility) matching current MetricRules |
 | New resource expected | NO |
 | Migration expected | NO |
 | Performance impact | None |
 
-Recognised sale remains: completed + mapped + ticket + qty > 0 → revenue from `OrderItem.line_total`.
+Recognised sale locked: completed + mapped + ticket + qty > 0 → revenue from `OrderItem.line_total`.
 
 ---
 
@@ -434,6 +439,7 @@ Recognised sale remains: completed + mapped + ticket + qty > 0 → revenue from 
 
 | Field | Value |
 | --- | --- |
+| Status | **REQUIRES OWNER AUTHORIZATION** |
 | Strategy | NEW CONTRACT REQUIRED |
 | Existing foundation | Order status `:refunded` only; no Refund/RefundLine resources; parser ignores Woo `refunds` array |
 | Expected change | Design refund/partial-refund/adjustment semantics, idempotency, timestamps, and analytics impact — **without pre-deciding Ash resources** |
@@ -741,8 +747,8 @@ Namespaced keys (`CacheKeys`); targeted invalidation; single-flight rebuild; def
 | M1-01A | Repository-native roadmap reconciliation — **COMPLETE** |
 | M1-02 | Source-scoped external identity contract — **COMPLETE** |
 | M1-03 | Attribution contract (certify current architecture) — **COMPLETE** |
-| M1-04 | Order lifecycle / recognised-sale contract — **REQUIRES OWNER AUTHORIZATION** |
-| M1-05 | Refund / financial adjustment contract |
+| M1-04 | Order lifecycle / recognised-sale contract — **COMPLETE** |
+| M1-05 | Refund / financial adjustment contract — **REQUIRES OWNER AUTHORIZATION** |
 | M1-06 | Financial metric dictionary |
 | M1-07 | Timestamp / Johannesburg period / freshness (resolve 5m vs 10m) |
 | M1-08 | Completeness / reconciliation / ANALYTICS_READY |
@@ -802,7 +808,8 @@ Namespaced keys (`CacheKeys`); targeted invalidation; single-flight rebuild; def
 [x] Roadmap is repository-native (this file)
 [x] M1-02 source-scoped external identity contract locked
 [x] M1-03 attribution contract locked
-[ ] M1-04..M1-09 contracts locked
+[x] M1-04 order lifecycle / recognised-sale contract locked
+[ ] M1-05..M1-09 contracts locked
 [ ] Existing Catalog/Sales/Ingestion/Analytics/Accounts reused
 [ ] Existing parser/OrderUpserter reused (no parallel writer)
 [x] Attribution certifies event-first + ProductMapping fallback
@@ -825,7 +832,8 @@ P1-00 COMPLETE
 → M1-01A COMPLETE
 → M1-02 COMPLETE
 → M1-03 COMPLETE
-→ M1-04 (requires owner authorization) … M1-09
+→ M1-04 COMPLETE
+→ M1-05 (requires owner authorization) … M1-09
 → M1-C (only if M1-09 PRE-M2 gate requires corrective implementation)
 → M2
 → M3
@@ -862,13 +870,19 @@ COMPLETE (PASS)
 M1-03 contract:
 docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md
 
+M1-04:
+COMPLETE (PASS)
+
+M1-04 contract:
+docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md
+
 Known REQUIRED_BEFORE_M2 gap:
 TicketType variation-parent fail-closed enforcement (unresolved; defer to M1-09 PRE-M2 gate)
 
 Current Path 1 task:
-M1-04 — Order Lifecycle and Recognised-Sale Contract
+M1-05 — Refund and Financial Adjustment Contract
 
-M1-04:
+M1-05:
 REQUIRES OWNER AUTHORIZATION
 
 Path 2:
@@ -883,7 +897,10 @@ docs/path-1/m1-02-source-scoped-external-identity-contract.md
 Attribution contract:
 docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md
 
-DO NOT START M1-04 WITHOUT OWNER AUTHORIZATION.
-USE A FRESH AGENT FOR M1-04.
-DO NOT REDESIGN ATTRIBUTION IN M1-04.
+Lifecycle / recognised-sale contract:
+docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md
+
+DO NOT START M1-05 WITHOUT OWNER AUTHORIZATION.
+USE A FRESH AGENT FOR M1-05.
+DO NOT REDESIGN LIFECYCLE RECOGNITION IN M1-05.
 ```

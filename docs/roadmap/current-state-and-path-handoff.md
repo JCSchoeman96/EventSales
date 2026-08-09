@@ -13,6 +13,7 @@
 | Path 1 execution roadmap | `docs/path-1/path-1-phase-breakdown.md` |
 | Path 1 identity contract | `docs/path-1/m1-02-source-scoped-external-identity-contract.md` |
 | Path 1 attribution contract | `docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md` |
+| Path 1 lifecycle / recognised-sale contract | `docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md` |
 
 ### Revision log
 
@@ -20,6 +21,7 @@
 - `v2` — record M1-01 COMPLETE; point to repository truth and repository-native Path 1 roadmap; next task M1-02
 - `v3` — record M1-01A/M1-02 COMPLETE; next task M1-03 (requires owner authorization)
 - `v4` — record M1-03 COMPLETE (PASS); next task M1-04 (requires owner authorization); note REQUIRED_BEFORE_M2 TicketType variation-parent gap
+- `v5` — record M1-04 COMPLETE (PASS); next task M1-05 (requires owner authorization)
 
 ### Conflict rule
 
@@ -110,9 +112,11 @@ Repository truth: docs/path-1/m1-01-current-repo-truth.md
 Execution roadmap: docs/path-1/path-1-phase-breakdown.md
 Identity contract: docs/path-1/m1-02-source-scoped-external-identity-contract.md
 Attribution contract: docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md
+Lifecycle / recognised-sale contract: docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md
 Known REQUIRED_BEFORE_M2 gap: TicketType variation-parent fail-closed enforcement (unresolved; defer to M1-09 PRE-M2 gate)
-Current Path 1 task: M1-04 — Order Lifecycle and Recognised-Sale Contract
-M1-04: REQUIRES OWNER AUTHORIZATION
+M1-04: COMPLETE (PASS)
+Current Path 1 task: M1-05 — Refund and Financial Adjustment Contract
+M1-05: REQUIRES OWNER AUTHORIZATION
 
 PATH 2 — AUTOMATIC SYNC / CATALOGUE AUTOMATION
 Status: PAUSED AT CERTIFIED CHECKPOINT
@@ -503,7 +507,7 @@ M7 — Production Certification / Pilot
 
 ```text
 CURRENT NEXT STEP:
-M1-04 — Order Lifecycle and Recognised-Sale Contract
+M1-05 — Refund and Financial Adjustment Contract
 
 P1-00:
 COMPLETE
@@ -523,10 +527,16 @@ COMPLETE (PASS)
 M1-03 contract:
 docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md
 
+M1-04:
+COMPLETE (PASS)
+
+M1-04 contract:
+docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md
+
 Known REQUIRED_BEFORE_M2 gap:
 TicketType variation-parent fail-closed enforcement (unresolved; defer to M1-09 PRE-M2 gate)
 
-M1-04:
+M1-05:
 REQUIRES OWNER AUTHORIZATION
 
 Repository truth:
@@ -540,9 +550,12 @@ docs/path-1/m1-02-source-scoped-external-identity-contract.md
 
 Attribution contract:
 docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md
+
+Lifecycle / recognised-sale contract:
+docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md
 ```
 
-M1-01 repository truth, the repository-native Path 1 roadmap, the M1-02 identity contract, and the M1-03 attribution contract are established. M1-04 requires owner authorization before work begins. Do not redesign attribution in M1-04.
+M1-01 through M1-04 contracts are established. M1-05 requires owner authorization before work begins. Use a fresh agent for M1-05. Do not redesign lifecycle recognition in M1-05.
 
 ---
 
@@ -609,7 +622,7 @@ PATH 1 — TRUSTED MANAGEMENT ANALYTICS
 ACTIVE
 
 Current Path 1 task:
-M1-04 — Order Lifecycle and Recognised-Sale Contract
+M1-05 — Refund and Financial Adjustment Contract
 
 P1-00:
 COMPLETE
@@ -629,10 +642,16 @@ COMPLETE (PASS)
 M1-03 contract:
 docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md
 
+M1-04:
+COMPLETE (PASS)
+
+M1-04 contract:
+docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md
+
 Known REQUIRED_BEFORE_M2 gap:
 TicketType variation-parent fail-closed enforcement (unresolved; defer to M1-09 PRE-M2 gate)
 
-M1-04:
+M1-05:
 REQUIRES OWNER AUTHORIZATION
 
 Repository truth:
@@ -646,6 +665,9 @@ docs/path-1/m1-02-source-scoped-external-identity-contract.md
 
 Attribution contract:
 docs/path-1/m1-03-event-product-variation-orderline-attribution-contract.md
+
+Lifecycle / recognised-sale contract:
+docs/path-1/m1-04-order-lifecycle-and-recognised-sale-contract.md
 
 PATH 2 — AUTOMATIC SYNC / CATALOGUE AUTOMATION
 PAUSED
