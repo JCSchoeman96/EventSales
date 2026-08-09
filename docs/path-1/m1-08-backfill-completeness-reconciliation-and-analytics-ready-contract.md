@@ -1203,7 +1203,7 @@ OPTIONAL / LATER:
   M1-03 G2–G4; MG9; refund fixtures; timestamp audit history; attendee UX panels
 ```
 
-M1-09 decides the final certification pack and PRE-M2 corrective implementation gate (M1-C if required).
+M1-09 — M1 Certification and PRE-M2 Implementation Gate — decides the final certification pack and PRE-M2 corrective implementation gate (M1-C if required).
 
 **M1-09 AUTHORIZATION: NOT GRANTED BY THIS TASK.**
 

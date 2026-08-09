@@ -32,7 +32,7 @@
 - `v6` — M1-05 closeout: COMPLETE (PASS); next task M1-06 (requires owner authorization); carry refund implementation gaps unresolved (M3/M4/M5 timing; MetricRules IMPLEMENTATION_CHANGE_REQUIRED)
 - `v7` — M1-06 closeout: COMPLETE (PASS); next task M1-07 (requires owner authorization); lock tax-inclusive Gross as `line_total + line_total_tax` (MG1 REQUIRED_DURING_M3; MG2–MG8 REQUIRED_BEFORE_M5)
 - `v8` — M1-07 closeout: COMPLETE (PASS); next task M1-08 (requires owner authorization); lock paid→completed sale clock, refund `date_created_gmt`, Johannesburg `[start,end)`, `<5m` NORMAL / `>10m` STALE; HotStateAggregator 5m stale = IMPLEMENTATION_CHANGE_REQUIRED
-- `v9` — M1-08 closeout: COMPLETE (PASS); next task M1-09 (requires owner authorization); lock A/B/C reconciliation separation, ORDER/REFUND completeness, exact financial recon, ANALYTICS_READY ≠ freshness, attendee recon DIAGNOSTIC; CG1–CG11 gap ledger
+- `v9` — M1-08 closeout: COMPLETE (PASS); next task M1-09 — M1 Certification and PRE-M2 Implementation Gate (requires owner authorization); lock A/B/C reconciliation separation, ORDER/REFUND completeness, exact financial recon, ANALYTICS_READY ≠ freshness, attendee recon DIAGNOSTIC; CG1–CG11 gap ledger
 
 ### Conflict rule
 
@@ -129,7 +129,7 @@ Known M1-05/M1-06/M1-07/M1-08 carry-forward gaps (unresolved):
   refund persistence/import REQUIRED_DURING_M3; refund completeness BEFORE_M4
   persist date_paid_gmt + refund date_created_gmt REQUIRED_DURING_M3; sale/refund bucketing + 10m source-stale projection REQUIRED_BEFORE_M5
   CG1 persist Tickera event creation instant; CG2 cursor-after-success; CG3–CG11 watermark/recon/ANALYTICS_READY projection (see M1-08 §29)
-Current Path 1 task: M1-09 — M1 Certification Pack
+Current Path 1 task: M1-09 — M1 Certification and PRE-M2 Implementation Gate
 M1-09: REQUIRES OWNER AUTHORIZATION
 ```
 
@@ -352,7 +352,7 @@ M1-05   COMPLETE — refund / financial adjustment
 M1-06   COMPLETE — financial metric dictionary
 M1-07   time / period / freshness — COMPLETE (PASS)
 M1-08   completeness / reconciliation / ANALYTICS_READY — COMPLETE (PASS)
-M1-09   certification (requires owner authorization)
+M1-09   certification and PRE-M2 implementation gate (requires owner authorization)
 ```
 
 ---
@@ -541,7 +541,7 @@ C. Path 1 financial source-vs-EventSales reconciliation — NEW (implement M4)
 
 ---
 
-### M1-09 — M1 Certification Pack
+### M1-09 — M1 Certification and PRE-M2 Implementation Gate
 
 | Field | Value |
 | --- | --- |
@@ -795,7 +795,7 @@ Namespaced keys (`CacheKeys`); targeted invalidation; single-flight rebuild; def
 | M1-06 | Financial metric dictionary — **COMPLETE** |
 | M1-07 | Timestamp / Johannesburg period / freshness — **COMPLETE (PASS)** |
 | M1-08 | Completeness / reconciliation / ANALYTICS_READY — **COMPLETE (PASS)** |
-| M1-09 | M1 Certification Pack — **REQUIRES OWNER AUTHORIZATION** |
+| M1-09 | M1 Certification and PRE-M2 Implementation Gate — **REQUIRES OWNER AUTHORIZATION** |
 
 ### M2 — Event Onboarding
 
@@ -966,7 +966,7 @@ FINANCIAL RECONCILIATION CONTRACT:
 LOCKED (concept C; exact Decimal; ticket-scoped)
 
 Current Path 1 task:
-M1-09 — M1 Certification Pack
+M1-09 — M1 Certification and PRE-M2 Implementation Gate
 
 M1-09:
 REQUIRES OWNER AUTHORIZATION

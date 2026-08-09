@@ -29,7 +29,7 @@
 - `v6` — record M1-05 COMPLETE (PASS); next task M1-06 (requires owner authorization); carry refund implementation gaps unresolved
 - `v7` — record M1-06 COMPLETE (PASS); next task M1-07 (requires owner authorization); tax-inclusive revenue IMPLEMENTATION_CHANGE_REQUIRED; preserve MG1–MG8 gap ledger
 - `v8` — record M1-07 COMPLETE (PASS); next task M1-08 (requires owner authorization); lock paid→completed sale clock, refund `date_created_gmt`, Johannesburg periods, `>10m` source STALE; HotStateAggregator 5m = IMPLEMENTATION_CHANGE_REQUIRED
-- `v9` — record M1-08 COMPLETE (PASS); next task M1-09 (requires owner authorization); lock A/B/C separation, ORDER/REFUND completeness, exact financial recon, ANALYTICS_READY ≠ freshness, attendee DIAGNOSTIC; CG1–CG11 gaps
+- `v9` — record M1-08 COMPLETE (PASS); next task M1-09 — M1 Certification and PRE-M2 Implementation Gate (requires owner authorization); lock A/B/C separation, ORDER/REFUND completeness, exact financial recon, ANALYTICS_READY ≠ freshness, attendee DIAGNOSTIC; CG1–CG11 gaps
 
 ### Conflict rule
 
@@ -141,7 +141,7 @@ Known M1-05/M1-06/M1-07/M1-08 carry-forward gaps (unresolved):
   refund persistence/import REQUIRED_DURING_M3; refund completeness BEFORE_M4
   persist date_paid_gmt + refund date_created_gmt REQUIRED_DURING_M3; sale/refund bucketing + 10m source-stale projection REQUIRED_BEFORE_M5
   CG1 persist Tickera event creation instant; CG2 cursor-after-success; CG3–CG11 watermark/recon/ANALYTICS_READY projection (see M1-08 §29)
-Current Path 1 task: M1-09 — M1 Certification Pack
+Current Path 1 task: M1-09 — M1 Certification and PRE-M2 Implementation Gate
 M1-09: REQUIRES OWNER AUTHORIZATION
 
 PATH 2 — AUTOMATIC SYNC / CATALOGUE AUTOMATION
@@ -533,7 +533,7 @@ M7 — Production Certification / Pilot
 
 ```text
 CURRENT NEXT STEP:
-M1-09 — M1 Certification Pack
+M1-09 — M1 Certification and PRE-M2 Implementation Gate
 
 P1-00:
 COMPLETE
@@ -703,7 +703,7 @@ PATH 1 — TRUSTED MANAGEMENT ANALYTICS
 ACTIVE
 
 Current Path 1 task:
-M1-09 — M1 Certification Pack
+M1-09 — M1 Certification and PRE-M2 Implementation Gate
 
 P1-00:
 COMPLETE
