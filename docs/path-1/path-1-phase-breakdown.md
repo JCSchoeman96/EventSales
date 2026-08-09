@@ -4,7 +4,7 @@
 | --- | --- |
 | Document | Canonical Path 1 execution roadmap |
 | Plan ID | `path-1-phase-breakdown` |
-| Plan version | `v11` |
+| Plan version | `v12` |
 | Status | ACTIVE — repository-native execution contract |
 | Scope | Path 1 M1–M7 gated implementation sequence |
 | Authority | This file wins for Path 1 task sequencing and physical ownership assumptions |
@@ -36,6 +36,7 @@
 - `v9` — M1-08 closeout: COMPLETE (PASS); next task M1-09 — M1 Certification and PRE-M2 Implementation Gate (requires owner authorization); lock A/B/C reconciliation separation, ORDER/REFUND completeness, exact financial recon, ANALYTICS_READY ≠ freshness, attendee recon DIAGNOSTIC; CG1–CG11 gap ledger
 - `v10` — M1-09 closeout: COMPLETE (PASS_WITH_PRE_M2_IMPLEMENTATION_GATE); sole BEFORE_M2 gap = GAP-PRE-M2-01 (M1-03 G1); next = M1-C PRE-M2 Contract Conformance Gate (branch+PR); M2 BLOCKED until M1-C merges
 - `v11` — M1-C closeout: COMPLETE (PASS); PR #167 merged (`285858a` / merge `9ddfd38`); GAP-PRE-M2-01 RESOLVED; REQUIRED_BEFORE_M2 gaps = 0; M2 AUTHORIZED; next = M2 (fresh agent)
+- `v12` — M2-01 closeout: COMPLETE (PASS); PR #168 merged (`72b04ac` / merge `cfb6dac`); `SourceEventResolver` on main; next = M2-02 (same agent; requires owner authorization)
 
 ### Conflict rule
 
@@ -131,9 +132,11 @@ REQUIRED_BEFORE_M2 gaps: 0 — GAP-PRE-M2-01 RESOLVED via M1-C (PR #167)
 PRE-M2 gate: M1-C — PRE-M2 Contract Conformance Gate (COMPLETE)
 M2 AUTHORIZATION: AUTHORIZED
 Canonical gap ledger: docs/path-1/m1-09-m1-certification-and-pre-m2-gate.md §7
-Current Path 1 task: M2 — Operator Event / Product / Variation Onboarding
 M1-C: COMPLETE (PASS)
 M1-C evidence: PR #167; commit 285858ad8d8ea50f77a006b18b148d24890065cf; merge 9ddfd38de833dc4575d803d984a29478dd39592c
+M2-01: COMPLETE (PASS)
+M2-01 evidence: PR #168; commit 72b04ac43f78a1e51d655d9122b8ca4515f5b48d; merge cfb6dac9d9d97c7135fab23f20602f03bd472c94
+Current Path 1 task: M2-02 — Idempotent Local Event Import / Link (same agent; requires owner authorization)
 ```
 
 ---
@@ -600,7 +603,7 @@ Rewrite as **extension/certification of Catalog foundations**, not a replacement
 
 | Task | Strategy | Existing foundation | Expected change | New resource | Migration | Performance |
 | --- | --- | --- | --- | --- | --- | --- |
-| M2-01 Exact Source/Event Resolution | CERTIFY / EXTEND | SourceSystem, Event external identity, DiscoveryIntegrity | Operator selection of exact source+event; use three source layers | NO | NO | Bounded lookup by source+external id |
+| M2-01 Exact Source/Event Resolution | CERTIFY / EXTEND — **COMPLETE (PASS)**; PR #168 | SourceSystem, Event external identity, DiscoveryIntegrity | `SourceEventResolver`; exact source+event; three source layers; absence vs lookup-failure | NO | NO | Bounded lookup by source+external id |
 | M2-02 Idempotent Local Event Import/Link | REUSE / EXTEND | Event create/update; DB unique external event | Idempotent link/import without fuzzy match | NO | TBD | Unique index already present |
 | M2-03 Authoritative Event-Product Discovery | REUSE / EXTEND | ProductMapping, TicketType, native-v3 evidence patterns | Onboard only exact products for selected event | NO | TBD | Bounded discovery; no Apply automation required |
 | M2-04 Parent Product Identity Protection | CERTIFY / EXTEND | ProductMapping woo_product_id; TicketType external_product_id | Fail closed on parent mismatch | NO | NO | Local validation only |
@@ -822,7 +825,9 @@ Namespaced keys (`CacheKeys`); targeted invalidation; single-flight rebuild; def
 
 | ID | Task |
 | --- | --- |
-| M2-01..M2-08 | Extend/certify Catalog foundations through structural certification — **AUTHORIZED**; start with fresh agent |
+| M2-01 | Exact Source/Event Resolution — **COMPLETE (PASS)**; PR #168 |
+| M2-02 | Idempotent Local Event Import/Link — **NEXT** (same agent; requires owner authorization) |
+| M2-03..M2-08 | Extend/certify Catalog foundations through structural certification — AUTHORIZED after prior M2 gates |
 
 ### M3 — Historical Sales
 
@@ -879,6 +884,7 @@ Namespaced keys (`CacheKeys`); targeted invalidation; single-flight rebuild; def
 [x] M1-08 completeness / reconciliation / ANALYTICS_READY contract locked
 [x] M1-09 M1 certification + PRE-M2 gate pack locked
 [x] M1-C PRE-M2 conformance (`GAP-PRE-M2-01`) merged
+[x] M2-01 exact source-scoped event resolution (`SourceEventResolver`) merged
 [ ] Existing Catalog/Sales/Ingestion/Analytics/Accounts reused
 [ ] Existing parser/OrderUpserter reused (no parallel writer)
 [x] Attribution certifies event-first + ProductMapping fallback
@@ -908,7 +914,9 @@ P1-00 COMPLETE
 → M1-08 COMPLETE
 → M1-09 COMPLETE (PASS_WITH_PRE_M2_IMPLEMENTATION_GATE)
 → M1-C COMPLETE (PASS; PR #167)
-→ M2 (AUTHORIZED; fresh agent)
+→ M2-01 COMPLETE (PASS; PR #168)
+→ M2-02 (NEXT; same agent; requires owner authorization)
+→ M2-03..M2-08
 → M3
 → M4
 → M5
@@ -1007,10 +1015,16 @@ FINANCIAL RECONCILIATION CONTRACT:
 LOCKED (concept C; exact Decimal; ticket-scoped)
 
 Current Path 1 task:
-M2 — Operator Event / Product / Variation Onboarding
+M2-02 — Idempotent Local Event Import / Link
 
 M1-C:
 COMPLETE (PASS)
+
+M2-01:
+COMPLETE (PASS)
+
+M2-01 evidence:
+PR #168; commit 72b04ac43f78a1e51d655d9122b8ca4515f5b48d; merge cfb6dac9d9d97c7135fab23f20602f03bd472c94
 
 Path 2:
 PAUSED
@@ -1042,8 +1056,8 @@ docs/path-1/m1-08-backfill-completeness-reconciliation-and-analytics-ready-contr
 M1 certification / PRE-M2 gate:
 docs/path-1/m1-09-m1-certification-and-pre-m2-gate.md
 
-M1-C CLOSED GAP-PRE-M2-01.
-M2 IS AUTHORIZED.
-USE A FRESH AGENT FOR M2.
-DO NOT REOPEN M1-C SCOPE.
+M2-01 COMPLETE.
+NEXT = M2-02 (SAME AGENT; REQUIRES OWNER AUTHORIZATION).
+DO NOT START M2-02 WITHOUT EXPLICIT AUTHORIZATION.
+DO NOT REOPEN M2-01 SCOPE.
 ```
