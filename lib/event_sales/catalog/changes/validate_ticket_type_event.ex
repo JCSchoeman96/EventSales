@@ -14,9 +14,10 @@ defmodule EventSales.Catalog.Changes.ValidateTicketTypeEvent do
   defp validate_ticket_type_event(changeset) do
     event_id = Ash.Changeset.get_attribute(changeset, :event_id)
     ticket_type_id = Ash.Changeset.get_attribute(changeset, :ticket_type_id)
+    woo_product_id = Ash.Changeset.get_attribute(changeset, :woo_product_id)
 
     if present_ids?(event_id, ticket_type_id) do
-      validate_matching_event(changeset, event_id, ticket_type_id)
+      validate_ticket_type(changeset, event_id, ticket_type_id, woo_product_id)
     else
       changeset
     end
@@ -25,19 +26,41 @@ defmodule EventSales.Catalog.Changes.ValidateTicketTypeEvent do
   defp present_ids?(event_id, ticket_type_id),
     do: not is_nil(event_id) and not is_nil(ticket_type_id)
 
-  defp validate_matching_event(changeset, event_id, ticket_type_id) do
+  defp validate_ticket_type(changeset, event_id, ticket_type_id, woo_product_id) do
     case Ash.get(TicketType, ticket_type_id, domain: Catalog) do
-      {:ok, %{event_id: ^event_id}} ->
+      {:ok, ticket_type} ->
         changeset
-
-      {:ok, _ticket_type} ->
-        Ash.Changeset.add_error(changeset,
-          field: :ticket_type_id,
-          message: "must belong to the same event as the mapping"
-        )
+        |> validate_matching_event(event_id, ticket_type)
+        |> validate_matching_parent(woo_product_id, ticket_type)
 
       {:error, _} ->
         Ash.Changeset.add_error(changeset, field: :ticket_type_id, message: "is invalid")
     end
   end
+
+  defp validate_matching_event(changeset, event_id, %{event_id: event_id}), do: changeset
+
+  defp validate_matching_event(changeset, _event_id, _ticket_type) do
+    Ash.Changeset.add_error(changeset,
+      field: :ticket_type_id,
+      message: "must belong to the same event as the mapping"
+    )
+  end
+
+  defp validate_matching_parent(changeset, _woo_product_id, %{external_product_id: nil}),
+    do: changeset
+
+  defp validate_matching_parent(changeset, woo_product_id, %{external_product_id: woo_product_id})
+       when not is_nil(woo_product_id),
+       do: changeset
+
+  defp validate_matching_parent(changeset, woo_product_id, %{external_product_id: _parent})
+       when not is_nil(woo_product_id) do
+    Ash.Changeset.add_error(changeset,
+      field: :woo_product_id,
+      message: "must match the ticket type parent product"
+    )
+  end
+
+  defp validate_matching_parent(changeset, _woo_product_id, _ticket_type), do: changeset
 end
