@@ -34,6 +34,7 @@
 - `v10` — record M1-09 COMPLETE (PASS_WITH_PRE_M2_IMPLEMENTATION_GATE); sole BEFORE_M2 gap GAP-PRE-M2-01; next M1-C (branch+PR); M2 BLOCKED_PENDING_PRE_M2_GATE
 - `v11` — record M1-C COMPLETE (PASS) via PR #167 merge (`285858a` / merge `9ddfd38`); GAP-PRE-M2-01 RESOLVED; REQUIRED_BEFORE_M2 gaps = 0; M2 AUTHORIZED; next M2 (fresh agent)
 - `v12` — record M2-01 COMPLETE (PASS) via PR #168 merge (`72b04ac` / merge `cfb6dac`); `SourceEventResolver` on main; next M2-02 (same agent; requires owner authorization)
+- `v13` — record M2-02 COMPLETE (PASS) via PR #170 merge (`fa8dcbd` / merge `6608c11`); `EventImporter` on main; next M2-03 (fresh agent; requires owner authorization)
 
 ### Conflict rule
 
@@ -114,7 +115,7 @@ Status: ESTABLISHED
 
 PATH 1 — MANAGEMENT ANALYTICS
 Status: ACTIVE
-Next milestone: M2-02 — Idempotent Local Event Import / Link
+Next milestone: M2-03 — Authoritative Event-Product Discovery
 P1-00: COMPLETE
 M1-01: COMPLETE (PASS)
 M1-01A: COMPLETE (PASS)
@@ -147,7 +148,9 @@ REQUIRED_BEFORE_M2 gaps: 0
 Canonical gap ledger: docs/path-1/m1-09-m1-certification-and-pre-m2-gate.md §7
 M2-01: COMPLETE (PASS)
 M2-01 evidence: PR #168; commit 72b04ac43f78a1e51d655d9122b8ca4515f5b48d; merge cfb6dac9d9d97c7135fab23f20602f03bd472c94
-Current Path 1 task: M2-02 — Idempotent Local Event Import / Link (same agent; requires owner authorization)
+M2-02: COMPLETE (PASS)
+M2-02 evidence: PR #170; commit fa8dcbda8c25f6776174172b251b5a259253f095; merge 6608c1188c07692a9f988221d2d36fda29be5019
+Current Path 1 task: M2-03 — Authoritative Event-Product Discovery (fresh agent; requires owner authorization)
 
 PATH 2 — AUTOMATIC SYNC / CATALOGUE AUTOMATION
 Status: PAUSED AT CERTIFIED CHECKPOINT
@@ -606,6 +609,12 @@ COMPLETE (PASS)
 M2-01 evidence:
 PR #168; commit 72b04ac43f78a1e51d655d9122b8ca4515f5b48d; merge cfb6dac9d9d97c7135fab23f20602f03bd472c94
 
+M2-02:
+COMPLETE (PASS)
+
+M2-02 evidence:
+PR #170; commit fa8dcbda8c25f6776174172b251b5a259253f095; merge 6608c1188c07692a9f988221d2d36fda29be5019
+
 TAX-INCLUSIVE REVENUE CONTRACT:
 IMPLEMENTATION_CHANGE_REQUIRED
 
@@ -664,7 +673,7 @@ M1 certification / PRE-M2 gate:
 docs/path-1/m1-09-m1-certification-and-pre-m2-gate.md
 ```
 
-M1 contracts are certified. M1-C closed `GAP-PRE-M2-01` on `main`. M2-01 shipped `SourceEventResolver` via PR #168. Next is M2-02 with the **same agent** under explicit owner authorization. Do not reopen M2-01 scope.
+M1 contracts are certified. M1-C closed `GAP-PRE-M2-01` on `main`. M2-01 shipped `SourceEventResolver` via PR #168. M2-02 shipped `EventImporter` via PR #170. Next is M2-03 with a **fresh agent** under explicit owner authorization. Do not reopen M2-02 scope.
 
 ---
 
@@ -731,7 +740,7 @@ PATH 1 — TRUSTED MANAGEMENT ANALYTICS
 ACTIVE
 
 Current Path 1 task:
-M2-02 — Idempotent Local Event Import / Link
+M2-03 — Authoritative Event-Product Discovery
 
 P1-00:
 COMPLETE
@@ -798,6 +807,12 @@ COMPLETE (PASS)
 
 M2-01 evidence:
 PR #168; commit 72b04ac43f78a1e51d655d9122b8ca4515f5b48d; merge cfb6dac9d9d97c7135fab23f20602f03bd472c94
+
+M2-02:
+COMPLETE (PASS)
+
+M2-02 evidence:
+PR #170; commit fa8dcbda8c25f6776174172b251b5a259253f095; merge 6608c1188c07692a9f988221d2d36fda29be5019
 
 TAX-INCLUSIVE REVENUE CONTRACT:
 IMPLEMENTATION_CHANGE_REQUIRED
