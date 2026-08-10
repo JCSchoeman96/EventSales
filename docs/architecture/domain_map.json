@@ -20,11 +20,32 @@
         ]
       },
       {
-        "docs_count": 0,
+        "docs_count": 1,
         "moduledoc?": true,
         "name": "EventSales.Catalog.Changes.NormalizeBaseUrl",
         "parse_error": null,
         "path": "lib/event_sales/catalog/changes/normalize_base_url.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "normalize"
+          },
+          {
+            "arity": 3,
+            "name": "change"
+          }
+        ],
+        "specs?": true,
+        "uses": [
+          "Ash.Resource.Change"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Catalog.Changes.ValidateEventDates",
+        "parse_error": null,
+        "path": "lib/event_sales/catalog/changes/validate_event_dates.ex",
         "public_funs": [
           {
             "arity": 3,
@@ -39,9 +60,9 @@
       {
         "docs_count": 0,
         "moduledoc?": true,
-        "name": "EventSales.Catalog.Changes.ValidateEventDates",
+        "name": "EventSales.Catalog.Changes.ValidateMappingSourceEvent",
         "parse_error": null,
-        "path": "lib/event_sales/catalog/changes/validate_event_dates.ex",
+        "path": "lib/event_sales/catalog/changes/validate_mapping_source_event.ex",
         "public_funs": [
           {
             "arity": 3,

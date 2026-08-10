@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-331
+341
 
 ## Files
 
@@ -66,7 +66,9 @@ Project root: `.`
 - `lib/event_sales/catalog/changes/mapping_side_effects_after_action.ex`
 - `lib/event_sales/catalog/changes/normalize_base_url.ex`
 - `lib/event_sales/catalog/changes/validate_event_dates.ex`
+- `lib/event_sales/catalog/changes/validate_mapping_source_event.ex`
 - `lib/event_sales/catalog/changes/validate_ticket_type_event.ex`
+- `lib/event_sales/catalog/event_importer.ex`
 - `lib/event_sales/catalog/event_lifecycle.ex`
 - `lib/event_sales/catalog/manual_mapping_creator.ex`
 - `lib/event_sales/catalog/mapping_conflict_resolver.ex`
@@ -81,6 +83,7 @@ Project root: `.`
 - `lib/event_sales/catalog/resources/product_mapping.ex`
 - `lib/event_sales/catalog/resources/source_system.ex`
 - `lib/event_sales/catalog/resources/ticket_type.ex`
+- `lib/event_sales/catalog/source_event_resolver.ex`
 - `lib/event_sales/catalog/tickera_catalog/applier.ex`
 - `lib/event_sales/catalog/tickera_catalog/auto_apply_policy.ex`
 - `lib/event_sales/catalog/tickera_catalog/cache.ex`
@@ -97,6 +100,13 @@ Project root: `.`
 - `lib/event_sales/catalog/tickera_catalog/pub_sub.ex`
 - `lib/event_sales/catalog/tickera_catalog/snapshot_canonicalizer.ex`
 - `lib/event_sales/catalog/tickera_catalog/source_risk.ex`
+- `lib/event_sales/catalog/tickera_catalog/source_risk_v3/canonical_fact.ex`
+- `lib/event_sales/catalog/tickera_catalog/source_risk_v3/compatibility/v2_adapter.ex`
+- `lib/event_sales/catalog/tickera_catalog/source_risk_v3/contract_registry.ex`
+- `lib/event_sales/catalog/tickera_catalog/source_risk_v3/discovery_integrity.ex`
+- `lib/event_sales/catalog/tickera_catalog/source_risk_v3/evidence.ex`
+- `lib/event_sales/catalog/tickera_catalog/source_risk_v3/finding_policy.ex`
+- `lib/event_sales/catalog/tickera_catalog/source_risk_v3/normalizer.ex`
 - `lib/event_sales/catalog/tickera_catalog/wordpress_feed_client.ex`
 - `lib/event_sales/catalog/tickera_catalog/wordpress_feed_discovery_source.ex`
 - `lib/event_sales/catalog/tickera_catalog/wordpress_feed_error.ex`
@@ -630,11 +640,17 @@ Project root: `.`
   - uses: `Ash.Resource.Change`
 - `EventSales.Catalog.Changes.NormalizeBaseUrl` - `lib/event_sales/catalog/changes/normalize_base_url.ex`
   - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `normalize/1`, `change/3`
+  - uses: `Ash.Resource.Change`
+- `EventSales.Catalog.Changes.ValidateEventDates` - `lib/event_sales/catalog/changes/validate_event_dates.ex`
+  - moduledoc?: true
   - specs?: false
   - docs_count: 0
   - public_funs: `change/3`
   - uses: `Ash.Resource.Change`
-- `EventSales.Catalog.Changes.ValidateEventDates` - `lib/event_sales/catalog/changes/validate_event_dates.ex`
+- `EventSales.Catalog.Changes.ValidateMappingSourceEvent` - `lib/event_sales/catalog/changes/validate_mapping_source_event.ex`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
@@ -646,6 +662,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `change/3`
   - uses: `Ash.Resource.Change`
+- `EventSales.Catalog.EventImporter` - `lib/event_sales/catalog/event_importer.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `import_tickera_event/2`
+  - uses: _none_
 - `EventSales.Catalog.EventLifecycle` - `lib/event_sales/catalog/event_lifecycle.ex`
   - moduledoc?: true
   - specs?: true
@@ -730,6 +752,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: _none_
   - uses: `Ash.Resource`
+- `EventSales.Catalog.SourceEventResolver` - `lib/event_sales/catalog/source_event_resolver.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `resolve/3`
+  - uses: _none_
 - `EventSales.Catalog.TickeraCatalog.Applier` - `lib/event_sales/catalog/tickera_catalog/applier.ex`
   - moduledoc?: true
   - specs?: true
@@ -818,13 +846,61 @@ Project root: `.`
   - moduledoc?: true
   - specs?: true
   - docs_count: 0
-  - public_funs: `canonicalize/1`
+  - public_funs: `v3_schema_version/0`, `canonicalize/1`
   - uses: _none_
 - `EventSales.Catalog.TickeraCatalog.SourceRisk` - `lib/event_sales/catalog/tickera_catalog/source_risk.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 0
   - public_funs: `from_code/3`, `explicit_safe/5`, `classified/6`
+  - uses: _none_
+- `EventSales.Catalog.TickeraCatalog.SourceRiskV3.CanonicalFact` - `lib/event_sales/catalog/tickera_catalog/source_risk_v3/canonical_fact.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `identity/1`, `same_identity?/2`, `semantic_claim/1`, `same_semantic_claim?/2`, `compare_pair/2`, `compare_key/1`, `sort_facts/1`, `sort_provenance_records/1`, `target_canonical_json/1`, `canonicalize_target/1`, `validate_target_for_scope/2`
+  - uses: _none_
+- `EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter` - `lib/event_sales/catalog/tickera_catalog/source_risk_v3/compatibility/v2_adapter.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `adapter_version/0`, `source_contract_version/0`, `canonical_contract_version/0`, `automation_eligible?/0`, `emitters/0`, `translation_results/0`, `translate/2`, `classify_pair/2`, `known_lossy_lifecycle_derivative?/4`
+  - uses: _none_
+- `TranslationRecord` - `lib/event_sales/catalog/tickera_catalog/source_risk_v3/compatibility/v2_adapter.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSales.Catalog.TickeraCatalog.SourceRiskV3.ContractRegistry` - `lib/event_sales/catalog/tickera_catalog/source_risk_v3/contract_registry.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `canonical_contract_version/0`, `native_producer_schema_version/0`, `native_normalization_mode/0`, `dimensions/0`, `scopes/0`, `states/0`, `producer_emittable_states/0`, `completeness_values/0`, `authorities/0`, `authority_slots/0`, `origins/0`, `dispositions/0`, `lifecycle_values/0`, `product_type_values/0`, `finding_owners/0`, `safe_negative_allowlist/0`, `safe_positive_rules/0`, `producer_provenance_keys/0`, `rejected_producer_provenance_keys/0`, `max_closed_id_length/0`, `max_raw_producer_code_bytes/0`, `max_producer_source_key_bytes/0`, `max_evidence_value_bytes/0`, `max_evidence_items_per_page/0`, `dimension?/1`, `scope?/1`, `state?/1`, `producer_emittable_state?/1`, `completeness?/1`, `authority?/1`, `authority_slot?/1`, `origin?/1`, `disposition?/1`, `finding_owner?/1`, `fetch_dimension/1`, `fetch_scope/1`, `fetch_state/1`, `fetch_completeness/1`, `fetch_authority/1`, `fetch_authority_slot/1`, `fetch_disposition/1`, `fetch_origin/1`, `authority_slot_for_dimension/1`, `authority_for_slot/1`, `producer_source_key_for_authority/1`, `scope_allowed_for_dimension?/2`, `state_allowed_for_dimension?/2`, `state_allowed_for_authority?/2`, `exhaustive_negative_permitted?/1`, `target_keys_for_scope/1`, `allowed_values_for_dimension/1`, `validate_closed_id/1`, `validate_bounded_string/2`, `member_of_safe_negative_allowlist?/1`
+  - uses: _none_
+- `EventSales.Catalog.TickeraCatalog.SourceRiskV3.DiscoveryIntegrity` - `lib/event_sales/catalog/tickera_catalog/source_risk_v3/discovery_integrity.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `native_schema_version/0`, `canonical_contract_version/0`, `producer_version/0`, `source/0`, `max_per_page/0`, `max_evidence_per_page/0`, `max_catalog_rows_per_page/0`, `normalize_base_url/1`, `expected_source_system_id/1`, `verify_source_system_id/2`, `validate_page_bounds/1`, `validate_discovery_pages/1`
+  - uses: _none_
+- `EventSales.Catalog.TickeraCatalog.SourceRiskV3.Evidence` - `lib/event_sales/catalog/tickera_catalog/source_risk_v3/evidence.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `validate/1`
+  - uses: _none_
+- `EventSales.Catalog.TickeraCatalog.SourceRiskV3.FindingPolicy` - `lib/event_sales/catalog/tickera_catalog/source_risk_v3/finding_policy.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `evaluate/1`, `evaluate_conflict/2`, `evaluate_contract_error/1`, `native_safe_negative_allowlist_empty?/0`, `implies_apply_safety?/1`
+  - uses: _none_
+- `EventSales.Catalog.TickeraCatalog.SourceRiskV3.Normalizer` - `lib/event_sales/catalog/tickera_catalog/source_risk_v3/normalizer.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `normalize_evidence/2`, `classify_against_existing/2`, `merge_duplicate/2`, `never_safe_state?/1`
   - uses: _none_
 - `EventSales.Catalog.TickeraCatalog.WordPressFeedClient` - `lib/event_sales/catalog/tickera_catalog/wordpress_feed_client.ex`
   - moduledoc?: true
@@ -1260,9 +1336,9 @@ Project root: `.`
   - uses: _none_
 - `EventSales.Ingestion.TickeraCatalogSync` - `lib/event_sales/ingestion/tickera_catalog_sync.ex`
   - moduledoc?: true
-  - specs?: false
-  - docs_count: 0
-  - public_funs: `queue_dry_run/2`, `queue_triggered_dry_run/3`, `queue_apply/3`, `revoke_ready_dry_run/3`, `claim_for_apply/3`, `list_runs/1`, `get_run_preview/2`, `list_source_systems/1`, `active_run_for_source/2`
+  - specs?: true
+  - docs_count: 3
+  - public_funs: `queue_dry_run/2`, `queue_event_product_discovery/2`, `project_event_parent_products/2`, `project_event_variations/2`, `queue_triggered_dry_run/3`, `queue_apply/3`, `revoke_ready_dry_run/3`, `claim_for_apply/3`, `list_runs/1`, `get_run_preview/2`, `list_source_systems/1`, `active_run_for_source/2`
   - uses: _none_
 - `EventSales.Ingestion.TickeraEventSources` - `lib/event_sales/ingestion/tickera_event_sources.ex`
   - moduledoc?: true
@@ -2263,8 +2339,8 @@ Project root: `.`
 - `EventSales.TestSupport.SalesHelpers` - `test/support/sales_helpers.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 0
-  - public_funs: `create_source_system!/1`, `create_event!/2`, `create_ticket_type!/2`, `normalized_order_attrs_from_fixture!/2`, `create_order_from_fixture!/2`, `create_order_item_from_line!/3`, `create_mixed_event_order!/1`
+  - docs_count: 1
+  - public_funs: `create_source_system!/1`, `create_event!/2`, `create_ticket_type!/2`, `create_variation_ticket_type!/4`, `normalized_order_attrs_from_fixture!/2`, `create_order_from_fixture!/2`, `create_order_item_from_line!/3`, `create_mixed_event_order!/1`
   - uses: _none_
 - `EventSales.TestSupport.TelemetryHelpers` - `test/support/telemetry_helpers.ex`
   - moduledoc?: true
@@ -2346,6 +2422,7 @@ Project root: `.`
 - `EventSales.Catalog.Changes.MappingSideEffectsAfterAction` - `lib/event_sales/catalog/changes/mapping_side_effects_after_action.ex`
 - `EventSales.Catalog.Changes.NormalizeBaseUrl` - `lib/event_sales/catalog/changes/normalize_base_url.ex`
 - `EventSales.Catalog.Changes.ValidateEventDates` - `lib/event_sales/catalog/changes/validate_event_dates.ex`
+- `EventSales.Catalog.Changes.ValidateMappingSourceEvent` - `lib/event_sales/catalog/changes/validate_mapping_source_event.ex`
 - `EventSales.Catalog.Changes.ValidateTicketTypeEvent` - `lib/event_sales/catalog/changes/validate_ticket_type_event.ex`
 - `EventSales.Sales.Changes.GuardSourceVersion` - `lib/event_sales/sales/changes/guard_source_version.ex`
 - `EventSales.Sales.Changes.SyncStatusFromSource` - `lib/event_sales/sales/changes/sync_status_from_source.ex`
