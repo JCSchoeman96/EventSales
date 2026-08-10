@@ -141,7 +141,7 @@ M2-01 evidence: PR #168; commit 72b04ac43f78a1e51d655d9122b8ca4515f5b48d; merge 
 M2-02: COMPLETE (PASS)
 M2-02 evidence: PR #170; commit fa8dcbda8c25f6776174172b251b5a259253f095; merge 6608c1188c07692a9f988221d2d36fda29be5019
 M2-03: COMPLETE (PASS)
-M2-03 evidence: PR pending merge; branch path1/m2-03-authoritative-event-product-discovery
+M2-03 evidence: PR #171; commit de18211272e8cac469e7d9c57ef8f23bb4e2e2b1; branch path1/m2-03-authoritative-event-product-discovery
 Current Path 1 task: M2-04 — Parent Product Identity Protection (fresh agent; requires owner authorization)
 ```
 
@@ -833,7 +833,7 @@ Namespaced keys (`CacheKeys`); targeted invalidation; single-flight rebuild; def
 | --- | --- |
 | M2-01 | Exact Source/Event Resolution — **COMPLETE (PASS)**; PR #168 |
 | M2-02 | Idempotent Local Event Import/Link — **COMPLETE (PASS)**; PR #170 |
-| M2-03 | Authoritative Event-Product Discovery — **COMPLETE (PASS)** |
+| M2-03 | Authoritative Event-Product Discovery — **COMPLETE (PASS)**; PR #171 |
 | M2-04 | Parent Product Identity Protection — **NEXT** (fresh agent; requires owner authorization) |
 | M2-05..M2-08 | Extend/certify Catalog foundations through structural certification — AUTHORIZED after prior M2 gates |
 
@@ -1048,7 +1048,7 @@ M2-03:
 COMPLETE (PASS)
 
 M2-03 evidence:
-PR pending merge; branch path1/m2-03-authoritative-event-product-discovery
+PR #171; commit de18211272e8cac469e7d9c57ef8f23bb4e2e2b1; branch path1/m2-03-authoritative-event-product-discovery
 
 Path 2:
 PAUSED
