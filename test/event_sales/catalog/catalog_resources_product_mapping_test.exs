@@ -59,8 +59,17 @@ defmodule EventSales.Catalog.CatalogResourcesProductMappingTest do
     product_level =
       create_mapping!(ctx, %{woo_product_id: 100, woo_variation_id: nil, current_label: "GA"})
 
+    variation_ticket =
+      create_ticket_type!(ctx.event, %{
+        name: "VIP",
+        external_ticket_type_kind: :woo_variation,
+        external_ticket_type_id: 501,
+        external_product_id: 200,
+        external_variation_id: 501
+      })
+
     variation_level =
-      create_mapping!(ctx, %{
+      create_mapping!(%{ctx | ticket: variation_ticket}, %{
         woo_product_id: 200,
         woo_variation_id: 501,
         current_label: "VIP"

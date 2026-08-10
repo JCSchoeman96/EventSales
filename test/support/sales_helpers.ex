@@ -47,6 +47,23 @@ defmodule EventSales.TestSupport.SalesHelpers do
     Ash.create!(TicketType, Map.merge(defaults, Map.new(attrs)), action: :create, domain: Catalog)
   end
 
+  @doc """
+  Creates a TicketType with canonical Woo variation identity for ProductMapping writes.
+  """
+  @spec create_variation_ticket_type!(Event.t(), pos_integer(), pos_integer(), keyword() | map()) ::
+          TicketType.t()
+  def create_variation_ticket_type!(event, woo_product_id, woo_variation_id, attrs \\ %{}) do
+    defaults = %{
+      name: "Variation Ticket",
+      external_ticket_type_kind: :woo_variation,
+      external_ticket_type_id: woo_variation_id,
+      external_product_id: woo_product_id,
+      external_variation_id: woo_variation_id
+    }
+
+    create_ticket_type!(event, Map.merge(defaults, Map.new(attrs)))
+  end
+
   @spec normalized_order_attrs_from_fixture!(atom() | String.t(), SourceSystem.t()) :: map()
   def normalized_order_attrs_from_fixture!(fixture_name, source) do
     fixture_name

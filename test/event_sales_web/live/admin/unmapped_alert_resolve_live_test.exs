@@ -85,6 +85,9 @@ defmodule EventSalesWeb.Live.Admin.UnmappedAlertResolveLiveTest do
   end
 
   test "creates an existing-ticket mapping and shows recovery counts", ctx do
+    ticket =
+      SalesHelpers.create_variation_ticket_type!(ctx.event, 701, 702, %{name: "Variation GA"})
+
     {:ok, view, _html} = ctx.conn |> sign_in_as(ctx.admin) |> live(path(ctx.item))
 
     html =
@@ -92,7 +95,7 @@ defmodule EventSalesWeb.Live.Admin.UnmappedAlertResolveLiveTest do
         "manual_mapping" => %{
           "event_id" => ctx.event.id,
           "ticket_type_mode" => "existing",
-          "ticket_type_id" => ctx.ticket.id,
+          "ticket_type_id" => ticket.id,
           "ticket_type_name" => "",
           "source_status" => "manual",
           "reason" => "Resolve live alert"
@@ -151,6 +154,9 @@ defmodule EventSalesWeb.Live.Admin.UnmappedAlertResolveLiveTest do
   end
 
   test "offers retry after recovery fails without creating a second mapping", ctx do
+    ticket =
+      SalesHelpers.create_variation_ticket_type!(ctx.event, 701, 702, %{name: "Retry Variation"})
+
     Application.put_env(
       :event_sales,
       :unmapped_alert_recovery_module,
@@ -158,7 +164,11 @@ defmodule EventSalesWeb.Live.Admin.UnmappedAlertResolveLiveTest do
     )
 
     {:ok, view, _html} = ctx.conn |> sign_in_as(ctx.admin) |> live(path(ctx.item))
-    html = render_submit(view, "resolve", %{"manual_mapping" => base_form(ctx)})
+
+    html =
+      render_submit(view, "resolve", %{
+        "manual_mapping" => Map.put(base_form(ctx), "ticket_type_id", ticket.id)
+      })
 
     assert html =~ "mapping was saved"
     assert html =~ "Retry recovery"

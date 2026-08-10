@@ -509,8 +509,23 @@ defmodule EventSales.Catalog.TickeraCatalog.PlannerApplierTest do
         external_event_kind: :tickera_event
       })
 
-    mp_ticket_a = SalesHelpers.create_ticket_type!(mp_event, %{name: "MP Ticket A"})
-    mp_ticket_b = SalesHelpers.create_ticket_type!(mp_event, %{name: "MP Ticket B"})
+    mp_ticket_a =
+      SalesHelpers.create_ticket_type!(mp_event, %{
+        name: "MP Ticket A",
+        external_ticket_type_kind: :woo_variation,
+        external_ticket_type_id: 109_165,
+        external_product_id: 109_132,
+        external_variation_id: 109_165
+      })
+
+    mp_ticket_b =
+      SalesHelpers.create_ticket_type!(mp_event, %{
+        name: "MP Ticket B",
+        external_ticket_type_kind: :woo_variation,
+        external_ticket_type_id: 109_167,
+        external_product_id: 109_132,
+        external_variation_id: 109_167
+      })
 
     stale_a =
       create_mapping!(source, mp_event, mp_ticket_a, %{

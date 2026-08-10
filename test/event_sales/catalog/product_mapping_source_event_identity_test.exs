@@ -119,7 +119,15 @@ defmodule EventSales.Catalog.ProductMappingSourceEventIdentityTest do
   test "matching source event and ticket type create succeeds" do
     source = create_source_system!()
     event = create_event!(source, %{name: "Full Match", slug: "full-match"})
-    ticket = create_ticket_type!(event, %{name: "VIP"})
+
+    ticket =
+      create_ticket_type!(event, %{
+        name: "VIP",
+        external_ticket_type_kind: :woo_variation,
+        external_ticket_type_id: 901,
+        external_product_id: 900,
+        external_variation_id: 901
+      })
 
     mapping =
       create_mapping!(%{source: source, event: event, ticket: ticket}, %{

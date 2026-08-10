@@ -341,12 +341,18 @@ defmodule EventSales.Ingestion.TickeraCatalogHistoricalImpactTest do
       })
 
     ticket =
-      SalesHelpers.create_ticket_type!(event, %{
-        external_ticket_type_id: ticket_external_id,
-        external_ticket_type_kind: :woo_variation,
-        external_product_id: product,
-        external_variation_id: variation
-      })
+      if is_nil(variation) do
+        SalesHelpers.create_ticket_type!(event, %{
+          external_ticket_type_id: ticket_external_id,
+          external_ticket_type_kind:
+            if(is_nil(ticket_external_id), do: nil, else: :woo_product),
+          external_product_id: product
+        })
+      else
+        SalesHelpers.create_variation_ticket_type!(event, product, variation, %{
+          external_ticket_type_id: ticket_external_id || variation
+        })
+      end
 
     Ash.create!(
       ProductMapping,

@@ -88,7 +88,14 @@ defmodule EventSales.Catalog.OrderAttributionResolverTest do
         external_event_kind: :tickera_event
       })
 
-    mp_ticket = SalesHelpers.create_ticket_type!(mp_event, %{name: "MP General"})
+    mp_ticket =
+      SalesHelpers.create_ticket_type!(mp_event, %{
+        name: "MP General",
+        external_ticket_type_kind: :woo_variation,
+        external_ticket_type_id: 109_167,
+        external_product_id: 109_132,
+        external_variation_id: 109_167
+      })
 
     create_mapping!(source, mp_event, mp_ticket, %{
       woo_product_id: 109_132,

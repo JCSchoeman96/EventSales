@@ -1334,7 +1334,10 @@ defmodule EventSalesWeb.Live.Admin.CatalogSyncLiveTest do
         external_event_kind: :tickera_event
       })
 
-    ticket = SalesHelpers.create_ticket_type!(event, %{name: "MP Ticket #{variation_id}"})
+    ticket =
+      SalesHelpers.create_variation_ticket_type!(event, 109_132, variation_id, %{
+        name: "MP Ticket #{variation_id}"
+      })
 
     mapping =
       Ash.create!(

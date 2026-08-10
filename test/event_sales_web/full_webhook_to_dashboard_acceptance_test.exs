@@ -52,7 +52,10 @@ defmodule EventSalesWeb.FullWebhookToDashboardAcceptanceTest do
         slug: "slice-23-acceptance-#{System.unique_integer([:positive])}"
       })
 
-    ticket = SalesHelpers.create_ticket_type!(event, %{name: @ticket_name})
+    ticket =
+      SalesHelpers.create_variation_ticket_type!(event, @woo_product_id, @woo_variation_id, %{
+        name: @ticket_name
+      })
 
     create_product_mapping!(source, event, ticket)
 

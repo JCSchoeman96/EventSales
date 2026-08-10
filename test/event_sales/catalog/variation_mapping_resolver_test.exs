@@ -139,6 +139,11 @@ defmodule EventSales.Catalog.VariationMappingResolverTest do
   } do
     assert {:ok, _revoked} = VariationMappingResolver.prepare(run.id, hash, actor: admin)
 
+    ticket =
+      SalesHelpers.create_variation_ticket_type!(event, 104_324, 501, %{
+        name: "Resolved Variation"
+      })
+
     assert {:ok, %{mapping: mapping}} =
              VariationMappingResolver.resolve(
                run.id,

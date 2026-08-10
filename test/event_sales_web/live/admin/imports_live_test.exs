@@ -25,7 +25,7 @@ defmodule EventSalesWeb.Live.Admin.ImportsLiveTest do
 
     source = SalesHelpers.create_source_system!()
     event = SalesHelpers.create_event!(source, %{name: "Imports Live Event"})
-    ticket = SalesHelpers.create_ticket_type!(event, %{name: "GA"})
+    ticket = SalesHelpers.create_variation_ticket_type!(event, 501, 601, %{name: "GA"})
     create_mapping!(source, event, ticket, %{woo_product_id: 501, woo_variation_id: 601})
 
     {:ok, admin: admin, staff: staff, event: event}

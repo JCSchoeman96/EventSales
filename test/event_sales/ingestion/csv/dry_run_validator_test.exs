@@ -14,7 +14,10 @@ defmodule EventSales.Ingestion.Csv.DryRunValidatorTest do
   setup do
     source = SalesHelpers.create_source_system!()
     event = SalesHelpers.create_event!(source, %{name: "CSV Import Event"})
-    ticket = SalesHelpers.create_ticket_type!(event, %{name: "General Admission"})
+
+    ticket =
+      SalesHelpers.create_variation_ticket_type!(event, 501, 601, %{name: "General Admission"})
+
     create_mapping!(source, event, ticket, %{woo_product_id: 501, woo_variation_id: 601})
 
     {:ok, source: source, event: event, ticket: ticket}
@@ -61,10 +64,17 @@ defmodule EventSales.Ingestion.Csv.DryRunValidatorTest do
 
   test "blank required order number and currency produce row errors", %{
     source: source,
-    event: event,
-    ticket: ticket
+    event: event
   } do
-    create_mapping!(source, event, ticket, %{woo_product_id: 501, woo_variation_id: nil})
+    product_ticket =
+      SalesHelpers.create_ticket_type!(event, %{
+        name: "Product Admission",
+        external_ticket_type_kind: :woo_product,
+        external_ticket_type_id: 501,
+        external_product_id: 501
+      })
+
+    create_mapping!(source, event, product_ticket, %{woo_product_id: 501, woo_variation_id: nil})
 
     assert_no_sales_mutation(fn ->
       path =
@@ -89,10 +99,17 @@ defmodule EventSales.Ingestion.Csv.DryRunValidatorTest do
 
   test "currency must be a three-letter uppercase code", %{
     source: source,
-    event: event,
-    ticket: ticket
+    event: event
   } do
-    create_mapping!(source, event, ticket, %{woo_product_id: 501, woo_variation_id: nil})
+    product_ticket =
+      SalesHelpers.create_ticket_type!(event, %{
+        name: "Product Admission",
+        external_ticket_type_kind: :woo_product,
+        external_ticket_type_id: 501,
+        external_product_id: 501
+      })
+
+    create_mapping!(source, event, product_ticket, %{woo_product_id: 501, woo_variation_id: nil})
 
     path =
       write_csv!([

@@ -127,9 +127,13 @@ defmodule EventSalesWeb.Live.Admin.ProductMappingsLiveTest do
     conn: conn,
     admin: admin,
     source: source,
-    event: event,
-    ticket: ticket
+    event: event
   } do
+    ticket =
+      SalesHelpers.create_variation_ticket_type!(event, 104_324, 501, %{
+        name: "Reviewed Variation"
+      })
+
     {run, hash} = create_resolution_run!(source, 104_324, 501)
     assert {:ok, _revoked} = VariationMappingResolver.prepare(run.id, hash, actor: admin)
 

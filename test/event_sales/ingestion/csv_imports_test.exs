@@ -26,7 +26,7 @@ defmodule EventSales.Ingestion.CsvImportsTest do
 
     source = SalesHelpers.create_source_system!()
     event = SalesHelpers.create_event!(source, %{name: "CSV Facade Event"})
-    ticket = SalesHelpers.create_ticket_type!(event, %{name: "GA"})
+    ticket = SalesHelpers.create_variation_ticket_type!(event, 501, 601, %{name: "GA"})
     create_mapping!(source, event, ticket, %{woo_product_id: 501, woo_variation_id: 601})
 
     {:ok, admin: admin, staff: staff, source: source, event: event}
