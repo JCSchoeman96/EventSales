@@ -31,6 +31,7 @@ defmodule EventSales.Ingestion.EventStructuralCertifier do
           | :snapshot_hash_mismatch
           | :blocking_discovery_findings
           | :invalid_source_membership
+          | :mapping_source_mismatch
           | :missing_mapping
           | :extra_mapping
           | :foreign_event_mapping
@@ -61,6 +62,7 @@ defmodule EventSales.Ingestion.EventStructuralCertifier do
              {:ok, source_membership} <- source_membership(snapshot),
              :ok <- reject_blocking_findings(snapshot),
              {:ok, local_mappings} <- active_event_mappings(event),
+             :ok <- validate_event_mapping_sources(event, local_mappings),
              {:ok, owned_mappings} <- active_source_mappings(event, source_membership),
              :ok <- reject_foreign_event_mapping(event, source_membership, owned_mappings),
              :ok <- validate_mapping_sets(source_membership, local_mappings),
@@ -210,13 +212,19 @@ defmodule EventSales.Ingestion.EventStructuralCertifier do
     end
   end
 
-  defp active_event_mappings(%Event{source_system_id: source_system_id, id: event_id}) do
+  defp active_event_mappings(%Event{id: event_id}) do
     ProductMapping
-    |> Ash.Query.filter(
-      source_system_id == ^source_system_id and event_id == ^event_id and active == true
-    )
+    |> Ash.Query.filter(event_id == ^event_id and active == true)
     |> Ash.read(domain: Catalog)
     |> normalize_read_result()
+  end
+
+  defp validate_event_mapping_sources(%Event{source_system_id: source_system_id}, mappings) do
+    if Enum.all?(mappings, &(&1.source_system_id == source_system_id)) do
+      :ok
+    else
+      {:error, :mapping_source_mismatch}
+    end
   end
 
   defp active_source_mappings(

@@ -208,6 +208,48 @@ defmodule EventSales.Ingestion.EventStructuralCertifierTest do
     assert {:error, :extra_mapping} = EventStructuralCertifier.certify(event.id, run.id)
   end
 
+  test "rejects an active foreign-source mapping attached to the selected Event" do
+    %{source: source, event: event, entries: [%{ticket: ticket}]} =
+      structure_fixture!([{70_851, nil}], with_run?: false)
+
+    foreign_source = create_source_system!()
+
+    Repo.query!(
+      """
+      INSERT INTO catalog_product_mappings
+        (source_system_id, event_id, ticket_type_id, woo_product_id,
+         woo_variation_id, original_label, current_label, active)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      """,
+      [
+        Ecto.UUID.dump!(foreign_source.id),
+        Ecto.UUID.dump!(event.id),
+        Ecto.UUID.dump!(ticket.id),
+        70_852,
+        nil,
+        "Legacy foreign source",
+        "Legacy foreign source",
+        true
+      ]
+    )
+
+    assert Repo.query!(
+             """
+             SELECT source_system_id, event_id, active
+             FROM catalog_product_mappings
+             WHERE source_system_id = $1 AND event_id = $2 AND active = TRUE
+             """,
+             [Ecto.UUID.dump!(foreign_source.id), Ecto.UUID.dump!(event.id)]
+           ).num_rows == 1
+
+    run = ready_run!(source, event, [{70_851, nil}])
+
+    assert {:error, :mapping_source_mismatch} =
+             EventStructuralCertifier.certify(event.id, run.id)
+
+    assert Ash.get!(Event, event.id, domain: Catalog).analytics_onboarding_state == :unverified
+  end
+
   test "rejects an expected source key owned by another Event" do
     source = create_source_system!()
 
