@@ -3,8 +3,10 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
   Admin facade for Tickera catalog sync dry-run and apply.
 
   Path 1 M2-03 adds an Event-owned queue boundary and a pure parent-product
-  membership projection over normalized `CatalogRow` evidence. Discovery still
-  runs through existing dry-run / Oban machinery; no Apply or mapping mutation.
+  membership projection over normalized `CatalogRow` evidence. Path 1 M2-05
+  adds the adjacent pure variation membership projection over the same rows.
+  Discovery still runs through existing dry-run / Oban machinery; no Apply or
+  mapping mutation.
   """
 
   require Ash.Query
@@ -97,6 +99,27 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
 
   def project_event_parent_products(_local_event_id, _rows), do: {:error, :invalid_input}
 
+  @doc """
+  Projects unique Woo variation identities for one exact local Tickera Event.
+
+  Loads the Event by UUID and derives both `source_system_id` and the selected
+  Tickera external event id from that Event. Variation identity remains
+  `(source_system_id, woo_product_id, woo_variation_id)` and cannot be
+  caller-relabelled under another SourceSystem. Simple-product rows (nil
+  variation) are ignored. Foreign-event rows and invalid product/variation IDs
+  fail closed. Does not read or mutate ProductMapping / TicketType.
+  """
+  @spec project_event_variations(Ecto.UUID.t(), [CatalogRow.t()]) ::
+          {:ok, %{variations: [map()], variation_count: non_neg_integer()}} | {:error, atom()}
+  def project_event_variations(local_event_id, rows)
+      when is_binary(local_event_id) and is_list(rows) do
+    with {:ok, event} <- load_authoritative_tickera_event(local_event_id) do
+      project_variations(event.source_system_id, event.external_event_id, rows)
+    end
+  end
+
+  def project_event_variations(_local_event_id, _rows), do: {:error, :invalid_input}
+
   defp project_parent_products(source_system_id, selected_tickera_event_id, rows)
        when is_binary(source_system_id) and is_integer(selected_tickera_event_id) and
               selected_tickera_event_id > 0 and is_list(rows) do
@@ -111,6 +134,27 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
         end)
 
       {:ok, %{products: products, product_count: length(products)}}
+    end
+  end
+
+  defp project_variations(source_system_id, selected_tickera_event_id, rows)
+       when is_binary(source_system_id) and is_integer(selected_tickera_event_id) and
+              selected_tickera_event_id > 0 and is_list(rows) do
+    with :ok <- validate_selected_event_membership(selected_tickera_event_id, rows),
+         {:ok, variation_tuples} <- collect_variation_identities(rows) do
+      variations =
+        variation_tuples
+        |> Enum.uniq()
+        |> Enum.sort()
+        |> Enum.map(fn {woo_product_id, woo_variation_id} ->
+          %{
+            source_system_id: source_system_id,
+            woo_product_id: woo_product_id,
+            woo_variation_id: woo_variation_id
+          }
+        end)
+
+      {:ok, %{variations: variations, variation_count: length(variations)}}
     end
   end
 
@@ -647,6 +691,40 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
       other -> other
     end
   end
+
+  # Simple/nil variation rows are ignored. Variation-bearing rows require both
+  # positive parent and variation IDs; identity remains parent+variation.
+  defp collect_variation_identities(rows) do
+    Enum.reduce_while(rows, {:ok, []}, fn row, {:ok, tuples} ->
+      case variation_identity_from_row(row) do
+        :ignore -> {:cont, {:ok, tuples}}
+        {:ok, tuple} -> {:cont, {:ok, [tuple | tuples]}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, tuples} -> {:ok, Enum.reverse(tuples)}
+      other -> other
+    end
+  end
+
+  defp variation_identity_from_row(%CatalogRow{woo_variation_id: nil}), do: :ignore
+
+  defp variation_identity_from_row(%CatalogRow{
+         woo_product_id: product_id,
+         woo_variation_id: variation_id
+       })
+       when is_integer(product_id) and product_id > 0 and is_integer(variation_id) and
+              variation_id > 0 do
+    {:ok, {product_id, variation_id}}
+  end
+
+  defp variation_identity_from_row(%CatalogRow{woo_product_id: product_id, woo_variation_id: id})
+       when not is_nil(id) and (not is_integer(product_id) or product_id <= 0) do
+    {:error, :invalid_product_identity}
+  end
+
+  defp variation_identity_from_row(%CatalogRow{}), do: {:error, :invalid_variation_identity}
 
   defp fetch_required(attrs, key) do
     case Map.get(attrs, key) || Map.get(attrs, to_string(key)) do
