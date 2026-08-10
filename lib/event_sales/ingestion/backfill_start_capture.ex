@@ -17,6 +17,10 @@ defmodule EventSales.Ingestion.BackfillStartCapture do
 
   @event_lock_query "SELECT id FROM catalog_events WHERE id = $1 FOR UPDATE"
   @run_lock_query "SELECT id FROM ingestion_tickera_catalog_sync_runs WHERE id = $1 FOR UPDATE"
+  @capture_context %{
+    event_sales_backfill_start_capture_authority: {Event, :verified},
+    warn_on_transaction_hooks?: false
+  }
 
   @type reason ::
           :capture_failed
@@ -250,7 +254,7 @@ defmodule EventSales.Ingestion.BackfillStartCapture do
            %{source_created_at: source_created_at},
            action: :capture_source_created_at,
            domain: Catalog,
-           context: %{warn_on_transaction_hooks?: false},
+           context: @capture_context,
            return_notifications?: true
          ) do
       {:ok, %Event{} = captured} -> {:ok, captured}

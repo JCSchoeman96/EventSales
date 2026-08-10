@@ -25,6 +25,7 @@ defmodule EventSales.Catalog.TickeraCatalog.PlannerApplierTest do
     FindingPolicy
   }
 
+  alias EventSales.Ingestion.BackfillStartCapture
   alias EventSales.Ingestion.Workers.MissingCatalogResolutionWorker
   alias EventSales.TestSupport.{CatalogSyncRunHelpers, SalesHelpers, TickeraCatalogFixtures}
 
@@ -156,84 +157,27 @@ defmodule EventSales.Catalog.TickeraCatalog.PlannerApplierTest do
   end
 
   test "matching source creation evidence does not create a source-created delta", %{
-    source: source
+    source: source,
+    event: event
   } do
-    event =
-      SalesHelpers.create_event!(source, %{
-        external_event_kind: :tickera_event,
-        external_event_id: 71_005,
-        source_updated_at: ~U[2026-06-01 10:00:00Z],
-        starts_at: ~U[2026-08-01 16:00:00Z],
-        ends_at: ~U[2026-08-01 18:00:00Z],
-        venue_name: "Pretoria",
-        booking_fee_type: :fixed,
-        booking_fee_value: Decimal.new("25.00"),
-        source_status: "publish"
-      })
+    event = prepare_source_metadata_event!(event)
+    discovery = discovery_result()
 
-    assert {:ok, event} =
-             Ash.update(
-               event,
-               %{source_created_at: ~U[2026-05-01 08:00:00Z]},
-               action: :capture_source_created_at,
-               domain: Catalog
-             )
-
-    discovery =
-      discovery_result()
-      |> Map.update!(:events, fn events ->
-        Enum.map(events, &Map.put(&1, "tickera_event_id", 71_005))
-      end)
-      |> Map.update!(:catalog_rows, fn rows ->
-        Enum.map(rows, fn row ->
-          row
-          |> Map.put("tickera_event_id", 71_005)
-          |> Map.put("woo_product_id", 71_006)
-        end)
-      end)
+    capture_source_created_at!(source, event, discovery, ~U[2026-05-01 08:00:00Z])
 
     assert {:ok, plan} = Planner.plan(source.id, discovery)
 
-    assert [%{action: :reuse, event_id: event_id}] = plan.event_changes
-    assert event_id == event.id
+    assert plan.event_changes == []
   end
 
   test "different source creation evidence is represented as a metadata difference", %{
-    source: source
+    source: source,
+    event: event
   } do
-    event =
-      SalesHelpers.create_event!(source, %{
-        external_event_kind: :tickera_event,
-        external_event_id: 71_007,
-        source_updated_at: ~U[2026-06-01 10:00:00Z],
-        starts_at: ~U[2026-08-01 16:00:00Z],
-        ends_at: ~U[2026-08-01 18:00:00Z],
-        venue_name: "Pretoria",
-        booking_fee_type: :fixed,
-        booking_fee_value: Decimal.new("25.00"),
-        source_status: "publish"
-      })
+    event = prepare_source_metadata_event!(event)
+    discovery = discovery_result()
 
-    assert {:ok, event} =
-             Ash.update(
-               event,
-               %{source_created_at: ~U[2026-04-30 08:00:00Z]},
-               action: :capture_source_created_at,
-               domain: Catalog
-             )
-
-    discovery =
-      discovery_result()
-      |> Map.update!(:events, fn events ->
-        Enum.map(events, &Map.put(&1, "tickera_event_id", 71_007))
-      end)
-      |> Map.update!(:catalog_rows, fn rows ->
-        Enum.map(rows, fn row ->
-          row
-          |> Map.put("tickera_event_id", 71_007)
-          |> Map.put("woo_product_id", 71_008)
-        end)
-      end)
+    capture_source_created_at!(source, event, discovery, ~U[2026-04-30 08:00:00Z])
 
     assert {:ok, plan} = Planner.plan(source.id, discovery)
 
@@ -759,6 +703,70 @@ defmodule EventSales.Catalog.TickeraCatalog.PlannerApplierTest do
     ProductMapping
     |> Ash.Query.filter(source_system_id == ^source_system_id)
     |> Ash.count!(domain: Catalog)
+  end
+
+  defp capture_source_created_at!(source, event, discovery, source_created_at) do
+    capture_discovery =
+      Map.update!(discovery, :events, fn events ->
+        Enum.map(
+          events,
+          &Map.put(&1, "event_source_created_at", DateTime.to_iso8601(source_created_at))
+        )
+      end)
+      |> Map.put(:schema_version, "2026-07-22.v2")
+      |> Map.put(:auto_apply_proof_complete?, true)
+      |> Map.put(:origin, :targeted_catalog_change)
+      |> Map.update!(:events, fn events ->
+        Enum.map(events, &Map.put(&1, "risk_codes", []))
+      end)
+      |> Map.update!(:catalog_rows, fn rows ->
+        Enum.map(rows, &Map.put(&1, "risk_codes", ["unknown_product_semantics"]))
+      end)
+
+    assert {:ok, plan} = Planner.plan(source.id, capture_discovery)
+
+    event =
+      Ash.update!(
+        event,
+        %{
+          external_event_id: hd(capture_discovery.catalog_rows)["tickera_event_id"],
+          external_event_kind: :tickera_event
+        },
+        action: :update,
+        domain: Catalog
+      )
+
+    event = Ash.update!(event, %{}, action: :mark_backfill_pending, domain: Catalog)
+
+    run =
+      CatalogSyncRunHelpers.create_ready_catalog_sync_run!(
+        source.id,
+        %{"kind" => "wordpress_feed", "event_id" => event.external_event_id},
+        %{
+          dry_run_hash: plan.dry_run_hash,
+          summary: plan.summary,
+          plan_snapshot: plan.plan_snapshot
+        }
+      )
+
+    assert {:ok, _captured} = BackfillStartCapture.capture(event.id, run.id)
+  end
+
+  defp prepare_source_metadata_event!(event) do
+    Ash.update!(
+      event,
+      %{
+        source_status: "publish",
+        source_updated_at: ~U[2026-06-01 10:00:00Z],
+        starts_at: ~U[2026-08-01 16:00:00Z],
+        ends_at: ~U[2026-08-01 18:00:00Z],
+        venue_name: "Pretoria",
+        booking_fee_type: :fixed,
+        booking_fee_value: Decimal.new("25.00")
+      },
+      action: :update,
+      domain: Catalog
+    )
   end
 
   defp discovery_result do

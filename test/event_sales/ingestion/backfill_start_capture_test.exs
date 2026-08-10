@@ -7,12 +7,13 @@ defmodule EventSales.Ingestion.BackfillStartCaptureTest do
   alias EventSales.Catalog.TickeraCatalog.SnapshotCanonicalizer
   alias EventSales.Ingestion
   alias EventSales.Ingestion.BackfillStartCapture
-  alias EventSales.Ingestion.Resources.TickeraCatalogSyncRun
+  alias EventSales.Ingestion.Resources.{SyncRun, TickeraCatalogSyncRun}
   alias EventSales.Repo
   alias EventSales.TestSupport.SalesHelpers
 
   @source_created_at ~U[2026-05-01 08:00:00Z]
   @source_updated_at ~U[2026-06-01 10:00:00Z]
+  @different_source_created_at ~U[2026-04-30 08:00:00Z]
 
   test "exact trusted event-scoped run captures source creation time" do
     %{event: event, run: run} = ready_fixture()
@@ -107,37 +108,34 @@ defmodule EventSales.Ingestion.BackfillStartCaptureTest do
   end
 
   test "existing different source creation time rejects" do
-    %{event: event, run: run} = ready_fixture()
+    %{source: source, event: event, run: initial_run} =
+      ready_fixture(source_created_at: @different_source_created_at)
 
-    assert {:ok, event} =
-             Ash.update(
-               event,
-               %{source_created_at: ~U[2026-04-30 08:00:00Z]},
-               action: :capture_source_created_at,
-               domain: Catalog
-             )
+    assert {:ok, _captured} = BackfillStartCapture.capture(event.id, initial_run.id)
+    retire_run!(initial_run)
+
+    conflicting_run = ready_run!(source, event, snapshot_for(event, @source_created_at))
 
     assert {:error, :source_created_at_conflict} =
-             BackfillStartCapture.capture(event.id, run.id)
+             BackfillStartCapture.capture(event.id, conflicting_run.id)
 
-    assert DateTime.compare(reload_event!(event).source_created_at, ~U[2026-04-30 08:00:00Z]) ==
+    assert DateTime.compare(reload_event!(event).source_created_at, @different_source_created_at) ==
              :eq
   end
 
   test "failure leaves an existing timestamp unchanged" do
-    %{event: event, run: run} = ready_fixture(source_created_at: nil)
+    %{source: source, event: event, run: initial_run} =
+      ready_fixture(source_created_at: @different_source_created_at)
 
-    assert {:ok, event} =
-             Ash.update(
-               event,
-               %{source_created_at: ~U[2026-04-30 08:00:00Z]},
-               action: :capture_source_created_at,
-               domain: Catalog
-             )
+    assert {:ok, _captured} = BackfillStartCapture.capture(event.id, initial_run.id)
+    retire_run!(initial_run)
 
-    assert {:error, :missing_source_created_at} = BackfillStartCapture.capture(event.id, run.id)
+    missing_run = ready_run!(source, event, snapshot_for(event, nil))
 
-    assert DateTime.compare(reload_event!(event).source_created_at, ~U[2026-04-30 08:00:00Z]) ==
+    assert {:error, :missing_source_created_at} =
+             BackfillStartCapture.capture(event.id, missing_run.id)
+
+    assert DateTime.compare(reload_event!(event).source_created_at, @different_source_created_at) ==
              :eq
   end
 
@@ -181,10 +179,10 @@ defmodule EventSales.Ingestion.BackfillStartCaptureTest do
 
   test "capture creates no historical SyncRun" do
     %{event: event, run: run} = ready_fixture()
-    before = Ash.count!(TickeraCatalogSyncRun, domain: Ingestion)
+    before = Ash.count!(SyncRun, domain: Ingestion)
 
     assert {:ok, _captured} = BackfillStartCapture.capture(event.id, run.id)
-    assert Ash.count!(TickeraCatalogSyncRun, domain: Ingestion) == before
+    assert Ash.count!(SyncRun, domain: Ingestion) == before
   end
 
   test "capture writes no Order or OrderItem and enqueues no worker" do
@@ -307,6 +305,12 @@ defmodule EventSales.Ingestion.BackfillStartCaptureTest do
       action: :create_dry_run,
       domain: Ingestion
     )
+  end
+
+  defp retire_run!(run) do
+    run
+    |> Ash.update!(%{}, action: :claim_for_apply, domain: Ingestion)
+    |> Ash.update!(%{}, action: :mark_applied, domain: Ingestion)
   end
 
   defp snapshot_for(event, source_created_at_or_actions) do
