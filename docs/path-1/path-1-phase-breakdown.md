@@ -4,7 +4,7 @@
 | --- | --- |
 | Document | Canonical Path 1 execution roadmap |
 | Plan ID | `path-1-phase-breakdown` |
-| Plan version | `v13` |
+| Plan version | `v14` |
 | Status | ACTIVE — repository-native execution contract |
 | Scope | Path 1 M1–M7 gated implementation sequence |
 | Authority | This file wins for Path 1 task sequencing and physical ownership assumptions |
@@ -38,6 +38,7 @@
 - `v11` — M1-C closeout: COMPLETE (PASS); PR #167 merged (`285858a` / merge `9ddfd38`); GAP-PRE-M2-01 RESOLVED; REQUIRED_BEFORE_M2 gaps = 0; M2 AUTHORIZED; next = M2 (fresh agent)
 - `v12` — M2-01 closeout: COMPLETE (PASS); PR #168 merged (`72b04ac` / merge `cfb6dac`); `SourceEventResolver` on main; next = M2-02 (same agent; requires owner authorization)
 - `v13` — M2-02 closeout: COMPLETE (PASS); PR #170 merged (`fa8dcbd` / merge `6608c11`); `EventImporter` on main; next = M2-03 (fresh agent; requires owner authorization)
+- `v14` — M2-03 closeout: COMPLETE (PASS); `queue_event_product_discovery` + `project_event_parent_products` on `TickeraCatalogSync`; next = M2-04 (fresh agent; requires owner authorization)
 
 ### Conflict rule
 
@@ -139,7 +140,9 @@ M2-01: COMPLETE (PASS)
 M2-01 evidence: PR #168; commit 72b04ac43f78a1e51d655d9122b8ca4515f5b48d; merge cfb6dac9d9d97c7135fab23f20602f03bd472c94
 M2-02: COMPLETE (PASS)
 M2-02 evidence: PR #170; commit fa8dcbda8c25f6776174172b251b5a259253f095; merge 6608c1188c07692a9f988221d2d36fda29be5019
-Current Path 1 task: M2-03 — Authoritative Event-Product Discovery (fresh agent; requires owner authorization)
+M2-03: COMPLETE (PASS)
+M2-03 evidence: PR #171; commit de18211272e8cac469e7d9c57ef8f23bb4e2e2b1; branch path1/m2-03-authoritative-event-product-discovery
+Current Path 1 task: M2-04 — Parent Product Identity Protection (fresh agent; requires owner authorization)
 ```
 
 ---
@@ -608,7 +611,7 @@ Rewrite as **extension/certification of Catalog foundations**, not a replacement
 | --- | --- | --- | --- | --- | --- | --- |
 | M2-01 Exact Source/Event Resolution | CERTIFY / EXTEND — **COMPLETE (PASS)**; PR #168 | SourceSystem, Event external identity, DiscoveryIntegrity | `SourceEventResolver`; exact source+event; three source layers; absence vs lookup-failure | NO | NO | Bounded lookup by source+external id |
 | M2-02 Idempotent Local Event Import/Link | REUSE / EXTEND — **COMPLETE (PASS)**; PR #170 | Event create; DB unique external event; `SourceEventResolver` | `EventImporter`; idempotent create/reuse; no mutable sync | NO | NO | Unique index already present |
-| M2-03 Authoritative Event-Product Discovery | REUSE / EXTEND | ProductMapping, TicketType, native-v3 evidence patterns | Onboard only exact products for selected event | NO | TBD | Bounded discovery; no Apply automation required |
+| M2-03 Authoritative Event-Product Discovery | REUSE / EXTEND — **COMPLETE (PASS)** | ProductMapping, TicketType, native-v3 evidence patterns | `TickeraCatalogSync.queue_event_product_discovery/2` + `project_event_parent_products/2`; event-owned scope; parent-product projection | NO | NO | Bounded event-scoped discovery; no Apply |
 | M2-04 Parent Product Identity Protection | CERTIFY / EXTEND | ProductMapping woo_product_id; TicketType external_product_id | Fail closed on parent mismatch | NO | NO | Local validation only |
 | M2-05 Variation Discovery | REUSE / EXTEND | ProductMapping with woo_variation_id; TicketType :woo_variation | Exact variations for selected parents | NO | TBD | Bounded |
 | M2-06 Variation-Parent Validation | CERTIFY / EXTEND | Existing variation-parent integrity work | Lock fail-closed validation for Path 1 onboarding | NO | NO | Local |
@@ -830,8 +833,9 @@ Namespaced keys (`CacheKeys`); targeted invalidation; single-flight rebuild; def
 | --- | --- |
 | M2-01 | Exact Source/Event Resolution — **COMPLETE (PASS)**; PR #168 |
 | M2-02 | Idempotent Local Event Import/Link — **COMPLETE (PASS)**; PR #170 |
-| M2-03 | Authoritative Event-Product Discovery — **NEXT** (fresh agent; requires owner authorization) |
-| M2-04..M2-08 | Extend/certify Catalog foundations through structural certification — AUTHORIZED after prior M2 gates |
+| M2-03 | Authoritative Event-Product Discovery — **COMPLETE (PASS)**; PR #171 |
+| M2-04 | Parent Product Identity Protection — **NEXT** (fresh agent; requires owner authorization) |
+| M2-05..M2-08 | Extend/certify Catalog foundations through structural certification — AUTHORIZED after prior M2 gates |
 
 ### M3 — Historical Sales
 
@@ -890,6 +894,7 @@ Namespaced keys (`CacheKeys`); targeted invalidation; single-flight rebuild; def
 [x] M1-C PRE-M2 conformance (`GAP-PRE-M2-01`) merged
 [x] M2-01 exact source-scoped event resolution (`SourceEventResolver`) merged
 [x] M2-02 idempotent local Event import/link (`EventImporter`) merged
+[x] M2-03 authoritative event-product discovery (`queue_event_product_discovery`) certified
 [ ] Existing Catalog/Sales/Ingestion/Analytics/Accounts reused
 [ ] Existing parser/OrderUpserter reused (no parallel writer)
 [x] Attribution certifies event-first + ProductMapping fallback
@@ -921,8 +926,9 @@ P1-00 COMPLETE
 → M1-C COMPLETE (PASS; PR #167)
 → M2-01 COMPLETE (PASS; PR #168)
 → M2-02 COMPLETE (PASS; PR #170)
-→ M2-03 (NEXT; fresh agent; requires owner authorization)
-→ M2-04..M2-08
+→ M2-03 COMPLETE (PASS)
+→ M2-04 (NEXT; fresh agent; requires owner authorization)
+→ M2-05..M2-08
 → M3
 → M4
 → M5
@@ -1021,7 +1027,7 @@ FINANCIAL RECONCILIATION CONTRACT:
 LOCKED (concept C; exact Decimal; ticket-scoped)
 
 Current Path 1 task:
-M2-03 — Authoritative Event-Product Discovery
+M2-04 — Parent Product Identity Protection
 
 M1-C:
 COMPLETE (PASS)
@@ -1037,6 +1043,12 @@ COMPLETE (PASS)
 
 M2-02 evidence:
 PR #170; commit fa8dcbda8c25f6776174172b251b5a259253f095; merge 6608c1188c07692a9f988221d2d36fda29be5019
+
+M2-03:
+COMPLETE (PASS)
+
+M2-03 evidence:
+PR #171; commit de18211272e8cac469e7d9c57ef8f23bb4e2e2b1; branch path1/m2-03-authoritative-event-product-discovery
 
 Path 2:
 PAUSED
@@ -1068,8 +1080,8 @@ docs/path-1/m1-08-backfill-completeness-reconciliation-and-analytics-ready-contr
 M1 certification / PRE-M2 gate:
 docs/path-1/m1-09-m1-certification-and-pre-m2-gate.md
 
-M2-02 COMPLETE.
-NEXT = M2-03 (FRESH AGENT; REQUIRES OWNER AUTHORIZATION).
-DO NOT START M2-03 WITHOUT EXPLICIT AUTHORIZATION.
-DO NOT REOPEN M2-02 SCOPE.
+M2-03 COMPLETE.
+NEXT = M2-04 (FRESH AGENT; REQUIRES OWNER AUTHORIZATION).
+DO NOT START M2-04 WITHOUT EXPLICIT AUTHORIZATION.
+DO NOT REOPEN M2-03 SCOPE.
 ```
