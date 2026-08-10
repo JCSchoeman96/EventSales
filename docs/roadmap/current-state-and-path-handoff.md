@@ -36,6 +36,7 @@
 - `v12` — record M2-01 COMPLETE (PASS) via PR #168 merge (`72b04ac` / merge `cfb6dac`); `SourceEventResolver` on main; next M2-02 (same agent; requires owner authorization)
 - `v13` — record M2-02 COMPLETE (PASS) via PR #170 merge (`fa8dcbd` / merge `6608c11`); `EventImporter` on main; next M2-03 (fresh agent; requires owner authorization)
 - `v14` — record M2-03 COMPLETE (PASS); `TickeraCatalogSync.queue_event_product_discovery/2` + `project_event_parent_products/2`; next M2-04 (fresh agent; requires owner authorization)
+- `v15` — record M2-04A + M2-04 COMPLETE (PASS); PR #173 source/Event invariant; PR #174 parent-product write protection; next M2-05 (fresh agent; requires owner authorization)
 
 ### Conflict rule
 
@@ -116,7 +117,7 @@ Status: ESTABLISHED
 
 PATH 1 — MANAGEMENT ANALYTICS
 Status: ACTIVE
-Next milestone: M2-04 — Parent Product Identity Protection
+Next milestone: M2-05 — Variation Discovery
 P1-00: COMPLETE
 M1-01: COMPLETE (PASS)
 M1-01A: COMPLETE (PASS)
@@ -153,7 +154,11 @@ M2-02: COMPLETE (PASS)
 M2-02 evidence: PR #170; commit fa8dcbda8c25f6776174172b251b5a259253f095; merge 6608c1188c07692a9f988221d2d36fda29be5019
 M2-03: COMPLETE (PASS)
 M2-03 evidence: PR #171; commit de18211272e8cac469e7d9c57ef8f23bb4e2e2b1; branch path1/m2-03-authoritative-event-product-discovery
-Current Path 1 task: M2-04 — Parent Product Identity Protection (fresh agent; requires owner authorization)
+M2-04A: COMPLETE (PASS)
+M2-04A evidence: PR #173; commit 6fcbd15c4737ce454b9968e0add7803ea19046e8; merge a87a3bb0ba7aeadd9c6b89b798513bd8598e92ce
+M2-04: COMPLETE (PASS)
+M2-04 evidence: PR #174; commit 70eea3e447ca791519c4336dde092431200c9930; merge f63a79bc997f0aa33e9c17dd417fdcc84b0e50c1
+Current Path 1 task: M2-05 — Variation Discovery (fresh agent; requires owner authorization)
 
 PATH 2 — AUTOMATIC SYNC / CATALOGUE AUTOMATION
 Status: PAUSED AT CERTIFIED CHECKPOINT
@@ -544,7 +549,7 @@ M7 — Production Certification / Pilot
 
 ```text
 CURRENT NEXT STEP:
-M2-04 — Parent Product Identity Protection
+M2-05 — Variation Discovery
 
 P1-00:
 COMPLETE
@@ -624,6 +629,18 @@ COMPLETE (PASS)
 M2-03 evidence:
 PR #171; commit de18211272e8cac469e7d9c57ef8f23bb4e2e2b1; branch path1/m2-03-authoritative-event-product-discovery
 
+M2-04A:
+COMPLETE (PASS)
+
+M2-04A evidence:
+PR #173; commit 6fcbd15c4737ce454b9968e0add7803ea19046e8; merge a87a3bb0ba7aeadd9c6b89b798513bd8598e92ce
+
+M2-04:
+COMPLETE (PASS)
+
+M2-04 evidence:
+PR #174; commit 70eea3e447ca791519c4336dde092431200c9930; merge f63a79bc997f0aa33e9c17dd417fdcc84b0e50c1
+
 TAX-INCLUSIVE REVENUE CONTRACT:
 IMPLEMENTATION_CHANGE_REQUIRED
 
@@ -682,7 +699,7 @@ M1 certification / PRE-M2 gate:
 docs/path-1/m1-09-m1-certification-and-pre-m2-gate.md
 ```
 
-M1 contracts are certified. M1-C closed `GAP-PRE-M2-01` on `main`. M2-01 shipped `SourceEventResolver` via PR #168. M2-02 shipped `EventImporter` via PR #170. M2-03 certified event-scoped parent-product discovery via `TickeraCatalogSync`. Next is M2-04 with a **fresh agent** under explicit owner authorization. Do not reopen M2-03 scope.
+M1 contracts are certified. M1-C closed `GAP-PRE-M2-01` on `main`. M2-01 shipped `SourceEventResolver` via PR #168. M2-02 shipped `EventImporter` via PR #170. M2-03 certified event-scoped parent-product discovery via `TickeraCatalogSync`. M2-04A enforced ProductMapping source/Event identity via PR #173. M2-04 enforced parent-product write protection via PR #174. Next is M2-05 with a **fresh agent** under explicit owner authorization. Do not reopen M2-04 / M2-04A scope.
 
 ---
 
@@ -749,7 +766,7 @@ PATH 1 — TRUSTED MANAGEMENT ANALYTICS
 ACTIVE
 
 Current Path 1 task:
-M2-04 — Parent Product Identity Protection
+M2-05 — Variation Discovery
 
 P1-00:
 COMPLETE
@@ -828,6 +845,18 @@ COMPLETE (PASS)
 
 M2-03 evidence:
 PR #171; commit de18211272e8cac469e7d9c57ef8f23bb4e2e2b1; branch path1/m2-03-authoritative-event-product-discovery
+
+M2-04A:
+COMPLETE (PASS)
+
+M2-04A evidence:
+PR #173; commit 6fcbd15c4737ce454b9968e0add7803ea19046e8; merge a87a3bb0ba7aeadd9c6b89b798513bd8598e92ce
+
+M2-04:
+COMPLETE (PASS)
+
+M2-04 evidence:
+PR #174; commit 70eea3e447ca791519c4336dde092431200c9930; merge f63a79bc997f0aa33e9c17dd417fdcc84b0e50c1
 
 TAX-INCLUSIVE REVENUE CONTRACT:
 IMPLEMENTATION_CHANGE_REQUIRED
