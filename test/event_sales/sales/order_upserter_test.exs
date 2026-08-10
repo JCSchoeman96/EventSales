@@ -54,7 +54,9 @@ defmodule EventSales.Sales.OrderUpserterTest do
     source: source
   } do
     event = SalesHelpers.create_event!(source, %{name: "Mapped Event"})
-    ticket = SalesHelpers.create_ticket_type!(event, %{name: "General Admission"})
+
+    ticket =
+      SalesHelpers.create_variation_ticket_type!(event, 501, 601, %{name: "General Admission"})
 
     create_mapping!(source, event, ticket, %{
       woo_product_id: 501,
@@ -72,7 +74,9 @@ defmodule EventSales.Sales.OrderUpserterTest do
 
   test "defers on-hold mapping until a completed order update arrives", %{source: source} do
     event = SalesHelpers.create_event!(source, %{name: "Mapped Event"})
-    ticket = SalesHelpers.create_ticket_type!(event, %{name: "General Admission"})
+
+    ticket =
+      SalesHelpers.create_variation_ticket_type!(event, 501, 601, %{name: "General Admission"})
 
     create_mapping!(source, event, ticket, %{
       woo_product_id: 501,

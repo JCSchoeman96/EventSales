@@ -30,7 +30,14 @@ defmodule EventSales.Catalog.MappingConflictResolverTest do
         external_event_kind: :tickera_event
       })
 
-    mp_ticket = SalesHelpers.create_ticket_type!(mp_event, %{name: "MP General"})
+    mp_ticket =
+      SalesHelpers.create_ticket_type!(mp_event, %{
+        name: "MP General",
+        external_ticket_type_kind: :woo_variation,
+        external_ticket_type_id: 109_165,
+        external_product_id: 109_132,
+        external_variation_id: 109_165
+      })
 
     mapping =
       create_mapping!(source, mp_event, mp_ticket, %{
@@ -198,7 +205,14 @@ defmodule EventSales.Catalog.MappingConflictResolverTest do
         external_event_kind: :tickera_event
       })
 
-    wr_ticket = SalesHelpers.create_ticket_type!(wr_event, %{name: "WR General"})
+    wr_ticket =
+      SalesHelpers.create_ticket_type!(wr_event, %{
+        name: "WR General",
+        external_ticket_type_kind: :woo_variation,
+        external_ticket_type_id: 109_165,
+        external_product_id: 109_132,
+        external_variation_id: 109_165
+      })
 
     mapping
     |> Ash.Changeset.for_update(:remap, %{

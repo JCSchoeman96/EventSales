@@ -65,9 +65,13 @@ defmodule EventSales.Ingestion.MissingCatalogResolutionWorkerTest do
   test "cache miss fetches product metadata through configured client, caches, and remaps", %{
     source: source,
     order: order,
-    event: event,
-    ticket: ticket
+    event: event
   } do
+    ticket =
+      SalesHelpers.create_variation_ticket_type!(event, 501, 601, %{
+        name: "Recovered Variation"
+      })
+
     item = create_item!(order, %{woo_product_id: 501, woo_variation_id: 601})
     create_mapping!(source, event, ticket, %{woo_product_id: 501, woo_variation_id: 601})
 

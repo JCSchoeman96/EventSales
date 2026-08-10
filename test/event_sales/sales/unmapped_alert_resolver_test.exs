@@ -67,6 +67,11 @@ defmodule EventSales.Sales.UnmappedAlertResolverTest do
 
   test "creates an existing-ticket mapping from durable identifiers and recovers exact matches",
        ctx do
+    ticket =
+      SalesHelpers.create_variation_ticket_type!(ctx.event, 501, 601, %{
+        name: "Resolution Variation"
+      })
+
     matching =
       create_pending_item!(ctx.order, %{
         woo_line_item_id: 99_001,
@@ -85,7 +90,7 @@ defmodule EventSales.Sales.UnmappedAlertResolverTest do
       "source_system_id" => Ecto.UUID.generate(),
       "event_id" => ctx.event.id,
       "ticket_type_mode" => "existing",
-      "ticket_type_id" => ctx.ticket.id,
+      "ticket_type_id" => ticket.id,
       "woo_product_id" => "999999",
       "woo_variation_id" => "999998",
       "label" => "Forged label",
@@ -140,6 +145,11 @@ defmodule EventSales.Sales.UnmappedAlertResolverTest do
 
   test "keeps a committed mapping when recovery fails and retries recovery without another mapping",
        ctx do
+    ticket =
+      SalesHelpers.create_variation_ticket_type!(ctx.event, 501, 601, %{
+        name: "Recovery Ticket"
+      })
+
     Application.put_env(
       :event_sales,
       :unmapped_alert_recovery_module,
@@ -147,7 +157,11 @@ defmodule EventSales.Sales.UnmappedAlertResolverTest do
     )
 
     assert {:error, {:recovery_failed, :recovery_failed}} =
-             UnmappedAlertResolver.resolve(ctx.item.id, base_params(ctx), actor: ctx.admin)
+             UnmappedAlertResolver.resolve(
+               ctx.item.id,
+               Map.put(base_params(ctx), "ticket_type_id", ticket.id),
+               actor: ctx.admin
+             )
 
     assert Ash.count!(ProductMapping, domain: Catalog) == 1
     Application.delete_env(:event_sales, :unmapped_alert_recovery_module)

@@ -23,11 +23,16 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
   test "maps affected pending rows when a local mapping now exists", %{
     source: source,
     order: order,
-    event: event,
-    ticket: ticket
+    event: event
   } do
     item = create_item!(order, %{woo_product_id: 501, woo_variation_id: 601})
     other = create_item!(order, %{woo_line_item_id: 99_002, woo_product_id: 777})
+
+    ticket =
+      SalesHelpers.create_variation_ticket_type!(event, 501, 601, %{
+        name: "Recovered Variation"
+      })
+
     create_mapping!(source, event, ticket, %{woo_product_id: 501, woo_variation_id: 601})
 
     assert {:ok, %{mapped: 1, marked_unmapped: 0, unchanged: 0}} =
@@ -43,11 +48,16 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
   test "leaves on-hold rows pending when a local mapping exists", %{
     source: source,
     order: order,
-    event: event,
-    ticket: ticket
+    event: event
   } do
     on_hold_order = put_order_on_hold!(order)
     item = create_item!(on_hold_order, %{woo_product_id: 501, woo_variation_id: 601})
+
+    ticket =
+      SalesHelpers.create_variation_ticket_type!(event, 501, 601, %{
+        name: "Recovered Variation"
+      })
+
     create_mapping!(source, event, ticket, %{woo_product_id: 501, woo_variation_id: 601})
 
     assert {:ok, %{mapped: 0, marked_unmapped: 0, unchanged: 1}} =
@@ -73,11 +83,16 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
   test "maps pending rows for cancelled orders", %{
     source: source,
     order: order,
-    event: event,
-    ticket: ticket
+    event: event
   } do
     cancelled_order = put_order_status!(order, :cancelled)
     item = create_item!(cancelled_order, %{woo_product_id: 501, woo_variation_id: 601})
+
+    ticket =
+      SalesHelpers.create_variation_ticket_type!(event, 501, 601, %{
+        name: "Recovered Variation"
+      })
+
     create_mapping!(source, event, ticket, %{woo_product_id: 501, woo_variation_id: 601})
 
     assert {:ok, %{mapped: 1, marked_unmapped: 0, unchanged: 0}} =

@@ -21,7 +21,16 @@ defmodule EventSales.Catalog.MappingResolverTest do
     assert resolved.id == mapping.id
   end
 
-  test "product and variation mapping resolves", %{source: source, event: event, ticket: ticket} do
+  test "product and variation mapping resolves", %{source: source, event: event} do
+    ticket =
+      SalesHelpers.create_ticket_type!(event, %{
+        name: "Variation Admission",
+        external_ticket_type_kind: :woo_variation,
+        external_ticket_type_id: 601,
+        external_product_id: 501,
+        external_variation_id: 601
+      })
+
     mapping =
       create_mapping!(source, event, ticket, %{woo_product_id: 501, woo_variation_id: 601})
 
@@ -37,7 +46,15 @@ defmodule EventSales.Catalog.MappingResolverTest do
     product_mapping = create_mapping!(source, event, ticket, %{woo_product_id: 501})
 
     variation_event = SalesHelpers.create_event!(source, %{name: "Variation Event"})
-    variation_ticket = SalesHelpers.create_ticket_type!(variation_event, %{name: "VIP"})
+
+    variation_ticket =
+      SalesHelpers.create_ticket_type!(variation_event, %{
+        name: "VIP",
+        external_ticket_type_kind: :woo_variation,
+        external_ticket_type_id: 601,
+        external_product_id: 501,
+        external_variation_id: 601
+      })
 
     variation_mapping =
       create_mapping!(source, variation_event, variation_ticket, %{
@@ -63,9 +80,17 @@ defmodule EventSales.Catalog.MappingResolverTest do
 
   test "nil variation checks product-level mapping only", %{
     source: source,
-    event: event,
-    ticket: ticket
+    event: event
   } do
+    ticket =
+      SalesHelpers.create_ticket_type!(event, %{
+        name: "Variation Only",
+        external_ticket_type_kind: :woo_variation,
+        external_ticket_type_id: 601,
+        external_product_id: 501,
+        external_variation_id: 601
+      })
+
     create_mapping!(source, event, ticket, %{woo_product_id: 501, woo_variation_id: 601})
 
     assert {:ok, :pending_mapping_resolution} = MappingResolver.resolve(source.id, 501, nil)

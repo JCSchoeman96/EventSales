@@ -39,7 +39,7 @@ defmodule EventSalesWeb.WebhookBurstNoDuplicatesTest do
 
     source = SalesHelpers.create_source_system!()
     event = SalesHelpers.create_event!(source, %{name: "Burst Test Event"})
-    ticket = SalesHelpers.create_ticket_type!(event, %{name: "GA"})
+    ticket = SalesHelpers.create_variation_ticket_type!(event, 501, 601, %{name: "GA"})
 
     create_product_mapping!(source, event, ticket)
 

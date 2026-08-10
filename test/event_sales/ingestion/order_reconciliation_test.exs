@@ -113,9 +113,9 @@ defmodule EventSales.Ingestion.OrderReconciliationTest do
 
   test "run_step sends exact Woo query params through the REST client", %{
     source: source,
-    event: event,
-    ticket: ticket
+    event: event
   } do
+    ticket = SalesHelpers.create_variation_ticket_type!(event, 501, 601, %{name: "Variation GA"})
     create_mapping!(source, event, ticket, %{woo_product_id: 501, woo_variation_id: 601})
 
     run = create_running_run!(source, event, %{})
@@ -150,9 +150,9 @@ defmodule EventSales.Ingestion.OrderReconciliationTest do
 
   test "variation mapping requires both product and variation ids", %{
     source: source,
-    event: event,
-    ticket: ticket
+    event: event
   } do
+    ticket = SalesHelpers.create_variation_ticket_type!(event, 501, 601, %{name: "Variation GA"})
     create_mapping!(source, event, ticket, %{woo_product_id: 501, woo_variation_id: 601})
 
     line = %{"product_id" => 501, "variation_id" => 999}
@@ -190,7 +190,9 @@ defmodule EventSales.Ingestion.OrderReconciliationTest do
     ticket: ticket
   } do
     other_event = SalesHelpers.create_event!(source, %{name: "Other", slug: unique_slug("other")})
-    other_ticket = SalesHelpers.create_ticket_type!(other_event, %{name: "VIP"})
+
+    other_ticket =
+      SalesHelpers.create_variation_ticket_type!(other_event, 900, 801, %{name: "VIP"})
 
     create_mapping!(source, event, ticket, %{woo_product_id: 900, woo_variation_id: nil})
 
@@ -231,9 +233,9 @@ defmodule EventSales.Ingestion.OrderReconciliationTest do
 
   test "successful upsert increments counts and notifies once per order", %{
     source: source,
-    event: event,
-    ticket: ticket
+    event: event
   } do
+    ticket = SalesHelpers.create_variation_ticket_type!(event, 501, 601, %{name: "Variation GA"})
     create_mapping!(source, event, ticket, %{woo_product_id: 501, woo_variation_id: 601})
 
     run = create_running_run!(source, event, %{})
@@ -262,9 +264,9 @@ defmodule EventSales.Ingestion.OrderReconciliationTest do
 
   test "stale upsert increments orders_stale_count", %{
     source: source,
-    event: event,
-    ticket: ticket
+    event: event
   } do
+    ticket = SalesHelpers.create_variation_ticket_type!(event, 501, 601, %{name: "Variation GA"})
     create_mapping!(source, event, ticket, %{woo_product_id: 501, woo_variation_id: 601})
 
     existing =

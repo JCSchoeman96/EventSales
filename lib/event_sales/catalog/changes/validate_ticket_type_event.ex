@@ -15,9 +15,10 @@ defmodule EventSales.Catalog.Changes.ValidateTicketTypeEvent do
     event_id = Ash.Changeset.get_attribute(changeset, :event_id)
     ticket_type_id = Ash.Changeset.get_attribute(changeset, :ticket_type_id)
     woo_product_id = Ash.Changeset.get_attribute(changeset, :woo_product_id)
+    woo_variation_id = Ash.Changeset.get_attribute(changeset, :woo_variation_id)
 
     if present_ids?(event_id, ticket_type_id) do
-      validate_ticket_type(changeset, event_id, ticket_type_id, woo_product_id)
+      validate_ticket_type(changeset, event_id, ticket_type_id, woo_product_id, woo_variation_id)
     else
       changeset
     end
@@ -26,12 +27,13 @@ defmodule EventSales.Catalog.Changes.ValidateTicketTypeEvent do
   defp present_ids?(event_id, ticket_type_id),
     do: not is_nil(event_id) and not is_nil(ticket_type_id)
 
-  defp validate_ticket_type(changeset, event_id, ticket_type_id, woo_product_id) do
+  defp validate_ticket_type(changeset, event_id, ticket_type_id, woo_product_id, woo_variation_id) do
     case Ash.get(TicketType, ticket_type_id, domain: Catalog) do
       {:ok, ticket_type} ->
         changeset
         |> validate_matching_event(event_id, ticket_type)
         |> validate_matching_parent(woo_product_id, ticket_type)
+        |> validate_variation_identity(woo_variation_id, ticket_type)
 
       {:error, _} ->
         Ash.Changeset.add_error(changeset, field: :ticket_type_id, message: "is invalid")
@@ -63,4 +65,32 @@ defmodule EventSales.Catalog.Changes.ValidateTicketTypeEvent do
   end
 
   defp validate_matching_parent(changeset, _woo_product_id, _ticket_type), do: changeset
+
+  defp validate_variation_identity(changeset, woo_variation_id, ticket_type)
+       when not is_nil(woo_variation_id) do
+    case ticket_type do
+      %{
+        external_ticket_type_kind: :woo_variation,
+        external_ticket_type_id: ^woo_variation_id,
+        external_variation_id: mirror
+      }
+      when is_nil(mirror) or mirror == woo_variation_id ->
+        changeset
+
+      _ ->
+        Ash.Changeset.add_error(changeset,
+          field: :woo_variation_id,
+          message: "must match the ticket type variation"
+        )
+    end
+  end
+
+  defp validate_variation_identity(changeset, nil, %{external_ticket_type_kind: :woo_variation}) do
+    Ash.Changeset.add_error(changeset,
+      field: :woo_variation_id,
+      message: "must match the ticket type variation"
+    )
+  end
+
+  defp validate_variation_identity(changeset, _woo_variation_id, _ticket_type), do: changeset
 end

@@ -28,7 +28,7 @@ defmodule EventSales.Ingestion.CsvLargeImportTest do
 
     source = SalesHelpers.create_source_system!()
     event = SalesHelpers.create_event!(source, %{name: "Large CSV Event"})
-    ticket = SalesHelpers.create_ticket_type!(event, %{name: "GA"})
+    ticket = SalesHelpers.create_variation_ticket_type!(event, 9001, 9002, %{name: "GA"})
     create_mapping!(source, event, ticket, %{woo_product_id: 9001, woo_variation_id: 9002})
 
     path = write_large_csv!()

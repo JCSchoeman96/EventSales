@@ -40,12 +40,15 @@ defmodule EventSales.Sales.OrderItemMapperTest do
   test "pending variation item uses variation-specific mapping", %{
     source: source,
     order: order,
-    event: event,
-    ticket: ticket
+    event: event
   } do
     product_event = SalesHelpers.create_event!(source, %{name: "Product Event"})
     product_ticket = SalesHelpers.create_ticket_type!(product_event, %{name: "GA"})
     create_mapping!(source, product_event, product_ticket, %{woo_product_id: 501})
+
+    ticket =
+      SalesHelpers.create_variation_ticket_type!(event, 501, 601, %{name: "Variation Admission"})
+
     create_mapping!(source, event, ticket, %{woo_product_id: 501, woo_variation_id: 601})
 
     item = create_item!(order, %{woo_product_id: 501, woo_variation_id: 601})
@@ -68,7 +71,8 @@ defmodule EventSales.Sales.OrderItemMapperTest do
         external_event_kind: :tickera_event
       })
 
-    mp_ticket = SalesHelpers.create_ticket_type!(mp_event, %{name: "MP General"})
+    mp_ticket =
+      SalesHelpers.create_variation_ticket_type!(mp_event, 109_132, 109_167, %{name: "MP General"})
 
     wr_event =
       SalesHelpers.create_event!(source, %{
@@ -110,9 +114,11 @@ defmodule EventSales.Sales.OrderItemMapperTest do
   test "invalid source event reason prevents legacy fallback", %{
     source: source,
     order: order,
-    event: event,
-    ticket: ticket
+    event: event
   } do
+    ticket =
+      SalesHelpers.create_variation_ticket_type!(event, 501, 601, %{name: "Variation Admission"})
+
     create_mapping!(source, event, ticket, %{woo_product_id: 501, woo_variation_id: 601})
 
     item =

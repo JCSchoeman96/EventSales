@@ -105,9 +105,17 @@ defmodule EventSales.Catalog.ManualMappingCreatorTest do
   test "optional review provenance is allowlisted and existing callers remain unchanged", %{
     admin: admin,
     source: source,
-    event: event,
-    ticket: ticket
+    event: event
   } do
+    ticket =
+      SalesHelpers.create_ticket_type!(event, %{
+        name: "Variation GA",
+        external_ticket_type_kind: :woo_variation,
+        external_ticket_type_id: 501,
+        external_product_id: 104_324,
+        external_variation_id: 501
+      })
+
     params =
       source
       |> existing_ticket_params(event, ticket)
@@ -165,9 +173,17 @@ defmodule EventSales.Catalog.ManualMappingCreatorTest do
   test "rejects duplicate active variation mapping", %{
     admin: admin,
     source: source,
-    event: event,
-    ticket: ticket
+    event: event
   } do
+    ticket =
+      SalesHelpers.create_ticket_type!(event, %{
+        name: "Duplicate Variation",
+        external_ticket_type_kind: :woo_variation,
+        external_ticket_type_id: 9,
+        external_product_id: 104_324,
+        external_variation_id: 9
+      })
+
     create_mapping!(source, event, ticket, %{woo_product_id: 104_324, woo_variation_id: 9})
 
     params =
