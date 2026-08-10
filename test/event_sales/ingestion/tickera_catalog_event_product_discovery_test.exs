@@ -140,13 +140,21 @@ defmodule EventSales.Ingestion.TickeraCatalogEventProductDiscoveryTest do
   end
 
   test "projects exact parent product membership for the selected Event", %{source: source} do
+    event =
+      SalesHelpers.create_event!(source, %{
+        name: "Membership Event",
+        slug: "membership-event",
+        external_event_kind: :tickera_event,
+        external_event_id: 123
+      })
+
     rows = [
       %CatalogRow{tickera_event_id: 123, woo_product_id: 500, woo_variation_id: nil},
       %CatalogRow{tickera_event_id: 123, woo_product_id: 600, woo_variation_id: nil}
     ]
 
     assert {:ok, %{products: products, product_count: 2}} =
-             TickeraCatalogSync.project_event_parent_products(source.id, 123, rows)
+             TickeraCatalogSync.project_event_parent_products(event.id, rows)
 
     assert products == [
              %{source_system_id: source.id, woo_product_id: 500},
@@ -154,40 +162,101 @@ defmodule EventSales.Ingestion.TickeraCatalogEventProductDiscoveryTest do
            ]
   end
 
+  test "source evidence cannot be relabelled under another SourceSystem" do
+    source_a =
+      SalesHelpers.create_source_system!(%{base_url: "https://m2-03-relabel-a.example.test"})
+
+    source_b =
+      SalesHelpers.create_source_system!(%{base_url: "https://m2-03-relabel-b.example.test"})
+
+    event_a =
+      SalesHelpers.create_event!(source_a, %{
+        name: "Source A Event 123",
+        slug: "relabel-source-a-123",
+        external_event_kind: :tickera_event,
+        external_event_id: 123
+      })
+
+    rows = [
+      %CatalogRow{tickera_event_id: 123, woo_product_id: 500, woo_variation_id: nil}
+    ]
+
+    assert {:ok, %{products: products}} =
+             TickeraCatalogSync.project_event_parent_products(event_a.id, rows)
+
+    assert products == [%{source_system_id: source_a.id, woo_product_id: 500}]
+    refute Enum.any?(products, &(&1.source_system_id == source_b.id))
+
+    # Public projection must not accept a free-standing source_system_id.
+    refute function_exported?(TickeraCatalogSync, :project_event_parent_products, 3)
+  end
+
   test "variation rows collapse to one parent product for M2-03", %{source: source} do
+    event =
+      SalesHelpers.create_event!(source, %{
+        name: "Variation Collapse Event",
+        slug: "variation-collapse-event",
+        external_event_kind: :tickera_event,
+        external_event_id: 123
+      })
+
     rows = [
       %CatalogRow{tickera_event_id: 123, woo_product_id: 500, woo_variation_id: 501},
       %CatalogRow{tickera_event_id: 123, woo_product_id: 500, woo_variation_id: 502}
     ]
 
     assert {:ok, %{products: products, product_count: 1}} =
-             TickeraCatalogSync.project_event_parent_products(source.id, 123, rows)
+             TickeraCatalogSync.project_event_parent_products(event.id, rows)
 
     assert products == [%{source_system_id: source.id, woo_product_id: 500}]
   end
 
   test "foreign Event row fails closed and is not certified", %{source: source} do
+    event =
+      SalesHelpers.create_event!(source, %{
+        name: "Foreign Row Event",
+        slug: "foreign-row-event",
+        external_event_kind: :tickera_event,
+        external_event_id: 123
+      })
+
     rows = [
       %CatalogRow{tickera_event_id: 123, woo_product_id: 500, woo_variation_id: nil},
       %CatalogRow{tickera_event_id: 999, woo_product_id: 700, woo_variation_id: nil}
     ]
 
     assert {:error, :foreign_event_row} =
-             TickeraCatalogSync.project_event_parent_products(source.id, 123, rows)
+             TickeraCatalogSync.project_event_parent_products(event.id, rows)
   end
 
   test "invalid product identity fails closed", %{source: source} do
+    event =
+      SalesHelpers.create_event!(source, %{
+        name: "Invalid Product Event",
+        slug: "invalid-product-event",
+        external_event_kind: :tickera_event,
+        external_event_id: 123
+      })
+
     rows = [
       %CatalogRow{tickera_event_id: 123, woo_product_id: nil, woo_variation_id: nil}
     ]
 
     assert {:error, :invalid_product_identity} =
-             TickeraCatalogSync.project_event_parent_products(source.id, 123, rows)
+             TickeraCatalogSync.project_event_parent_products(event.id, rows)
   end
 
   test "zero eligible products remain explicit without fabricated mappings", %{source: source} do
+    event =
+      SalesHelpers.create_event!(source, %{
+        name: "Zero Product Event",
+        slug: "zero-product-event",
+        external_event_kind: :tickera_event,
+        external_event_id: 300_001
+      })
+
     assert {:ok, %{products: [], product_count: 0}} =
-             TickeraCatalogSync.project_event_parent_products(source.id, 300_001, [])
+             TickeraCatalogSync.project_event_parent_products(event.id, [])
 
     run =
       CatalogSyncRunHelpers.create_queued_catalog_sync_run!(source.id, %{
@@ -214,6 +283,14 @@ defmodule EventSales.Ingestion.TickeraCatalogEventProductDiscoveryTest do
   test "existing conflicting ProductMapping remains a review finding without mutation", %{
     source: source
   } do
+    selected_event =
+      SalesHelpers.create_event!(source, %{
+        name: "VWG Selected Event",
+        slug: "vwg-selected-event",
+        external_event_kind: :tickera_event,
+        external_event_id: 109_316
+      })
+
     other_event =
       SalesHelpers.create_event!(source, %{
         name: "Other Event",
@@ -251,11 +328,7 @@ defmodule EventSales.Ingestion.TickeraCatalogEventProductDiscoveryTest do
     assert {:ok, normalized} = Normalizer.normalize(discovery)
 
     assert {:ok, membership} =
-             TickeraCatalogSync.project_event_parent_products(
-               source.id,
-               109_316,
-               normalized.rows
-             )
+             TickeraCatalogSync.project_event_parent_products(selected_event.id, normalized.rows)
 
     assert membership.products == [
              %{source_system_id: source.id, woo_product_id: 109_740}
@@ -275,6 +348,14 @@ defmodule EventSales.Ingestion.TickeraCatalogEventProductDiscoveryTest do
   end
 
   test "normalized pipeline parent products match M2-03 projection", %{source: source} do
+    event =
+      SalesHelpers.create_event!(source, %{
+        name: "Normalized Pipeline Event",
+        slug: "normalized-pipeline-event",
+        external_event_kind: :tickera_event,
+        external_event_id: 400_001
+      })
+
     [row_a, row_b] = TickeraCatalogFixtures.variation_rows()
 
     simple =
@@ -300,12 +381,21 @@ defmodule EventSales.Ingestion.TickeraCatalogEventProductDiscoveryTest do
     assert {:ok, %{rows: rows}} = Normalizer.normalize(discovery)
 
     assert {:ok, %{products: products, product_count: 2}} =
-             TickeraCatalogSync.project_event_parent_products(source.id, 400_001, rows)
+             TickeraCatalogSync.project_event_parent_products(event.id, rows)
 
     assert products == [
              %{source_system_id: source.id, woo_product_id: 400_740},
              %{source_system_id: source.id, woo_product_id: 400_999}
            ]
+  end
+
+  test "projection fails closed when local Event is absent" do
+    rows = [
+      %CatalogRow{tickera_event_id: 123, woo_product_id: 500, woo_variation_id: nil}
+    ]
+
+    assert {:error, :event_not_found} =
+             TickeraCatalogSync.project_event_parent_products(Ecto.UUID.generate(), rows)
   end
 
   defp catalog_sync_run_count do

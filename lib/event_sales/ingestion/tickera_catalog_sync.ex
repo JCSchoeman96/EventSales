@@ -77,17 +77,29 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
   def queue_event_product_discovery(_local_event_id, _opts), do: {:error, :invalid_event_id}
 
   @doc """
-  Projects unique parent Woo product identities for one exact Tickera Event.
+  Projects unique parent Woo product identities for one exact local Tickera Event.
 
-  Product identity remains `(source_system_id, woo_product_id)`. Variation-bearing rows
-  contribute only their parent product. Foreign-event rows and invalid product IDs fail
-  closed. Does not read or mutate ProductMapping / TicketType.
+  Loads the Event by UUID and derives both `source_system_id` and the selected Tickera
+  external event id from that Event. Product identity remains
+  `(source_system_id, woo_product_id)` and cannot be caller-relabelled under another
+  SourceSystem. Variation-bearing rows contribute only their parent product.
+  Foreign-event rows and invalid product IDs fail closed. Does not read or mutate
+  ProductMapping / TicketType.
   """
-  @spec project_event_parent_products(Ecto.UUID.t(), pos_integer(), [CatalogRow.t()]) ::
+  @spec project_event_parent_products(Ecto.UUID.t(), [CatalogRow.t()]) ::
           {:ok, %{products: [map()], product_count: non_neg_integer()}} | {:error, atom()}
-  def project_event_parent_products(source_system_id, selected_tickera_event_id, rows)
-      when is_binary(source_system_id) and is_integer(selected_tickera_event_id) and
-             selected_tickera_event_id > 0 and is_list(rows) do
+  def project_event_parent_products(local_event_id, rows)
+      when is_binary(local_event_id) and is_list(rows) do
+    with {:ok, event} <- load_authoritative_tickera_event(local_event_id) do
+      project_parent_products(event.source_system_id, event.external_event_id, rows)
+    end
+  end
+
+  def project_event_parent_products(_local_event_id, _rows), do: {:error, :invalid_input}
+
+  defp project_parent_products(source_system_id, selected_tickera_event_id, rows)
+       when is_binary(source_system_id) and is_integer(selected_tickera_event_id) and
+              selected_tickera_event_id > 0 and is_list(rows) do
     with :ok <- validate_selected_event_membership(selected_tickera_event_id, rows),
          {:ok, product_ids} <- collect_parent_product_ids(rows) do
       products =
@@ -101,9 +113,6 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
       {:ok, %{products: products, product_count: length(products)}}
     end
   end
-
-  def project_event_parent_products(_source_system_id, _selected_tickera_event_id, _rows),
-    do: {:error, :invalid_input}
 
   def queue_triggered_dry_run(pending_target_id, expected_generation, opts \\ []) do
     result =
@@ -588,10 +597,18 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
       {:ok, nil} ->
         {:error, :event_not_found}
 
-      {:error, _reason} ->
-        {:error, :event_not_found}
+      {:error, reason} ->
+        classify_event_lookup_error(reason)
     end
   end
+
+  # Ash.get expresses authoritative absence as Query.NotFound.
+  defp classify_event_lookup_error(%Ash.Error.Invalid{
+         errors: [%Ash.Error.Query.NotFound{} | _]
+       }),
+       do: {:error, :event_not_found}
+
+  defp classify_event_lookup_error(_reason), do: {:error, :event_lookup_failed}
 
   defp validate_tickera_external_identity(
          %Event{external_event_kind: :tickera_event, external_event_id: id} = event

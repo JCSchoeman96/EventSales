@@ -35,7 +35,7 @@
 - `v11` — record M1-C COMPLETE (PASS) via PR #167 merge (`285858a` / merge `9ddfd38`); GAP-PRE-M2-01 RESOLVED; REQUIRED_BEFORE_M2 gaps = 0; M2 AUTHORIZED; next M2 (fresh agent)
 - `v12` — record M2-01 COMPLETE (PASS) via PR #168 merge (`72b04ac` / merge `cfb6dac`); `SourceEventResolver` on main; next M2-02 (same agent; requires owner authorization)
 - `v13` — record M2-02 COMPLETE (PASS) via PR #170 merge (`fa8dcbd` / merge `6608c11`); `EventImporter` on main; next M2-03 (fresh agent; requires owner authorization)
-- `v14` — record M2-03 COMPLETE (PASS); `TickeraCatalogSync.queue_event_product_discovery/2` + `project_event_parent_products/3`; next M2-04 (fresh agent; requires owner authorization)
+- `v14` — record M2-03 COMPLETE (PASS); `TickeraCatalogSync.queue_event_product_discovery/2` + `project_event_parent_products/2`; next M2-04 (fresh agent; requires owner authorization)
 
 ### Conflict rule
 
