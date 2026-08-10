@@ -9,6 +9,7 @@ defmodule EventSales.Catalog.Resources.ProductMapping do
     extensions: [AshPaperTrail.Resource]
 
   alias EventSales.Catalog.Changes.MappingSideEffectsAfterAction
+  alias EventSales.Catalog.Changes.ValidateMappingSourceEvent
   alias EventSales.Catalog.Changes.ValidateTicketTypeEvent
 
   postgres do
@@ -50,6 +51,7 @@ defmodule EventSales.Catalog.Resources.ProductMapping do
 
     create :create do
       accept @mapping_accept
+      change ValidateMappingSourceEvent
       change ValidateTicketTypeEvent
       change MappingSideEffectsAfterAction
     end
@@ -57,6 +59,7 @@ defmodule EventSales.Catalog.Resources.ProductMapping do
     update :update do
       accept @mapping_accept
       require_atomic? false
+      change ValidateMappingSourceEvent
       change ValidateTicketTypeEvent
       change MappingSideEffectsAfterAction
     end
@@ -85,6 +88,7 @@ defmodule EventSales.Catalog.Resources.ProductMapping do
       ]
 
       require_atomic? false
+      change ValidateMappingSourceEvent
       change ValidateTicketTypeEvent
       change MappingSideEffectsAfterAction
     end
