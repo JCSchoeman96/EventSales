@@ -344,8 +344,7 @@ defmodule EventSales.Ingestion.TickeraCatalogHistoricalImpactTest do
       if is_nil(variation) do
         SalesHelpers.create_ticket_type!(event, %{
           external_ticket_type_id: ticket_external_id,
-          external_ticket_type_kind:
-            if(is_nil(ticket_external_id), do: nil, else: :woo_product),
+          external_ticket_type_kind: if(is_nil(ticket_external_id), do: nil, else: :woo_product),
           external_product_id: product
         })
       else
