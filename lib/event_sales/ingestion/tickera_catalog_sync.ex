@@ -1,13 +1,18 @@
 defmodule EventSales.Ingestion.TickeraCatalogSync do
   @moduledoc """
   Admin facade for Tickera catalog sync dry-run and apply.
+
+  Path 1 M2-03 adds an Event-owned queue boundary and a pure parent-product
+  membership projection over normalized `CatalogRow` evidence. Discovery still
+  runs through existing dry-run / Oban machinery; no Apply or mapping mutation.
   """
 
   require Ash.Query
 
   alias EventSales.Accounts.Policies
   alias EventSales.Catalog
-  alias EventSales.Catalog.Resources.SourceSystem
+  alias EventSales.Catalog.Resources.{Event, SourceSystem}
+  alias EventSales.Catalog.TickeraCatalog.CatalogRow
   alias EventSales.Catalog.TickeraCatalog.PubSub
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.{CatalogChangePendingTarget, TickeraCatalogSyncRun}
@@ -46,6 +51,59 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
       {:ok, %{run: run, job: job}}
     end
   end
+
+  @doc """
+  Queues bounded event-scoped Tickera catalog dry-run discovery for one exact local Event.
+
+  Loads the Event by UUID, requires authoritative Tickera external identity, and derives
+  both `source_system_id` and `%{"kind" => "wordpress_feed", "event_id" => ...}` from that
+  Event. Callers cannot supply an unrelated source/event pair.
+  """
+  @spec queue_event_product_discovery(Ecto.UUID.t(), keyword()) ::
+          {:ok, %{run: TickeraCatalogSyncRun.t(), job: Oban.Job.t(), event: Event.t()}}
+          | {:error, atom()}
+  def queue_event_product_discovery(local_event_id, opts \\ [])
+
+  def queue_event_product_discovery(local_event_id, opts) when is_binary(local_event_id) do
+    with :ok <- authorize_admin(opts),
+         {:ok, event} <- load_authoritative_tickera_event(local_event_id),
+         scope <- event_product_discovery_scope(event),
+         {:ok, %{run: run, job: job}} <-
+           queue_run_and_job(event.source_system_id, scope, opts) do
+      {:ok, %{run: run, job: job, event: event}}
+    end
+  end
+
+  def queue_event_product_discovery(_local_event_id, _opts), do: {:error, :invalid_event_id}
+
+  @doc """
+  Projects unique parent Woo product identities for one exact Tickera Event.
+
+  Product identity remains `(source_system_id, woo_product_id)`. Variation-bearing rows
+  contribute only their parent product. Foreign-event rows and invalid product IDs fail
+  closed. Does not read or mutate ProductMapping / TicketType.
+  """
+  @spec project_event_parent_products(Ecto.UUID.t(), pos_integer(), [CatalogRow.t()]) ::
+          {:ok, %{products: [map()], product_count: non_neg_integer()}} | {:error, atom()}
+  def project_event_parent_products(source_system_id, selected_tickera_event_id, rows)
+      when is_binary(source_system_id) and is_integer(selected_tickera_event_id) and
+             selected_tickera_event_id > 0 and is_list(rows) do
+    with :ok <- validate_selected_event_membership(selected_tickera_event_id, rows),
+         {:ok, product_ids} <- collect_parent_product_ids(rows) do
+      products =
+        product_ids
+        |> Enum.uniq()
+        |> Enum.sort()
+        |> Enum.map(fn woo_product_id ->
+          %{source_system_id: source_system_id, woo_product_id: woo_product_id}
+        end)
+
+      {:ok, %{products: products, product_count: length(products)}}
+    end
+  end
+
+  def project_event_parent_products(_source_system_id, _selected_tickera_event_id, _rows),
+    do: {:error, :invalid_input}
 
   def queue_triggered_dry_run(pending_target_id, expected_generation, opts \\ []) do
     result =
@@ -519,6 +577,57 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
       :ok
     else
       {:error, :forbidden}
+    end
+  end
+
+  defp load_authoritative_tickera_event(local_event_id) do
+    case Ash.get(Event, local_event_id, domain: Catalog) do
+      {:ok, %Event{} = event} ->
+        validate_tickera_external_identity(event)
+
+      {:ok, nil} ->
+        {:error, :event_not_found}
+
+      {:error, _reason} ->
+        {:error, :event_not_found}
+    end
+  end
+
+  defp validate_tickera_external_identity(
+         %Event{external_event_kind: :tickera_event, external_event_id: id} = event
+       )
+       when is_integer(id) and id > 0 do
+    {:ok, event}
+  end
+
+  defp validate_tickera_external_identity(%Event{}),
+    do: {:error, :missing_external_event_identity}
+
+  defp event_product_discovery_scope(%Event{external_event_id: event_id}) do
+    %{"kind" => "wordpress_feed", "event_id" => event_id}
+  end
+
+  defp validate_selected_event_membership(selected_tickera_event_id, rows) do
+    if Enum.any?(rows, &(&1.tickera_event_id != selected_tickera_event_id)) do
+      {:error, :foreign_event_row}
+    else
+      :ok
+    end
+  end
+
+  defp collect_parent_product_ids(rows) do
+    Enum.reduce_while(rows, {:ok, []}, fn row, {:ok, ids} ->
+      case row.woo_product_id do
+        id when is_integer(id) and id > 0 ->
+          {:cont, {:ok, [id | ids]}}
+
+        _invalid ->
+          {:halt, {:error, :invalid_product_identity}}
+      end
+    end)
+    |> case do
+      {:ok, ids} -> {:ok, Enum.reverse(ids)}
+      other -> other
     end
   end
 
