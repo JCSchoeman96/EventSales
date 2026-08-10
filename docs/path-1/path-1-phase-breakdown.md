@@ -4,7 +4,7 @@
 | --- | --- |
 | Document | Canonical Path 1 execution roadmap |
 | Plan ID | `path-1-phase-breakdown` |
-| Plan version | `v17` |
+| Plan version | `v18` |
 | Status | ACTIVE — repository-native execution contract |
 | Scope | Path 1 M1–M7 gated implementation sequence |
 | Authority | This file wins for Path 1 task sequencing and physical ownership assumptions |
@@ -42,6 +42,7 @@
 - `v15` — M2-04A + M2-04 closeout: COMPLETE (PASS); PR #173 source/Event invariant; PR #174 parent-product write protection; next = M2-05 (fresh agent; requires owner authorization)
 - `v16` — M2-05 closeout: COMPLETE (PASS); PR #176 `project_event_variations/2` on `TickeraCatalogSync`; next = M2-06 (fresh agent; requires owner authorization)
 - `v17` — M2-06 closeout: COMPLETE (PASS); PR #178 ProductMapping variation-identity write protection; next = M2-07 (fresh agent; requires owner authorization)
+- `v18` — M2-07 closeout: COMPLETE (PASS); PR #180 durable Event analytics onboarding state machine; next = M2-08 Structural Certification (fresh agent)
 
 ### Conflict rule
 
@@ -153,7 +154,9 @@ M2-05: COMPLETE (PASS)
 M2-05 evidence: PR #176; commit 65228d69b806041594c7d5ebda52ffd35628f477; merge 5bb51d092995dc4aeea2abb8d1345ffa336dfcc7
 M2-06: COMPLETE (PASS)
 M2-06 evidence: PR #178; commit 7686d07163541e3d173e6ffd3e68b1b159bca1da; merge 8a179c0843fb7af7c54f2aebbbf4455f88477189
-Current Path 1 task: M2-07 — Event Onboarding State Machine (fresh agent; requires owner authorization)
+M2-07: COMPLETE (PASS)
+M2-07 evidence: PR #180; implementation commit e75570d4e95cc28b15ad236f0e2a71c8b3ee9111; final reviewed head ad6c881a7cb966b2cf39bd80605da938b0d328d7; merge d501a704baffa85392e7e2c6fab6858091396d3e
+Current Path 1 task: M2-08 — Structural Certification (fresh agent)
 ```
 
 ---
@@ -627,8 +630,36 @@ Rewrite as **extension/certification of Catalog foundations**, not a replacement
 | M2-04 Parent Product Identity Protection | CERTIFY / EXTEND — **COMPLETE (PASS)**; PR #174 | ProductMapping woo_product_id; TicketType external_product_id | Extend `ValidateTicketTypeEvent`; fail closed on explicit parent mismatch; nil compatible | NO | NO | Existing TicketType lookup only |
 | M2-05 Variation Discovery | REUSE / EXTEND — **COMPLETE (PASS)**; PR #176 | CatalogRow; TickeraCatalogSync event discovery | `project_event_variations/2`; exact `(source, product, variation)` projection | NO | NO | Bounded in-memory projection |
 | M2-06 Variation-Parent Validation | CERTIFY / EXTEND — **COMPLETE (PASS)**; PR #178 | ValidateTicketTypeEvent | Fail-closed ProductMapping variation↔TicketType identity | NO | NO | Local |
-| M2-07 Event Onboarding State Machine | NEW / EXTEND | Event.status; dashboard settings | BACKFILL_PENDING and related states as contracted | TBD | TBD | State transitions local |
-| M2-08 Structural Certification | CERTIFY | Onboarded event+mappings | Prove zero cross-contamination | NO | NO | — |
+| M2-07 Event Onboarding State Machine | EXTEND — **COMPLETE (PASS)**; PR #180 | `EventSales.Catalog.Resources.Event` | Durable `analytics_onboarding_state` transitions; Business `Event.status` unchanged / independent | NO | YES — additive `analytics_onboarding_state` column | Local Postgres/Ash state transitions; no Redis/ETS/Cachex/GenServer identity authority; no source REST; no additional onboarding-state index |
+| M2-08 Structural Certification | CERTIFY | Existing Event, TicketType, and ProductMapping structure | Exact event + parent-product + variation discovery and local TicketType/ProductMapping structure; prove zero cross-contamination; permit Event transition to BACKFILL_PENDING | NO | NO | Local structural certification |
+
+M2-07 physical implementation record:
+
+```text
+Existing resource: EventSales.Catalog.Resources.Event
+New resource: NO
+Migration: YES — additive analytics_onboarding_state column
+Durable authority: Postgres / Ash Event
+State attribute: analytics_onboarding_state
+States: :unverified, :backfill_pending
+Forward: mark_backfill_pending
+Reverse: invalidate_onboarding
+Business Event.status: UNCHANGED / INDEPENDENT
+Performance: local Postgres/Ash state transitions; no Redis/ETS/Cachex/GenServer identity authority; no source REST call; no additional onboarding-state index
+```
+
+M2-08 — Structural Certification:
+
+```text
+Strategy: CERTIFY
+Purpose:
+one exact existing Tickera Event
++ exact parent-product discovery
++ exact variation discovery
++ exact local TicketType/ProductMapping structure
+→ prove zero cross-contamination
+→ permit Event transition to BACKFILL_PENDING
+```
 
 ### M2 Performance & Scaling Review
 
@@ -850,10 +881,12 @@ Namespaced keys (`CacheKeys`); targeted invalidation; single-flight rebuild; def
 | M2-04 | Parent Product Identity Protection — **COMPLETE (PASS)**; PR #174 |
 | M2-05 | Variation Discovery — **COMPLETE (PASS)**; PR #176 |
 | M2-06 | Variation-Parent Validation — **COMPLETE (PASS)**; PR #178 |
-| M2-07 | Event Onboarding State Machine — **NEXT** (fresh agent; requires owner authorization) |
-| M2-08 | Extend/certify Catalog foundations through structural certification — AUTHORIZED after prior M2 gates |
+| M2-07 | Event Onboarding State Machine — **COMPLETE (PASS)**; PR #180 |
+| M2-08 | Structural Certification — **NEXT** (fresh agent); Strategy: CERTIFY |
 
 ### M3 — Historical Sales
+
+Status: NOT STARTED
 
 | ID | Task |
 | --- | --- |
@@ -947,9 +980,9 @@ P1-00 COMPLETE
 → M2-04 COMPLETE (PASS; PR #174)
 → M2-05 COMPLETE (PASS; PR #176)
 → M2-06 COMPLETE (PASS; PR #178)
-→ M2-07 (NEXT; fresh agent; requires owner authorization)
-→ M2-08
-→ M3
+→ M2-07 COMPLETE (PASS; PR #180)
+→ M2-08 NEXT (fresh agent)
+→ M3 NOT STARTED
 → M4
 → M5
 → M6
@@ -1047,7 +1080,7 @@ FINANCIAL RECONCILIATION CONTRACT:
 LOCKED (concept C; exact Decimal; ticket-scoped)
 
 Current Path 1 task:
-M2-07 — Event Onboarding State Machine
+M2-08 — Structural Certification
 
 M1-C:
 COMPLETE (PASS)
@@ -1094,6 +1127,18 @@ COMPLETE (PASS)
 M2-06 evidence:
 PR #178; commit 7686d07163541e3d173e6ffd3e68b1b159bca1da; merge 8a179c0843fb7af7c54f2aebbbf4455f88477189
 
+M2-07:
+COMPLETE (PASS)
+
+M2-07 evidence:
+PR #180; implementation commit e75570d4e95cc28b15ad236f0e2a71c8b3ee9111; final reviewed head ad6c881a7cb966b2cf39bd80605da938b0d328d7; merge d501a704baffa85392e7e2c6fab6858091396d3e
+
+M2-08:
+NEXT — Structural Certification (fresh agent)
+
+M3:
+NOT STARTED
+
 Path 2:
 PAUSED
 
@@ -1124,8 +1169,9 @@ docs/path-1/m1-08-backfill-completeness-reconciliation-and-analytics-ready-contr
 M1 certification / PRE-M2 gate:
 docs/path-1/m1-09-m1-certification-and-pre-m2-gate.md
 
-M2-06 COMPLETE.
-NEXT = M2-07 (FRESH AGENT; REQUIRES OWNER AUTHORIZATION).
-DO NOT START M2-07 WITHOUT EXPLICIT AUTHORIZATION.
-DO NOT REOPEN M2-06 SCOPE.
+M2-07 COMPLETE (PASS); PR #180.
+NEXT = M2-08 — Structural Certification (FRESH AGENT).
+M2-08 IMPLEMENTATION: NOT STARTED.
+M3: NOT STARTED.
+DO NOT REOPEN M2-07 SCOPE.
 ```
