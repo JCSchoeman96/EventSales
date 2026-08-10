@@ -39,6 +39,7 @@
 - `v15` — record M2-04A + M2-04 COMPLETE (PASS); PR #173 source/Event invariant; PR #174 parent-product write protection; next M2-05 (fresh agent; requires owner authorization)
 - `v16` — record M2-05 COMPLETE (PASS); PR #176 `project_event_variations/2` on `TickeraCatalogSync`; next M2-06 (fresh agent; requires owner authorization)
 - `v17` — record M2-06 COMPLETE (PASS); PR #178 ProductMapping variation-identity write protection; next M2-07 (fresh agent; requires owner authorization)
+- `v18` — M2-07 closeout: COMPLETE (PASS); PR #180 durable Event analytics onboarding state machine; next = M2-08 Structural Certification (fresh agent)
 
 ### Conflict rule
 
@@ -119,7 +120,7 @@ Status: ESTABLISHED
 
 PATH 1 — MANAGEMENT ANALYTICS
 Status: ACTIVE
-Next milestone: M2-07 — Event Onboarding State Machine
+Next milestone: M2-08 — Structural Certification
 P1-00: COMPLETE
 M1-01: COMPLETE (PASS)
 M1-01A: COMPLETE (PASS)
@@ -164,7 +165,10 @@ M2-05: COMPLETE (PASS)
 M2-05 evidence: PR #176; commit 65228d69b806041594c7d5ebda52ffd35628f477; merge 5bb51d092995dc4aeea2abb8d1345ffa336dfcc7
 M2-06: COMPLETE (PASS)
 M2-06 evidence: PR #178; commit 7686d07163541e3d173e6ffd3e68b1b159bca1da; merge 8a179c0843fb7af7c54f2aebbbf4455f88477189
-Current Path 1 task: M2-07 — Event Onboarding State Machine (fresh agent; requires owner authorization)
+M2-07: COMPLETE (PASS)
+M2-07 evidence: PR #180; implementation commit e75570d4e95cc28b15ad236f0e2a71c8b3ee9111; final reviewed head ad6c881a7cb966b2cf39bd80605da938b0d328d7; merge d501a704baffa85392e7e2c6fab6858091396d3e
+Current Path 1 task: M2-08 — Structural Certification (fresh agent)
+M3: NOT STARTED
 
 PATH 2 — AUTOMATIC SYNC / CATALOGUE AUTOMATION
 Status: PAUSED AT CERTIFIED CHECKPOINT
@@ -555,7 +559,7 @@ M7 — Production Certification / Pilot
 
 ```text
 CURRENT NEXT STEP:
-M2-07 — Event Onboarding State Machine
+M2-08 — Structural Certification
 
 P1-00:
 COMPLETE
@@ -659,6 +663,18 @@ COMPLETE (PASS)
 M2-06 evidence:
 PR #178; commit 7686d07163541e3d173e6ffd3e68b1b159bca1da; merge 8a179c0843fb7af7c54f2aebbbf4455f88477189
 
+M2-07:
+COMPLETE (PASS)
+
+M2-07 evidence:
+PR #180; implementation commit e75570d4e95cc28b15ad236f0e2a71c8b3ee9111; final reviewed head ad6c881a7cb966b2cf39bd80605da938b0d328d7; merge d501a704baffa85392e7e2c6fab6858091396d3e
+
+M2-08:
+NEXT — Structural Certification (fresh agent)
+
+M3:
+NOT STARTED
+
 TAX-INCLUSIVE REVENUE CONTRACT:
 IMPLEMENTATION_CHANGE_REQUIRED
 
@@ -717,7 +733,7 @@ M1 certification / PRE-M2 gate:
 docs/path-1/m1-09-m1-certification-and-pre-m2-gate.md
 ```
 
-M1 contracts are certified. M1-C closed `GAP-PRE-M2-01` on `main`. M2-01 shipped `SourceEventResolver` via PR #168. M2-02 shipped `EventImporter` via PR #170. M2-03 certified event-scoped parent-product discovery via `TickeraCatalogSync`. M2-04A enforced ProductMapping source/Event identity via PR #173. M2-04 enforced parent-product write protection via PR #174. M2-05 certified event-scoped Woo variation discovery via PR #176 (`project_event_variations/2`). M2-06 enforced ProductMapping variation↔TicketType identity via PR #178. Next is M2-07 with a **fresh agent** under explicit owner authorization. Do not reopen M2-06 scope.
+M1 contracts are certified. M1-C closed `GAP-PRE-M2-01` on `main`. M2-01 shipped `SourceEventResolver` via PR #168. M2-02 shipped `EventImporter` via PR #170. M2-03 certified event-scoped parent-product discovery via `TickeraCatalogSync`. M2-04A enforced ProductMapping source/Event identity via PR #173. M2-04 enforced parent-product write protection via PR #174. M2-05 certified event-scoped Woo variation discovery via PR #176 (`project_event_variations/2`). M2-06 enforced ProductMapping variation↔TicketType identity via PR #178. M2-07 shipped the durable Event analytics onboarding state machine via PR #180. Next is M2-08 — Structural Certification with a **fresh agent**. Do not reopen M2-07 scope.
 
 ---
 
@@ -784,7 +800,7 @@ PATH 1 — TRUSTED MANAGEMENT ANALYTICS
 ACTIVE
 
 Current Path 1 task:
-M2-07 — Event Onboarding State Machine
+M2-08 — Structural Certification
 
 P1-00:
 COMPLETE
@@ -887,6 +903,18 @@ COMPLETE (PASS)
 
 M2-06 evidence:
 PR #178; commit 7686d07163541e3d173e6ffd3e68b1b159bca1da; merge 8a179c0843fb7af7c54f2aebbbf4455f88477189
+
+M2-07:
+COMPLETE (PASS)
+
+M2-07 evidence:
+PR #180; implementation commit e75570d4e95cc28b15ad236f0e2a71c8b3ee9111; final reviewed head ad6c881a7cb966b2cf39bd80605da938b0d328d7; merge d501a704baffa85392e7e2c6fab6858091396d3e
+
+M2-08:
+NEXT — Structural Certification (fresh agent)
+
+M3:
+NOT STARTED
 
 TAX-INCLUSIVE REVENUE CONTRACT:
 IMPLEMENTATION_CHANGE_REQUIRED
