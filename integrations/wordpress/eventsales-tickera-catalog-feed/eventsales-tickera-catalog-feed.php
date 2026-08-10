@@ -1132,6 +1132,7 @@ final class EventSales_Tickera_Catalog_Feed
                 ev.post_title AS event_title,
                 ev.post_name AS event_slug,
                 ev.post_status AS event_status,
+                ev.post_date_gmt AS event_source_created_at,
                 ev.post_modified_gmt AS event_source_updated_at,
                 variation.ID AS woo_variation_id,
                 variation.post_title AS variation_title,
@@ -1161,6 +1162,7 @@ final class EventSales_Tickera_Catalog_Feed
                 ev.post_title,
                 ev.post_name,
                 ev.post_status,
+                ev.post_date_gmt,
                 ev.post_modified_gmt,
                 variation.ID,
                 variation.post_title,
@@ -1314,6 +1316,7 @@ final class EventSales_Tickera_Catalog_Feed
                 ev.post_title AS event_title,
                 ev.post_name AS event_slug,
                 ev.post_status AS event_status,
+                ev.post_date_gmt AS event_source_created_at,
                 ev.post_modified_gmt AS event_source_updated_at,
                 MAX(CASE WHEN evm.meta_key = 'event_date_time' THEN evm.meta_value END) AS event_start_at,
                 MAX(CASE WHEN evm.meta_key = 'event_end_date_time' THEN evm.meta_value END) AS event_end_at,
@@ -1343,6 +1346,7 @@ final class EventSales_Tickera_Catalog_Feed
                 ev.post_title,
                 ev.post_name,
                 ev.post_status,
+                ev.post_date_gmt,
                 ev.post_modified_gmt
             ORDER BY ev.post_title ASC, ev.ID ASC
             LIMIT %d OFFSET %d';
@@ -1368,6 +1372,7 @@ final class EventSales_Tickera_Catalog_Feed
                 'event_title' => $this->nullable_string($row['event_title'] ?? null),
                 'event_slug' => $this->nullable_string($row['event_slug'] ?? null),
                 'event_status' => $this->nullable_string($row['event_status'] ?? null),
+                'event_source_created_at' => $this->sql_datetime_to_iso8601($row['event_source_created_at'] ?? null),
                 'event_status_classification' => $event_status,
                 'target_observation' => $this->target_observation($event_status),
                 'risk_codes' => $this->event_risk_codes($event_status),
@@ -1420,6 +1425,7 @@ final class EventSales_Tickera_Catalog_Feed
             'event_title' => $this->nullable_string($row['event_title'] ?? null),
             'event_slug' => $this->nullable_string($row['event_slug'] ?? null),
             'event_status' => $this->nullable_string($row['event_status'] ?? null),
+            'event_source_created_at' => $this->sql_datetime_to_iso8601($row['event_source_created_at'] ?? null),
             'event_source_updated_at' => $this->sql_datetime_to_iso8601($row['event_source_updated_at'] ?? null),
             'woo_product_id' => $product_id,
             'product_title' => $this->nullable_string($row['product_title'] ?? null),

@@ -132,6 +132,50 @@ defmodule EventSales.Catalog.TickeraCatalog.NormalizerTest do
     assert row.booking_fee_value == nil
   end
 
+  test "normalizes source creation independently from source update and event start" do
+    event =
+      TickeraCatalogFixtures.vwg_event()
+      |> Map.merge(%{
+        "event_source_created_at" => "2026-05-01T08:00:00Z",
+        "event_source_updated_at" => "2026-06-01T10:00:00Z",
+        "event_start_at" => "2026-08-01T16:00:00Z"
+      })
+
+    result = %DiscoveryResult{
+      events: [event],
+      catalog_rows: [TickeraCatalogFixtures.vwg_row()]
+    }
+
+    assert {:ok, %{rows: [row]}} = Normalizer.normalize(result)
+
+    assert Map.get(row, :event_source_created_at) == ~U[2026-05-01 08:00:00Z]
+    assert row.event_source_updated_at == ~U[2026-06-01 10:00:00Z]
+    assert row.starts_at == ~U[2026-08-01 16:00:00Z]
+    refute Map.get(row, :event_source_created_at) == row.starts_at
+    refute Map.get(row, :event_source_created_at) == row.event_source_updated_at
+  end
+
+  test "invalid source creation evidence remains nil instead of borrowing another clock" do
+    event =
+      TickeraCatalogFixtures.vwg_event()
+      |> Map.merge(%{
+        "event_source_created_at" => "not-a-date",
+        "event_source_updated_at" => "2026-06-01T10:00:00Z",
+        "event_start_at" => "2026-08-01T16:00:00Z"
+      })
+
+    result = %DiscoveryResult{
+      events: [event],
+      catalog_rows: [TickeraCatalogFixtures.vwg_row()]
+    }
+
+    assert {:ok, %{rows: [row]}} = Normalizer.normalize(result)
+
+    assert Map.get(row, :event_source_created_at) == nil
+    assert row.event_source_updated_at == ~U[2026-06-01 10:00:00Z]
+    assert row.starts_at == ~U[2026-08-01 16:00:00Z]
+  end
+
   test "normalizes percentage booking fee type" do
     event =
       TickeraCatalogFixtures.vwg_event()

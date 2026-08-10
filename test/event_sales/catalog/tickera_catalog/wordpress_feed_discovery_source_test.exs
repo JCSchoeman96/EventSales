@@ -218,6 +218,14 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedDiscoverySourceTest do
     assert result.discovery_snapshot_id == "snap-native-1"
     refute result.auto_apply_proof_complete?
 
+    assert [
+             %{
+               "tickera_event_id" => 1,
+               "event_source_created_at" => "2026-05-01T08:00:00Z",
+               "event_source_updated_at" => "2026-06-01T10:00:00Z"
+             }
+           ] = result.events
+
     assert [%CanonicalFact{} = fact] = result.canonical_source_risk_facts
     assert fact.run_id == result.discovery_snapshot_id
     assert fact.origin == "native"
@@ -522,7 +530,13 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedDiscoverySourceTest do
       "per_page" => 50,
       "has_more" => false,
       "filters" => %{"include_private" => false},
-      "events" => [%{"tickera_event_id" => 1}],
+      "events" => [
+        %{
+          "tickera_event_id" => 1,
+          "event_source_created_at" => "2026-05-01T08:00:00Z",
+          "event_source_updated_at" => "2026-06-01T10:00:00Z"
+        }
+      ],
       "catalog_rows" => [%{"woo_product_id" => 2}],
       "evidence" => [
         %{

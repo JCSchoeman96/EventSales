@@ -11,6 +11,9 @@ defmodule EventSales.Catalog.Resources.Event do
   alias EventSales.Catalog.Changes.InvalidateEventOnboardingAfterIdentityChange
   alias EventSales.Catalog.Changes.ValidateEventDates
 
+  @backfill_start_capture_context_key :event_sales_backfill_start_capture_authority
+  @backfill_start_capture_context_value {__MODULE__, :verified}
+
   postgres do
     table "catalog_events"
     repo EventSales.Repo
@@ -66,6 +69,12 @@ defmodule EventSales.Catalog.Resources.Event do
       require_atomic? false
       change ValidateEventDates
       change InvalidateEventOnboardingAfterIdentityChange
+    end
+
+    update :capture_source_created_at do
+      accept [:source_created_at]
+      require_atomic? false
+      change &__MODULE__.validate_source_created_at_capture/2
     end
 
     update :archive do
@@ -155,6 +164,10 @@ defmodule EventSales.Catalog.Resources.Event do
       public? true
     end
 
+    attribute :source_created_at, :utc_datetime_usec do
+      public? true
+    end
+
     attribute :last_synced_at, :utc_datetime_usec do
       public? true
     end
@@ -200,6 +213,39 @@ defmodule EventSales.Catalog.Resources.Event do
   validations do
     validate present([:name, :slug, :source_system_id]) do
       on [:create]
+    end
+  end
+
+  def validate_source_created_at_capture(changeset, _context) do
+    Ash.Changeset.before_action(changeset, &validate_source_created_at_capture_request/1)
+  end
+
+  defp validate_source_created_at_capture_request(changeset) do
+    persisted = changeset.data.source_created_at
+    requested = Ash.Changeset.get_attribute(changeset, :source_created_at)
+
+    cond do
+      Map.get(changeset.context, @backfill_start_capture_context_key) !=
+          @backfill_start_capture_context_value ->
+        Ash.Changeset.add_error(changeset,
+          field: :source_created_at,
+          message: "requires verified BackfillStartCapture authority"
+        )
+
+      not match?(%DateTime{}, requested) ->
+        Ash.Changeset.add_error(changeset,
+          field: :source_created_at,
+          message: "must be an authoritative UTC timestamp"
+        )
+
+      is_nil(persisted) or DateTime.compare(persisted, requested) == :eq ->
+        changeset
+
+      true ->
+        Ash.Changeset.add_error(changeset,
+          field: :source_created_at,
+          message: "source_created_at_conflict"
+        )
     end
   end
 end
