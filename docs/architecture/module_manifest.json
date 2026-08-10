@@ -54,7 +54,9 @@
     "lib/event_sales/catalog/changes/mapping_side_effects_after_action.ex",
     "lib/event_sales/catalog/changes/normalize_base_url.ex",
     "lib/event_sales/catalog/changes/validate_event_dates.ex",
+    "lib/event_sales/catalog/changes/validate_mapping_source_event.ex",
     "lib/event_sales/catalog/changes/validate_ticket_type_event.ex",
+    "lib/event_sales/catalog/event_importer.ex",
     "lib/event_sales/catalog/event_lifecycle.ex",
     "lib/event_sales/catalog/manual_mapping_creator.ex",
     "lib/event_sales/catalog/mapping_conflict_resolver.ex",
@@ -69,6 +71,7 @@
     "lib/event_sales/catalog/resources/product_mapping.ex",
     "lib/event_sales/catalog/resources/source_system.ex",
     "lib/event_sales/catalog/resources/ticket_type.ex",
+    "lib/event_sales/catalog/source_event_resolver.ex",
     "lib/event_sales/catalog/tickera_catalog/applier.ex",
     "lib/event_sales/catalog/tickera_catalog/auto_apply_policy.ex",
     "lib/event_sales/catalog/tickera_catalog/cache.ex",
@@ -85,6 +88,13 @@
     "lib/event_sales/catalog/tickera_catalog/pub_sub.ex",
     "lib/event_sales/catalog/tickera_catalog/snapshot_canonicalizer.ex",
     "lib/event_sales/catalog/tickera_catalog/source_risk.ex",
+    "lib/event_sales/catalog/tickera_catalog/source_risk_v3/canonical_fact.ex",
+    "lib/event_sales/catalog/tickera_catalog/source_risk_v3/compatibility/v2_adapter.ex",
+    "lib/event_sales/catalog/tickera_catalog/source_risk_v3/contract_registry.ex",
+    "lib/event_sales/catalog/tickera_catalog/source_risk_v3/discovery_integrity.ex",
+    "lib/event_sales/catalog/tickera_catalog/source_risk_v3/evidence.ex",
+    "lib/event_sales/catalog/tickera_catalog/source_risk_v3/finding_policy.ex",
+    "lib/event_sales/catalog/tickera_catalog/source_risk_v3/normalizer.ex",
     "lib/event_sales/catalog/tickera_catalog/wordpress_feed_client.ex",
     "lib/event_sales/catalog/tickera_catalog/wordpress_feed_discovery_source.ex",
     "lib/event_sales/catalog/tickera_catalog/wordpress_feed_error.ex",
@@ -1261,11 +1271,32 @@
       ]
     },
     {
-      "docs_count": 0,
+      "docs_count": 1,
       "moduledoc?": true,
       "name": "EventSales.Catalog.Changes.NormalizeBaseUrl",
       "parse_error": null,
       "path": "lib/event_sales/catalog/changes/normalize_base_url.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "normalize"
+        },
+        {
+          "arity": 3,
+          "name": "change"
+        }
+      ],
+      "specs?": true,
+      "uses": [
+        "Ash.Resource.Change"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.Changes.ValidateEventDates",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/changes/validate_event_dates.ex",
       "public_funs": [
         {
           "arity": 3,
@@ -1280,9 +1311,9 @@
     {
       "docs_count": 0,
       "moduledoc?": true,
-      "name": "EventSales.Catalog.Changes.ValidateEventDates",
+      "name": "EventSales.Catalog.Changes.ValidateMappingSourceEvent",
       "parse_error": null,
-      "path": "lib/event_sales/catalog/changes/validate_event_dates.ex",
+      "path": "lib/event_sales/catalog/changes/validate_mapping_source_event.ex",
       "public_funs": [
         {
           "arity": 3,
@@ -1310,6 +1341,21 @@
       "uses": [
         "Ash.Resource.Change"
       ]
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.EventImporter",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/event_importer.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "import_tickera_event"
+        }
+      ],
+      "specs?": true,
+      "uses": []
     },
     {
       "docs_count": 0,
@@ -1557,6 +1603,21 @@
       ]
     },
     {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.SourceEventResolver",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/source_event_resolver.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "resolve"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
       "docs_count": 0,
       "moduledoc?": true,
       "name": "EventSales.Catalog.TickeraCatalog.Applier",
@@ -1773,6 +1834,10 @@
       "path": "lib/event_sales/catalog/tickera_catalog/snapshot_canonicalizer.ex",
       "public_funs": [
         {
+          "arity": 0,
+          "name": "v3_schema_version"
+        },
+        {
           "arity": 1,
           "name": "canonicalize"
         }
@@ -1798,6 +1863,477 @@
         {
           "arity": 6,
           "name": "classified"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.TickeraCatalog.SourceRiskV3.CanonicalFact",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/tickera_catalog/source_risk_v3/canonical_fact.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "identity"
+        },
+        {
+          "arity": 2,
+          "name": "same_identity?"
+        },
+        {
+          "arity": 1,
+          "name": "semantic_claim"
+        },
+        {
+          "arity": 2,
+          "name": "same_semantic_claim?"
+        },
+        {
+          "arity": 2,
+          "name": "compare_pair"
+        },
+        {
+          "arity": 1,
+          "name": "compare_key"
+        },
+        {
+          "arity": 1,
+          "name": "sort_facts"
+        },
+        {
+          "arity": 1,
+          "name": "sort_provenance_records"
+        },
+        {
+          "arity": 1,
+          "name": "target_canonical_json"
+        },
+        {
+          "arity": 1,
+          "name": "canonicalize_target"
+        },
+        {
+          "arity": 2,
+          "name": "validate_target_for_scope"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.TickeraCatalog.SourceRiskV3.Compatibility.V2Adapter",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/tickera_catalog/source_risk_v3/compatibility/v2_adapter.ex",
+      "public_funs": [
+        {
+          "arity": 0,
+          "name": "adapter_version"
+        },
+        {
+          "arity": 0,
+          "name": "source_contract_version"
+        },
+        {
+          "arity": 0,
+          "name": "canonical_contract_version"
+        },
+        {
+          "arity": 0,
+          "name": "automation_eligible?"
+        },
+        {
+          "arity": 0,
+          "name": "emitters"
+        },
+        {
+          "arity": 0,
+          "name": "translation_results"
+        },
+        {
+          "arity": 2,
+          "name": "translate"
+        },
+        {
+          "arity": 2,
+          "name": "classify_pair"
+        },
+        {
+          "arity": 4,
+          "name": "known_lossy_lifecycle_derivative?"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "TranslationRecord",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/tickera_catalog/source_risk_v3/compatibility/v2_adapter.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.TickeraCatalog.SourceRiskV3.ContractRegistry",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/tickera_catalog/source_risk_v3/contract_registry.ex",
+      "public_funs": [
+        {
+          "arity": 0,
+          "name": "canonical_contract_version"
+        },
+        {
+          "arity": 0,
+          "name": "native_producer_schema_version"
+        },
+        {
+          "arity": 0,
+          "name": "native_normalization_mode"
+        },
+        {
+          "arity": 0,
+          "name": "dimensions"
+        },
+        {
+          "arity": 0,
+          "name": "scopes"
+        },
+        {
+          "arity": 0,
+          "name": "states"
+        },
+        {
+          "arity": 0,
+          "name": "producer_emittable_states"
+        },
+        {
+          "arity": 0,
+          "name": "completeness_values"
+        },
+        {
+          "arity": 0,
+          "name": "authorities"
+        },
+        {
+          "arity": 0,
+          "name": "authority_slots"
+        },
+        {
+          "arity": 0,
+          "name": "origins"
+        },
+        {
+          "arity": 0,
+          "name": "dispositions"
+        },
+        {
+          "arity": 0,
+          "name": "lifecycle_values"
+        },
+        {
+          "arity": 0,
+          "name": "product_type_values"
+        },
+        {
+          "arity": 0,
+          "name": "finding_owners"
+        },
+        {
+          "arity": 0,
+          "name": "safe_negative_allowlist"
+        },
+        {
+          "arity": 0,
+          "name": "safe_positive_rules"
+        },
+        {
+          "arity": 0,
+          "name": "producer_provenance_keys"
+        },
+        {
+          "arity": 0,
+          "name": "rejected_producer_provenance_keys"
+        },
+        {
+          "arity": 0,
+          "name": "max_closed_id_length"
+        },
+        {
+          "arity": 0,
+          "name": "max_raw_producer_code_bytes"
+        },
+        {
+          "arity": 0,
+          "name": "max_producer_source_key_bytes"
+        },
+        {
+          "arity": 0,
+          "name": "max_evidence_value_bytes"
+        },
+        {
+          "arity": 0,
+          "name": "max_evidence_items_per_page"
+        },
+        {
+          "arity": 1,
+          "name": "dimension?"
+        },
+        {
+          "arity": 1,
+          "name": "scope?"
+        },
+        {
+          "arity": 1,
+          "name": "state?"
+        },
+        {
+          "arity": 1,
+          "name": "producer_emittable_state?"
+        },
+        {
+          "arity": 1,
+          "name": "completeness?"
+        },
+        {
+          "arity": 1,
+          "name": "authority?"
+        },
+        {
+          "arity": 1,
+          "name": "authority_slot?"
+        },
+        {
+          "arity": 1,
+          "name": "origin?"
+        },
+        {
+          "arity": 1,
+          "name": "disposition?"
+        },
+        {
+          "arity": 1,
+          "name": "finding_owner?"
+        },
+        {
+          "arity": 1,
+          "name": "fetch_dimension"
+        },
+        {
+          "arity": 1,
+          "name": "fetch_scope"
+        },
+        {
+          "arity": 1,
+          "name": "fetch_state"
+        },
+        {
+          "arity": 1,
+          "name": "fetch_completeness"
+        },
+        {
+          "arity": 1,
+          "name": "fetch_authority"
+        },
+        {
+          "arity": 1,
+          "name": "fetch_authority_slot"
+        },
+        {
+          "arity": 1,
+          "name": "fetch_disposition"
+        },
+        {
+          "arity": 1,
+          "name": "fetch_origin"
+        },
+        {
+          "arity": 1,
+          "name": "authority_slot_for_dimension"
+        },
+        {
+          "arity": 1,
+          "name": "authority_for_slot"
+        },
+        {
+          "arity": 1,
+          "name": "producer_source_key_for_authority"
+        },
+        {
+          "arity": 2,
+          "name": "scope_allowed_for_dimension?"
+        },
+        {
+          "arity": 2,
+          "name": "state_allowed_for_dimension?"
+        },
+        {
+          "arity": 2,
+          "name": "state_allowed_for_authority?"
+        },
+        {
+          "arity": 1,
+          "name": "exhaustive_negative_permitted?"
+        },
+        {
+          "arity": 1,
+          "name": "target_keys_for_scope"
+        },
+        {
+          "arity": 1,
+          "name": "allowed_values_for_dimension"
+        },
+        {
+          "arity": 1,
+          "name": "validate_closed_id"
+        },
+        {
+          "arity": 2,
+          "name": "validate_bounded_string"
+        },
+        {
+          "arity": 1,
+          "name": "member_of_safe_negative_allowlist?"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.TickeraCatalog.SourceRiskV3.DiscoveryIntegrity",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/tickera_catalog/source_risk_v3/discovery_integrity.ex",
+      "public_funs": [
+        {
+          "arity": 0,
+          "name": "native_schema_version"
+        },
+        {
+          "arity": 0,
+          "name": "canonical_contract_version"
+        },
+        {
+          "arity": 0,
+          "name": "producer_version"
+        },
+        {
+          "arity": 0,
+          "name": "source"
+        },
+        {
+          "arity": 0,
+          "name": "max_per_page"
+        },
+        {
+          "arity": 0,
+          "name": "max_evidence_per_page"
+        },
+        {
+          "arity": 0,
+          "name": "max_catalog_rows_per_page"
+        },
+        {
+          "arity": 1,
+          "name": "normalize_base_url"
+        },
+        {
+          "arity": 1,
+          "name": "expected_source_system_id"
+        },
+        {
+          "arity": 2,
+          "name": "verify_source_system_id"
+        },
+        {
+          "arity": 1,
+          "name": "validate_page_bounds"
+        },
+        {
+          "arity": 1,
+          "name": "validate_discovery_pages"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.TickeraCatalog.SourceRiskV3.Evidence",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/tickera_catalog/source_risk_v3/evidence.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "validate"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.TickeraCatalog.SourceRiskV3.FindingPolicy",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/tickera_catalog/source_risk_v3/finding_policy.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "evaluate"
+        },
+        {
+          "arity": 2,
+          "name": "evaluate_conflict"
+        },
+        {
+          "arity": 1,
+          "name": "evaluate_contract_error"
+        },
+        {
+          "arity": 0,
+          "name": "native_safe_negative_allowlist_empty?"
+        },
+        {
+          "arity": 1,
+          "name": "implies_apply_safety?"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.TickeraCatalog.SourceRiskV3.Normalizer",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/tickera_catalog/source_risk_v3/normalizer.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "normalize_evidence"
+        },
+        {
+          "arity": 2,
+          "name": "classify_against_existing"
+        },
+        {
+          "arity": 2,
+          "name": "merge_duplicate"
+        },
+        {
+          "arity": 1,
+          "name": "never_safe_state?"
         }
       ],
       "specs?": true,
@@ -3352,7 +3888,7 @@
       "uses": []
     },
     {
-      "docs_count": 0,
+      "docs_count": 3,
       "moduledoc?": true,
       "name": "EventSales.Ingestion.TickeraCatalogSync",
       "parse_error": null,
@@ -3361,6 +3897,18 @@
         {
           "arity": 2,
           "name": "queue_dry_run"
+        },
+        {
+          "arity": 2,
+          "name": "queue_event_product_discovery"
+        },
+        {
+          "arity": 2,
+          "name": "project_event_parent_products"
+        },
+        {
+          "arity": 2,
+          "name": "project_event_variations"
         },
         {
           "arity": 3,
@@ -3395,7 +3943,7 @@
           "name": "active_run_for_source"
         }
       ],
-      "specs?": false,
+      "specs?": true,
       "uses": []
     },
     {
@@ -7067,7 +7615,7 @@
       ]
     },
     {
-      "docs_count": 0,
+      "docs_count": 1,
       "moduledoc?": true,
       "name": "EventSales.TestSupport.SalesHelpers",
       "parse_error": null,
@@ -7084,6 +7632,10 @@
         {
           "arity": 2,
           "name": "create_ticket_type!"
+        },
+        {
+          "arity": 4,
+          "name": "create_variation_ticket_type!"
         },
         {
           "arity": 2,
