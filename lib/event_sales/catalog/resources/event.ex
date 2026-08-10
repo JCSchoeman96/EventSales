@@ -5,7 +5,8 @@ defmodule EventSales.Catalog.Resources.Event do
 
   use Ash.Resource,
     data_layer: AshPostgres.DataLayer,
-    domain: EventSales.Catalog
+    domain: EventSales.Catalog,
+    extensions: [AshStateMachine]
 
   alias EventSales.Catalog.Changes.ValidateEventDates
 
@@ -70,6 +71,16 @@ defmodule EventSales.Catalog.Resources.Event do
       require_atomic? false
       change set_attribute(:status, :archived)
     end
+
+    update :mark_backfill_pending do
+      accept []
+      change transition_state(:backfill_pending)
+    end
+
+    update :invalidate_onboarding do
+      accept []
+      change transition_state(:unverified)
+    end
   end
 
   attributes do
@@ -115,6 +126,13 @@ defmodule EventSales.Catalog.Resources.Event do
       allow_nil? false
       default :draft
       constraints one_of: [:draft, :active, :archived, :cancelled]
+      public? true
+    end
+
+    attribute :analytics_onboarding_state, :atom do
+      allow_nil? false
+      default :unverified
+      constraints one_of: [:unverified, :backfill_pending]
       public? true
     end
 
@@ -164,6 +182,17 @@ defmodule EventSales.Catalog.Resources.Event do
 
   identities do
     identity :unique_slug_per_source, [:source_system_id, :slug]
+  end
+
+  state_machine do
+    state_attribute :analytics_onboarding_state
+    initial_states [:unverified]
+    default_initial_state :unverified
+
+    transitions do
+      transition :mark_backfill_pending, from: :unverified, to: :backfill_pending
+      transition :invalidate_onboarding, from: :backfill_pending, to: :unverified
+    end
   end
 
   validations do
