@@ -4,7 +4,7 @@
 | --- | --- |
 | Document | Canonical Path 1 execution roadmap |
 | Plan ID | `path-1-phase-breakdown` |
-| Plan version | `v18` |
+| Plan version | `v19` |
 | Status | ACTIVE — repository-native execution contract |
 | Scope | Path 1 M1–M7 gated implementation sequence |
 | Authority | This file wins for Path 1 task sequencing and physical ownership assumptions |
@@ -43,6 +43,7 @@
 - `v16` — M2-05 closeout: COMPLETE (PASS); PR #176 `project_event_variations/2` on `TickeraCatalogSync`; next = M2-06 (fresh agent; requires owner authorization)
 - `v17` — M2-06 closeout: COMPLETE (PASS); PR #178 ProductMapping variation-identity write protection; next = M2-07 (fresh agent; requires owner authorization)
 - `v18` — M2-07 closeout: COMPLETE (PASS); PR #180 durable Event analytics onboarding state machine; next = M2-08 Structural Certification (fresh agent)
+- `v19` — M2 closeout: M2-08 Structural Certification COMPLETE (PASS) via PR #184; M2 COMPLETE (PASS); next = M3 Historical Sales Backfill (fresh agent); M3 implementation NOT STARTED
 
 ### Conflict rule
 
@@ -156,7 +157,11 @@ M2-06: COMPLETE (PASS)
 M2-06 evidence: PR #178; commit 7686d07163541e3d173e6ffd3e68b1b159bca1da; merge 8a179c0843fb7af7c54f2aebbbf4455f88477189
 M2-07: COMPLETE (PASS)
 M2-07 evidence: PR #180; implementation commit e75570d4e95cc28b15ad236f0e2a71c8b3ee9111; final reviewed head ad6c881a7cb966b2cf39bd80605da938b0d328d7; merge d501a704baffa85392e7e2c6fab6858091396d3e
-Current Path 1 task: M2-08 — Structural Certification (fresh agent)
+M2: COMPLETE (PASS)
+M2-08: COMPLETE (PASS)
+M2-08 evidence: PR #184; initial implementation baedb7455fb4673c088ed9e8a3a749e56c198495; corrective/final reviewed head 25b83e053b4f7f259530498c47f91cbf70675e7f; merge 548cfce6e011b54824cb8787ef97cb3ec27e271b; CI #464: PASS
+Current Path 1 task: M3 — Historical Sales Backfill (fresh agent)
+M3: NOT STARTED
 ```
 
 ---
@@ -340,7 +345,7 @@ Freshness numeric thresholds: see §3.8 (M1-07 LOCKED; implementation still 5m r
 | --- | --- | --- |
 | P1-00 | Path 1 Activation Gate | COMPLETE |
 | M1 | Truth & Identity Contract | Contracts locked |
-| M2 | Operator Event Onboarding | BACKFILL_PENDING for exact event |
+| M2 | Operator Event Onboarding | COMPLETE (PASS); exact event → BACKFILL_PENDING |
 | M3 | Historical Sales Backfill | Durable history via OrderUpserter |
 | M4 | Financial Reconciliation | Source vs EventSales money match |
 | M5 | Analytics Read Model | Trusted bounded projections |
@@ -631,7 +636,7 @@ Rewrite as **extension/certification of Catalog foundations**, not a replacement
 | M2-05 Variation Discovery | REUSE / EXTEND — **COMPLETE (PASS)**; PR #176 | CatalogRow; TickeraCatalogSync event discovery | `project_event_variations/2`; exact `(source, product, variation)` projection | NO | NO | Bounded in-memory projection |
 | M2-06 Variation-Parent Validation | CERTIFY / EXTEND — **COMPLETE (PASS)**; PR #178 | ValidateTicketTypeEvent | Fail-closed ProductMapping variation↔TicketType identity | NO | NO | Local |
 | M2-07 Event Onboarding State Machine | EXTEND — **COMPLETE (PASS)**; PR #180 | `EventSales.Catalog.Resources.Event` | Durable `analytics_onboarding_state` transitions; Business `Event.status` unchanged / independent | NO | YES — additive `analytics_onboarding_state` column | Local Postgres/Ash state transitions; no Redis/ETS/Cachex/GenServer identity authority; no source REST; no additional onboarding-state index |
-| M2-08 Structural Certification | CERTIFY | Existing Event, TicketType, and ProductMapping structure | Exact event + parent-product + variation discovery and local TicketType/ProductMapping structure; prove zero cross-contamination; permit Event transition to BACKFILL_PENDING | NO | NO | Local structural certification |
+| M2-08 Structural Certification | CERTIFY — COMPLETE (PASS); PR #184 | Existing Event, TicketType, and ProductMapping structure | Exact event + parent-product + variation discovery and local TicketType/ProductMapping structure; prove zero cross-contamination; permit Event transition to BACKFILL_PENDING | NO | NO | Local structural certification |
 
 M2-07 physical implementation record:
 
@@ -652,13 +657,42 @@ M2-08 — Structural Certification:
 
 ```text
 Strategy: CERTIFY
-Purpose:
-one exact existing Tickera Event
-+ exact parent-product discovery
-+ exact variation discovery
-+ exact local TicketType/ProductMapping structure
-→ prove zero cross-contamination
-→ permit Event transition to BACKFILL_PENDING
+Trusted input: exact Event UUID + exact TickeraCatalogSyncRun UUID
+Evidence authority: durable event-scoped dry-run plan_snapshot
+Integrity: SnapshotCanonicalizer hash verification against run.dry_run_hash
+Certification: exact source membership ↔ active ProductMapping set equality
+TicketType: batched mapping-bound TicketType identity certification
+Contamination protection: cross-event and cross-source fail closed
+Transition: :unverified → :backfill_pending
+Repeat certification: idempotent after full re-certification
+Structural invalidation: ProductMapping structural identity changes; mapped TicketType structural identity changes; Event external identity changes
+Non-structural changes: do not invalidate
+Concurrency: Event-first locking prevents stale :backfill_pending
+Historical sales: NOT INGESTED by M2
+```
+
+### M2 Completion Gate
+
+```text
+M2 COMPLETION GATE:
+COMPLETE (PASS)
+
+One exact existing Tickera Event can now be:
+
+1. resolved against the exact SourceSystem;
+2. imported/linked idempotently;
+3. projected to authoritative parent-product membership;
+4. protected against cross-source ProductMapping writes;
+5. protected against parent-product identity mismatch;
+6. projected to exact variation identities;
+7. protected against variation-parent identity mismatch;
+8. represented with durable onboarding state;
+9. structurally certified against trusted discovery evidence;
+10. advanced to BACKFILL_PENDING only after exact structural proof.
+
+Structural mutations invalidate prior certification.
+
+M2 performs no historical order/refund ingestion.
 ```
 
 ### M2 Performance & Scaling Review
@@ -882,7 +916,7 @@ Namespaced keys (`CacheKeys`); targeted invalidation; single-flight rebuild; def
 | M2-05 | Variation Discovery — **COMPLETE (PASS)**; PR #176 |
 | M2-06 | Variation-Parent Validation — **COMPLETE (PASS)**; PR #178 |
 | M2-07 | Event Onboarding State Machine — **COMPLETE (PASS)**; PR #180 |
-| M2-08 | Structural Certification — **NEXT** (fresh agent); Strategy: CERTIFY |
+| M2-08 | Structural Certification — **COMPLETE (PASS)**; PR #184; Strategy: CERTIFY |
 
 ### M3 — Historical Sales
 
@@ -981,8 +1015,8 @@ P1-00 COMPLETE
 → M2-05 COMPLETE (PASS; PR #176)
 → M2-06 COMPLETE (PASS; PR #178)
 → M2-07 COMPLETE (PASS; PR #180)
-→ M2-08 NEXT (fresh agent)
-→ M3 NOT STARTED
+→ M2-08 COMPLETE (PASS; PR #184)
+→ M3 NEXT (fresh agent; NOT STARTED)
 → M4
 → M5
 → M6
@@ -1080,7 +1114,7 @@ FINANCIAL RECONCILIATION CONTRACT:
 LOCKED (concept C; exact Decimal; ticket-scoped)
 
 Current Path 1 task:
-M2-08 — Structural Certification
+M3 — Historical Sales Backfill
 
 M1-C:
 COMPLETE (PASS)
@@ -1133,8 +1167,14 @@ COMPLETE (PASS)
 M2-07 evidence:
 PR #180; implementation commit e75570d4e95cc28b15ad236f0e2a71c8b3ee9111; final reviewed head ad6c881a7cb966b2cf39bd80605da938b0d328d7; merge d501a704baffa85392e7e2c6fab6858091396d3e
 
+M2:
+COMPLETE (PASS)
+
 M2-08:
-NEXT — Structural Certification (fresh agent)
+COMPLETE (PASS)
+
+M2-08 evidence:
+PR #184; initial implementation baedb7455fb4673c088ed9e8a3a749e56c198495; corrective/final reviewed head 25b83e053b4f7f259530498c47f91cbf70675e7f; merge 548cfce6e011b54824cb8787ef97cb3ec27e271b; CI #464: PASS
 
 M3:
 NOT STARTED
@@ -1170,8 +1210,10 @@ M1 certification / PRE-M2 gate:
 docs/path-1/m1-09-m1-certification-and-pre-m2-gate.md
 
 M2-07 COMPLETE (PASS); PR #180.
-NEXT = M2-08 — Structural Certification (FRESH AGENT).
-M2-08 IMPLEMENTATION: NOT STARTED.
+M2 COMPLETE (PASS).
+M2-08 COMPLETE (PASS); PR #184.
+NEXT = M3 — Historical Sales Backfill (FRESH AGENT).
+M2-08 IMPLEMENTATION: COMPLETE (PASS).
 M3: NOT STARTED.
 DO NOT REOPEN M2-07 SCOPE.
 ```

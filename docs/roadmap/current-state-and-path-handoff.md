@@ -40,6 +40,7 @@
 - `v16` — record M2-05 COMPLETE (PASS); PR #176 `project_event_variations/2` on `TickeraCatalogSync`; next M2-06 (fresh agent; requires owner authorization)
 - `v17` — record M2-06 COMPLETE (PASS); PR #178 ProductMapping variation-identity write protection; next M2-07 (fresh agent; requires owner authorization)
 - `v18` — M2-07 closeout: COMPLETE (PASS); PR #180 durable Event analytics onboarding state machine; next = M2-08 Structural Certification (fresh agent)
+- `v19` — M2 closeout: M2-08 Structural Certification COMPLETE (PASS) via PR #184; M2 COMPLETE (PASS); next = M3 Historical Sales Backfill (fresh agent); M3 implementation NOT STARTED
 
 ### Conflict rule
 
@@ -120,7 +121,7 @@ Status: ESTABLISHED
 
 PATH 1 — MANAGEMENT ANALYTICS
 Status: ACTIVE
-Next milestone: M2-08 — Structural Certification
+Next milestone: M3 — Historical Sales Backfill
 P1-00: COMPLETE
 M1-01: COMPLETE (PASS)
 M1-01A: COMPLETE (PASS)
@@ -167,7 +168,10 @@ M2-06: COMPLETE (PASS)
 M2-06 evidence: PR #178; commit 7686d07163541e3d173e6ffd3e68b1b159bca1da; merge 8a179c0843fb7af7c54f2aebbbf4455f88477189
 M2-07: COMPLETE (PASS)
 M2-07 evidence: PR #180; implementation commit e75570d4e95cc28b15ad236f0e2a71c8b3ee9111; final reviewed head ad6c881a7cb966b2cf39bd80605da938b0d328d7; merge d501a704baffa85392e7e2c6fab6858091396d3e
-Current Path 1 task: M2-08 — Structural Certification (fresh agent)
+M2: COMPLETE (PASS)
+M2-08: COMPLETE (PASS)
+M2-08 evidence: PR #184; initial implementation baedb7455fb4673c088ed9e8a3a749e56c198495; corrective/final reviewed head 25b83e053b4f7f259530498c47f91cbf70675e7f; merge 548cfce6e011b54824cb8787ef97cb3ec27e271b; CI #464: PASS
+Current Path 1 task: M3 — Historical Sales Backfill (fresh agent)
 M3: NOT STARTED
 
 PATH 2 — AUTOMATIC SYNC / CATALOGUE AUTOMATION
@@ -559,7 +563,7 @@ M7 — Production Certification / Pilot
 
 ```text
 CURRENT NEXT STEP:
-M2-08 — Structural Certification
+M3 — Historical Sales Backfill
 
 P1-00:
 COMPLETE
@@ -669,8 +673,14 @@ COMPLETE (PASS)
 M2-07 evidence:
 PR #180; implementation commit e75570d4e95cc28b15ad236f0e2a71c8b3ee9111; final reviewed head ad6c881a7cb966b2cf39bd80605da938b0d328d7; merge d501a704baffa85392e7e2c6fab6858091396d3e
 
+M2:
+COMPLETE (PASS)
+
 M2-08:
-NEXT — Structural Certification (fresh agent)
+COMPLETE (PASS)
+
+M2-08 evidence:
+PR #184; initial implementation baedb7455fb4673c088ed9e8a3a749e56c198495; corrective/final reviewed head 25b83e053b4f7f259530498c47f91cbf70675e7f; merge 548cfce6e011b54824cb8787ef97cb3ec27e271b; CI #464: PASS
 
 M3:
 NOT STARTED
@@ -733,7 +743,7 @@ M1 certification / PRE-M2 gate:
 docs/path-1/m1-09-m1-certification-and-pre-m2-gate.md
 ```
 
-M1 contracts are certified. M1-C closed `GAP-PRE-M2-01` on `main`. M2-01 shipped `SourceEventResolver` via PR #168. M2-02 shipped `EventImporter` via PR #170. M2-03 certified event-scoped parent-product discovery via `TickeraCatalogSync`. M2-04A enforced ProductMapping source/Event identity via PR #173. M2-04 enforced parent-product write protection via PR #174. M2-05 certified event-scoped Woo variation discovery via PR #176 (`project_event_variations/2`). M2-06 enforced ProductMapping variation↔TicketType identity via PR #178. M2-07 shipped the durable Event analytics onboarding state machine via PR #180. Next is M2-08 — Structural Certification with a **fresh agent**. Do not reopen M2-07 scope.
+M1 contracts are certified. M1-C closed `GAP-PRE-M2-01` on `main`. M2-01 shipped `SourceEventResolver` via PR #168. M2-02 shipped `EventImporter` via PR #170. M2-03 certified event-scoped parent-product discovery via `TickeraCatalogSync`. M2-04A enforced ProductMapping source/Event identity via PR #173. M2-04 enforced parent-product write protection via PR #174. M2-05 certified event-scoped Woo variation discovery via PR #176 (`project_event_variations/2`). M2-06 enforced ProductMapping variation↔TicketType identity via PR #178. M2-07 shipped the durable Event analytics onboarding state machine via PR #180. M2-08 completed Structural Certification via PR #184. M2 is COMPLETE (PASS). Current next is M3 — Historical Sales Backfill with a **fresh agent**; M3 implementation is NOT STARTED. Do not reopen M2-07 scope.
 
 ---
 
@@ -800,7 +810,7 @@ PATH 1 — TRUSTED MANAGEMENT ANALYTICS
 ACTIVE
 
 Current Path 1 task:
-M2-08 — Structural Certification
+M3 — Historical Sales Backfill
 
 P1-00:
 COMPLETE
@@ -910,8 +920,14 @@ COMPLETE (PASS)
 M2-07 evidence:
 PR #180; implementation commit e75570d4e95cc28b15ad236f0e2a71c8b3ee9111; final reviewed head ad6c881a7cb966b2cf39bd80605da938b0d328d7; merge d501a704baffa85392e7e2c6fab6858091396d3e
 
+M2:
+COMPLETE (PASS)
+
 M2-08:
-NEXT — Structural Certification (fresh agent)
+COMPLETE (PASS)
+
+M2-08 evidence:
+PR #184; initial implementation baedb7455fb4673c088ed9e8a3a749e56c198495; corrective/final reviewed head 25b83e053b4f7f259530498c47f91cbf70675e7f; merge 548cfce6e011b54824cb8787ef97cb3ec27e271b; CI #464: PASS
 
 M3:
 NOT STARTED
