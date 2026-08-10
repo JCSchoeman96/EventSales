@@ -8,6 +8,7 @@ defmodule EventSales.TestSupport.TickeraCatalogFixtures do
     "event_title" => "Vroue wat Glo-retreat - PTA",
     "event_slug" => "vroue-wat-glo-retreat-pta",
     "event_status" => "publish",
+    "event_source_created_at" => "2026-05-01T08:00:00Z",
     "event_source_updated_at" => "2026-06-01T10:00:00Z",
     "event_start_at" => "2026-08-01T16:00:00Z",
     "event_end_at" => "2026-08-01T18:00:00Z",

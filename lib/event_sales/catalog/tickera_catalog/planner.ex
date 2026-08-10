@@ -187,6 +187,7 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
           external_event_id: row.tickera_event_id,
           external_event_kind: :tickera_event,
           source_status: row.event_status,
+          source_created_at: row.event_source_created_at,
           source_updated_at: row.event_source_updated_at,
           starts_at: row.starts_at,
           ends_at: row.ends_at,
@@ -307,6 +308,7 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
       external_event_id: row.tickera_event_id,
       external_event_kind: :tickera_event,
       source_status: row.event_status,
+      source_created_at: row.event_source_created_at,
       source_updated_at: row.event_source_updated_at,
       starts_at: row.starts_at,
       ends_at: row.ends_at,
@@ -330,6 +332,7 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
       ref: event_ref,
       event_id: event.id,
       source_status: row.event_status,
+      source_created_at: row.event_source_created_at,
       source_updated_at: row.event_source_updated_at,
       starts_at: row.starts_at,
       ends_at: row.ends_at,
@@ -341,6 +344,7 @@ defmodule EventSales.Catalog.TickeraCatalog.Planner do
 
   defp event_metadata_changed?(%Event{} = event, row) do
     event.source_status != row.event_status or
+      compare_datetime(event.source_created_at, row.event_source_created_at) or
       compare_datetime(event.source_updated_at, row.event_source_updated_at) or
       compare_datetime(event.starts_at, row.starts_at) or
       compare_datetime(event.ends_at, row.ends_at) or

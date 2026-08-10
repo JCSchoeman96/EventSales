@@ -408,7 +408,12 @@
         "name": "EventSales.Catalog.Resources.Event",
         "parse_error": null,
         "path": "lib/event_sales/catalog/resources/event.ex",
-        "public_funs": [],
+        "public_funs": [
+          {
+            "arity": 2,
+            "name": "validate_source_created_at_capture"
+          }
+        ],
         "specs?": false,
         "uses": [
           "Ash.Resource"

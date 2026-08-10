@@ -70,6 +70,7 @@ defmodule EventSales.Catalog.TickeraCatalog.PlannerApplierTest do
                external_event_id: 109_316,
                external_event_kind: :tickera_event,
                source_status: "publish",
+               source_created_at: ~U[2026-05-01 08:00:00Z],
                source_updated_at: ~U[2026-06-01 10:00:00Z],
                starts_at: ~U[2026-08-01 16:00:00Z],
                ends_at: ~U[2026-08-01 18:00:00Z],
@@ -94,6 +95,153 @@ defmodule EventSales.Catalog.TickeraCatalog.PlannerApplierTest do
            ]
 
     assert plan.product_mapping_changes == []
+  end
+
+  test "new Event action carries authoritative source creation evidence", %{source: source} do
+    discovery =
+      discovery_result()
+      |> Map.update!(:events, fn events ->
+        Enum.map(events, &Map.put(&1, "tickera_event_id", 71_001))
+      end)
+      |> Map.update!(:catalog_rows, fn rows ->
+        Enum.map(rows, fn row ->
+          row
+          |> Map.put("tickera_event_id", 71_001)
+          |> Map.put("woo_product_id", 71_002)
+        end)
+      end)
+
+    assert {:ok, plan} = Planner.plan(source.id, discovery)
+
+    assert [%{action: :create, source_created_at: ~U[2026-05-01 08:00:00Z]}] =
+             Enum.filter(plan.event_changes, &(&1.action == :create))
+  end
+
+  test "an existing Event without source creation evidence gets an update action", %{
+    source: source
+  } do
+    event =
+      SalesHelpers.create_event!(source, %{
+        external_event_kind: :tickera_event,
+        external_event_id: 71_003,
+        source_updated_at: ~U[2026-06-01 10:00:00Z],
+        starts_at: ~U[2026-08-01 16:00:00Z],
+        ends_at: ~U[2026-08-01 18:00:00Z],
+        venue_name: "Pretoria",
+        booking_fee_type: :fixed,
+        booking_fee_value: Decimal.new("25.00"),
+        source_status: "publish"
+      })
+
+    discovery =
+      discovery_result()
+      |> Map.update!(:events, fn events ->
+        Enum.map(events, &Map.put(&1, "tickera_event_id", 71_003))
+      end)
+      |> Map.update!(:catalog_rows, fn rows ->
+        Enum.map(rows, fn row ->
+          row
+          |> Map.put("tickera_event_id", 71_003)
+          |> Map.put("woo_product_id", 71_004)
+        end)
+      end)
+
+    assert {:ok, plan} = Planner.plan(source.id, discovery)
+
+    assert [%{action: :update_metadata, event_id: event_id, source_created_at: timestamp}] =
+             Enum.filter(plan.event_changes, &(&1.action == :update_metadata))
+
+    assert event_id == event.id
+    assert timestamp == ~U[2026-05-01 08:00:00Z]
+  end
+
+  test "matching source creation evidence does not create a source-created delta", %{
+    source: source
+  } do
+    event =
+      SalesHelpers.create_event!(source, %{
+        external_event_kind: :tickera_event,
+        external_event_id: 71_005,
+        source_updated_at: ~U[2026-06-01 10:00:00Z],
+        starts_at: ~U[2026-08-01 16:00:00Z],
+        ends_at: ~U[2026-08-01 18:00:00Z],
+        venue_name: "Pretoria",
+        booking_fee_type: :fixed,
+        booking_fee_value: Decimal.new("25.00"),
+        source_status: "publish"
+      })
+
+    assert {:ok, event} =
+             Ash.update(
+               event,
+               %{source_created_at: ~U[2026-05-01 08:00:00Z]},
+               action: :capture_source_created_at,
+               domain: Catalog
+             )
+
+    discovery =
+      discovery_result()
+      |> Map.update!(:events, fn events ->
+        Enum.map(events, &Map.put(&1, "tickera_event_id", 71_005))
+      end)
+      |> Map.update!(:catalog_rows, fn rows ->
+        Enum.map(rows, fn row ->
+          row
+          |> Map.put("tickera_event_id", 71_005)
+          |> Map.put("woo_product_id", 71_006)
+        end)
+      end)
+
+    assert {:ok, plan} = Planner.plan(source.id, discovery)
+
+    assert [%{action: :reuse, event_id: event_id}] = plan.event_changes
+    assert event_id == event.id
+  end
+
+  test "different source creation evidence is represented as a metadata difference", %{
+    source: source
+  } do
+    event =
+      SalesHelpers.create_event!(source, %{
+        external_event_kind: :tickera_event,
+        external_event_id: 71_007,
+        source_updated_at: ~U[2026-06-01 10:00:00Z],
+        starts_at: ~U[2026-08-01 16:00:00Z],
+        ends_at: ~U[2026-08-01 18:00:00Z],
+        venue_name: "Pretoria",
+        booking_fee_type: :fixed,
+        booking_fee_value: Decimal.new("25.00"),
+        source_status: "publish"
+      })
+
+    assert {:ok, event} =
+             Ash.update(
+               event,
+               %{source_created_at: ~U[2026-04-30 08:00:00Z]},
+               action: :capture_source_created_at,
+               domain: Catalog
+             )
+
+    discovery =
+      discovery_result()
+      |> Map.update!(:events, fn events ->
+        Enum.map(events, &Map.put(&1, "tickera_event_id", 71_007))
+      end)
+      |> Map.update!(:catalog_rows, fn rows ->
+        Enum.map(rows, fn row ->
+          row
+          |> Map.put("tickera_event_id", 71_007)
+          |> Map.put("woo_product_id", 71_008)
+        end)
+      end)
+
+    assert {:ok, plan} = Planner.plan(source.id, discovery)
+
+    assert [%{action: :update_metadata, event_id: event_id, source_created_at: timestamp}] =
+             Enum.filter(plan.event_changes, &(&1.action == :update_metadata))
+
+    assert event_id == event.id
+    assert timestamp == ~U[2026-05-01 08:00:00Z]
   end
 
   test "v2 planner stores an exact eleven-key snapshot with an external hash", %{source: source} do

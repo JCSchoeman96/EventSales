@@ -61,6 +61,7 @@ defmodule EventSales.Catalog.TickeraCatalog.Normalizer do
       event_title: source_display_text(row["event_title"]),
       event_slug: clean(row["event_slug"]),
       event_status: clean(row["event_status"]),
+      event_source_created_at: parse_datetime(metadata["event_source_created_at"]),
       event_source_updated_at: parse_datetime(row["event_source_updated_at"]),
       starts_at: parse_datetime(metadata["event_start_at"]),
       ends_at: parse_datetime(metadata["event_end_at"]),

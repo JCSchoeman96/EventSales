@@ -1651,6 +1651,7 @@ function fake_event_sql_row(int $id, int $linked = 0, ?string $title = null): ar
         'event_title' => $title ?? ('Event ' . $id),
         'event_slug' => 'event-' . $id,
         'event_status' => 'publish',
+        'event_source_created_at' => '2026-07-31 10:00:00',
         'event_source_updated_at' => '2026-08-01 10:00:00',
         'event_start_at' => null,
         'event_end_at' => null,
@@ -1676,6 +1677,7 @@ function fake_catalog_sql_row(int $product_id, int $event_id): array
         'event_title' => 'Event ' . $event_id,
         'event_slug' => 'event-' . $event_id,
         'event_status' => 'publish',
+        'event_source_created_at' => '2026-07-31 10:00:00',
         'event_source_updated_at' => '2026-08-01 10:00:00',
         'woo_variation_id' => null,
         'variation_title' => null,
@@ -1725,6 +1727,8 @@ $event_sql_page1 = $event_wpdb->captured_sql;
 $event_values_page1 = $event_wpdb->captured_values;
 
 T::ok('event SQL was captured', $event_sql_page1 !== '');
+T::ok('event SQL selects post_date_gmt as source creation authority', strpos($event_sql_page1, 'ev.post_date_gmt AS event_source_created_at') !== false);
+T::ok('event SQL groups by post_date_gmt', preg_match('/GROUP BY[\s\S]*ev\.post_date_gmt/i', $event_sql_page1) === 1);
 T::ok(
     'event SQL uses LIMIT/OFFSET placeholders',
     preg_match('/LIMIT\s+%d\s+OFFSET\s+%d/i', $event_sql_page1) === 1
@@ -1757,6 +1761,9 @@ $event_wpdb->event_results = [fake_event_sql_row(777, 0, 'Zero Product Event')];
 $zero_product = $event_rows->invoke(new Feed(), $params_page(1, 100));
 T::same('zero-product published event still emitted', 1, count($zero_product['rows']));
 T::same('zero-product event id preserved', 777, $zero_product['rows'][0]['tickera_event_id']);
+T::same('source creation serializes from post_date_gmt', '2026-07-31T10:00:00Z', $zero_product['rows'][0]['event_source_created_at']);
+T::same('source update remains a separate clock', '2026-08-01T10:00:00Z', $zero_product['rows'][0]['event_source_updated_at']);
+T::ok('source creation differs from event start metadata', $zero_product['rows'][0]['event_source_created_at'] !== $zero_product['rows'][0]['event_start_at']);
 T::same('zero-product linked count is zero', 0, $zero_product['rows'][0]['linked_ticket_products']);
 T::same('zero-product page has_more false', false, $zero_product['has_more']);
 T::ok(

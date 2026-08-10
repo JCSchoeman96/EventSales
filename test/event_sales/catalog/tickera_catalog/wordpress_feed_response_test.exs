@@ -147,6 +147,21 @@ defmodule EventSales.Catalog.TickeraCatalog.WordPressFeedResponseTest do
       refute page.auto_apply_proof_complete?
     end
 
+    test "accepts additive source creation metadata on native events" do
+      page =
+        valid_v3_page()
+        |> put_in(["events", Access.at(0), "event_source_created_at"], "2026-05-01T08:00:00Z")
+        |> put_in(["events", Access.at(0), "event_source_updated_at"], "2026-06-01T10:00:00Z")
+
+      assert {:ok, parsed} = WordPressFeedResponse.parse_page(page)
+
+      assert hd(parsed.events)["event_source_created_at"] == "2026-05-01T08:00:00Z"
+      assert hd(parsed.events)["event_source_updated_at"] == "2026-06-01T10:00:00Z"
+      assert parsed.schema_version == "2026-08-07.v3"
+      assert parsed.canonical_contract_version == "source_risk.v3"
+      assert parsed.producer_version == "2026-08-07.1"
+    end
+
     test "rejects missing or extra envelope keys and unknown schemas" do
       missing = Map.delete(valid_v3_page(), "filters")
       extra = Map.put(valid_v3_page(), "extra_meta", %{})

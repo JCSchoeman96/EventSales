@@ -112,6 +112,7 @@
     "lib/event_sales/health/database_readiness.ex",
     "lib/event_sales/ingestion.ex",
     "lib/event_sales/ingestion/admin_reconciliation_dashboard.ex",
+    "lib/event_sales/ingestion/backfill_start_capture.ex",
     "lib/event_sales/ingestion/catalog_change_contract.ex",
     "lib/event_sales/ingestion/catalog_change_dispatch.ex",
     "lib/event_sales/ingestion/catalog_change_intake.ex",
@@ -1627,7 +1628,12 @@
       "name": "EventSales.Catalog.Resources.Event",
       "parse_error": null,
       "path": "lib/event_sales/catalog/resources/event.ex",
-      "public_funs": [],
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "validate_source_created_at_capture"
+        }
+      ],
       "specs?": false,
       "uses": [
         "Ash.Resource"
@@ -2701,6 +2707,21 @@
         {
           "arity": 1,
           "name": "export_row_limit"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.BackfillStartCapture",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/backfill_start_capture.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "capture"
         }
       ],
       "specs?": true,

@@ -49,10 +49,13 @@ defmodule EventSales.Catalog.TickeraCatalog.SnapshotCanonicalizer do
     vwg_pretoria_preserved
   ) ++ @risk_codes
 
-  @event_create ~w(action ref source_system_id name slug status external_event_id external_event_kind source_status source_updated_at starts_at ends_at venue_name booking_fee_type booking_fee_value)
+  @legacy_event_create ~w(action ref source_system_id name slug status external_event_id external_event_kind source_status source_updated_at starts_at ends_at venue_name booking_fee_type booking_fee_value)
+  @event_create ~w(action ref source_system_id name slug status external_event_id external_event_kind source_status source_created_at source_updated_at starts_at ends_at venue_name booking_fee_type booking_fee_value)
   @event_reuse ~w(action ref event_id source_system_id external_event_kind external_event_id)
-  @event_update ~w(action ref event_id source_status source_updated_at starts_at ends_at venue_name booking_fee_type booking_fee_value)
-  @event_adopt ~w(action event_id external_event_id external_event_kind source_status source_updated_at starts_at ends_at venue_name booking_fee_type booking_fee_value)
+  @legacy_event_update ~w(action ref event_id source_status source_updated_at starts_at ends_at venue_name booking_fee_type booking_fee_value)
+  @event_update ~w(action ref event_id source_status source_created_at source_updated_at starts_at ends_at venue_name booking_fee_type booking_fee_value)
+  @legacy_event_adopt ~w(action event_id external_event_id external_event_kind source_status source_updated_at starts_at ends_at venue_name booking_fee_type booking_fee_value)
+  @event_adopt ~w(action event_id external_event_id external_event_kind source_status source_created_at source_updated_at starts_at ends_at venue_name booking_fee_type booking_fee_value)
   @ticket_create ~w(action ref event_ref name active external_ticket_type_id external_ticket_type_kind external_product_id external_variation_id source_status source_updated_at)
   @ticket_reuse ~w(action ref ticket_type_id event_id external_ticket_type_kind external_ticket_type_id external_product_id external_variation_id)
   @ticket_adopt ~w(action ticket_type_id event_id external_ticket_type_id external_ticket_type_kind external_product_id external_variation_id source_status source_updated_at)
@@ -378,7 +381,7 @@ defmodule EventSales.Catalog.TickeraCatalog.SnapshotCanonicalizer do
 
   defp valid_event_action?(%{"action" => "create"} = value) do
     Enum.all?([
-      exact_keys?(value, @event_create),
+      exact_keys?(value, @event_create) or exact_keys?(value, @legacy_event_create),
       bounded?(value["ref"], 160, false),
       uuid?(value["source_system_id"]),
       bounded?(value["name"], 255, false),
@@ -387,6 +390,7 @@ defmodule EventSales.Catalog.TickeraCatalog.SnapshotCanonicalizer do
       positive_integer?(value["external_event_id"]),
       value["external_event_kind"] == "tickera_event",
       value["source_status"] in @statuses,
+      datetime_or_nil?(value["source_created_at"]),
       datetime_or_nil?(value["source_updated_at"]),
       datetime_or_nil?(value["starts_at"]),
       datetime_or_nil?(value["ends_at"]),
@@ -404,11 +408,14 @@ defmodule EventSales.Catalog.TickeraCatalog.SnapshotCanonicalizer do
   end
 
   defp valid_event_action?(%{"action" => "update_metadata"} = value),
-    do: exact_keys?(value, @event_update) and valid_event_metadata?(value, true)
+    do:
+      (exact_keys?(value, @event_update) or exact_keys?(value, @legacy_event_update)) and
+        valid_event_metadata?(value, true)
 
   defp valid_event_action?(%{"action" => "adopt_existing"} = value),
     do:
-      exact_keys?(value, @event_adopt) and valid_event_metadata?(value, false) and
+      (exact_keys?(value, @event_adopt) or exact_keys?(value, @legacy_event_adopt)) and
+        valid_event_metadata?(value, false) and
         positive_integer?(value["external_event_id"]) and
         value["external_event_kind"] == "tickera_event"
 
@@ -419,6 +426,7 @@ defmodule EventSales.Catalog.TickeraCatalog.SnapshotCanonicalizer do
       not has_ref? or bounded?(value["ref"], 160, true),
       uuid?(value["event_id"]),
       value["source_status"] in @statuses,
+      datetime_or_nil?(value["source_created_at"]),
       datetime_or_nil?(value["source_updated_at"]),
       datetime_or_nil?(value["starts_at"]),
       datetime_or_nil?(value["ends_at"]),
