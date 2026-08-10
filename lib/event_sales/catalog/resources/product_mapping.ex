@@ -8,6 +8,7 @@ defmodule EventSales.Catalog.Resources.ProductMapping do
     domain: EventSales.Catalog,
     extensions: [AshPaperTrail.Resource]
 
+  alias EventSales.Catalog.Changes.InvalidateEventOnboardingAfterMappingChange
   alias EventSales.Catalog.Changes.MappingSideEffectsAfterAction
   alias EventSales.Catalog.Changes.ValidateMappingSourceEvent
   alias EventSales.Catalog.Changes.ValidateTicketTypeEvent
@@ -53,6 +54,7 @@ defmodule EventSales.Catalog.Resources.ProductMapping do
       accept @mapping_accept
       change ValidateMappingSourceEvent
       change ValidateTicketTypeEvent
+      change InvalidateEventOnboardingAfterMappingChange
       change MappingSideEffectsAfterAction
     end
 
@@ -61,6 +63,7 @@ defmodule EventSales.Catalog.Resources.ProductMapping do
       require_atomic? false
       change ValidateMappingSourceEvent
       change ValidateTicketTypeEvent
+      change InvalidateEventOnboardingAfterMappingChange
       change MappingSideEffectsAfterAction
     end
 
@@ -73,6 +76,7 @@ defmodule EventSales.Catalog.Resources.ProductMapping do
       accept []
       require_atomic? false
       change set_attribute(:active, false)
+      change InvalidateEventOnboardingAfterMappingChange
       change MappingSideEffectsAfterAction
     end
 
@@ -90,6 +94,7 @@ defmodule EventSales.Catalog.Resources.ProductMapping do
       require_atomic? false
       change ValidateMappingSourceEvent
       change ValidateTicketTypeEvent
+      change InvalidateEventOnboardingAfterMappingChange
       change MappingSideEffectsAfterAction
     end
   end

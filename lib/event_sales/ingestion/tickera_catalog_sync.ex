@@ -17,6 +17,7 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
   alias EventSales.Catalog.TickeraCatalog.CatalogRow
   alias EventSales.Catalog.TickeraCatalog.PubSub
   alias EventSales.Ingestion
+  alias EventSales.Ingestion.EventStructuralCertifier
   alias EventSales.Ingestion.Resources.{CatalogChangePendingTarget, TickeraCatalogSyncRun}
   alias EventSales.Ingestion.Workers.{ApplyTickeraCatalogWorker, DiscoverTickeraCatalogWorker}
   alias EventSales.Repo
@@ -77,6 +78,20 @@ defmodule EventSales.Ingestion.TickeraCatalogSync do
   end
 
   def queue_event_product_discovery(_local_event_id, _opts), do: {:error, :invalid_event_id}
+
+  @doc """
+  Certifies one exact Event against one exact event-scoped dry-run snapshot.
+
+  The certifier owns the durable structural checks and onboarding transition; this
+  facade only supplies the existing admin authorization boundary.
+  """
+  @spec certify_event_structure(Ecto.UUID.t(), Ecto.UUID.t(), keyword()) ::
+          {:ok, map()} | {:error, atom()}
+  def certify_event_structure(local_event_id, sync_run_id, opts \\ []) do
+    with :ok <- authorize_admin(opts) do
+      EventStructuralCertifier.certify(local_event_id, sync_run_id, opts)
+    end
+  end
 
   @doc """
   Projects unique parent Woo product identities for one exact local Tickera Event.

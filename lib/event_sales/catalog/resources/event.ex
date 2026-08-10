@@ -8,6 +8,7 @@ defmodule EventSales.Catalog.Resources.Event do
     domain: EventSales.Catalog,
     extensions: [AshStateMachine]
 
+  alias EventSales.Catalog.Changes.InvalidateEventOnboardingAfterIdentityChange
   alias EventSales.Catalog.Changes.ValidateEventDates
 
   postgres do
@@ -64,6 +65,7 @@ defmodule EventSales.Catalog.Resources.Event do
 
       require_atomic? false
       change ValidateEventDates
+      change InvalidateEventOnboardingAfterIdentityChange
     end
 
     update :archive do

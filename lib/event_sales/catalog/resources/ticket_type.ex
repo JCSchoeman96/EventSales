@@ -7,6 +7,8 @@ defmodule EventSales.Catalog.Resources.TicketType do
     data_layer: AshPostgres.DataLayer,
     domain: EventSales.Catalog
 
+  alias EventSales.Catalog.Changes.InvalidateEventOnboardingAfterTicketTypeChange
+
   postgres do
     table "catalog_ticket_types"
     repo EventSales.Repo
@@ -50,12 +52,14 @@ defmodule EventSales.Catalog.Resources.TicketType do
       ]
 
       require_atomic? false
+      change InvalidateEventOnboardingAfterTicketTypeChange
     end
 
     update :deactivate do
       accept []
       require_atomic? false
       change set_attribute(:active, false)
+      change InvalidateEventOnboardingAfterTicketTypeChange
     end
   end
 
