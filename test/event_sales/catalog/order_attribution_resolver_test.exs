@@ -145,12 +145,15 @@ defmodule EventSales.Catalog.OrderAttributionResolverTest do
 
   test "mismatched present TicketType parent product fails closed and is not rescued by ProductMapping",
        %{source: source, wr_event: wr_event} do
+    # Create a temporarily consistent mapping, then drift TicketType parent metadata.
+    # M2-04 rejects ProductMapping writes with an explicit parent mismatch; M1-C must
+    # still fail closed for historical drift that ProductMapping cannot rescue.
     mismatched_ticket =
       SalesHelpers.create_ticket_type!(wr_event, %{
         name: "WR Wrong Parent Variation",
         external_ticket_type_kind: :woo_variation,
         external_ticket_type_id: 209_167,
-        external_product_id: 999_999,
+        external_product_id: 209_132,
         external_variation_id: 209_167
       })
 
@@ -158,6 +161,13 @@ defmodule EventSales.Catalog.OrderAttributionResolverTest do
       woo_product_id: 209_132,
       woo_variation_id: 209_167
     })
+
+    Ash.update!(
+      mismatched_ticket,
+      %{external_product_id: 999_999},
+      action: :update,
+      domain: Catalog
+    )
 
     assert {:ok, result} =
              OrderAttributionResolver.resolve(source.id, 109_120, 209_132, 209_167)
