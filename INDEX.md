@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-341
+346
 
 ## Files
 
@@ -63,6 +63,9 @@ Project root: `.`
 - `lib/event_sales/audit/resources/audit_log.ex`
 - `lib/event_sales/catalog.ex`
 - `lib/event_sales/catalog/cache_invalidation.ex`
+- `lib/event_sales/catalog/changes/invalidate_event_onboarding_after_identity_change.ex`
+- `lib/event_sales/catalog/changes/invalidate_event_onboarding_after_mapping_change.ex`
+- `lib/event_sales/catalog/changes/invalidate_event_onboarding_after_ticket_type_change.ex`
 - `lib/event_sales/catalog/changes/mapping_side_effects_after_action.ex`
 - `lib/event_sales/catalog/changes/normalize_base_url.ex`
 - `lib/event_sales/catalog/changes/validate_event_dates.ex`
@@ -70,6 +73,7 @@ Project root: `.`
 - `lib/event_sales/catalog/changes/validate_ticket_type_event.ex`
 - `lib/event_sales/catalog/event_importer.ex`
 - `lib/event_sales/catalog/event_lifecycle.ex`
+- `lib/event_sales/catalog/event_onboarding.ex`
 - `lib/event_sales/catalog/manual_mapping_creator.ex`
 - `lib/event_sales/catalog/mapping_conflict_resolver.ex`
 - `lib/event_sales/catalog/mapping_resolver.ex`
@@ -133,6 +137,7 @@ Project root: `.`
 - `lib/event_sales/ingestion/csv/dry_run_validator.ex`
 - `lib/event_sales/ingestion/csv/parser.ex`
 - `lib/event_sales/ingestion/csv_imports.ex`
+- `lib/event_sales/ingestion/event_structural_certifier.ex`
 - `lib/event_sales/ingestion/findings_csv_export.ex`
 - `lib/event_sales/ingestion/handlers/product_updated_handler.ex`
 - `lib/event_sales/ingestion/intake_backpressure.ex`
@@ -632,6 +637,24 @@ Project root: `.`
   - docs_count: 1
   - public_funs: `emit_for_event/2`
   - uses: _none_
+- `EventSales.Catalog.Changes.InvalidateEventOnboardingAfterIdentityChange` - `lib/event_sales/catalog/changes/invalidate_event_onboarding_after_identity_change.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `change/3`
+  - uses: `Ash.Resource.Change`
+- `EventSales.Catalog.Changes.InvalidateEventOnboardingAfterMappingChange` - `lib/event_sales/catalog/changes/invalidate_event_onboarding_after_mapping_change.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `change/3`
+  - uses: `Ash.Resource.Change`
+- `EventSales.Catalog.Changes.InvalidateEventOnboardingAfterTicketTypeChange` - `lib/event_sales/catalog/changes/invalidate_event_onboarding_after_ticket_type_change.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `change/3`
+  - uses: `Ash.Resource.Change`
 - `EventSales.Catalog.Changes.MappingSideEffectsAfterAction` - `lib/event_sales/catalog/changes/mapping_side_effects_after_action.ex`
   - moduledoc?: true
   - specs?: false
@@ -673,6 +696,12 @@ Project root: `.`
   - specs?: true
   - docs_count: 0
   - public_funs: `classify/2`, `current_bucket?/2`, `past?/2`
+  - uses: _none_
+- `EventSales.Catalog.EventOnboarding` - `lib/event_sales/catalog/event_onboarding.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `invalidate_if_pending/1`, `invalidate_many/1`, `lock_events/1`
   - uses: _none_
 - `EventSales.Catalog.ManualMappingCreator` - `lib/event_sales/catalog/manual_mapping_creator.ex`
   - moduledoc?: true
@@ -1058,6 +1087,12 @@ Project root: `.`
   - docs_count: 2
   - public_funs: `dry_run_file/3`, `list_batches/1`, `get_batch/2`, `queue_apply/2`, `list_rows/2`
   - uses: _none_
+- `EventSales.Ingestion.EventStructuralCertifier` - `lib/event_sales/ingestion/event_structural_certifier.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `certify/3`
+  - uses: _none_
 - `EventSales.Ingestion.FindingsCsvExport` - `lib/event_sales/ingestion/findings_csv_export.ex`
   - moduledoc?: true
   - specs?: true
@@ -1337,8 +1372,8 @@ Project root: `.`
 - `EventSales.Ingestion.TickeraCatalogSync` - `lib/event_sales/ingestion/tickera_catalog_sync.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 3
-  - public_funs: `queue_dry_run/2`, `queue_event_product_discovery/2`, `project_event_parent_products/2`, `project_event_variations/2`, `queue_triggered_dry_run/3`, `queue_apply/3`, `revoke_ready_dry_run/3`, `claim_for_apply/3`, `list_runs/1`, `get_run_preview/2`, `list_source_systems/1`, `active_run_for_source/2`
+  - docs_count: 4
+  - public_funs: `queue_dry_run/2`, `queue_event_product_discovery/2`, `certify_event_structure/3`, `project_event_parent_products/2`, `project_event_variations/2`, `queue_triggered_dry_run/3`, `queue_apply/3`, `revoke_ready_dry_run/3`, `claim_for_apply/3`, `list_runs/1`, `get_run_preview/2`, `list_source_systems/1`, `active_run_for_source/2`
   - uses: _none_
 - `EventSales.Ingestion.TickeraEventSources` - `lib/event_sales/ingestion/tickera_event_sources.ex`
   - moduledoc?: true
@@ -2419,6 +2454,9 @@ Project root: `.`
 
 ### Changes
 
+- `EventSales.Catalog.Changes.InvalidateEventOnboardingAfterIdentityChange` - `lib/event_sales/catalog/changes/invalidate_event_onboarding_after_identity_change.ex`
+- `EventSales.Catalog.Changes.InvalidateEventOnboardingAfterMappingChange` - `lib/event_sales/catalog/changes/invalidate_event_onboarding_after_mapping_change.ex`
+- `EventSales.Catalog.Changes.InvalidateEventOnboardingAfterTicketTypeChange` - `lib/event_sales/catalog/changes/invalidate_event_onboarding_after_ticket_type_change.ex`
 - `EventSales.Catalog.Changes.MappingSideEffectsAfterAction` - `lib/event_sales/catalog/changes/mapping_side_effects_after_action.ex`
 - `EventSales.Catalog.Changes.NormalizeBaseUrl` - `lib/event_sales/catalog/changes/normalize_base_url.ex`
 - `EventSales.Catalog.Changes.ValidateEventDates` - `lib/event_sales/catalog/changes/validate_event_dates.ex`

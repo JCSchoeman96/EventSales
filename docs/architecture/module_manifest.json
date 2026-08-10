@@ -51,6 +51,9 @@
     "lib/event_sales/audit/resources/audit_log.ex",
     "lib/event_sales/catalog.ex",
     "lib/event_sales/catalog/cache_invalidation.ex",
+    "lib/event_sales/catalog/changes/invalidate_event_onboarding_after_identity_change.ex",
+    "lib/event_sales/catalog/changes/invalidate_event_onboarding_after_mapping_change.ex",
+    "lib/event_sales/catalog/changes/invalidate_event_onboarding_after_ticket_type_change.ex",
     "lib/event_sales/catalog/changes/mapping_side_effects_after_action.ex",
     "lib/event_sales/catalog/changes/normalize_base_url.ex",
     "lib/event_sales/catalog/changes/validate_event_dates.ex",
@@ -58,6 +61,7 @@
     "lib/event_sales/catalog/changes/validate_ticket_type_event.ex",
     "lib/event_sales/catalog/event_importer.ex",
     "lib/event_sales/catalog/event_lifecycle.ex",
+    "lib/event_sales/catalog/event_onboarding.ex",
     "lib/event_sales/catalog/manual_mapping_creator.ex",
     "lib/event_sales/catalog/mapping_conflict_resolver.ex",
     "lib/event_sales/catalog/mapping_resolver.ex",
@@ -121,6 +125,7 @@
     "lib/event_sales/ingestion/csv/dry_run_validator.ex",
     "lib/event_sales/ingestion/csv/parser.ex",
     "lib/event_sales/ingestion/csv_imports.ex",
+    "lib/event_sales/ingestion/event_structural_certifier.ex",
     "lib/event_sales/ingestion/findings_csv_export.ex",
     "lib/event_sales/ingestion/handlers/product_updated_handler.ex",
     "lib/event_sales/ingestion/intake_backpressure.ex",
@@ -1256,6 +1261,57 @@
     {
       "docs_count": 0,
       "moduledoc?": true,
+      "name": "EventSales.Catalog.Changes.InvalidateEventOnboardingAfterIdentityChange",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/changes/invalidate_event_onboarding_after_identity_change.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "change"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource.Change"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.Changes.InvalidateEventOnboardingAfterMappingChange",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/changes/invalidate_event_onboarding_after_mapping_change.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "change"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource.Change"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.Changes.InvalidateEventOnboardingAfterTicketTypeChange",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/changes/invalidate_event_onboarding_after_ticket_type_change.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "change"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource.Change"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
       "name": "EventSales.Catalog.Changes.MappingSideEffectsAfterAction",
       "parse_error": null,
       "path": "lib/event_sales/catalog/changes/mapping_side_effects_after_action.ex",
@@ -1375,6 +1431,29 @@
         {
           "arity": 2,
           "name": "past?"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Catalog.EventOnboarding",
+      "parse_error": null,
+      "path": "lib/event_sales/catalog/event_onboarding.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "invalidate_if_pending"
+        },
+        {
+          "arity": 1,
+          "name": "invalidate_many"
+        },
+        {
+          "arity": 1,
+          "name": "lock_events"
         }
       ],
       "specs?": true,
@@ -2880,6 +2959,21 @@
     {
       "docs_count": 0,
       "moduledoc?": true,
+      "name": "EventSales.Ingestion.EventStructuralCertifier",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/event_structural_certifier.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "certify"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
       "name": "EventSales.Ingestion.FindingsCsvExport",
       "parse_error": null,
       "path": "lib/event_sales/ingestion/findings_csv_export.ex",
@@ -3888,7 +3982,7 @@
       "uses": []
     },
     {
-      "docs_count": 3,
+      "docs_count": 4,
       "moduledoc?": true,
       "name": "EventSales.Ingestion.TickeraCatalogSync",
       "parse_error": null,
@@ -3901,6 +3995,10 @@
         {
           "arity": 2,
           "name": "queue_event_product_discovery"
+        },
+        {
+          "arity": 3,
+          "name": "certify_event_structure"
         },
         {
           "arity": 2,
