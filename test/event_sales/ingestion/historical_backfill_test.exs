@@ -17,6 +17,10 @@ defmodule EventSales.Ingestion.HistoricalBackfillTest do
   alias EventSales.Repo
   alias EventSales.TestSupport.SalesHelpers
 
+  defmodule FailingHistoricalAuditLogger do
+    def historical_backfill_requested(_attrs), do: {:error, :audit_unavailable}
+  end
+
   @queue_now ~U[2026-08-10 12:00:00.000000Z]
   @backfill_start ~U[2026-08-01 08:00:00.123456Z]
   @cutoff ~U[2026-08-09 23:59:59.999999Z]
@@ -281,8 +285,30 @@ defmodule EventSales.Ingestion.HistoricalBackfillTest do
              |> Ash.Query.filter(sync_type == :historical_backfill)
              |> Ash.read!(domain: Ingestion)
 
-    assert [%SyncCursor{status: :failed}] = Ash.read!(SyncCursor, domain: Ingestion)
+    assert [%SyncCursor{status: :failed, metadata: metadata}] =
+             Ash.read!(SyncCursor, domain: Ingestion)
 
+    assert metadata["failure"] == "worker_enqueue_failed"
+
+    assert all_enqueued() == []
+  end
+
+  test "historical audit failure is recorded separately from worker enqueue failure", %{
+    admin: admin,
+    event: event
+  } do
+    assert {:error, :audit_unavailable} =
+             queue(event, admin, @cutoff, historical_audit_logger: FailingHistoricalAuditLogger)
+
+    assert [%SyncRun{status: :cancelled}] =
+             SyncRun
+             |> Ash.Query.filter(sync_type == :historical_backfill)
+             |> Ash.read!(domain: Ingestion)
+
+    assert [%SyncCursor{status: :failed, metadata: metadata}] =
+             Ash.read!(SyncCursor, domain: Ingestion)
+
+    assert metadata["failure"] == "audit_failed"
     assert all_enqueued() == []
   end
 

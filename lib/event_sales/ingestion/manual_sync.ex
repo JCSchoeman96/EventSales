@@ -154,12 +154,12 @@ defmodule EventSales.Ingestion.ManualSync do
   end
 
   defp finalize_historical_queue(run, cursor, audit_attrs, opts) do
-    case audit_historical_requested(run, audit_attrs) do
+    case audit_historical_requested(run, audit_attrs, opts) do
       {:ok, _audit} ->
         enqueue_historical_result(run, cursor, opts)
 
       {:error, reason} ->
-        _ = cleanup_historical_enqueue_failure(run)
+        _ = cleanup_historical_failure(run, "audit_failed")
         {:error, classify_historical_error(reason)}
     end
   end
@@ -170,7 +170,7 @@ defmodule EventSales.Ingestion.ManualSync do
         {:ok, %{sync_run: run, sync_cursor: cursor, job: job}}
 
       {:error, _reason} ->
-        _ = cleanup_historical_enqueue_failure(run)
+        _ = cleanup_historical_failure(run, "worker_enqueue_failed")
         {:error, :enqueue_failed}
     end
   end
@@ -283,7 +283,9 @@ defmodule EventSales.Ingestion.ManualSync do
     |> normalize_create_result()
   end
 
-  defp audit_historical_requested(%SyncRun{} = run, audit_attrs) do
+  defp audit_historical_requested(%SyncRun{} = run, audit_attrs, opts) do
+    logger = historical_audit_logger(opts)
+
     metadata =
       audit_attrs
       |> Map.get(:metadata, %{})
@@ -304,7 +306,7 @@ defmodule EventSales.Ingestion.ManualSync do
     |> Map.put(:subject_id, run.id)
     |> Map.put(:event_id, run.event_id)
     |> Map.put(:metadata, metadata)
-    |> then(&AuditLogger.historical_backfill_requested/1)
+    |> then(&logger.historical_backfill_requested/1)
   end
 
   defp normalize_create_result({:ok, record, notifications}),
@@ -377,7 +379,7 @@ defmodule EventSales.Ingestion.ManualSync do
     Ash.update(run, %{}, action: :cancel, domain: Ingestion)
   end
 
-  defp cleanup_historical_enqueue_failure(%SyncRun{} = run) do
+  defp cleanup_historical_failure(%SyncRun{} = run, failure) do
     _ = cancel_run_after_enqueue_failure(run)
 
     with {:ok, %SyncCursor{} = cursor} <-
@@ -385,7 +387,7 @@ defmodule EventSales.Ingestion.ManualSync do
            |> Ash.Query.filter(sync_run_id == ^run.id)
            |> Ash.read_one(domain: Ingestion),
          {:ok, _failed} <-
-           Ash.update(cursor, %{metadata: %{"failure" => "worker_enqueue_failed"}},
+           Ash.update(cursor, %{metadata: Map.put(cursor.metadata || %{}, "failure", failure)},
              action: :mark_failed,
              domain: Ingestion
            ) do
@@ -394,6 +396,9 @@ defmodule EventSales.Ingestion.ManualSync do
       _error -> :ok
     end
   end
+
+  defp historical_audit_logger(opts),
+    do: Keyword.get(opts, :historical_audit_logger, AuditLogger)
 
   defp audit_requested(%SyncRun{} = run, audit_attrs) do
     metadata =

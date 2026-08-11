@@ -38,6 +38,93 @@ defmodule EventSales.Ingestion.HistoricalExecutionTest do
     end
   end
 
+  defmodule WooSourceContractClient do
+    def child_spec(opts) do
+      %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}}
+    end
+
+    def start_link(_opts),
+      do: Agent.start_link(fn -> %{orders: [], requests: []} end, name: __MODULE__)
+
+    def reset!(orders) do
+      Agent.update(__MODULE__, fn _ -> %{orders: orders, requests: []} end)
+    end
+
+    def requests do
+      Agent.get(__MODULE__, &Enum.reverse(&1.requests))
+    end
+
+    def list_orders_page(params, opts) do
+      Agent.get_and_update(__MODULE__, fn %{orders: orders, requests: requests} = state ->
+        result = source_page(orders, params)
+        {result, %{state | requests: [{params, opts} | requests]}}
+      end)
+    end
+
+    defp source_page(orders, params) do
+      with :ok <- require_gmt_filter(params),
+           {:ok, after_bound} <- parse_datetime(params["modified_after"]),
+           {:ok, before_bound} <- parse_datetime(params["modified_before"]),
+           {:ok, page} <- parse_positive_integer(params["page"]),
+           {:ok, per_page} <- parse_positive_integer(params["per_page"]) do
+        page_orders =
+          orders
+          |> Enum.filter(fn order ->
+            {:ok, modified_at} = parse_datetime(order["date_modified_gmt"])
+
+            DateTime.compare(modified_at, after_bound) == :gt and
+              DateTime.compare(modified_at, before_bound) == :lt
+          end)
+          |> Enum.sort_by(fn order ->
+            {:ok, modified_at} = parse_datetime(order["date_modified_gmt"])
+            {DateTime.to_unix(modified_at, :microsecond), order["id"]}
+          end)
+          |> Enum.drop((page - 1) * per_page)
+          |> Enum.take(per_page)
+
+        {:ok, page_orders}
+      end
+    end
+
+    defp require_gmt_filter(%{
+           "dates_are_gmt" => "true",
+           "orderby" => "modified",
+           "order" => "asc"
+         }),
+         do: :ok
+
+    defp require_gmt_filter(_params),
+      do: {:error, {:source_contract_violation, :gmt_tuple_query_required}}
+
+    defp parse_positive_integer(value) when is_binary(value) do
+      case Integer.parse(value) do
+        {integer, ""} when integer > 0 -> {:ok, integer}
+        _other -> {:error, {:source_contract_violation, :invalid_pagination}}
+      end
+    end
+
+    defp parse_positive_integer(_value),
+      do: {:error, {:source_contract_violation, :invalid_pagination}}
+
+    defp parse_datetime(value) when is_binary(value) do
+      case DateTime.from_iso8601(value) do
+        {:ok, datetime, _offset} ->
+          {:ok, datetime}
+
+        {:error, _reason} ->
+          with {:ok, naive} <- NaiveDateTime.from_iso8601(value),
+               {:ok, datetime} <- DateTime.from_naive(naive, "Etc/UTC") do
+            {:ok, datetime}
+          else
+            _error -> {:error, {:source_contract_violation, :invalid_date}}
+          end
+      end
+    end
+
+    defp parse_datetime(_value),
+      do: {:error, {:source_contract_violation, :invalid_date}}
+  end
+
   defmodule FakeUpserter do
     def child_spec(opts) do
       %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}}
@@ -72,6 +159,7 @@ defmodule EventSales.Ingestion.HistoricalExecutionTest do
 
   setup do
     start_supervised!(FakeClient)
+    start_supervised!(WooSourceContractClient)
     start_supervised!(FakeUpserter)
 
     original_rest = Application.get_env(:event_sales, :woocommerce_rest)
@@ -105,13 +193,91 @@ defmodule EventSales.Ingestion.HistoricalExecutionTest do
     assert [{params, _opts}] = FakeClient.requests()
 
     assert params == %{
-             "modified_after" => "2026-05-01T08:00:00Z",
-             "modified_before" => "2026-05-01T08:10:00Z",
+             "modified_after" => "2026-05-01T07:59:59Z",
+             "modified_before" => "2026-05-01T08:10:01Z",
+             "dates_are_gmt" => "true",
              "orderby" => "modified",
              "order" => "asc",
              "page" => "1",
              "per_page" => "2"
            }
+  end
+
+  test "historical source filters use strict UTC overlap and retain exact boundary seconds" do
+    date_to = ~U[2026-05-01 08:10:00.500000Z]
+    context = historical_context!(mapped: true, date_to: date_to)
+
+    orders = [
+      mapped_order(1, "2026-05-01T08:00:00"),
+      mapped_order(2, "2026-05-01T08:10:00"),
+      mapped_order(3, "2026-05-01T08:10:01")
+    ]
+
+    WooSourceContractClient.reset!(orders)
+
+    FakeUpserter.reset!([
+      fn _source, payload -> {:ok, %{id: payload["id"]}} end,
+      fn _source, payload -> {:ok, %{id: payload["id"]}} end
+    ])
+
+    assert {:continue, _run} = run_step(context, woocommerce_client: WooSourceContractClient)
+    assert {:complete, _run} = run_step(context, woocommerce_client: WooSourceContractClient)
+    assert Enum.map(FakeUpserter.calls(), & &1["id"]) == [1, 2]
+
+    assert [{first_params, _}, {second_params, _}] = WooSourceContractClient.requests()
+    assert first_params["dates_are_gmt"] == "true"
+    assert first_params["modified_after"] == "2026-05-01T07:59:59Z"
+    assert first_params["modified_before"] == "2026-05-01T08:10:01Z"
+    assert second_params["page"] == "1"
+  end
+
+  test "Woo's modified-plus-ID source order carries a same-timestamp bucket across pages" do
+    context =
+      historical_context!(
+        mapped: true,
+        cursor: %{modified_after: ~U[2026-05-01 08:05:00Z]}
+      )
+
+    WooSourceContractClient.reset!(Enum.map([10, 20, 30, 40], &mapped_order(&1, @tie_time)))
+
+    FakeUpserter.reset!(
+      Enum.map(1..4, fn _ -> fn _source, payload -> {:ok, %{id: payload["id"]}} end end)
+    )
+
+    assert {:continue, _run} = run_step(context, woocommerce_client: WooSourceContractClient)
+    assert reloaded_cursor(context.run).last_seen_order_id == 20
+
+    assert {:continue, _run} = run_step(context, woocommerce_client: WooSourceContractClient)
+    assert reloaded_cursor(context.run).last_seen_order_id == 40
+
+    assert {:complete, _run} = run_step(context, woocommerce_client: WooSourceContractClient)
+    assert Enum.map(FakeUpserter.calls(), & &1["id"]) == [10, 20, 30, 40]
+
+    assert [{first_params, _}, {second_params, _}, {third_params, _}] =
+             WooSourceContractClient.requests()
+
+    assert first_params["page"] == "1"
+    assert second_params["page"] == "2"
+    assert third_params["page"] == "3"
+  end
+
+  test "a lower-ID same-timestamp page is rejected instead of silently skipping a tie row" do
+    context =
+      historical_context!(cursor: %{modified_after: ~U[2026-05-01 08:05:00Z]})
+
+    FakeClient.reset!([
+      {:ok, [unmatched_order(30, @tie_time), unmatched_order(40, @tie_time)]},
+      {:ok, [unmatched_order(10, @tie_time), unmatched_order(20, @tie_time)]}
+    ])
+
+    assert {:continue, _run} = run_step(context)
+    assert reloaded_cursor(context.run).last_seen_order_id == 40
+
+    assert {:error, {:historical_source_order_regressed, _details}} = run_step(context)
+    cursor = reloaded_cursor(context.run)
+    assert cursor.last_seen_order_id == 40
+    assert cursor.page == 2
+    assert reloaded_run(context.run).status == :running
   end
 
   test "a full raw page does not complete a historical run" do
@@ -368,7 +534,9 @@ defmodule EventSales.Ingestion.HistoricalExecutionTest do
 
   defp historical_context!(opts \\ []) do
     source = SalesHelpers.create_source_system!()
-    event = historical_event!(source)
+    date_from = Keyword.get(opts, :date_from, @from)
+    date_to = Keyword.get(opts, :date_to, @to)
+    event = historical_event!(source, date_from)
     mapped = Keyword.get(opts, :mapped, false)
 
     if mapped do
@@ -397,22 +565,22 @@ defmodule EventSales.Ingestion.HistoricalExecutionTest do
       end
     end
 
-    run = create_historical_run!(source, event)
+    run = create_historical_run!(source, event, date_from, date_to)
 
     cursor_attrs = Keyword.get(opts, :cursor, %{})
     cursor = create_cursor!(run, cursor_attrs)
     %{run: run, cursor: cursor, source: source, event: event}
   end
 
-  defp create_historical_run!(source, event) do
+  defp create_historical_run!(source, event, date_from, date_to) do
     {:ok, run} =
       SyncRun
       |> Ash.Changeset.for_create(:queue_historical_backfill, %{
         event_id: event.id,
-        date_to: @to
+        date_to: date_to
       })
       |> Ash.Changeset.force_change_attribute(:source_system_id, source.id)
-      |> Ash.Changeset.force_change_attribute(:date_from, @from)
+      |> Ash.Changeset.force_change_attribute(:date_from, date_from)
       |> Ash.create(domain: Ingestion)
 
     Ash.update!(run, %{}, action: :start, domain: Ingestion)
@@ -457,7 +625,7 @@ defmodule EventSales.Ingestion.HistoricalExecutionTest do
     end)
   end
 
-  defp historical_event!(source) do
+  defp historical_event!(source, source_created_at) do
     external_event_id = 70_500 + System.unique_integer([:positive])
 
     event =
@@ -472,7 +640,7 @@ defmodule EventSales.Ingestion.HistoricalExecutionTest do
 
     Ash.update!(
       event,
-      %{source_created_at: @from},
+      %{source_created_at: source_created_at},
       action: :capture_source_created_at,
       domain: Catalog,
       context: %{

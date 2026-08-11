@@ -104,6 +104,7 @@ defmodule EventSales.Ingestion.OrderReconciliation do
     with :ok <- validate_historical_context(run, cursor),
          {:ok, raw_orders, per_page} <- fetch_historical_orders(run, cursor, opts),
          {:ok, normalized_orders} <- normalize_historical_orders(raw_orders),
+         :ok <- validate_historical_source_order_progress(normalized_orders, run, cursor),
          {:ok, result} <-
            process_historical_page(run, cursor, normalized_orders, raw_orders, per_page, opts) do
       emit_step_result(run, result)
@@ -234,6 +235,39 @@ defmodule EventSales.Ingestion.OrderReconciliation do
          Enum.sort_by(normalized, fn %{modified_at: modified_at, id: id} ->
            {DateTime.to_unix(modified_at, :microsecond), id}
          end)}
+    end
+  end
+
+  defp validate_historical_source_order_progress([], _run, _cursor), do: :ok
+
+  defp validate_historical_source_order_progress(
+         [%{modified_at: modified_at, id: id} | _rest],
+         %SyncRun{} = run,
+         %SyncCursor{} = cursor
+       ) do
+    current_modified_at = cursor.modified_after || run.date_from
+    current_page = cursor.page || 1
+
+    if current_page > 1 and is_integer(cursor.last_seen_order_id) and
+         source_tuple_precedes_cursor?(
+           modified_at,
+           id,
+           current_modified_at,
+           cursor.last_seen_order_id
+         ) do
+      {:error,
+       {:historical_source_order_regressed,
+        %{page: current_page, modified_at: modified_at, order_id: id}}}
+    else
+      :ok
+    end
+  end
+
+  defp source_tuple_precedes_cursor?(modified_at, id, cursor_modified_at, cursor_order_id) do
+    case DateTime.compare(modified_at, cursor_modified_at) do
+      :lt -> true
+      :eq -> id <= cursor_order_id
+      :gt -> false
     end
   end
 
@@ -656,9 +690,15 @@ defmodule EventSales.Ingestion.OrderReconciliation do
   end
 
   defp build_historical_woo_params(%SyncRun{} = run, %SyncCursor{} = cursor) do
+    modified_after = cursor.modified_after || run.date_from
+
+    # WooCommerce expands orderby=modified to modified ID before WordPress
+    # builds the query, so ascending source pages are ordered by the durable
+    # {date_modified_gmt, order_id} tuple.
     %{
-      "modified_after" => iso8601(cursor.modified_after || run.date_from),
-      "modified_before" => iso8601(run.date_to),
+      "modified_after" => historical_iso8601(historical_transport_after(modified_after)),
+      "modified_before" => historical_iso8601(historical_transport_before(run.date_to)),
+      "dates_are_gmt" => "true",
       "orderby" => "modified",
       "order" => "asc",
       "page" => Integer.to_string(cursor.page || 1),
@@ -799,6 +839,23 @@ defmodule EventSales.Ingestion.OrderReconciliation do
     |> DateTime.truncate(:second)
     |> DateTime.to_iso8601()
   end
+
+  # WooCommerce/WordPress date filters are strict and second-precision. Keep
+  # the durable tuple authoritative and overlap the source request by one
+  # whole source second; local logical-scope filtering remains inclusive.
+  defp historical_transport_after(%DateTime{} = datetime) do
+    datetime
+    |> DateTime.truncate(:second)
+    |> DateTime.add(-1, :second)
+  end
+
+  defp historical_transport_before(%DateTime{} = datetime) do
+    datetime
+    |> DateTime.truncate(:second)
+    |> DateTime.add(1, :second)
+  end
+
+  defp historical_iso8601(%DateTime{} = datetime), do: DateTime.to_iso8601(datetime)
 
   defp per_page do
     Application.get_env(:event_sales, :woocommerce_rest, [])
