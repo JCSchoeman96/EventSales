@@ -137,6 +137,27 @@ defmodule EventSales.Ingestion.Clients.WooCommerceClientTest do
            ] = FakeTransport.requests()
   end
 
+  test "list_orders_page returns one full raw page without pagination-limit completion" do
+    FakeTransport.reset!([
+      {:ok, 200, [], Jason.encode!([%{"id" => 1}, %{"id" => 2}])}
+    ])
+
+    assert {:ok, [%{"id" => 1}, %{"id" => 2}]} =
+             WooCommerceClient.list_orders_page(%{
+               "page" => "3",
+               "per_page" => "2",
+               "modified_after" => "2026-05-01T00:00:00Z"
+             })
+
+    assert [%{url: url}] = FakeTransport.requests()
+
+    assert URI.decode_query(URI.parse(url).query) == %{
+             "modified_after" => "2026-05-01T00:00:00Z",
+             "page" => "3",
+             "per_page" => "2"
+           }
+  end
+
   test "list_products stops at max_pages with a typed pagination error" do
     FakeTransport.reset!([
       {:ok, 200, [], Jason.encode!([%{id: 1}, %{id: 2}])},

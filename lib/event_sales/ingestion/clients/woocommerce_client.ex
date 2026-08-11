@@ -49,6 +49,19 @@ defmodule EventSales.Ingestion.Clients.WooCommerceClient do
     end
   end
 
+  @doc "Fetches exactly one raw WooCommerce order page without iterating."
+  @spec list_orders_page(params(), keyword()) :: {:ok, [map()]} | {:error, WooCommerceError.t()}
+  def list_orders_page(params \\ %{}, opts \\ []) do
+    with {:ok, config} <- config(:list_orders_page, opts),
+         {:ok, query} <- one_page_query(params, config.per_page) do
+      case guarded_request(:list_orders_page, config, url(config, "/orders", query)) do
+        {:ok, page} when is_list(page) -> {:ok, page}
+        {:ok, _not_a_list} -> emit_exception(:list_orders_page, :invalid_json)
+        {:error, %WooCommerceError{} = error} -> {:error, error}
+      end
+    end
+  end
+
   @doc "Lists WooCommerce products using bounded page iteration."
   @spec list_products(params(), keyword()) :: {:ok, [map()]} | {:error, WooCommerceError.t()}
   def list_products(params \\ %{}, opts \\ []) do
@@ -90,6 +103,35 @@ defmodule EventSales.Ingestion.Clients.WooCommerceClient do
   defp fetch_page(operation, config, path, params, page) do
     query = page_query(params, page, config.per_page)
     guarded_request(operation, config, url(config, path, query))
+  end
+
+  defp one_page_query(params, default_per_page) do
+    normalized = normalize_query_params(params)
+
+    with {:ok, page} <- positive_query_value(normalized, "page", 1),
+         {:ok, per_page} <- positive_query_value(normalized, "per_page", default_per_page) do
+      query =
+        [{"page", page}, {"per_page", per_page}] ++
+          Enum.reject(normalized, fn {key, _value} -> key in ["page", "per_page"] end)
+
+      {:ok, query}
+    end
+  end
+
+  defp positive_query_value(params, key, default) do
+    case List.keyfind(params, key, 0) do
+      nil -> {:ok, default}
+      {^key, value} when is_integer(value) and value > 0 -> {:ok, value}
+      {^key, value} when is_binary(value) -> parse_positive_query_value(value)
+      _other -> emit_exception(:list_orders_page, :invalid_request)
+    end
+  end
+
+  defp parse_positive_query_value(value) do
+    case Integer.parse(String.trim(value)) do
+      {parsed, ""} when parsed > 0 -> {:ok, parsed}
+      _other -> emit_exception(:list_orders_page, :invalid_request)
+    end
   end
 
   defp continue_or_stop_page({:ok, page_items}, _operation, per_page, acc)
@@ -260,7 +302,10 @@ defmodule EventSales.Ingestion.Clients.WooCommerceClient do
   end
 
   defp page_query(params, page, per_page) do
-    [{"page", page}, {"per_page", per_page}] ++ normalize_query_params(params)
+    [{"page", page}, {"per_page", per_page}] ++
+      Enum.reject(normalize_query_params(params), fn {key, _value} ->
+        key in ["page", "per_page"]
+      end)
   end
 
   defp normalize_query_params(params) do
