@@ -10,10 +10,12 @@ defmodule EventSales.Ingestion.OrderReconciliation do
 
   alias EventSales.Analytics.OrderProcessedNotifier
   alias EventSales.Catalog
+  alias EventSales.Catalog.Resources.Event
   alias EventSales.Catalog.Resources.ProductMapping
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Clients.{WooCommerceClient, WooCommerceError}
   alias EventSales.Ingestion.Resources.{SyncCursor, SyncRun}
+  alias EventSales.Repo
   alias EventSales.Sales.OrderUpserter
   alias EventSales.Telemetry
 
@@ -82,6 +84,47 @@ defmodule EventSales.Ingestion.OrderReconciliation do
     end
   end
 
+  @doc """
+  Executes exactly one historical WooCommerce source page.
+
+  Historical progress is checkpointed only after every mapped order on the raw
+  page has been accepted by OrderUpserter. The page itself remains the source
+  of pagination evidence; Event matching only controls which rows are written.
+  """
+  @spec run_historical_step(SyncRun.t(), SyncCursor.t() | nil, keyword()) :: step_result()
+  def run_historical_step(run, cursor, opts \\ [])
+
+  def run_historical_step(
+        %SyncRun{sync_type: :historical_backfill} = run,
+        %SyncCursor{} = cursor,
+        opts
+      ) do
+    emit_start(run)
+
+    with :ok <- validate_historical_context(run, cursor),
+         {:ok, raw_orders, per_page} <- fetch_historical_orders(run, cursor, opts),
+         {:ok, normalized_orders} <- normalize_historical_orders(raw_orders),
+         {:ok, result} <-
+           process_historical_page(run, cursor, normalized_orders, raw_orders, per_page, opts) do
+      emit_step_result(run, result)
+      result
+    else
+      {:pause, paused_run, pause_reason, seconds} ->
+        emit_pause(paused_run, pause_reason)
+        {:pause, paused_run, pause_reason, seconds}
+
+      {:error, reason} = error ->
+        emit_exception(run, reason)
+        error
+    end
+  end
+
+  def run_historical_step(%SyncRun{sync_type: :historical_backfill}, nil, _opts),
+    do: {:error, :historical_cursor_required}
+
+  def run_historical_step(%SyncRun{}, _cursor, _opts),
+    do: {:error, :historical_run_required}
+
   defp ensure_cursor(%SyncRun{}, %SyncCursor{} = cursor), do: {:ok, cursor}
 
   defp ensure_cursor(%SyncRun{} = run, nil) do
@@ -94,6 +137,386 @@ defmodule EventSales.Ingestion.OrderReconciliation do
       metadata: %{}
     })
     |> Ash.create(domain: Ingestion)
+  end
+
+  defp validate_historical_context(%SyncRun{} = run, %SyncCursor{} = cursor) do
+    with :ok <- validate_historical_cursor(run, cursor),
+         do: validate_historical_event(run)
+  end
+
+  defp validate_historical_cursor(%SyncRun{} = run, %SyncCursor{} = cursor) do
+    cond do
+      cursor.sync_run_id != run.id ->
+        {:error, :historical_cursor_run_mismatch}
+
+      cursor.status != :active ->
+        {:error, :historical_cursor_not_active}
+
+      is_nil(run.date_from) or is_nil(run.date_to) ->
+        {:error, :historical_scope_missing}
+
+      cursor.modified_before != run.date_to ->
+        {:error, :historical_cutoff_mismatch}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp validate_historical_event(%SyncRun{} = run) do
+    case Ash.get(Event, run.event_id, domain: Catalog) do
+      {:ok,
+       %Event{
+         source_system_id: source_system_id,
+         source_created_at: %DateTime{} = source_created_at,
+         analytics_onboarding_state: :backfill_pending
+       }} ->
+        if source_system_id == run.source_system_id and
+             DateTime.compare(source_created_at, run.date_from) == :eq do
+          :ok
+        else
+          {:error, :historical_scope_changed}
+        end
+
+      {:ok, %Event{analytics_onboarding_state: state}} ->
+        {:error, {:historical_event_not_backfill_pending, state}}
+
+      {:ok, nil} ->
+        {:error, :historical_event_missing}
+
+      {:error, reason} ->
+        {:error, {:historical_event_lookup_failed, reason}}
+    end
+  end
+
+  defp fetch_historical_orders(%SyncRun{} = run, %SyncCursor{} = cursor, opts) do
+    params = build_historical_woo_params(run, cursor)
+    client = Keyword.get(opts, :woocommerce_client, WooCommerceClient)
+    per_page = per_page()
+
+    client_opts =
+      []
+      |> maybe_put_client_opt(:transport, Keyword.get(opts, :transport))
+
+    case client.list_orders_page(params, client_opts) do
+      {:ok, orders} when is_list(orders) ->
+        {:ok, orders, per_page}
+
+      {:error, %WooCommerceError{} = error} ->
+        handle_fetch_error(run, error)
+
+      {:error, reason} ->
+        {:error, reason}
+
+      _other ->
+        {:error, :invalid_historical_source_page}
+    end
+  end
+
+  defp normalize_historical_orders(raw_orders) do
+    raw_orders
+    |> Enum.reduce_while([], fn order, normalized ->
+      with {:ok, id} <- historical_order_id(order),
+           {:ok, modified_at} <- historical_modified_at(order) do
+        normalized_order = %{payload: order, id: id, modified_at: modified_at}
+        {:cont, [normalized_order | normalized]}
+      else
+        {:error, field} ->
+          {:halt, {:error, {:invalid_historical_source_order, field}}}
+      end
+    end)
+    |> case do
+      {:error, reason} ->
+        {:error, reason}
+
+      normalized ->
+        {:ok,
+         Enum.sort_by(normalized, fn %{modified_at: modified_at, id: id} ->
+           {DateTime.to_unix(modified_at, :microsecond), id}
+         end)}
+    end
+  end
+
+  defp process_historical_page(
+         %SyncRun{} = run,
+         %SyncCursor{} = cursor,
+         normalized_orders,
+         raw_orders,
+         per_page,
+         opts
+       ) do
+    orders =
+      Enum.filter(normalized_orders, fn order ->
+        historical_in_scope?(order.modified_at, run) and
+          historical_after_cursor?(order, run, cursor)
+      end)
+
+    with {:ok, counts} <- process_historical_orders(run, orders, opts),
+         :ok <- run_historical_checkpoint_hook(opts) do
+      persist_historical_checkpoint(
+        run,
+        cursor,
+        counts,
+        historical_progress(run, cursor, orders),
+        length(raw_orders) < per_page
+      )
+    end
+  end
+
+  defp process_historical_orders(%SyncRun{} = run, orders, opts) do
+    mappings = active_mappings(run)
+    notifier = notifier(opts)
+    upserter = Keyword.get(opts, :order_upserter, OrderUpserter)
+
+    Enum.reduce_while(orders, {:ok, initial_counts()}, fn order, {:ok, counts} ->
+      process_historical_order(order, counts, run, mappings, upserter, notifier)
+    end)
+  end
+
+  defp process_historical_order(order, counts, run, mappings, upserter, notifier) do
+    counts = %{counts | orders_seen_count: counts.orders_seen_count + 1}
+    filtered = filter_matching_line_items(order.payload, mappings)
+
+    if filtered["line_items"] == [] do
+      {:cont, {:ok, counts}}
+    else
+      process_historical_match(filtered, counts, run, upserter, notifier)
+    end
+  end
+
+  defp process_historical_match(filtered, counts, run, upserter, notifier) do
+    counts = %{counts | orders_matched_count: counts.orders_matched_count + 1}
+
+    case historical_upsert(upserter, run.source_system_id, filtered) do
+      {:ok, %{} = persisted} ->
+        historical_persisted_result(persisted, counts, run, notifier)
+
+      {:ok, :stale_noop} ->
+        {:cont, {:ok, %{counts | orders_stale_count: counts.orders_stale_count + 1}}}
+
+      {:error, reason} ->
+        {:halt, {:error, {:historical_order_upsert_failed, reason}}}
+
+      other ->
+        {:halt, {:error, {:historical_order_upsert_failed, other}}}
+    end
+  end
+
+  defp historical_persisted_result(persisted, counts, run, notifier) do
+    case historical_notify(notifier, persisted, run, run.event_id) do
+      :ok ->
+        {:cont, {:ok, %{counts | orders_upserted_count: counts.orders_upserted_count + 1}}}
+
+      {:error, reason} ->
+        {:halt, {:error, {:historical_notification_failed, reason}}}
+    end
+  end
+
+  defp historical_upsert(upserter, source_system_id, payload) do
+    upserter.upsert_order(source_system_id, payload)
+  rescue
+    error -> {:error, error}
+  catch
+    kind, reason -> {:error, {kind, reason}}
+  end
+
+  defp historical_notify(notifier, persisted, run, event_id) do
+    case notifier.notify_order_reconciled(persisted, run, event_id) do
+      :ok -> :ok
+      other -> {:error, other}
+    end
+  rescue
+    error -> {:error, error}
+  catch
+    kind, reason -> {:error, {kind, reason}}
+  end
+
+  defp run_historical_checkpoint_hook(opts) do
+    case Keyword.get(opts, :checkpoint_fun) do
+      nil -> :ok
+      checkpoint when is_function(checkpoint, 0) -> checkpoint.()
+      _other -> {:error, :invalid_checkpoint_fun}
+    end
+  rescue
+    error -> {:error, error}
+  catch
+    kind, reason -> {:error, {kind, reason}}
+  end
+
+  defp persist_historical_checkpoint(
+         %SyncRun{} = run,
+         %SyncCursor{} = cursor,
+         counts,
+         progress,
+         terminal?
+       ) do
+    transaction_result =
+      Repo.transaction(fn ->
+        with {:ok, counted_run, count_notifications} <-
+               record_counts(run, counts, return_notifications?: true),
+             {:ok, persisted_cursor, cursor_notifications} <-
+               persist_historical_cursor(cursor, progress, terminal?),
+             {:ok, final_run, run_notifications} <-
+               maybe_complete_historical_run(counted_run, terminal?) do
+          {
+            persisted_cursor,
+            final_run,
+            count_notifications ++ cursor_notifications ++ run_notifications
+          }
+        else
+          {:error, reason} -> Repo.rollback(reason)
+          other -> Repo.rollback(other)
+        end
+      end)
+
+    case transaction_result do
+      {:ok, {_cursor, %SyncRun{status: :completed} = completed, notifications}} ->
+        Ash.Notifier.notify(notifications)
+        {:ok, {:complete, completed}}
+
+      {:ok, {_cursor, %SyncRun{} = continued, notifications}} ->
+        Ash.Notifier.notify(notifications)
+        {:ok, {:continue, continued}}
+
+      {:error, reason} ->
+        {:error, {:historical_checkpoint_failed, reason}}
+    end
+  end
+
+  defp persist_historical_cursor(%SyncCursor{} = cursor, progress, true) do
+    cursor
+    |> Ash.update(
+      %{
+        page: progress.page,
+        modified_after: progress.modified_after,
+        modified_before: cursor.modified_before,
+        last_seen_order_id: progress.last_seen_order_id,
+        metadata: cursor.metadata || %{}
+      },
+      action: :mark_done,
+      domain: Ingestion,
+      return_notifications?: true
+    )
+    |> normalize_notifications_result()
+  end
+
+  defp persist_historical_cursor(%SyncCursor{} = cursor, progress, false) do
+    attrs = %{
+      page: progress.page,
+      modified_after: progress.modified_after,
+      modified_before: cursor.modified_before,
+      last_seen_order_id: progress.last_seen_order_id,
+      metadata: cursor.metadata || %{}
+    }
+
+    historical_upsert_cursor(cursor, attrs)
+  end
+
+  defp maybe_complete_historical_run(run, true) do
+    run
+    |> Ash.update(%{},
+      action: :complete,
+      domain: Ingestion,
+      return_notifications?: true
+    )
+    |> normalize_notifications_result()
+  end
+
+  defp maybe_complete_historical_run(run, false), do: {:ok, run, []}
+
+  defp historical_progress(%SyncRun{} = run, %SyncCursor{} = cursor, []) do
+    %{
+      page: (cursor.page || 1) + 1,
+      modified_after: cursor.modified_after || run.date_from,
+      last_seen_order_id: cursor.last_seen_order_id
+    }
+  end
+
+  defp historical_progress(%SyncRun{} = run, %SyncCursor{} = cursor, orders) do
+    %{modified_at: modified_at, id: id} = List.last(orders)
+    current_modified_at = cursor.modified_after || run.date_from
+
+    case DateTime.compare(modified_at, current_modified_at) do
+      :gt ->
+        %{page: 1, modified_after: modified_at, last_seen_order_id: id}
+
+      :eq ->
+        %{
+          page: (cursor.page || 1) + 1,
+          modified_after: current_modified_at,
+          last_seen_order_id: max_order_id(cursor.last_seen_order_id, id)
+        }
+
+      :lt ->
+        %{
+          page: (cursor.page || 1) + 1,
+          modified_after: current_modified_at,
+          last_seen_order_id: cursor.last_seen_order_id
+        }
+    end
+  end
+
+  defp max_order_id(nil, id), do: id
+  defp max_order_id(current, id), do: max(current, id)
+
+  defp historical_in_scope?(modified_at, %SyncRun{} = run) do
+    DateTime.compare(modified_at, run.date_from) in [:eq, :gt] and
+      DateTime.compare(modified_at, run.date_to) in [:eq, :lt]
+  end
+
+  defp historical_after_cursor?(
+         %{modified_at: modified_at, id: id},
+         %SyncRun{} = run,
+         %SyncCursor{} = cursor
+       ) do
+    current_modified_at = cursor.modified_after || run.date_from
+
+    case DateTime.compare(modified_at, current_modified_at) do
+      :gt -> true
+      :lt -> false
+      :eq -> is_nil(cursor.last_seen_order_id) or id > cursor.last_seen_order_id
+    end
+  end
+
+  defp historical_order_id(order) when is_map(order) do
+    case Map.get(order, "id") || Map.get(order, :id) do
+      id when is_integer(id) and id > 0 -> {:ok, id}
+      id when is_binary(id) -> parse_historical_order_id(id)
+      _other -> {:error, :id}
+    end
+  end
+
+  defp historical_order_id(_order), do: {:error, :id}
+
+  defp parse_historical_order_id(value) do
+    case Integer.parse(String.trim(value)) do
+      {id, ""} when id > 0 -> {:ok, id}
+      _other -> {:error, :id}
+    end
+  end
+
+  defp historical_modified_at(order) when is_map(order) do
+    case Map.get(order, "date_modified_gmt") || Map.get(order, :date_modified_gmt) do
+      value when is_binary(value) -> parse_historical_modified_at(value)
+      _other -> {:error, :date_modified_gmt}
+    end
+  end
+
+  defp historical_modified_at(_order), do: {:error, :date_modified_gmt}
+
+  defp parse_historical_modified_at(value) do
+    case DateTime.from_iso8601(String.trim(value)) do
+      {:ok, datetime, _offset} ->
+        {:ok, DateTime.from_unix!(DateTime.to_unix(datetime, :microsecond), :microsecond)}
+
+      {:error, _reason} ->
+        with {:ok, naive} <- NaiveDateTime.from_iso8601(String.trim(value)),
+             {:ok, datetime} <- DateTime.from_naive(naive, "Etc/UTC") do
+          {:ok, datetime}
+        else
+          _error -> {:error, :date_modified_gmt}
+        end
+    end
   end
 
   defp fetch_orders(%SyncRun{} = run, %SyncCursor{} = cursor, opts) do
@@ -232,6 +655,17 @@ defmodule EventSales.Ingestion.OrderReconciliation do
     }
   end
 
+  defp build_historical_woo_params(%SyncRun{} = run, %SyncCursor{} = cursor) do
+    %{
+      "modified_after" => iso8601(cursor.modified_after || run.date_from),
+      "modified_before" => iso8601(run.date_to),
+      "orderby" => "modified",
+      "order" => "asc",
+      "page" => Integer.to_string(cursor.page || 1),
+      "per_page" => Integer.to_string(per_page())
+    }
+  end
+
   defp line_item_matches?(line_item, mappings) do
     product_id = woo_id(line_item, "product_id")
     variation_id = normalize_variation_id(line_item)
@@ -256,7 +690,9 @@ defmodule EventSales.Ingestion.OrderReconciliation do
     |> Ash.read!(domain: Catalog)
   end
 
-  defp record_counts(%SyncRun{} = run, counts) do
+  defp record_counts(%SyncRun{} = run, counts), do: record_counts(run, counts, [])
+
+  defp record_counts(%SyncRun{} = run, counts, opts) do
     attrs = %{
       orders_seen_count: run.orders_seen_count + counts.orders_seen_count,
       orders_matched_count: run.orders_matched_count + counts.orders_matched_count,
@@ -266,7 +702,18 @@ defmodule EventSales.Ingestion.OrderReconciliation do
       errors_count: run.errors_count + counts.errors_count
     }
 
-    Ash.update(run, attrs, action: :record_counts, domain: Ingestion)
+    result =
+      Ash.update(
+        run,
+        attrs,
+        Keyword.merge([action: :record_counts, domain: Ingestion], opts)
+      )
+
+    if Keyword.get(opts, :return_notifications?, false) do
+      normalize_notifications_result(result)
+    else
+      result
+    end
   end
 
   defp complete_run(%SyncRun{} = run) do
@@ -289,6 +736,26 @@ defmodule EventSales.Ingestion.OrderReconciliation do
     |> Ash.Changeset.for_create(:upsert_active, attrs)
     |> Ash.create(domain: Ingestion)
   end
+
+  defp historical_upsert_cursor(%SyncCursor{sync_run_id: sync_run_id} = cursor, attrs) do
+    attrs =
+      attrs
+      |> Map.put(:sync_run_id, sync_run_id)
+      |> Map.put_new(:modified_after, cursor.modified_after)
+      |> Map.put_new(:modified_before, cursor.modified_before)
+      |> Map.put_new(:metadata, cursor.metadata || %{})
+
+    SyncCursor
+    |> Ash.Changeset.for_create(:upsert_active, attrs)
+    |> Ash.create(domain: Ingestion, return_notifications?: true)
+    |> normalize_notifications_result()
+  end
+
+  defp normalize_notifications_result({:ok, record, notifications}),
+    do: {:ok, record, notifications}
+
+  defp normalize_notifications_result({:ok, record}), do: {:ok, record, []}
+  defp normalize_notifications_result(error), do: error
 
   defp reload_run(%SyncRun{id: id}), do: Ash.get(SyncRun, id, domain: Ingestion)
 

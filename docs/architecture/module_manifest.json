@@ -2834,7 +2834,7 @@
       "uses": []
     },
     {
-      "docs_count": 5,
+      "docs_count": 6,
       "moduledoc?": true,
       "name": "EventSales.Ingestion.Clients.WooCommerceClient",
       "parse_error": null,
@@ -2851,6 +2851,10 @@
         {
           "arity": 2,
           "name": "list_orders"
+        },
+        {
+          "arity": 2,
+          "name": "list_orders_page"
         },
         {
           "arity": 2,
@@ -3065,7 +3069,7 @@
       "uses": []
     },
     {
-      "docs_count": 4,
+      "docs_count": 5,
       "moduledoc?": true,
       "name": "EventSales.Ingestion.OrderReconciliation",
       "parse_error": null,
@@ -3086,6 +3090,10 @@
         {
           "arity": 3,
           "name": "run_step"
+        },
+        {
+          "arity": 3,
+          "name": "run_historical_step"
         }
       ],
       "specs?": true,
@@ -4451,9 +4459,16 @@
       "name": "EventSales.Ingestion.Workers.BackfillOrdersWorker",
       "parse_error": null,
       "path": "lib/event_sales/ingestion/workers/backfill_orders_worker.ex",
-      "public_funs": [],
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "perform"
+        }
+      ],
       "specs?": false,
-      "uses": []
+      "uses": [
+        "Oban.Worker"
+      ]
     },
     {
       "docs_count": 0,

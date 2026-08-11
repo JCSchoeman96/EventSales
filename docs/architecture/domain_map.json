@@ -933,6 +933,23 @@
       {
         "docs_count": 0,
         "moduledoc?": true,
+        "name": "EventSales.Ingestion.Workers.BackfillOrdersWorker",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/workers/backfill_orders_worker.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "perform"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Oban.Worker"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
         "name": "EventSales.Ingestion.Workers.CatalogChangeDispatchWorker",
         "parse_error": null,
         "path": "lib/event_sales/ingestion/workers/catalog_change_dispatch_worker.ex",

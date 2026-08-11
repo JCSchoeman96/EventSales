@@ -1055,8 +1055,8 @@ Project root: `.`
 - `EventSales.Ingestion.Clients.WooCommerceClient` - `lib/event_sales/ingestion/clients/woocommerce_client.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 5
-  - public_funs: `fetch_order/2`, `fetch_product/2`, `list_orders/2`, `list_products/2`, `validate_configuration/1`
+  - docs_count: 6
+  - public_funs: `fetch_order/2`, `fetch_product/2`, `list_orders/2`, `list_orders_page/2`, `list_products/2`, `validate_configuration/1`
   - uses: _none_
 - `EventSales.Ingestion.Clients.WooCommerceError` - `lib/event_sales/ingestion/clients/woocommerce_error.ex`
   - moduledoc?: true
@@ -1127,8 +1127,8 @@ Project root: `.`
 - `EventSales.Ingestion.OrderReconciliation` - `lib/event_sales/ingestion/order_reconciliation.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 4
-  - public_funs: `load_or_init_cursor/2`, `woo_params/2`, `matches_event_mapping?/2`, `run_step/3`
+  - docs_count: 5
+  - public_funs: `load_or_init_cursor/2`, `woo_params/2`, `matches_event_mapping?/2`, `run_step/3`, `run_historical_step/3`
   - uses: _none_
 - `EventSales.Ingestion.Parsers.WoocommerceOrderParser` - `lib/event_sales/ingestion/parsers/woocommerce_order_parser.ex`
   - moduledoc?: true
@@ -1482,8 +1482,8 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: _none_
-  - uses: _none_
+  - public_funs: `perform/1`
+  - uses: `Oban.Worker`
 - `EventSales.Ingestion.Workers.CatalogChangeDispatchWorker` - `lib/event_sales/ingestion/workers/catalog_change_dispatch_worker.ex`
   - moduledoc?: true
   - specs?: false
@@ -2570,6 +2570,7 @@ _none_
 - `EventSales.Analytics.Workers.RefreshSnapshotWorker` - `lib/event_sales/analytics/workers/refresh_snapshot_worker.ex`
 - `EventSales.Catalog.Workers.MappingChangedWorker` - `lib/event_sales/catalog/workers/mapping_changed_worker.ex`
 - `EventSales.Ingestion.Workers.ApplyTickeraCatalogWorker` - `lib/event_sales/ingestion/workers/apply_tickera_catalog_worker.ex`
+- `EventSales.Ingestion.Workers.BackfillOrdersWorker` - `lib/event_sales/ingestion/workers/backfill_orders_worker.ex`
 - `EventSales.Ingestion.Workers.CatalogChangeDispatchWorker` - `lib/event_sales/ingestion/workers/catalog_change_dispatch_worker.ex`
 - `EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker` - `lib/event_sales/ingestion/workers/discover_tickera_catalog_worker.ex`
 - `EventSales.Ingestion.Workers.EvaluateTickeraCatalogAutoApplyWorker` - `lib/event_sales/ingestion/workers/evaluate_tickera_catalog_auto_apply_worker.ex`

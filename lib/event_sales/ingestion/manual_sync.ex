@@ -4,12 +4,15 @@ defmodule EventSales.Ingestion.ManualSync do
   historical backfill runs.
   """
 
+  require Ash.Query
+
   alias EventSales.Accounts.Policies
   alias EventSales.Audit.Logger, as: AuditLogger
   alias EventSales.Catalog
   alias EventSales.Catalog.Resources.Event
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Resources.{SyncCursor, SyncRun}
+  alias EventSales.Ingestion.Workers.BackfillOrdersWorker
   alias EventSales.Ingestion.Workers.ReconcileOrdersWorker
   alias EventSales.Repo
 
@@ -39,7 +42,7 @@ defmodule EventSales.Ingestion.ManualSync do
           | {:error, :forbidden | :enqueue_failed | term()}
 
   @type historical_result ::
-          {:ok, %{sync_run: SyncRun.t(), sync_cursor: SyncCursor.t()}}
+          {:ok, %{sync_run: SyncRun.t(), sync_cursor: SyncCursor.t(), job: Oban.Job.t()}}
           | {:error, :forbidden | term()}
 
   @doc """
@@ -68,7 +71,7 @@ defmodule EventSales.Ingestion.ManualSync do
 
   The Event is the only source of source_system_id and date_from.
   Historical queueing creates the run and its initial cursor in one Postgres
-  transaction and intentionally does not enqueue an Oban job.
+  transaction, audits the request, and enqueues exactly one bounded worker.
   """
   @spec queue_historical_backfill(Ecto.UUID.t(), DateTime.t() | nil, audit_attrs(), keyword()) ::
           historical_result()
@@ -138,15 +141,37 @@ defmodule EventSales.Ingestion.ManualSync do
   end
 
   defp queue_persisted_historical_backfill(event, date_from, date_to, audit_attrs, opts) do
-    with {:ok, %{sync_run: run, sync_cursor: cursor, notifications: notifications}} <-
-           Repo.transaction(fn ->
-             persist_historical_backfill(event, date_from, date_to, audit_attrs, opts)
-           end),
-         {:ok, _audit} <- audit_historical_requested(run, audit_attrs) do
-      Ash.Notifier.notify(notifications)
-      {:ok, %{sync_run: run, sync_cursor: cursor}}
-    else
-      {:error, reason} -> {:error, classify_historical_error(reason)}
+    case Repo.transaction(fn ->
+           persist_historical_backfill(event, date_from, date_to, audit_attrs, opts)
+         end) do
+      {:ok, %{sync_run: run, sync_cursor: cursor, notifications: notifications}} ->
+        Ash.Notifier.notify(notifications)
+        finalize_historical_queue(run, cursor, audit_attrs, opts)
+
+      {:error, reason} ->
+        {:error, classify_historical_error(reason)}
+    end
+  end
+
+  defp finalize_historical_queue(run, cursor, audit_attrs, opts) do
+    case audit_historical_requested(run, audit_attrs) do
+      {:ok, _audit} ->
+        enqueue_historical_result(run, cursor, opts)
+
+      {:error, reason} ->
+        _ = cleanup_historical_enqueue_failure(run)
+        {:error, classify_historical_error(reason)}
+    end
+  end
+
+  defp enqueue_historical_result(run, cursor, opts) do
+    case enqueue_historical_worker(run, opts) do
+      {:ok, job} ->
+        {:ok, %{sync_run: run, sync_cursor: cursor, job: job}}
+
+      {:error, _reason} ->
+        _ = cleanup_historical_enqueue_failure(run)
+        {:error, :enqueue_failed}
     end
   end
 
@@ -331,8 +356,43 @@ defmodule EventSales.Ingestion.ManualSync do
     |> Oban.insert()
   end
 
+  defp enqueue_historical_worker(%SyncRun{} = run, opts) do
+    case Keyword.get(opts, :historical_worker_enqueuer) do
+      enqueuer when is_function(enqueuer, 1) ->
+        enqueuer.(run)
+
+      nil ->
+        %{"sync_run_id" => run.id}
+        |> BackfillOrdersWorker.new()
+        |> Oban.insert()
+
+      _other ->
+        {:error, :invalid_historical_worker_enqueuer}
+    end
+  rescue
+    _error -> {:error, :enqueue_failed}
+  end
+
   defp cancel_run_after_enqueue_failure(%SyncRun{} = run) do
     Ash.update(run, %{}, action: :cancel, domain: Ingestion)
+  end
+
+  defp cleanup_historical_enqueue_failure(%SyncRun{} = run) do
+    _ = cancel_run_after_enqueue_failure(run)
+
+    with {:ok, %SyncCursor{} = cursor} <-
+           SyncCursor
+           |> Ash.Query.filter(sync_run_id == ^run.id)
+           |> Ash.read_one(domain: Ingestion),
+         {:ok, _failed} <-
+           Ash.update(cursor, %{metadata: %{"failure" => "worker_enqueue_failed"}},
+             action: :mark_failed,
+             domain: Ingestion
+           ) do
+      :ok
+    else
+      _error -> :ok
+    end
   end
 
   defp audit_requested(%SyncRun{} = run, audit_attrs) do

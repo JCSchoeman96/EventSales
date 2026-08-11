@@ -60,6 +60,9 @@ defmodule EventSales.Ingestion.Workers.ReconcileOrdersWorker do
       {:ok, %SyncRun{status: status}} when status in [:completed, :failed, :cancelled] ->
         :discard
 
+      {:ok, %SyncRun{sync_type: :historical_backfill}} ->
+        :discard
+
       {:ok, %SyncRun{} = run} ->
         {:ok, run}
 

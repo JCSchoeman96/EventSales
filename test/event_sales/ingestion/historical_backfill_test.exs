@@ -13,6 +13,7 @@ defmodule EventSales.Ingestion.HistoricalBackfillTest do
   alias EventSales.Ingestion
   alias EventSales.Ingestion.ManualSync
   alias EventSales.Ingestion.Resources.{SyncCursor, SyncRun}
+  alias EventSales.Ingestion.Workers.BackfillOrdersWorker
   alias EventSales.Repo
   alias EventSales.TestSupport.SalesHelpers
 
@@ -33,7 +34,7 @@ defmodule EventSales.Ingestion.HistoricalBackfillTest do
     source: source,
     event: event
   } do
-    assert {:ok, %{sync_run: run, sync_cursor: cursor}} = queue(event, admin)
+    assert {:ok, %{sync_run: run, sync_cursor: cursor, job: job}} = queue(event, admin)
 
     assert run.source_system_id == source.id
     assert run.event_id == event.id
@@ -51,6 +52,9 @@ defmodule EventSales.Ingestion.HistoricalBackfillTest do
     assert cursor.last_seen_order_id == nil
     assert cursor.status == :active
     assert cursor.metadata == %{}
+
+    assert job.worker == Oban.Worker.to_string(BackfillOrdersWorker)
+    assert_enqueued(worker: BackfillOrdersWorker, args: %{"sync_run_id" => run.id})
 
     assert Ash.count!(SyncCursor, domain: Ingestion) == 1
 
@@ -251,7 +255,7 @@ defmodule EventSales.Ingestion.HistoricalBackfillTest do
     assert Ash.count!(SyncCursor, domain: Ingestion) == 1
   end
 
-  test "historical queueing creates no orders, items, refunds, or Oban jobs", %{
+  test "historical queueing creates no orders or items and enqueues one worker", %{
     admin: admin,
     event: event
   } do
@@ -262,6 +266,23 @@ defmodule EventSales.Ingestion.HistoricalBackfillTest do
 
     assert Repo.aggregate(from(order in "sales_orders"), :count, :id) == orders_before
     assert Repo.aggregate(from(item in "sales_order_items"), :count, :id) == items_before
+    assert [%Oban.Job{worker: worker}] = all_enqueued()
+    assert worker == Oban.Worker.to_string(BackfillOrdersWorker)
+  end
+
+  test "historical enqueue failure cancels the created run", %{admin: admin, event: event} do
+    assert {:error, :enqueue_failed} =
+             queue(event, admin, @cutoff,
+               historical_worker_enqueuer: fn _run -> {:error, :queue_unavailable} end
+             )
+
+    assert [%SyncRun{status: :cancelled}] =
+             SyncRun
+             |> Ash.Query.filter(sync_type == :historical_backfill)
+             |> Ash.read!(domain: Ingestion)
+
+    assert [%SyncCursor{status: :failed}] = Ash.read!(SyncCursor, domain: Ingestion)
+
     assert all_enqueued() == []
   end
 
