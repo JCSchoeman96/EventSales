@@ -66,9 +66,22 @@ defmodule EventSales.Ingestion.Resources.SyncCursorTest do
     {:ok, cursor} = upsert_active!(run.id, %{page: 1})
 
     assert {:ok, done} =
-             Ash.update(cursor, %{last_seen_order_id: 42}, action: :mark_done, domain: Ingestion)
+             Ash.update(
+               cursor,
+               %{
+                 page: 4,
+                 modified_after: ~U[2026-05-01 08:05:00Z],
+                 modified_before: ~U[2026-05-02 00:00:00Z],
+                 last_seen_order_id: 42
+               },
+               action: :mark_done,
+               domain: Ingestion
+             )
 
     assert done.status == :done
+    assert done.page == 4
+    assert DateTime.compare(done.modified_after, ~U[2026-05-01 08:05:00Z]) == :eq
+    assert DateTime.compare(done.modified_before, ~U[2026-05-02 00:00:00Z]) == :eq
     assert done.last_seen_order_id == 42
 
     {:ok, cursor} = upsert_active!(run.id, %{page: 2})

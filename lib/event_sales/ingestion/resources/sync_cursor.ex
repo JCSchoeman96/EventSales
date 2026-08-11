@@ -61,7 +61,7 @@ defmodule EventSales.Ingestion.Resources.SyncCursor do
     end
 
     update :mark_done do
-      accept [:last_seen_order_id, :metadata]
+      accept [:page, :modified_after, :modified_before, :last_seen_order_id, :metadata]
       require_atomic? false
       change set_attribute(:status, :done)
       validate {BoundedMetadata, max_bytes: @metadata_max_bytes}
