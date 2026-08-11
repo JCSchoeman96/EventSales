@@ -1129,7 +1129,7 @@
       ]
     },
     {
-      "docs_count": 13,
+      "docs_count": 14,
       "moduledoc?": true,
       "name": "EventSales.Audit.Logger",
       "parse_error": null,
@@ -1138,6 +1138,10 @@
         {
           "arity": 1,
           "name": "manual_sync_requested"
+        },
+        {
+          "arity": 1,
+          "name": "historical_backfill_requested"
         },
         {
           "arity": 1,
@@ -3042,7 +3046,7 @@
       "uses": []
     },
     {
-      "docs_count": 1,
+      "docs_count": 2,
       "moduledoc?": true,
       "name": "EventSales.Ingestion.ManualSync",
       "parse_error": null,
@@ -3051,6 +3055,10 @@
         {
           "arity": 3,
           "name": "queue_manual_scoped"
+        },
+        {
+          "arity": 4,
+          "name": "queue_historical_backfill"
         }
       ],
       "specs?": true,
