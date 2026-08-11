@@ -1,6 +1,7 @@
 defmodule EventSales.Ingestion.Resources.SyncRun do
   @moduledoc """
-  Tracks REST reconciliation/backfill runs for scoped WooCommerce order sync.
+  Tracks REST reconciliation and historical backfill runs for scoped
+  WooCommerce order sync.
   """
 
   use Ash.Resource,
@@ -11,9 +12,11 @@ defmodule EventSales.Ingestion.Resources.SyncRun do
   alias EventSales.Ingestion.Validations.ScopedManualSync
 
   @requested_via_values [:manual, :scheduled, :system]
+  @sync_type_values [:reconciliation, :historical_backfill]
   @sync_modes [:shallow, :deep]
   @statuses [:queued, :running, :paused, :completed, :failed, :cancelled]
   @pause_reasons [:rate_limited, :timeout, :server_error, :circuit_open]
+  @active_historical_index_name "ingestion_sync_runs_active_historical_event_idx"
 
   @queue_manual_accept [
     :source_system_id,
@@ -28,6 +31,11 @@ defmodule EventSales.Ingestion.Resources.SyncRun do
     table "ingestion_sync_runs"
     repo EventSales.Repo
 
+    unique_index_names [
+      {[:source_system_id, :event_id], @active_historical_index_name,
+       "an active historical backfill already exists"}
+    ]
+
     references do
       reference :source_system, on_delete: :restrict, on_update: :update
       reference :event, on_delete: :restrict, on_update: :update
@@ -40,6 +48,11 @@ defmodule EventSales.Ingestion.Resources.SyncRun do
       index :started_at, name: "ingestion_sync_runs_started_at_idx"
       index :sync_mode, name: "ingestion_sync_runs_sync_mode_idx"
       index :requested_via, name: "ingestion_sync_runs_requested_via_idx"
+
+      index [:source_system_id, :event_id],
+        unique: true,
+        where: "sync_type = 'historical_backfill' AND status IN ('queued', 'running', 'paused')",
+        name: @active_historical_index_name
     end
   end
 
@@ -51,6 +64,14 @@ defmodule EventSales.Ingestion.Resources.SyncRun do
       change set_attribute(:status, :queued)
       change set_attribute(:requested_via, :manual)
       validate {ScopedManualSync, []}
+    end
+
+    create :queue_historical_backfill do
+      accept [:event_id, :date_to]
+      change set_attribute(:sync_type, :historical_backfill)
+      change set_attribute(:sync_mode, :deep)
+      change set_attribute(:requested_via, :manual)
+      change set_attribute(:status, :queued)
     end
 
     update :start do
@@ -117,6 +138,13 @@ defmodule EventSales.Ingestion.Resources.SyncRun do
     attribute :requested_via, :atom do
       allow_nil? false
       constraints one_of: @requested_via_values
+      public? true
+    end
+
+    attribute :sync_type, :atom do
+      allow_nil? false
+      default :reconciliation
+      constraints one_of: @sync_type_values
       public? true
     end
 

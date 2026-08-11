@@ -605,8 +605,8 @@ Project root: `.`
 - `EventSales.Audit.Logger` - `lib/event_sales/audit/logger.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 13
-  - public_funs: `manual_sync_requested/1`, `tickera_attendee_sync_requested/1`, `tickera_reconciliation_run_requested/1`, `csv_apply_requested/1`, `manual_mapping_created/1`, `product_mapping_cutover/1`, `order_attribution_corrected/1`, `event_sales_export_requested/1`, `webhook_replay_requested/1`, `log_webhook_replay_ignored/1`, `log_webhook_duplicate_payload_mismatch/1`, `log_webhook_stale_replay/1`, `log/2`
+  - docs_count: 14
+  - public_funs: `manual_sync_requested/1`, `historical_backfill_requested/1`, `tickera_attendee_sync_requested/1`, `tickera_reconciliation_run_requested/1`, `csv_apply_requested/1`, `manual_mapping_created/1`, `product_mapping_cutover/1`, `order_attribution_corrected/1`, `event_sales_export_requested/1`, `webhook_replay_requested/1`, `log_webhook_replay_ignored/1`, `log_webhook_duplicate_payload_mismatch/1`, `log_webhook_stale_replay/1`, `log/2`
   - uses: _none_
 - `EventSales.Audit.MetadataSanitizer` - `lib/event_sales/audit/metadata_sanitizer.ex`
   - moduledoc?: true
@@ -1121,8 +1121,8 @@ Project root: `.`
 - `EventSales.Ingestion.ManualSync` - `lib/event_sales/ingestion/manual_sync.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 1
-  - public_funs: `queue_manual_scoped/3`
+  - docs_count: 2
+  - public_funs: `queue_manual_scoped/3`, `queue_historical_backfill/4`
   - uses: _none_
 - `EventSales.Ingestion.OrderReconciliation` - `lib/event_sales/ingestion/order_reconciliation.ex`
   - moduledoc?: true

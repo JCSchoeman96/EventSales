@@ -13,6 +13,7 @@ defmodule EventSales.Audit.Resources.AuditLog do
 
   @event_types [
     :manual_sync_requested,
+    :historical_backfill_requested,
     :csv_apply_requested,
     :webhook_replay_requested,
     :webhook_replay_ignored,

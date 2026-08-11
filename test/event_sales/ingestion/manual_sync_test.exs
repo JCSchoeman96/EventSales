@@ -54,6 +54,7 @@ defmodule EventSales.Ingestion.ManualSyncTest do
     assert run.status == :queued
     assert run.requested_via == :manual
     assert run.sync_mode == :shallow
+    assert Map.get(run, :sync_type) == :reconciliation
 
     assert_enqueued(worker: ReconcileOrdersWorker, args: %{"sync_run_id" => run.id})
     assert Map.get(job.args, "sync_run_id") == run.id

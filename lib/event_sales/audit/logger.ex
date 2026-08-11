@@ -66,6 +66,10 @@ defmodule EventSales.Audit.Logger do
   @spec manual_sync_requested(attrs()) :: result()
   def manual_sync_requested(attrs), do: log(:manual_sync_requested, attrs)
 
+  @doc "Writes a historical backfill request audit event."
+  @spec historical_backfill_requested(attrs()) :: result()
+  def historical_backfill_requested(attrs), do: log(:historical_backfill_requested, attrs)
+
   @doc "Writes a manual Tickera attendee snapshot sync request audit event."
   @spec tickera_attendee_sync_requested(attrs()) :: result()
   def tickera_attendee_sync_requested(attrs), do: log(:tickera_attendee_sync_requested, attrs)
