@@ -198,7 +198,6 @@ final class EventSales_Woo_Order_Index_Feed
             'source_observed_at_gmt' => $page['source_observed_at_gmt'],
             'items' => $page['items'],
             'has_more' => $page['has_more'],
-            'terminal_evidence' => $page['terminal_evidence'],
         ];
 
         if ($page['has_more']) {
@@ -207,6 +206,8 @@ final class EventSales_Woo_Order_Index_Feed
                 (int) $page['next_sequence'],
                 self::configured_value('EVENTSALES_WOO_ORDER_INDEX_SECRET', self::SECRET_OPTION)
             );
+        } else {
+            $response['terminal_evidence'] = $page['terminal_evidence'];
         }
 
         return new WP_REST_Response($response, 200);

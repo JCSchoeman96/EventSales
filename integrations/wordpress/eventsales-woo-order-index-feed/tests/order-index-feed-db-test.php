@@ -314,7 +314,8 @@ function signed_request(
     string $path,
     array $query,
     string $body,
-    array $url_params = []
+    array $url_params = [],
+    string $secret = 'order-index-secret'
 ): WP_REST_Request {
     $timestamp = (string) time();
     $key_id = 'order-index-key-1';
@@ -329,7 +330,7 @@ function signed_request(
     $headers = [
         'X-EventSales-Key-Id' => $key_id,
         'X-EventSales-Timestamp' => $timestamp,
-        'X-EventSales-Signature' => 'v1=' . hash_hmac('sha256', $signature_input, 'order-index-secret'),
+        'X-EventSales-Signature' => 'v1=' . hash_hmac('sha256', $signature_input, $secret),
     ];
     $_SERVER['REQUEST_URI'] = $path;
     if ($query !== []) {
@@ -546,12 +547,66 @@ try {
     $http_page_one = $controller->handle_manifest_fetch(signed_request('GET', $large_path, [], '', ['token' => $large['token']]));
     T::same('authenticated READY GET succeeds', 200, $http_page_one->get_status());
     T::same('authenticated GET returns at most 100 items', 100, count($http_page_one->get_data()['items']));
+    T::same('HTTP page 1 is nonterminal', true, $http_page_one->get_data()['has_more']);
     T::ok('authenticated GET returns an opaque cursor', is_string($http_page_one->get_data()['next_cursor'] ?? null));
+    T::ok('HTTP page 1 omits terminal evidence', !array_key_exists('terminal_evidence', $http_page_one->get_data()));
     $cursor = $http_page_one->get_data()['next_cursor'];
     $http_page_two = $controller->handle_manifest_fetch(signed_request('GET', $large_path, ['cursor' => $cursor], '', ['token' => $large['token']]));
     $http_page_two_replay = $controller->handle_manifest_fetch(signed_request('GET', $large_path, ['cursor' => $cursor], '', ['token' => $large['token']]));
     T::same('cursor page returns the next deterministic page', 100, count($http_page_two->get_data()['items']));
+    T::same('HTTP page 2 is nonterminal', true, $http_page_two->get_data()['has_more']);
+    T::ok('HTTP page 2 returns a continuation cursor', is_string($http_page_two->get_data()['next_cursor'] ?? null));
+    T::ok('HTTP page 2 omits terminal evidence', !array_key_exists('terminal_evidence', $http_page_two->get_data()));
     T::same('same cursor replays the same page', $http_page_two->get_data()['items'], $http_page_two_replay->get_data()['items']);
+    $terminal_cursor = $http_page_two->get_data()['next_cursor'];
+    $http_page_three = $controller->handle_manifest_fetch(signed_request(
+        'GET',
+        $large_path,
+        ['cursor' => $terminal_cursor],
+        '',
+        ['token' => $large['token']]
+    ));
+    $http_page_three_replay = $controller->handle_manifest_fetch(signed_request(
+        'GET',
+        $large_path,
+        ['cursor' => $terminal_cursor],
+        '',
+        ['token' => $large['token']]
+    ));
+    T::same('HTTP page 3 contains the remaining five items', 5, count($http_page_three->get_data()['items']));
+    T::same('HTTP page 3 is terminal', false, $http_page_three->get_data()['has_more']);
+    T::ok('HTTP page 3 omits the continuation cursor', !array_key_exists('next_cursor', $http_page_three->get_data()));
+    T::same('HTTP page 3 exposes stored terminal evidence', $large['terminal_evidence'], $http_page_three->get_data()['terminal_evidence'] ?? null);
+    T::same('terminal replay preserves item ordering', $http_page_three->get_data()['items'], $http_page_three_replay->get_data()['items']);
+    T::same('terminal replay preserves evidence', $http_page_three->get_data()['terminal_evidence'], $http_page_three_replay->get_data()['terminal_evidence']);
+
+    $_SERVER['REQUEST_URI'] = $large_path;
+    $unauthenticated_response = $controller->handle_manifest_fetch(new WP_REST_Request(
+        'GET',
+        $large_path,
+        [],
+        '',
+        [],
+        ['token' => $large['token']]
+    ));
+    $unauthenticated_data = $unauthenticated_response->get_data();
+    T::same('valid manifest URL without HMAC is unauthorized', 401, $unauthenticated_response->get_status());
+    T::ok('unauthenticated response has no items', !array_key_exists('items', $unauthenticated_data));
+    T::ok('unauthenticated response has no manifest hash', !array_key_exists('manifest_hash', $unauthenticated_data));
+    T::ok('unauthenticated response has no terminal evidence', !array_key_exists('terminal_evidence', $unauthenticated_data));
+    $wrong_hmac_response = $controller->handle_manifest_fetch(signed_request(
+        'GET',
+        $large_path,
+        [],
+        '',
+        ['token' => $large['token']],
+        'wrong-order-index-secret'
+    ));
+    $wrong_hmac_data = $wrong_hmac_response->get_data();
+    T::same('wrong HMAC is unauthorized before membership lookup', 401, $wrong_hmac_response->get_status());
+    T::ok('wrong HMAC response has no items', !array_key_exists('items', $wrong_hmac_data));
+    T::ok('wrong HMAC response has no manifest hash', !array_key_exists('manifest_hash', $wrong_hmac_data));
+    T::ok('wrong HMAC response has no terminal evidence', !array_key_exists('terminal_evidence', $wrong_hmac_data));
     $tampered_cursor_response = $controller->handle_manifest_fetch(
         signed_request(
             'GET',

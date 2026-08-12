@@ -121,9 +121,13 @@ status/expiry selection. Active READY manifests are retained.
 ## Token and cursor checks
 
 Tokens use `bin2hex(random_bytes(32))` and are at least 128-bit entropy. The
-raw bearer token is not stored in the header; only `sha256(raw_token)` is
-persisted. Unknown tokens and all lifecycle errors fail closed without echoing
-the token or any credential.
+manifest token is an opaque boundary/lookup identifier, not a standalone access
+authority. The raw token is not stored in the header; only `sha256(raw_token)`
+is persisted as defense-in-depth. Surrounding HTTP infrastructure may record
+URLs, so HMAC order-index authentication remains mandatory before membership is
+returned. The plugin does not deliberately log the raw token or echo it in
+error bodies. Unknown tokens and all lifecycle errors fail closed without
+exposing credentials.
 
 GET cursors are not offsets. They contain an authenticated last sequence and
 the exact manifest token hash. The domain-separated HMAC input is:
@@ -157,7 +161,8 @@ source_modified_at_gmt records
 
 The raw token, secret, current replay wall-clock, and full order payloads are
 excluded. The stored terminal evidence is stable across replay and is returned
-only from the finalized header.
+only from the finalized header on terminal HTTP pages. Nonterminal HTTP pages
+omit `terminal_evidence`; a short page is not terminal proof.
 
 ## Privacy, performance, and source boundary
 

@@ -13,7 +13,8 @@ E1 provides:
 
 - two WordPress database tables using the active `$wpdb->prefix`;
 - an internal API for a trusted builder to persist already-resolved identity rows;
-- cryptographically random opaque tokens stored only as SHA-256 lookup hashes;
+- cryptographically random opaque boundary/lookup identifiers stored only as
+  SHA-256 lookup hashes;
 - immutable READY membership, deterministic hash evidence, and terminal metadata;
 - 24-hour expiry with a seven-day hard maximum;
 - directly callable bounded garbage collection, including abandoned BUILDING rows;
@@ -125,8 +126,14 @@ addition to those database guards.
 ## Token and cursor security
 
 Tokens are `bin2hex(random_bytes(32))`: 256 bits of cryptographic entropy. The
-raw bearer token is returned only to the internal caller and is never persisted
-or logged. The header stores only:
+manifest token is an opaque boundary/lookup identifier, not a standalone
+access authority. It is returned to the internal builder and as the locked
+`boundary_token` field only after an authenticated READY GET. Surrounding HTTP
+infrastructure may record URLs, so possession of the token alone must not grant
+access. Order-index HMAC authentication remains mandatory before membership is
+returned. The plugin does not deliberately log the raw token, persist it, or
+echo it in error bodies; hashing it at rest is defense-in-depth. The header
+stores only:
 
 ```text
 sha256(raw_token)
@@ -195,7 +202,8 @@ Terminal evidence is the bounded stored value:
 v1;manifest_sha256=<hash>;item_count=<count>;last_sequence=<sequence>
 ```
 
-GET returns that stored evidence; a short page is not terminal proof.
+GET returns that stored evidence only when `has_more` is false. Nonterminal
+pages omit `terminal_evidence`; a short page is not terminal proof.
 
 ## Endpoints
 
@@ -235,7 +243,8 @@ returns READY, unexpired identity pages only:
 - BUILDING and FAILED return no membership;
 - expired returns stable `manifest_expired` HTTP 410;
 - unknown tokens return `manifest_not_found` HTTP 404;
-- terminal responses use stored `terminal_evidence`.
+- terminal responses use stored `terminal_evidence`; nonterminal responses omit
+  it.
 
 The response envelope remains limited to the locked metadata-only fields:
 
@@ -247,9 +256,9 @@ manifest_hash
 manifest_expires_at_gmt
 source_observed_at_gmt
 items
-next_cursor
+next_cursor (nonterminal pages only)
 has_more
-terminal_evidence
+terminal_evidence (terminal pages only)
 ```
 
 ## Tests
