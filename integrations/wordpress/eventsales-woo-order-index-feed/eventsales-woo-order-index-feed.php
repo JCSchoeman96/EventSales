@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: EventSales Woo Order Index Feed
- * Description: Provides the authenticated, bounded boundary for a future WooCommerce order identity manifest.
- * Version: 0.1.0
+ * Description: Provides authenticated Woo order identity manifest storage and a bounded READY reader.
+ * Version: 0.2.0
  * Author: EventSales
  * License: GPL-2.0-or-later
  */
@@ -26,6 +26,8 @@ if (!defined('EVENTSALES_WOO_ORDER_INDEX_CREATE_ROUTE')) {
 if (!defined('EVENTSALES_WOO_ORDER_INDEX_FETCH_ROUTE')) {
     define('EVENTSALES_WOO_ORDER_INDEX_FETCH_ROUTE', '/woo-order-index/manifests/(?P<token>[A-Za-z0-9._-]{1,128})');
 }
+
+require_once __DIR__ . '/eventsales-woo-order-index-manifest-store.php';
 
 final class EventSales_Woo_Order_Index_Feed
 {
@@ -135,6 +137,16 @@ final class EventSales_Woo_Order_Index_Feed
         return self::capability_unavailable();
     }
 
+    private function manifest_store(): ?EventSales_Woo_Order_Index_Manifest_Store
+    {
+        $database = $GLOBALS['wpdb'] ?? null;
+        if (!is_object($database)) {
+            return null;
+        }
+
+        return new EventSales_Woo_Order_Index_Manifest_Store($database);
+    }
+
     public function handle_manifest_fetch(WP_REST_Request $request): WP_REST_Response
     {
         if (!$this->request_size_is_bounded($request)) {
@@ -153,7 +165,52 @@ final class EventSales_Woo_Order_Index_Feed
             return self::error_response('invalid_request', 400);
         }
 
-        return self::capability_unavailable();
+        $store = $this->manifest_store();
+        if ($store === null) {
+            return self::capability_unavailable();
+        }
+
+        $token = $validation['values']['token'];
+        $last_sequence = null;
+        if (isset($validation['values']['cursor'])) {
+            $cursor_secret = self::configured_value('EVENTSALES_WOO_ORDER_INDEX_SECRET', self::SECRET_OPTION);
+            $last_sequence = EventSales_Woo_Order_Index_Manifest_Store::decode_cursor(
+                $validation['values']['cursor'],
+                EventSales_Woo_Order_Index_Manifest_Store::token_hash($token),
+                $cursor_secret
+            );
+            if ($last_sequence === null) {
+                return self::error_response('invalid_request', 400);
+            }
+        }
+
+        $page = $store->read_page($token, $last_sequence, self::MAX_LIMIT);
+        if (!$page['ok']) {
+            return self::manifest_read_error((string) ($page['error'] ?? 'manifest_unavailable'));
+        }
+
+        $response = [
+            'schema_version' => $page['schema_version'],
+            'phase' => 'manifest_enumerate',
+            'boundary_token' => $token,
+            'manifest_hash' => $page['manifest_hash'],
+            'manifest_expires_at_gmt' => $page['expires_at_gmt'],
+            'source_observed_at_gmt' => $page['source_observed_at_gmt'],
+            'items' => $page['items'],
+            'has_more' => $page['has_more'],
+        ];
+
+        if ($page['has_more']) {
+            $response['next_cursor'] = EventSales_Woo_Order_Index_Manifest_Store::encode_cursor(
+                EventSales_Woo_Order_Index_Manifest_Store::token_hash($token),
+                (int) $page['next_sequence'],
+                self::configured_value('EVENTSALES_WOO_ORDER_INDEX_SECRET', self::SECRET_OPTION)
+            );
+        } else {
+            $response['terminal_evidence'] = $page['terminal_evidence'];
+        }
+
+        return new WP_REST_Response($response, 200);
     }
 
     /**
@@ -224,12 +281,33 @@ final class EventSales_Woo_Order_Index_Feed
             || strlen($token) > self::MAX_TOKEN_BYTES
             || !preg_match('/^[A-Za-z0-9._-]+$/D', $token)
             || !is_array($query)
-            || $query !== []
         ) {
             return ['ok' => false];
         }
 
-        return ['ok' => true, 'values' => ['token' => $token]];
+        $actual_keys = array_map('strval', array_keys($query));
+        sort($actual_keys, SORT_STRING);
+        if ($actual_keys !== [] && $actual_keys !== ['cursor']) {
+            return ['ok' => false];
+        }
+
+        if (array_key_exists('cursor', $query)) {
+            if (
+                !is_string($query['cursor'])
+                || strlen($query['cursor']) < 16
+                || strlen($query['cursor']) > 512
+                || !preg_match('/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/D', $query['cursor'])
+            ) {
+                return ['ok' => false];
+            }
+        }
+
+        $values = ['token' => $token];
+        if (array_key_exists('cursor', $query)) {
+            $values['cursor'] = $query['cursor'];
+        }
+
+        return ['ok' => true, 'values' => $values];
     }
 
     /**
@@ -474,6 +552,16 @@ final class EventSales_Woo_Order_Index_Feed
         ], 501);
     }
 
+    private static function manifest_read_error(string $error): WP_REST_Response
+    {
+        return match ($error) {
+            'manifest_expired' => self::error_response('manifest_expired', 410),
+            'manifest_not_found' => self::error_response('manifest_not_found', 404),
+            'manifest_not_ready', 'manifest_failed', 'manifest_unavailable' => self::error_response('manifest_unavailable', 404),
+            default => self::error_response('manifest_unavailable', 404),
+        };
+    }
+
     /**
      * @param mixed $value
      */
@@ -565,4 +653,13 @@ final class EventSales_Woo_Order_Index_Feed
 
 if (function_exists('add_action')) {
     add_action('rest_api_init', ['EventSales_Woo_Order_Index_Feed', 'register']);
+}
+
+if (function_exists('register_activation_hook')) {
+    register_activation_hook(__FILE__, static function (): void {
+        $database = $GLOBALS['wpdb'] ?? null;
+        if (is_object($database)) {
+            EventSales_Woo_Order_Index_Manifest_Store::activate($database);
+        }
+    });
 }
