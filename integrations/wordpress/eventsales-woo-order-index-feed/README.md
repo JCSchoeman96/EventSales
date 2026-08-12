@@ -183,8 +183,8 @@ amount.
 
 | Mode | Total `shop_order` identity space | Matching identities | Rows examined | Source chunks | Snapshot wall time | PHP peak | Largest ID gap | Plan/key |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| HPOS | 5 | 4 | 8 | 1 | 13.775 ms | 105,906,176 bytes | 9 | range / `PRIMARY` |
-| Legacy | 19,745 | 4 | 68,441 | 1 | 175.151 ms | 105,906,176 bytes | 9 | range / `PRIMARY` |
+| HPOS | 5 | 4 | 8 | 1 | 14.733 ms | 105,906,176 bytes | 9 | range / `PRIMARY` |
+| Legacy | 19,745 | 4 | 68,441 | 1 | 59.088 ms | 105,906,176 bytes | 9 | range / `PRIMARY` |
 
 Both representative captures completed below the fixed five-second gate. The
 legacy result still demonstrates the structural cost of primary-ID traversal
