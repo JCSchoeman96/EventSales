@@ -400,6 +400,86 @@ function eventsales_proof_scope(string $mode, string $observed): array
 }
 
 /**
+ * Exercise the source-owned continuation state machine independently of E1.
+ */
+function eventsales_proof_assert_continuation(object $wpdb, string $mode): void
+{
+    $adapter = new EventSales_Woo_Order_Membership_Source($wpdb, eventsales_proof_new_db($wpdb));
+    $preflight = $adapter->preflight();
+    $opened = $adapter->open_snapshot($preflight);
+    if (!($opened['ok'] ?? false)) {
+        throw new RuntimeException('continuation snapshot failed: ' . (string) ($opened['error'] ?? 'unknown'));
+    }
+
+    $candidate = $adapter->read_next_candidate(EVENTSALES_PROOF_START, EVENTSALES_PROOF_CUTOFF, 2);
+    if (!($candidate['ok'] ?? false) || ($candidate['terminal'] ?? true) === true) {
+        throw new RuntimeException('continuation candidate failed');
+    }
+
+    $jumped = $candidate;
+    $jumped['candidate_next_id'] = (string) ((int) $candidate['candidate_next_id'] + 1000);
+    EventSales_Membership_Proof_Test::same(
+        $mode . ' arbitrary source continuation jump is rejected',
+        false,
+        $adapter->confirm_persisted($jumped)['ok'] ?? true
+    );
+    EventSales_Membership_Proof_Test::same(
+        $mode . ' unconfirmed candidate replays exactly',
+        $candidate,
+        $adapter->read_next_candidate(EVENTSALES_PROOF_START, EVENTSALES_PROOF_CUTOFF, 2)
+    );
+    EventSales_Membership_Proof_Test::same(
+        $mode . ' source commit before candidate confirmation is rejected',
+        false,
+        $adapter->commit_snapshot()['ok'] ?? true
+    );
+
+    $terminal_adapter = new EventSales_Woo_Order_Membership_Source($wpdb, eventsales_proof_new_db($wpdb));
+    $terminal_preflight = $terminal_adapter->preflight();
+    $terminal_opened = $terminal_adapter->open_snapshot($terminal_preflight);
+    if (!($terminal_opened['ok'] ?? false)) {
+        throw new RuntimeException('terminal guard snapshot failed: ' . (string) ($terminal_opened['error'] ?? 'unknown'));
+    }
+
+    while (true) {
+        $next = $terminal_adapter->read_next_candidate(EVENTSALES_PROOF_START, EVENTSALES_PROOF_CUTOFF, 2);
+        if (!($next['ok'] ?? false)) {
+            throw new RuntimeException('terminal guard candidate failed');
+        }
+        if (($next['terminal'] ?? false) === true) {
+            EventSales_Membership_Proof_Test::same(
+                $mode . ' source commit before terminal confirmation is rejected',
+                false,
+                $terminal_adapter->commit_snapshot()['ok'] ?? true
+            );
+            EventSales_Membership_Proof_Test::same(
+                $mode . ' terminal candidate confirmation succeeds',
+                true,
+                $terminal_adapter->confirm_persisted($next)['ok'] ?? false
+            );
+            EventSales_Membership_Proof_Test::same(
+                $mode . ' duplicate terminal confirmation is rejected',
+                false,
+                $terminal_adapter->confirm_persisted($next)['ok'] ?? true
+            );
+            break;
+        }
+
+        EventSales_Membership_Proof_Test::same(
+            $mode . ' source candidate confirmation succeeds',
+            true,
+            $terminal_adapter->confirm_persisted($next)['ok'] ?? false
+        );
+    }
+
+    EventSales_Membership_Proof_Test::same(
+        $mode . ' source commit after terminal confirmation succeeds',
+        true,
+        $terminal_adapter->commit_snapshot()['ok'] ?? false
+    );
+}
+
+/**
  * Capture one source snapshot into a separate BUILDING E1 manifest.
  *
  * @param callable|null $after_first_chunk Called after the first E1 append.
@@ -427,27 +507,35 @@ function eventsales_proof_capture(object $wpdb, object $source_db, string $mode,
 
     $manifest_id = (int) $started['manifest_id'];
     $captured = [];
-    $cursor = '0';
     $first = true;
     try {
         while (true) {
-            $chunk = $adapter->read_chunk(EVENTSALES_PROOF_START, EVENTSALES_PROOF_CUTOFF, $cursor, 2);
-            if (!($chunk['ok'] ?? false)) {
-                throw new RuntimeException('source chunk failed: ' . (string) ($chunk['error'] ?? 'unknown'));
+            $candidate = $adapter->read_next_candidate(EVENTSALES_PROOF_START, EVENTSALES_PROOF_CUTOFF, 2);
+            if (!($candidate['ok'] ?? false)) {
+                throw new RuntimeException('source candidate failed: ' . (string) ($candidate['error'] ?? 'unknown'));
             }
-            if ($chunk['rows'] === []) {
+
+            if (($candidate['terminal'] ?? false) === true) {
+                $confirmed = $adapter->confirm_persisted($candidate);
+                if (!($confirmed['ok'] ?? false)) {
+                    throw new RuntimeException('terminal confirmation failed');
+                }
                 break;
             }
 
-            $appended = $store->append_items($manifest_id, $chunk['rows']);
+            $appended = $store->append_items($manifest_id, $candidate['rows']);
             if (!($appended['ok'] ?? false)) {
                 throw new RuntimeException('E1 append failed');
             }
-            foreach ($chunk['rows'] as $row) {
+
+            $confirmed = $adapter->confirm_persisted($candidate);
+            if (!($confirmed['ok'] ?? false)) {
+                throw new RuntimeException('source confirmation failed');
+            }
+            foreach ($candidate['rows'] as $row) {
                 $captured[] = $row;
             }
 
-            $cursor = (string) $chunk['next_id'];
             if ($first && $after_first_chunk !== null) {
                 $after_first_chunk();
             }
@@ -537,6 +625,7 @@ try {
         $mutation_db = eventsales_proof_new_db($wpdb);
 
         try {
+            eventsales_proof_assert_continuation($wpdb, $mode);
             $baseline = eventsales_proof_capture($wpdb, $source_db, $mode);
             EventSales_Membership_Proof_Test::same(
                 $mode . ' baseline membership',
@@ -611,8 +700,9 @@ try {
             $failed_open = $failed_adapter->open_snapshot($failed_preflight);
             $failed_store = new EventSales_Woo_Order_Index_Manifest_Store($wpdb);
             $failed_start = $failed_store->begin_manifest(eventsales_proof_scope($mode, (string) $failed_open['source_observed_at_gmt']));
-            $failed_chunk = $failed_adapter->read_chunk(EVENTSALES_PROOF_START, EVENTSALES_PROOF_CUTOFF, '0', 2);
-            $failed_store->append_items((int) $failed_start['manifest_id'], $failed_chunk['rows']);
+            $failed_candidate = $failed_adapter->read_next_candidate(EVENTSALES_PROOF_START, EVENTSALES_PROOF_CUTOFF, 2);
+            $failed_store->append_items((int) $failed_start['manifest_id'], $failed_candidate['rows']);
+            $failed_adapter->confirm_persisted($failed_candidate);
             $failed_adapter->rollback_snapshot();
             $failed_store->fail_manifest((int) $failed_start['manifest_id']);
             EventSales_Membership_Proof_Test::same($mode . ' failed capture is not READY', 'failed', $failed_store->manifest_status((int) $failed_start['manifest_id']));
