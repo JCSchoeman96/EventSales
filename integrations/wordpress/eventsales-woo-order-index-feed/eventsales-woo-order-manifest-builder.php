@@ -241,6 +241,7 @@ final class EventSales_Woo_Order_Manifest_Builder
             return [
                 'ok' => true,
                 'status' => 'ready',
+                'manifest_id' => $manifest_id,
                 'token' => (string) $started['token'],
                 'manifest_hash' => (string) ($finalized['manifest_hash'] ?? ''),
                 'manifest_expires_at_gmt' => (string) ($started['expires_at_gmt'] ?? ''),
@@ -421,6 +422,12 @@ final class EventSales_Woo_Order_Manifest_Builder
             'source_definition_changed_during_capture',
             'source_connection_identity_mismatch',
             'source_connection_is_not_writable_primary',
+            'source_table_is_not_innodb',
+            'source_required_column_missing',
+            'source_identity_primary_key_missing',
+            'source_columns_unavailable',
+            'source_indexes_unavailable',
+            'source_definition_unavailable',
         ], true)) {
             return 'source_authority_changed';
         }

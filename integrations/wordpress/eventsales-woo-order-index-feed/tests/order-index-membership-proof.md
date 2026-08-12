@@ -1,6 +1,6 @@
 # M3-01/02E2A — Atomic Woo Membership Capture Proof
 
-Status: **LOCKED IMPLEMENTATION DECISION — COMPLETE (PASS)**
+Status: **E2A LOCKED IMPLEMENTATION DECISION — COMPLETE (PASS); E2B LOCAL GATE — PASS**
 
 Base: `e8f1cb0b7e32afc9ffe8d161c0af2a81b2022f11`
 
@@ -30,15 +30,19 @@ read or stored by the proof adapter.
 Use one dedicated source database connection with an InnoDB
 `REPEATABLE READ` consistent snapshot and bounded primary-ID keyset reads.
 Use the existing E1 manifest store on the normal WordPress connection for
-short bounded BUILDING appends.
+short bounded BUILDING appends. The production adapter owns continuation; no
+caller or HTTP request supplies a source cursor.
 
 ```text
 source connection A:
   SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ
   START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY
   D = the InnoDB read view established by that statement
-  SELECT at most 100 identity rows with id > last_id
-  repeat until the snapshot returns no rows
+  confirmed_cursor = 0
+  read_next_candidate: at most 100 identity rows with id > confirmed_cursor
+  append candidate to E1
+  confirm_persisted(candidate)
+  repeat until an empty candidate is confirmed
   COMMIT / close source snapshot
 
 manifest connection B:
@@ -52,7 +56,7 @@ The source rows are ordered by their immutable numeric identity, not by a
 mutable timestamp:
 
 ```sql
-WHERE source_id > :last_source_id
+WHERE source_id > :confirmed_cursor
   AND source_type = 'shop_order'
   AND source_created_gmt >= :B
   AND source_created_gmt <= :C
@@ -64,7 +68,16 @@ The primary-ID keyset is safe here because membership is evaluated against the
 same InnoDB snapshot for every chunk. Ordering alone is not the proof. A source
 row that changes, is deleted, or is inserted after `D` cannot become visible
 or invisible to that read view. The unique source identity and strict
-`source_id > last_source_id` predicate make each snapshot member appear once.
+`source_id > confirmed_cursor` predicate make each snapshot member appear once.
+
+The source state machine has exactly one pending candidate. Reading before
+confirmation replays the exact candidate without another SQL query. The
+candidate binds its starting confirmed cursor, ending ID, rows, limit, terminal
+flag, and digest. Acknowledgement advances the internal cursor only after the
+corresponding E1 append succeeds. Forged, stale, duplicate, or out-of-order
+acknowledgements fail closed. The empty terminal candidate is pending until
+acknowledged; source COMMIT is forbidden before that acknowledgement and is
+also forbidden while any candidate remains pending.
 
 The source transaction is never continued across HTTP requests. If capture
 fails before source exhaustion, source commit, or E1 finalization, the
@@ -74,7 +87,8 @@ from a newer source observation.
 
 The HPOS and legacy adversarial harnesses have passed, including the required
 query-plan and bounded-snapshot measurements. The decision is locked for E2B;
-production-scale legacy benchmarking remains an E2B operational gate.
+the production builder and public boundary are now covered by the local E2B
+gate. This does not claim unsupported deployment scale.
 
 ## Boundary D
 
@@ -219,9 +233,10 @@ frozen result must remain the set present at `D`:
 | Capture fails before publication | No READY manifest is published; retry starts a new D. |
 
 The same matrix runs against HPOS and legacy source tables. The harness also
-asserts that the public feed file does not load or reference the proof adapter;
-the existing E1 contract suite continues to assert that the public POST
-remains HTTP 501.
+asserts that the public feed loads only the production source adapter and
+manifest builder required for POST; the catalog plugin remains unchanged. The
+activated POST is covered separately by the database-independent builder/feed
+tests and returns success only for a READY manifest.
 
 ## Harness evidence
 
@@ -248,8 +263,23 @@ the metric and are not a production throughput benchmark. The legacy result
 demonstrates the
 expected primary-ID traversal cost: only four rows matched while the source
 plan examined substantially more of the `posts` identity space. This is
-correctness evidence and a finite local feasibility measurement, not a claim
-that millions of legacy orders have been benchmarked.
+correctness evidence and a finite local feasibility measurement, not an
+unsupported legacy deployment-scale claim.
+
+The E2B production-builder benchmark used the same verified loopback site and
+enabled proof-only query metrics through an injected test adapter. The default
+production adapter does not run `EXPLAIN ANALYZE`. It recorded:
+
+| Mode | Total source identity-space size (`shop_order`) | Matching identities | Rows examined | Source chunks | Snapshot wall time | PHP peak memory | Largest ID gap | Plan/key |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| HPOS | 5 | 4 | 8 | 1 | 13.404 ms | 105,906,176 bytes | 9 | range / `PRIMARY` |
+| Legacy | 19,745 | 4 | 68,441 | 1 | 188.254 ms | 105,906,176 bytes | 9 | range / `PRIMARY` |
+
+Both modes completed within the fixed five-second server-controlled E2B
+budget. The memory value is the PHP process peak reported by the harness, not
+the size of a materialized full membership set. The legacy scan remains an
+operational limitation; these values do not certify arbitrary deployment
+scale.
 
 The harness changes the official HPOS usage option directly only while setting
 up the local HPOS/legacy fixture runs. The normal Woo option API correctly
@@ -267,8 +297,9 @@ does not create per-user work, including for 100,000 EventSales users.
 
 The PHP memory bound is one source chunk plus the E1 append batch (maximum 100
 identity rows and three fields per row); no full order object, payload, or
-`limit = -1` result is materialized. The database holds the durable E1 item
-rows, O(m) for the matching membership size.
+unbounded result is materialized. The E2B benchmark records
+`memory_get_peak_usage(true)` for each mode. The database holds the durable E1
+item rows, O(m) for the matching membership size.
 
 The required source access path is the primary identity index: HPOS `PRIMARY
 KEY (id)` and WordPress `PRIMARY KEY (ID)`. HPOS additionally supplies
@@ -285,18 +316,22 @@ schema does not index `post_date_gmt`. The harness must record, separately for
 HPOS and legacy:
 
 ```text
+source mode
+total source identity-space size
+matching identities
 EXPLAIN/query plan
 rows examined (session Rows_examined delta)
-matching rows
 number of source chunks
 elapsed source snapshot duration
+PHP peak memory
 largest observed gap between emitted source IDs
 ```
 
-The decision remains production-feasible only if those measurements fit a
-finite E2B worker/transaction budget on representative datasets. If legacy
-capture exceeds that budget, E2B is blocked pending a source materialization
-mechanism; no speculative production index is added in E2A.
+The fixed server-controlled E2B capture budget is five seconds. The decision
+remains production-feasible only if those measurements fit that finite worker
+and transaction budget on representative datasets. If either enabled mode
+exceeds five seconds, E2B is blocked pending a source materialization mechanism;
+the budget is not raised to make the benchmark pass.
 
 Plain consistent reads acquire no row locks, but the source read view remains
 open while bounded chunks are appended to E1. Transaction duration is
@@ -317,9 +352,10 @@ word atomic.
 
 ## Recommended E2B algorithm
 
-1. Validate immutable `B` and `C`, the source system, and a bounded chunk size
-   no greater than 100.
-2. Open a dedicated source connection and use
+1. Validate immutable `B` and `C` and the source system. The HTTP `limit` is
+   only the READY response page size; the source chunk is fixed at 100.
+2. Acquire the source-scoped zero-wait MySQL connection lock, then open a
+   dedicated source connection and use
    `OrderUtil::custom_orders_table_usage_is_enabled()` for the preflight mode
    expectation. Verify same authoritative database/server identity, writable
    primary state, effective `REPEATABLE-READ`, the mode-specific table's
@@ -330,18 +366,18 @@ word atomic.
    otherwise abort closed.
 4. Record bounded D metadata and create one E1 BUILDING manifest bound to B,
    C, D, and the predicate version.
-5. Fetch identity-only chunks using the mode-specific fields, exact
-   `shop_order` filter, inclusive `[B,C]` predicate, `id > last_id`, and
-   `ORDER BY id ASC LIMIT 100`.
-6. Append each chunk to E1. Advance the source cursor only after the append
-   succeeds. On any error, fail/abandon the BUILDING manifest, roll back the
-   source snapshot, and do not resume it.
-7. Require an empty source chunk as source terminal evidence. Commit the source
+5. Fetch identity-only candidates using the mode-specific fields, exact
+   `shop_order` filter, inclusive `[B,C]` predicate, the internal
+   `id > confirmed_cursor` keyset, and `ORDER BY id ASC LIMIT 100`.
+6. Append each candidate to E1, then acknowledge that exact candidate. Advance
+   the source cursor only after the append succeeds. On any error, fail/abandon
+   the BUILDING manifest, roll back the source snapshot, and do not resume it.
+7. Require an empty source candidate as source terminal evidence. Commit the source
    transaction, close connection A, then finalize the E1 manifest in its short
    transaction.
-8. Publish/use the manifest only after READY. The public POST remains disabled
-   in E2A; E2B must preserve the existing authenticated boundary and bounded
-   READY GET.
+8. Publish/use the manifest only after READY. E2B activates the existing
+   authenticated POST and reuses the bounded E1 READY GET reader; it does not
+   expose BUILDING state or add a second paging implementation.
 
 Query-plan and rows-examined collection is harness instrumentation. E2B must
 measure representative plans before deployment and must not run per-chunk

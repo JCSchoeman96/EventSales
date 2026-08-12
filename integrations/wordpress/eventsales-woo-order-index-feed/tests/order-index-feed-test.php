@@ -409,6 +409,12 @@ T::same('builder failure is non-success', 503, $failure_response->get_status());
 T::same('builder failure is bounded', 'capture_budget_exceeded', $failure_response->get_data()['error'] ?? null);
 T::ok('builder failure exposes no token or source data', !array_key_exists('boundary_token', $failure_response->get_data()) && !array_key_exists('items', $failure_response->get_data()));
 
+$busy_builder = new FeedTestBuilder();
+$busy_builder->forced_result = ['ok' => false, 'error' => 'busy'];
+$busy_response = test_controller($busy_builder)->handle_manifest_create($valid['request']);
+T::same('concurrent builder failure is conflict', 409, $busy_response->get_status());
+T::same('concurrent builder failure is bounded', 'busy', $busy_response->get_data()['error'] ?? null);
+
 $known_vector_base = "POST\n"
     . "/wp-json/eventsales/v1/woo-order-index/manifests\n"
     . "query=alpha=one%20two&z=9\n"

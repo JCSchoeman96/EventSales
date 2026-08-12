@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name: EventSales Woo Order Index Feed
- * Description: Provides authenticated Woo order identity manifest storage and a bounded READY reader.
+ * Description: Provides authenticated Woo order identity manifest capture and a bounded READY reader.
  * Version: 0.2.0
  * Author: EventSales
  * License: GPL-2.0-or-later
@@ -589,7 +589,7 @@ final class EventSales_Woo_Order_Index_Feed
             $error = 'manifest_storage_failed';
         }
 
-        return self::error_response($error, 503);
+        return self::error_response($error, $error === 'busy' ? 409 : 503);
     }
 
     /**

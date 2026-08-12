@@ -117,8 +117,22 @@ function eventsales_proof_bootstrap_wordpress(): object
     $_SERVER['HTTPS'] = 'off';
 
     define('WP_USE_THEMES', false);
+    $database_host = trim((string) getenv('EVENTSALES_WP_DB_HOST'));
+    if ($database_host !== '') {
+        if (
+            !str_starts_with($database_host, 'localhost')
+            && !str_starts_with($database_host, '127.0.0.1')
+        ) {
+            eventsales_proof_fail('EVENTSALES_WP_DB_HOST must be loopback');
+        }
+        define('DB_HOST', $database_host);
+    }
     ob_start();
+    set_error_handler(static function (int $severity, string $message): bool {
+        return $severity === E_WARNING && str_contains($message, 'Constant DB_HOST already defined');
+    }, E_WARNING);
     require $root . '/wp-load.php';
+    restore_error_handler();
     ob_end_clean();
 
     global $wpdb;
@@ -589,6 +603,68 @@ function eventsales_proof_capture(object $wpdb, object $source_db, string $mode,
     }
 }
 
+/**
+ * Run the production builder against the existing local source fixtures.
+ * Query metrics are enabled only for this representative benchmark; the
+ * production builder default does not run EXPLAIN ANALYZE.
+ *
+ * @return array<string, mixed>
+ */
+function eventsales_proof_production_capture(object $wpdb, string $mode, int $limit = 2): array
+{
+    $builder = new EventSales_Woo_Order_Manifest_Builder(
+        $wpdb,
+        null,
+        static function (object $wordpress_db, object $source_db): object {
+            return new EventSales_Woo_Order_Membership_Source($wordpress_db, $source_db, null, true);
+        }
+    );
+    $identity_space_size = eventsales_proof_identity_space_size($wpdb, $mode);
+    $memory_before = memory_get_usage(true);
+    $result = $builder->build([
+        'source_system' => 'local-proof:production:' . $mode,
+        'backfill_start' => EVENTSALES_PROOF_START,
+        'backfill_cutoff' => EVENTSALES_PROOF_CUTOFF,
+        'limit' => $limit,
+    ]);
+    $peak_memory = memory_get_peak_usage(true);
+    $result['benchmark'] = [
+        'source_mode' => $mode,
+        'capture' => 'e2b-production-builder-benchmark',
+        'total_source_identity_space_size' => $identity_space_size,
+        'php_memory_before_bytes' => $memory_before,
+        'php_peak_memory_bytes' => $peak_memory,
+        'php_peak_memory_delta_bytes' => max(0, $peak_memory - $memory_before),
+    ];
+
+    return $result;
+}
+
+function eventsales_proof_identity_space_size(object $wpdb, string $mode): int
+{
+    $table = eventsales_proof_identifier(eventsales_proof_table($wpdb, $mode));
+    $type_field = $mode === EVENTSALES_PROOF_HPOS ? 'type' : 'post_type';
+    $count = $wpdb->get_var($wpdb->prepare(
+        'SELECT COUNT(*) FROM ' . $table . ' WHERE ' . eventsales_proof_identifier($type_field) . ' = %s',
+        'shop_order'
+    ));
+    if (!is_numeric($count)) {
+        throw new RuntimeException('source identity-space count failed');
+    }
+
+    return (int) $count;
+}
+
+/** @return array<string, mixed> */
+function eventsales_proof_builder_lock_key(object $wpdb): array
+{
+    $builder = new EventSales_Woo_Order_Manifest_Builder($wpdb);
+    $method = new ReflectionMethod($builder, 'lock_key');
+    $method->setAccessible(true);
+
+    return ['builder' => $builder, 'key' => (string) $method->invoke($builder)];
+}
+
 function eventsales_proof_ids(array $rows): array
 {
     return array_map(static fn(array $row): string => (string) $row['source_order_id'], $rows);
@@ -600,25 +676,74 @@ function eventsales_proof_item_digest(array $rows): string
 }
 
 /** @param array<string, mixed> $metrics */
-function eventsales_proof_print_metrics(string $mode, array $metrics): void
+function eventsales_proof_print_metrics(string $mode, array $metrics, ?array $benchmark = null): void
 {
     echo 'METRICS ' . $mode . ' ' . json_encode([
+        'source_mode' => $mode,
+        'capture' => $benchmark === null ? 'e2a-proof-adapter' : 'e2b-production-builder-benchmark',
+        'total_source_identity_space_size' => $benchmark['total_source_identity_space_size'] ?? null,
+        'matching_identities' => $metrics['matching_rows'] ?? null,
         'plan' => $metrics['plan'] ?? [],
+        'query_key' => $metrics['plan'][0]['key'] ?? null,
         'rows_examined' => $metrics['rows_examined'] ?? null,
-        'matching_rows' => $metrics['matching_rows'] ?? null,
         'chunks' => $metrics['chunks'] ?? null,
         'snapshot_duration_ms' => $metrics['snapshot_duration_ms'] ?? null,
+        'php_peak_memory_bytes' => $benchmark['php_peak_memory_bytes'] ?? null,
+        'php_peak_memory_delta_bytes' => $benchmark['php_peak_memory_delta_bytes'] ?? null,
         'largest_id_gap' => $metrics['largest_id_gap'] ?? null,
     ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR) . "\n";
 }
 
 require_once dirname(__DIR__) . '/eventsales-woo-order-index-manifest-store.php';
 require_once dirname(__DIR__) . '/eventsales-woo-order-membership-source.php';
+require_once dirname(__DIR__) . '/eventsales-woo-order-manifest-builder.php';
 
 $wpdb = eventsales_proof_bootstrap_wordpress();
 $modes = eventsales_proof_modes();
 if (!defined('EVENTSALES_WOO_ORDER_INDEX_SCHEMA_VERSION')) {
     define('EVENTSALES_WOO_ORDER_INDEX_SCHEMA_VERSION', '2026-08-12.v1');
+}
+if (!defined('EVENTSALES_WOO_ORDER_INDEX_KEY_ID')) {
+    define('EVENTSALES_WOO_ORDER_INDEX_KEY_ID', 'local-proof-key');
+}
+if (!defined('EVENTSALES_WOO_ORDER_INDEX_SECRET')) {
+    define('EVENTSALES_WOO_ORDER_INDEX_SECRET', 'local-proof-secret');
+}
+if (!class_exists('WP_REST_Request')) {
+    require_once ABSPATH . WPINC . '/rest-api/class-wp-rest-request.php';
+}
+if (!class_exists('WP_REST_Response')) {
+    require_once ABSPATH . WPINC . '/rest-api/class-wp-rest-response.php';
+}
+if (!class_exists('EventSales_Woo_Order_Index_Feed')) {
+    require_once dirname(__DIR__) . '/eventsales-woo-order-index-feed.php';
+}
+
+/** @param array<string, mixed> $query @param array<string, mixed> $body */
+function eventsales_proof_signed_request(string $method, string $path, array $query, array $body, array $url_params = []): WP_REST_Request
+{
+    $raw_body = $body === [] ? '' : (string) json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+    $timestamp = (string) time();
+    $base = EventSales_Woo_Order_Index_Feed::canonical_signature_input(
+        $method,
+        $path,
+        EventSales_Woo_Order_Index_Feed::canonical_query_string($query),
+        $raw_body,
+        $timestamp,
+        EVENTSALES_WOO_ORDER_INDEX_KEY_ID
+    );
+    $request = new WP_REST_Request($method, $path);
+    $request->set_query_params($query);
+    $request->set_url_params($url_params);
+    $request->set_body($raw_body);
+    $request->set_headers([
+        'X-EventSales-Key-Id' => EVENTSALES_WOO_ORDER_INDEX_KEY_ID,
+        'X-EventSales-Timestamp' => $timestamp,
+        'X-EventSales-Signature' => 'v1=' . hash_hmac('sha256', $base, EVENTSALES_WOO_ORDER_INDEX_SECRET),
+    ]);
+    $_SERVER['REQUEST_URI'] = $path;
+
+    return $request;
 }
 $original_option = $wpdb->get_var($wpdb->prepare(
     'SELECT option_value FROM ' . eventsales_proof_identifier($wpdb->options) . ' WHERE option_name = %s LIMIT 1',
@@ -663,6 +788,93 @@ try {
             EventSales_Membership_Proof_Test::ok($mode . ' snapshot duration captured', (float) $baseline['metrics']['snapshot_duration_ms'] >= 0.0);
             EventSales_Membership_Proof_Test::ok($mode . ' largest ID gap captured', (int) $baseline['metrics']['largest_id_gap'] >= 0);
             eventsales_proof_print_metrics($mode, $baseline['metrics']);
+
+            $production = eventsales_proof_production_capture($wpdb, $mode, 2);
+            EventSales_Membership_Proof_Test::same($mode . ' production builder returns READY', true, $production['ok'] ?? false);
+            EventSales_Membership_Proof_Test::same($mode . ' production builder status', 'ready', $production['status'] ?? null);
+            EventSales_Membership_Proof_Test::same(
+                $mode . ' production builder first page includes inclusive B/C members in order',
+                [(string) $ids['10'], (string) $ids['20']],
+                eventsales_proof_ids($production['page']['items'] ?? [])
+            );
+            EventSales_Membership_Proof_Test::same($mode . ' production POST page honors limit=2', 2, count($production['page']['items'] ?? []));
+            EventSales_Membership_Proof_Test::same($mode . ' production first page is nonterminal', true, $production['page']['has_more'] ?? false);
+            EventSales_Membership_Proof_Test::ok($mode . ' production first page has a continuation sequence', is_int($production['page']['next_sequence'] ?? null));
+            $production_store = new EventSales_Woo_Order_Index_Manifest_Store($wpdb);
+            $production_continuation = $production_store->read_page((string) $production['token'], (int) $production['page']['next_sequence'], 100);
+            EventSales_Membership_Proof_Test::same(
+                $mode . ' existing E1 reader returns remaining production identities',
+                [(string) $ids['30'], (string) $ids['40']],
+                eventsales_proof_ids($production_continuation['items'] ?? [])
+            );
+            EventSales_Membership_Proof_Test::same($mode . ' production GET continuation is terminal', false, $production_continuation['has_more'] ?? true);
+            EventSales_Membership_Proof_Test::ok($mode . ' production GET continuation returns terminal evidence', is_string($production_continuation['terminal_evidence'] ?? null) && $production_continuation['terminal_evidence'] !== '');
+            $post_builder = new EventSales_Woo_Order_Manifest_Builder($wpdb);
+            $post_controller = new EventSales_Woo_Order_Index_Feed(static fn(object $database): object => $post_builder);
+            $post_path = '/wp-json/eventsales/v1/woo-order-index/manifests';
+            $post_response = $post_controller->handle_manifest_create(eventsales_proof_signed_request('POST', $post_path, [], [
+                'source_system' => 'local-proof:http:' . $mode,
+                'backfill_start' => EVENTSALES_PROOF_START,
+                'backfill_cutoff' => EVENTSALES_PROOF_CUTOFF,
+                'limit' => 2,
+            ]));
+            EventSales_Membership_Proof_Test::same($mode . ' authenticated production POST returns READY', 200, $post_response->get_status());
+            EventSales_Membership_Proof_Test::same($mode . ' authenticated production POST returns first page', [(string) $ids['10'], (string) $ids['20']], eventsales_proof_ids($post_response->get_data()['items'] ?? []));
+            EventSales_Membership_Proof_Test::ok($mode . ' authenticated production POST returns at most requested limit', count($post_response->get_data()['items'] ?? []) <= 2);
+            EventSales_Membership_Proof_Test::ok($mode . ' authenticated production POST is nonterminal', ($post_response->get_data()['has_more'] ?? false) === true && isset($post_response->get_data()['next_cursor']) && !array_key_exists('terminal_evidence', $post_response->get_data()));
+            $post_token = (string) ($post_response->get_data()['boundary_token'] ?? '');
+            $get_path = '/wp-json/eventsales/v1/woo-order-index/manifests/' . $post_token;
+            $get_response = $post_controller->handle_manifest_fetch(eventsales_proof_signed_request('GET', $get_path, ['cursor' => (string) $post_response->get_data()['next_cursor']], [], ['token' => $post_token]));
+            EventSales_Membership_Proof_Test::same($mode . ' authenticated production GET continuation returns remaining identities', [(string) $ids['30'], (string) $ids['40']], eventsales_proof_ids($get_response->get_data()['items'] ?? []));
+            EventSales_Membership_Proof_Test::same($mode . ' authenticated production GET continuation is terminal', false, $get_response->get_data()['has_more'] ?? true);
+            EventSales_Membership_Proof_Test::ok($mode . ' authenticated production GET continuation returns final evidence', is_string($get_response->get_data()['terminal_evidence'] ?? null) && !array_key_exists('next_cursor', $get_response->get_data()));
+            EventSales_Membership_Proof_Test::same($mode . ' production metrics mode', $mode, $production['benchmark']['source_mode'] ?? null);
+            EventSales_Membership_Proof_Test::same($mode . ' production metrics matching identities', 4, $production['metrics']['matching_rows'] ?? null);
+            EventSales_Membership_Proof_Test::ok($mode . ' production snapshot is within five seconds', (float) ($production['metrics']['snapshot_duration_ms'] ?? 6000) <= 5000.0);
+            eventsales_proof_print_metrics($mode, $production['metrics'], $production['benchmark']);
+
+            usleep(1000);
+            $production_replay = eventsales_proof_production_capture($wpdb, $mode, 2);
+            EventSales_Membership_Proof_Test::same($mode . ' later production replay is READY', true, $production_replay['ok'] ?? false);
+            EventSales_Membership_Proof_Test::ok($mode . ' later production replay uses a new manifest', (int) ($production['manifest_id'] ?? 0) !== (int) ($production_replay['manifest_id'] ?? 0));
+            EventSales_Membership_Proof_Test::ok($mode . ' later production replay uses a new token', (string) ($production['token'] ?? '') !== (string) ($production_replay['token'] ?? ''));
+            EventSales_Membership_Proof_Test::ok($mode . ' later production replay establishes a new D', (string) ($production['source_observed_at_gmt'] ?? '') !== (string) ($production_replay['source_observed_at_gmt'] ?? ''));
+
+            $lock_context = eventsales_proof_builder_lock_key($wpdb);
+            $lock_db = eventsales_proof_new_db($wpdb);
+            $lock_taken = $lock_db->get_var($lock_db->prepare('SELECT GET_LOCK(%s, 0)', $lock_context['key']));
+            EventSales_Membership_Proof_Test::same($mode . ' source-scoped lock acquired for concurrency test', '1', (string) $lock_taken);
+            try {
+                $busy = $lock_context['builder']->build([
+                    'source_system' => 'local-proof:busy:' . $mode,
+                    'backfill_start' => EVENTSALES_PROOF_START,
+                    'backfill_cutoff' => EVENTSALES_PROOF_CUTOFF,
+                    'limit' => 2,
+                ]);
+                EventSales_Membership_Proof_Test::same($mode . ' simultaneous production capture returns busy', 'busy', $busy['error'] ?? null);
+            } finally {
+                $lock_db->get_var($lock_db->prepare('SELECT RELEASE_LOCK(%s)', $lock_context['key']));
+            }
+
+            $authority_builder = new EventSales_Woo_Order_Manifest_Builder(
+                $wpdb,
+                null,
+                static function (object $wordpress_db, object $source_db) use ($mode): object {
+                    $wrong_mode = $mode === EVENTSALES_PROOF_HPOS ? false : true;
+
+                    return new EventSales_Woo_Order_Membership_Source($wordpress_db, $source_db, static function () use ($wrong_mode): bool {
+                        return $wrong_mode;
+                    });
+                }
+            );
+            $authority_failure = $authority_builder->build([
+                'source_system' => 'local-proof:authority:' . $mode,
+                'backfill_start' => EVENTSALES_PROOF_START,
+                'backfill_cutoff' => EVENTSALES_PROOF_CUTOFF,
+                'limit' => 2,
+            ]);
+            EventSales_Membership_Proof_Test::same($mode . ' authority mismatch has no READY result', false, $authority_failure['ok'] ?? true);
+            EventSales_Membership_Proof_Test::same($mode . ' authority mismatch is bounded', 'source_authority_changed', $authority_failure['error'] ?? null);
 
             $replay = eventsales_proof_capture($wpdb, eventsales_proof_new_db($wpdb), $mode);
             EventSales_Membership_Proof_Test::same(
