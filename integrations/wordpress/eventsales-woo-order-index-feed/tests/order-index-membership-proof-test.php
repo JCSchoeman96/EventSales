@@ -452,16 +452,6 @@ function eventsales_proof_assert_continuation(object $wpdb, string $mode): void
                 false,
                 $terminal_adapter->commit_snapshot()['ok'] ?? true
             );
-            EventSales_Membership_Proof_Test::same(
-                $mode . ' terminal candidate confirmation succeeds',
-                true,
-                $terminal_adapter->confirm_persisted($next)['ok'] ?? false
-            );
-            EventSales_Membership_Proof_Test::same(
-                $mode . ' duplicate terminal confirmation is rejected',
-                false,
-                $terminal_adapter->confirm_persisted($next)['ok'] ?? true
-            );
             break;
         }
 
@@ -472,10 +462,37 @@ function eventsales_proof_assert_continuation(object $wpdb, string $mode): void
         );
     }
 
+    $terminal_success_adapter = new EventSales_Woo_Order_Membership_Source($wpdb, eventsales_proof_new_db($wpdb));
+    $terminal_success_preflight = $terminal_success_adapter->preflight();
+    $terminal_success_opened = $terminal_success_adapter->open_snapshot($terminal_success_preflight);
+    if (!($terminal_success_opened['ok'] ?? false)) {
+        throw new RuntimeException('terminal success snapshot failed: ' . (string) ($terminal_success_opened['error'] ?? 'unknown'));
+    }
+
+    while (true) {
+        $next = $terminal_success_adapter->read_next_candidate(EVENTSALES_PROOF_START, EVENTSALES_PROOF_CUTOFF, 2);
+        if (!($next['ok'] ?? false)) {
+            throw new RuntimeException('terminal success candidate failed');
+        }
+        EventSales_Membership_Proof_Test::same(
+            $mode . ' terminal path confirmation succeeds',
+            true,
+            $terminal_success_adapter->confirm_persisted($next)['ok'] ?? false
+        );
+        if (($next['terminal'] ?? false) === true) {
+            EventSales_Membership_Proof_Test::same(
+                $mode . ' duplicate terminal confirmation is rejected',
+                false,
+                $terminal_success_adapter->confirm_persisted($next)['ok'] ?? true
+            );
+            break;
+        }
+    }
+
     EventSales_Membership_Proof_Test::same(
         $mode . ' source commit after terminal confirmation succeeds',
         true,
-        $terminal_adapter->commit_snapshot()['ok'] ?? false
+        $terminal_success_adapter->commit_snapshot()['ok'] ?? false
     );
 }
 
