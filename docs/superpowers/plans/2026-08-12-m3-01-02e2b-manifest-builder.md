@@ -755,4 +755,3 @@ Record final branch, HEAD SHA, PR number, exact changed files, POST status, buil
 - [ ] Step 4: Stop.
 
 Do not implement EventSales Elixir consumption, modified catch-up H, SyncRun or SyncCursor changes, refunds, M3-03+, or unrelated cleanup after the draft PR is opened.
-
