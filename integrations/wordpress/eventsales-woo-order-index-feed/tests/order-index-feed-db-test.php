@@ -655,11 +655,15 @@ try {
         [],
         $post_body
     ));
-    T::same('public POST remains unavailable in E1', 501, $post_response->get_status());
+    T::same('activated public POST fails closed without verified Woo runtime', 503, $post_response->get_status());
+    T::same('activated public POST exposes bounded preflight failure', 'source_preflight_failed', $post_response->get_data()['error'] ?? null);
+    T::ok('failed public POST does not expose BUILDING metadata', !array_key_exists('boundary_token', $post_response->get_data()) && !array_key_exists('items', $post_response->get_data()));
 
     T::section('source and catalog boundaries');
     $source = file_get_contents(dirname(__DIR__) . '/eventsales-woo-order-index-feed.php')
-        . file_get_contents(dirname(__DIR__) . '/eventsales-woo-order-index-manifest-store.php');
+        . file_get_contents(dirname(__DIR__) . '/eventsales-woo-order-index-manifest-store.php')
+        . file_get_contents(dirname(__DIR__) . '/eventsales-woo-order-membership-source.php')
+        . file_get_contents(dirname(__DIR__) . '/eventsales-woo-order-manifest-builder.php');
     foreach (['wc_get_orders', 'wc_get_order', 'WP_Query', '$wpdb->posts', 'wp_posts', 'wc/v3'] as $forbidden) {
         T::ok('no live Woo enumeration reference: ' . $forbidden, strpos($source, $forbidden) === false);
     }

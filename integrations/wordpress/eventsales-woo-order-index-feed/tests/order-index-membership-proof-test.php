@@ -629,8 +629,10 @@ if (!EventSales_Woo_Order_Index_Manifest_Store::install_schema($wpdb)) {
     eventsales_proof_fail('E1 manifest schema installation failed on the local database');
 }
 EventSales_Membership_Proof_Test::ok(
-    'public feed does not load the proof adapter',
-    strpos((string) file_get_contents(dirname(__DIR__) . '/eventsales-woo-order-index-feed.php'), 'EventSales_Woo_Order_Membership_Source') === false
+    'public feed loads the production source and builder only',
+    strpos((string) file_get_contents(dirname(__DIR__) . '/eventsales-woo-order-index-feed.php'), "eventsales-woo-order-membership-source.php") !== false
+        && strpos((string) file_get_contents(dirname(__DIR__) . '/eventsales-woo-order-index-feed.php'), "eventsales-woo-order-manifest-builder.php") !== false
+        && strpos((string) file_get_contents(dirname(__DIR__) . '/eventsales-woo-order-index-feed.php'), 'eventsales-tickera-catalog-feed') === false
 );
 
 try {

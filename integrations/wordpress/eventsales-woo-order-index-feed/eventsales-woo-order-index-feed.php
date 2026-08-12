@@ -28,6 +28,8 @@ if (!defined('EVENTSALES_WOO_ORDER_INDEX_FETCH_ROUTE')) {
 }
 
 require_once __DIR__ . '/eventsales-woo-order-index-manifest-store.php';
+require_once __DIR__ . '/eventsales-woo-order-membership-source.php';
+require_once __DIR__ . '/eventsales-woo-order-manifest-builder.php';
 
 final class EventSales_Woo_Order_Index_Feed
 {
@@ -57,6 +59,14 @@ final class EventSales_Woo_Order_Index_Feed
         'source_created_at_gmt',
         'source_modified_at_gmt',
     ];
+
+    /** @var callable(object): object|null */
+    private $manifest_builder_factory;
+
+    public function __construct(?callable $manifest_builder_factory = null)
+    {
+        $this->manifest_builder_factory = $manifest_builder_factory;
+    }
 
     public static function register(): void
     {
@@ -134,7 +144,49 @@ final class EventSales_Woo_Order_Index_Feed
             return self::error_response('invalid_request', 400);
         }
 
-        return self::capability_unavailable();
+        $builder = $this->manifest_builder();
+        if ($builder === null) {
+            return self::error_response('manifest_builder_unavailable', 503);
+        }
+
+        try {
+            $built = $builder->build($validation['values']);
+        } catch (Throwable $error) {
+            return self::error_response('manifest_storage_failed', 503);
+        }
+        if (!is_array($built) || !($built['ok'] ?? false)) {
+            return self::manifest_build_error((string) ($built['error'] ?? 'manifest_storage_failed'));
+        }
+        if (($built['status'] ?? null) !== 'ready' || !is_string($built['token'] ?? null) || !is_array($built['page'] ?? null)) {
+            return self::error_response('manifest_unavailable', 503);
+        }
+
+        return $this->manifest_page_response((string) $built['token'], $built['page'], 'manifest_enumerate');
+    }
+
+    private function manifest_builder(): ?object
+    {
+        if ($this->manifest_builder_factory !== null) {
+            try {
+                $database = $GLOBALS['wpdb'] ?? new stdClass();
+                $builder = call_user_func($this->manifest_builder_factory, $database);
+
+                return is_object($builder) ? $builder : null;
+            } catch (Throwable $error) {
+                return null;
+            }
+        }
+
+        $database = $GLOBALS['wpdb'] ?? null;
+        if (!is_object($database)) {
+            return null;
+        }
+
+        try {
+            return new EventSales_Woo_Order_Manifest_Builder($database);
+        } catch (Throwable $error) {
+            return null;
+        }
     }
 
     private function manifest_store(): ?EventSales_Woo_Order_Index_Manifest_Store
@@ -167,7 +219,7 @@ final class EventSales_Woo_Order_Index_Feed
 
         $store = $this->manifest_store();
         if ($store === null) {
-            return self::capability_unavailable();
+            return self::error_response('manifest_storage_unavailable', 503);
         }
 
         $token = $validation['values']['token'];
@@ -189,28 +241,7 @@ final class EventSales_Woo_Order_Index_Feed
             return self::manifest_read_error((string) ($page['error'] ?? 'manifest_unavailable'));
         }
 
-        $response = [
-            'schema_version' => $page['schema_version'],
-            'phase' => 'manifest_enumerate',
-            'boundary_token' => $token,
-            'manifest_hash' => $page['manifest_hash'],
-            'manifest_expires_at_gmt' => $page['expires_at_gmt'],
-            'source_observed_at_gmt' => $page['source_observed_at_gmt'],
-            'items' => $page['items'],
-            'has_more' => $page['has_more'],
-        ];
-
-        if ($page['has_more']) {
-            $response['next_cursor'] = EventSales_Woo_Order_Index_Manifest_Store::encode_cursor(
-                EventSales_Woo_Order_Index_Manifest_Store::token_hash($token),
-                (int) $page['next_sequence'],
-                self::configured_value('EVENTSALES_WOO_ORDER_INDEX_SECRET', self::SECRET_OPTION)
-            );
-        } else {
-            $response['terminal_evidence'] = $page['terminal_evidence'];
-        }
-
-        return new WP_REST_Response($response, 200);
+        return $this->manifest_page_response($token, $page, 'manifest_enumerate');
     }
 
     /**
@@ -542,14 +573,91 @@ final class EventSales_Woo_Order_Index_Feed
         return new WP_REST_Response(['error' => $code], $status);
     }
 
-    private static function capability_unavailable(): WP_REST_Response
+    private static function manifest_build_error(string $error): WP_REST_Response
     {
-        return new WP_REST_Response([
-            'error' => 'manifest_capability_unavailable',
-            'schema_version' => EVENTSALES_WOO_ORDER_INDEX_SCHEMA_VERSION,
-            'capability' => 'woo_order_index_manifest',
-            'capability_status' => 'not_implemented',
-        ], 501);
+        $safe_errors = [
+            'busy',
+            'capture_budget_exceeded',
+            'lock_unavailable',
+            'manifest_finalize_failed',
+            'manifest_storage_failed',
+            'source_authority_changed',
+            'source_preflight_failed',
+            'source_snapshot_failed',
+        ];
+        if (!in_array($error, $safe_errors, true)) {
+            $error = 'manifest_storage_failed';
+        }
+
+        return self::error_response($error, 503);
+    }
+
+    /**
+     * Format one immutable E1 page for both POST creation and GET
+     * continuation. The caller has already authenticated the request.
+     *
+     * @param array<string, mixed> $page
+     */
+    private function manifest_page_response(string $token, array $page, string $phase): WP_REST_Response
+    {
+        $items = $page['items'] ?? null;
+        $has_more = ($page['has_more'] ?? null) === true;
+        if (
+            !is_array($items)
+            || count($items) > self::MAX_LIMIT
+            || !is_string($page['schema_version'] ?? null)
+            || !is_string($page['manifest_hash'] ?? null)
+            || !is_string($page['expires_at_gmt'] ?? null)
+            || !is_string($page['source_observed_at_gmt'] ?? null)
+        ) {
+            return self::error_response('manifest_storage_failed', 503);
+        }
+        foreach ($items as $item) {
+            if (!is_array($item)) {
+                return self::error_response('manifest_storage_failed', 503);
+            }
+            $item_keys = array_map('strval', array_keys($item));
+            sort($item_keys, SORT_STRING);
+            $expected_item_keys = self::FUTURE_ITEM_KEYS;
+            sort($expected_item_keys, SORT_STRING);
+            if ($item_keys !== $expected_item_keys) {
+                return self::error_response('manifest_storage_failed', 503);
+            }
+            foreach (self::FUTURE_ITEM_KEYS as $item_key) {
+                if (!is_string($item[$item_key])) {
+                    return self::error_response('manifest_storage_failed', 503);
+                }
+            }
+        }
+
+        $response = [
+            'schema_version' => $page['schema_version'],
+            'phase' => $phase,
+            'boundary_token' => $token,
+            'manifest_hash' => $page['manifest_hash'],
+            'manifest_expires_at_gmt' => $page['expires_at_gmt'],
+            'source_observed_at_gmt' => $page['source_observed_at_gmt'],
+            'items' => $items,
+            'has_more' => $has_more,
+        ];
+
+        if ($has_more) {
+            if (!is_int($page['next_sequence'] ?? null) && !is_numeric($page['next_sequence'] ?? null)) {
+                return self::error_response('manifest_storage_failed', 503);
+            }
+            $response['next_cursor'] = EventSales_Woo_Order_Index_Manifest_Store::encode_cursor(
+                EventSales_Woo_Order_Index_Manifest_Store::token_hash($token),
+                (int) $page['next_sequence'],
+                self::configured_value('EVENTSALES_WOO_ORDER_INDEX_SECRET', self::SECRET_OPTION)
+            );
+        } else {
+            if (!is_string($page['terminal_evidence'] ?? null) || $page['terminal_evidence'] === '') {
+                return self::error_response('manifest_storage_failed', 503);
+            }
+            $response['terminal_evidence'] = $page['terminal_evidence'];
+        }
+
+        return new WP_REST_Response($response, 200);
     }
 
     private static function manifest_read_error(string $error): WP_REST_Response
