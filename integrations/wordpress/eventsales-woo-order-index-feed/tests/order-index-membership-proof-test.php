@@ -448,6 +448,20 @@ function eventsales_proof_assert_continuation(object $wpdb, string $mode): void
         $adapter->commit_snapshot()['ok'] ?? true
     );
 
+    $not_terminal_adapter = new EventSales_Woo_Order_Membership_Source($wpdb, eventsales_proof_new_db($wpdb));
+    $not_terminal_preflight = $not_terminal_adapter->preflight();
+    $not_terminal_opened = $not_terminal_adapter->open_snapshot($not_terminal_preflight);
+    if (!($not_terminal_opened['ok'] ?? false)) {
+        throw new RuntimeException('not-terminal guard snapshot failed: ' . (string) ($not_terminal_opened['error'] ?? 'unknown'));
+    }
+    $not_terminal_candidate = $not_terminal_adapter->read_next_candidate(EVENTSALES_PROOF_START, EVENTSALES_PROOF_CUTOFF, 2);
+    $not_terminal_adapter->confirm_persisted($not_terminal_candidate);
+    EventSales_Membership_Proof_Test::same(
+        $mode . ' source commit after nonterminal confirmation is rejected',
+        false,
+        $not_terminal_adapter->commit_snapshot()['ok'] ?? true
+    );
+
     $terminal_adapter = new EventSales_Woo_Order_Membership_Source($wpdb, eventsales_proof_new_db($wpdb));
     $terminal_preflight = $terminal_adapter->preflight();
     $terminal_opened = $terminal_adapter->open_snapshot($terminal_preflight);
@@ -483,11 +497,17 @@ function eventsales_proof_assert_continuation(object $wpdb, string $mode): void
         throw new RuntimeException('terminal success snapshot failed: ' . (string) ($terminal_success_opened['error'] ?? 'unknown'));
     }
 
+    $previous_end_id = '0';
     while (true) {
         $next = $terminal_success_adapter->read_next_candidate(EVENTSALES_PROOF_START, EVENTSALES_PROOF_CUTOFF, 2);
         if (!($next['ok'] ?? false)) {
             throw new RuntimeException('terminal success candidate failed');
         }
+        EventSales_Membership_Proof_Test::same(
+            $mode . ' candidate starts at the confirmed cursor',
+            $previous_end_id,
+            (string) ($next['candidate_start_id'] ?? '')
+        );
         EventSales_Membership_Proof_Test::same(
             $mode . ' terminal path confirmation succeeds',
             true,
@@ -501,6 +521,7 @@ function eventsales_proof_assert_continuation(object $wpdb, string $mode): void
             );
             break;
         }
+        $previous_end_id = (string) $next['candidate_next_id'];
     }
 
     EventSales_Membership_Proof_Test::same(

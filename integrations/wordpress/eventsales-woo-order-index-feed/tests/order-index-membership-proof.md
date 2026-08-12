@@ -272,8 +272,8 @@ production adapter does not run `EXPLAIN ANALYZE`. It recorded:
 
 | Mode | Total source identity-space size (`shop_order`) | Matching identities | Rows examined | Source chunks | Snapshot wall time | PHP peak memory | Largest ID gap | Plan/key |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| HPOS | 5 | 4 | 8 | 1 | 13.404 ms | 105,906,176 bytes | 9 | range / `PRIMARY` |
-| Legacy | 19,745 | 4 | 68,441 | 1 | 188.254 ms | 105,906,176 bytes | 9 | range / `PRIMARY` |
+| HPOS | 5 | 4 | 8 | 1 | 13.775 ms | 105,906,176 bytes | 9 | range / `PRIMARY` |
+| Legacy | 19,745 | 4 | 68,441 | 1 | 175.151 ms | 105,906,176 bytes | 9 | range / `PRIMARY` |
 
 Both modes completed within the fixed five-second server-controlled E2B
 budget. The memory value is the PHP process peak reported by the harness, not
