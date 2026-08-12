@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | **DRAFT — proposed contract lock** |
+| Status | **LOCKED — COMPLETE (PASS)** |
 | Scope | Source-safe historical Woo order enumeration only |
 | Canonical base | `068e2d09aaf6b29eb3aad69c8697a55744c1af5a` |
 | Blocked implementation | PR #188, head `2544c26351ba537792f789eff9f20f805f2e8169` |
@@ -19,31 +19,35 @@ for Path 1. Its `page`/`offset` traversal can skip an order when that order's
 mutable `date_modified_gmt` changes while a run is in progress. Adding
 `(date_modified_gmt, order_id)` to the sort does not repair that failure.
 
-The chosen model is **immutable discovery + modified-time catch-up**:
+The chosen model is **atomic immutable identity snapshot/manifest +
+modified-time catch-up**:
 
-1. A source-owned order-index endpoint establishes an immutable initial
-   membership boundary using source order identity and a source creation-time
-   keyset. Its boundary is fixed to the run's immutable
-   `BACKFILL_CUTOFF`.
-2. EventSales consumes bounded pages of metadata only and fetches each returned
-   order by identity through the existing Woo client. `OrderUpserter` remains
-   the sole durable order writer.
-3. A separate modified-time catch-up pass drains changes for that fixed
+1. A source-owned order-index endpoint creates an atomic, source-consistent
+   identity snapshot/manifest for the exact historical membership boundary.
+   Its boundary is fixed to the run's immutable `BACKFILL_CUTOFF`.
+2. The manifest contains source identities and bounded metadata only. It is
+   created and consumed in bounded chunks; it is never a full order-payload
+   materialization and is never built by paging the mutable standard REST
+   collection.
+3. EventSales consumes bounded manifest pages and fetches each returned order
+   by identity through the existing Woo client. `OrderUpserter` remains the
+   sole durable order writer.
+4. A separate modified-time catch-up pass drains changes for that frozen
    membership using a source-safe boundary and cursor. A current modified time
    greater than `run.date_to` does not evict an order already admitted by the
-   immutable membership boundary.
-4. If the source cannot provide a genuinely stable creation/identity boundary
-   in both legacy and HPOS storage, the source implementation must use an
-   atomic, short-lived identity snapshot/manifest. A live offset collection is
-   never an acceptable fallback.
+   manifest.
+5. Stateless/source-native creation-time discovery is only an optimization.
+   It is permitted for a specific HPOS or legacy adapter only after that
+   adapter proves the complete invariant in §4.C. REST read-only status for
+   `date_created` is not proof. Otherwise manifest mode is mandatory.
 
 The source integration is a new, separate boundary provisionally named
 `integrations/wordpress/eventsales-woo-order-index-feed/`. The existing
 `eventsales-tickera-catalog-feed` remains catalog-only and is not changed.
 
 `SyncRun.status == :completed` will mean only that the contracted source
-transport phases reached their terminal evidence and any deterministic item
-failures were durably inventoried. It will not mean `ORDER_COMPLETE`,
+transport phases reached their terminal evidence with zero unresolved source
+identity fetch or durable-write failures. It will not mean `ORDER_COMPLETE`,
 `REFUND_COMPLETE`, or `ANALYTICS_READY`. M3-08 remains the owner of
 completeness certification.
 
@@ -110,20 +114,39 @@ does not expose either form as a cursor contract. Therefore this document
 does not pretend that one set of `WC_Order_Query` arguments proves the tuple
 predicate in both storage modes.
 
+### 2.4 Read-only REST fields are not immutable source facts
+
+The official REST documentation marks `date_created` and `date_created_gmt`
+as `READ-ONLY` for REST consumers. That constrains this API's write surface;
+it does not establish that the underlying order creation value is immutable
+across plugins, imports, migrations, source-side PHP, or Woo internals.
+
+Current Woo core exposes `WC_Abstract_Order::set_date_created()`, which writes
+the `date_created` property. This is sufficient to reject REST read-only
+status as an immutability proof. It does not assert that every store changes
+the field during every run; it means the source adapter must prove its actual
+storage/integration invariant before it may use a stateless creation-time
+keyset.
+
+The authoritative default is therefore an atomic identity snapshot/manifest.
+The manifest records the creation timestamp observed at `D` as metadata; it
+does not assume that value will remain unchanged afterward.
+
 Primary evidence:
 
 - [Official `wc_get_orders` / `WC_Order_Query` guidance](https://developer.woocommerce.com/docs/features/orders/wc-get-orders/)
 - [Current `wc_get_orders` implementation](https://raw.githubusercontent.com/woocommerce/woocommerce/trunk/plugins/woocommerce/includes/wc-order-functions.php)
 - [Current `WC_Order_Query` source](https://raw.githubusercontent.com/woocommerce/woocommerce/trunk/plugins/woocommerce/includes/class-wc-order-query.php)
 - [Current legacy order data-store source](https://raw.githubusercontent.com/woocommerce/woocommerce/trunk/plugins/woocommerce/includes/data-stores/class-wc-order-data-store-cpt.php)
+- [Current `WC_Abstract_Order` source](https://raw.githubusercontent.com/woocommerce/woocommerce/trunk/plugins/woocommerce/includes/abstracts/abstract-wc-order.php)
 - [HPOS order-query improvements](https://developer.woocommerce.com/docs/features/orders/high-performance-order-storage/wc-order-query-improvements/)
 - [Current HPOS `OrdersTableQuery` source](https://raw.githubusercontent.com/woocommerce/woocommerce/trunk/plugins/woocommerce/src/Internal/DataStores/Orders/OrdersTableQuery.php)
 
 The source integration must therefore own and test a stable enumeration
-contract. It may use Woo's supported query APIs and storage-specific adapters,
-or it may materialize a source-side identity manifest when those APIs cannot
-prove the required invariant. Brittle `wp_posts`-only SQL is not the default
-architecture.
+contract. Its authoritative output is the source-side identity manifest;
+Woo's supported query APIs and storage-specific adapters may be used to build
+that manifest or to qualify the §4.C optimization. Brittle `wp_posts`-only SQL
+is not the default architecture.
 
 ## 3. Exact transport-completion semantics
 
@@ -138,8 +161,12 @@ B = BACKFILL_START
 C = BACKFILL_CUTOFF
   = the run's immutable date_to
 
-D = immutable source discovery boundary
-  = a source-issued boundary token and its captured source observation point
+D = source membership observation boundary
+  = the source-consistent observation point at which the manifest is frozen
+
+M = atomic immutable identity manifest
+  = the source-issued token and identity/metadata set frozen at D
+  = bound to SourceSystem, B, C, the membership predicate/version, and expiry
 
 H = catch-up high-water
   = a separate source observation bound captured for the catch-up phase
@@ -151,9 +178,10 @@ half-open representation where its API requires it. The adapter must not
 silently widen or move `C`.
 
 `D` is not a worker wall-clock timestamp. It is source evidence that binds the
-initial membership query to the requested bounds. It may be a stateless,
-authenticated boundary token. If a source cannot issue such a token without
-run-long state, it must use the snapshot/manifest fallback in §5.2.
+manifest membership observation to the requested bounds. `M` is the
+authoritative source-side state in the default architecture. A stateless,
+authenticated boundary token may replace `M` only for an adapter that has
+proved every §4.C invariant; otherwise the source must retain the manifest.
 
 `H` is operational transport evidence for draining source changes observed
 after discovery. It is not a new `BACKFILL_CUTOFF`, is not
@@ -162,18 +190,23 @@ historical range.
 
 ### 3.2 Membership and the mutable modified timestamp
 
-The initial launch backfill membership is the source order identity set whose
-source creation time is in `[B, C]` at boundary `D`. The source contract must
-make the membership key stable for the life of `D`:
+The initial launch backfill membership is frozen by an atomic source
+identity snapshot/manifest `M` created at boundary `D`. `M` contains exactly
+the source order identities whose source-consistent membership observation
+matches the selected `[B, C]` boundary. The manifest records the source
+creation and modified timestamps observed at `D` as metadata; it does not
+claim that either mutable source property remains unchanged afterward.
 
 ```text
-source_created_at_gmt is stable for D
-source_order_id is immutable identity
+manifest_membership(M) is immutable after D
+source_order_id is the source identity recorded by M
 ```
 
 The source order index returns the ID and both source timestamps. The current
 `date_modified_gmt` is metadata for catch-up and source-version ordering; it
-is not the membership authority.
+is not the membership authority. A stateless/source-native creation-time
+keyset may replace manifest enumeration only when the actual source adapter
+has recorded the complete proof in §4.C. REST read-only status is not enough.
 
 If a member's `date_modified_gmt` changes from a value inside the historical
 window to a value after `C` before it is fetched, the member remains in the
@@ -195,23 +228,29 @@ For this historical transport, `SyncRun.status == :completed` is allowed only
 when all of the following are durably true:
 
 1. the run's immutable `B` and `C` were persisted before transport began;
-2. the source returned a boundary-bound initial discovery response for `D`;
-3. every discovery page was replay-safe and ended with source terminal
+2. the source returned a boundary-bound manifest-create response for `D` and
+   froze the exact membership;
+3. every manifest page was replay-safe and ended with source terminal
    evidence, not merely a short page from the standard REST collection;
-4. every returned source identity was either fetched through the approved
-   full-order transport or durably classified in a blocking per-item
-   inventory;
+4. every returned source identity was fetched through the approved full-order
+   transport and its durable write succeeded;
 5. the bounded catch-up phase reached its own `H`-bound terminal evidence;
-6. cursors advanced only after the durable success or explicit blocking
-   inventory required by the M1-08 cursor rules; and
+6. cursors advanced only after durable success under the M1-08 cursor rules;
+   this MVP has no per-identity inventory escape hatch; and
 7. no source request, cursor, or boundary is still in flight for the run.
 
-The status may coexist with a durable blocking inventory. A deterministic
-source `not_found`, an unprocessable source identity, or a local write failure
-may therefore leave transport terminal while keeping Path 1 completeness
-false. Network failures, authentication failures, expired/invalid boundaries,
-and unproven source terminal conditions do not qualify; they leave the run
-retryable, paused, or failed-closed.
+The status may not coexist with any unresolved source identity, full-order
+fetch failure, or durable write failure. A deterministic source `not_found`,
+an unprocessable source identity, or a local write failure leaves the run
+retryable, paused, or failed-closed. Network failures, authentication
+failures, expired/invalid boundaries, and unproven source terminal conditions
+also do not qualify.
+
+`SyncCursor.metadata` and bounded run metadata are not a per-order failure or
+tombstone ledger. They may contain only bounded evidence such as the source
+phase, boundary token or hash, opaque cursor, source observation/high-water,
+terminal evidence or hash, and a bounded failure summary/reason. They must
+not contain unbounded source ID arrays.
 
 The following claims remain forbidden from `:completed` alone:
 
@@ -240,7 +279,7 @@ The relationship to the locked Path 1 contracts is:
 | --- | --- |
 | M1-08 C3 | `BACKFILL_START` remains the selected Tickera `post_date_gmt` source creation instant. This source enumeration does not invent or replace it. |
 | M1-08 C4 | `BACKFILL_CUTOFF` remains the explicit immutable `SyncRun.date_to`. The initial transport cursor's `modified_before` remains `C`; the catch-up high-water `H` is separate evidence and never rewrites `C`. |
-| M1-08 C6 | Cursor progress still advances only after durable success or explicit durable blocking inventory. Boundary replay and page replay remain required. |
+| M1-08 C6 | Cursor progress still advances only after durable success. Boundary replay and page replay remain required; this MVP does not use bounded cursor metadata as a per-identity blocking-inventory escape to `SyncRun :completed`. |
 | M1-08 C7 | Transport `SyncRun :completed` remains distinct from `ORDER_COMPLETE`. The source terminal proof is an input to later certification, not certification itself. |
 | M1-08 C28 | M3 still must produce durable bounded order history, idempotent writes, terminal cursor/evidence, and unresolved inventory before M4. This document supplies only the source-enumeration part of that evidence. |
 | M3-08 | M3-08 must certify event-relevant orders, order-item durability, attribution, effective timestamps, refunds, unresolved inventory, and the durable completeness watermark. It may reject a transport-completed run. |
@@ -299,28 +338,42 @@ to prove initial membership.
 At minimum, the source must provide:
 
 - an immutable source order ID;
-- a source creation timestamp that is stable for the boundary, or an
-  equivalent immutable membership sequence;
-- a source-issued boundary token binding the query to `B`, `C`, and the source
-  observation point;
-- a strict, replayable cursor over `(source_created_at_gmt, source_order_id)`
-  for initial discovery;
+- a source-consistent membership predicate evaluated at `D` against `B` and
+  `C`;
+- the creation and modified timestamps observed at `D` as manifest metadata;
+- a source-issued snapshot/manifest token binding the membership to `B`, `C`,
+  and the observation point;
+- a strict, replayable cursor over the frozen manifest sequence;
 - `source_modified_at_gmt` as the version/catch-up value; and
-- terminal evidence bound to the same source boundary.
+- terminal evidence bound to the same frozen membership.
 
-A full identity manifest is **not mandatory** if the source can provide those
-properties with a stateless or source-native immutable keyset. A snapshot or
-manifest is mandatory when creation/identity membership can change during
-enumeration, when the legacy and HPOS adapters cannot prove the same keyset
-semantics, or when the source cannot issue boundary-bound terminal evidence.
+For the optional stateless optimization only, the source must additionally
+provide a creation/ID seek whose membership key has the five properties below.
+
+A full identity manifest is the authoritative default and is mandatory unless
+a specific HPOS or legacy adapter proves all of the following for the actual
+source storage mechanism and boundary `D`:
+
+1. the membership key cannot mutate behind or ahead of the cursor during `D`;
+2. identities cannot be inserted into the historical membership after `D`;
+3. identities cannot silently leave the historical membership after `D`;
+4. terminal evidence is bound to that same immutable membership; and
+5. the proof covers the actual source storage and integration path, not merely
+   the REST representation of it.
+
+REST `date_created`/`date_created_gmt` read-only status is not this proof. If
+any property is unproven, manifest mode is mandatory. A future requirement to
+terminate with an unresolved deterministic tombstone would require a
+separately reviewed durable per-identity Postgres evidence contract; this
+correction does not authorize that resource.
 
 ### D. Is immutable creation/identity discovery plus modified reconciliation
 compatible with M1/M3?
 
-**Yes, with the explicit scope resolution in §3.2.** It preserves the locked
-`BACKFILL_START`, leaves `SyncRun.date_to` immutable, uses existing
-`SyncRun`/`SyncCursor` as the durable run/cursor foundation, and keeps
-`SyncRun :completed` distinct from `ORDER_COMPLETE`.
+**Yes, with the explicit scope resolution in §3.2 and the manifest authority.**
+It preserves the locked `BACKFILL_START`, leaves `SyncRun.date_to` immutable,
+uses existing `SyncRun`/`SyncCursor` as the durable run/cursor foundation, and
+keeps `SyncRun :completed` distinct from `ORDER_COMPLETE`.
 
 It is compatible because the Path 1 launch scope already says historical
 backfill begins at selected event creation date, while M1-08 requires source
@@ -328,11 +381,12 @@ terminal evidence and a later completeness watermark rather than a particular
 Woo pagination mechanism.
 
 The phrase “modified/created window” in M1-08 remains an explicit boundary to
-watch. This document chooses creation/identity as the initial sales-membership
-authority and modified time as catch-up/version evidence. If a later reviewer
-requires modified-only membership for orders created before `B`, the current
-contract set is insufficient; M3-01/02B must stop until M1-08 is amended or a
-stronger immutable source change-evidence contract is approved.
+watch. This document chooses the atomic source membership observation at `D`
+as the initial sales-membership authority and modified time as
+catch-up/version evidence. If a later reviewer requires modified-only
+membership for orders created before `B`, the current contract set is
+insufficient; M3-01/02B must stop until M1-08 is amended or a stronger
+immutable source change-evidence contract is approved.
 
 ## 5. Option analysis
 
@@ -409,6 +463,9 @@ live Woo collection.
 - construction and consumption must stream bounded identity pages;
 - no full order payload may be materialized in PHP memory;
 - no giant response is permitted;
+- atomic means that membership is defined by one source-consistent
+  observation boundary, not that all identities must be returned in one
+  response or held in one PHP array;
 - manifest storage is O(n) in matching identities and must be indexed by
   `(snapshot_id, sequence)` and by source identity as needed;
 - state is source-side persistent state with a default TTL of 24 hours and a
@@ -422,15 +479,18 @@ live Woo collection.
   concurrency limits so a caller cannot turn it into an unbounded database
   amplification service.
 
-**Verdict:** the strongest fallback and the required escape hatch when a
-  portable immutable keyset cannot be proven. It is not the default because
-  it adds persistent source state proportional to the historical membership.
+**Verdict:** authoritative default. It is the smallest architecture that
+  does not require trusting mutable creation timestamps without source proof.
+  Its identity-only state is proportional to membership and is bounded by
+  TTL, quotas, and cleanup.
 
-### 5.3 Option 3 — immutable initial discovery boundary plus modified catch-up
+### 5.3 Option 3 — stateless creation/identity discovery optimization plus
+modified catch-up
 
-The source exposes a stateless or source-native immutable initial discovery
-boundary ordered by `(source_created_at_gmt, source_order_id)`. The mandatory
-logical seek predicate is:
+The source may expose a stateless or source-native initial discovery boundary
+ordered by `(source_created_at_gmt, source_order_id)`, but only after the
+adapter proves the five invariants in §4.C for the actual storage mechanism.
+The logical seek predicate is:
 
 ```text
 (created > cursor_created)
@@ -444,17 +504,18 @@ through `H`.
 
 **Correctness:**
 
-- source modification cannot move a member out of the creation predicate;
-- an order that moves beyond `C` stays in the member set and is fetched by
-  identity;
+- source modification cannot move a member out of the creation predicate
+  only if the adapter has proven that property;
+- an order that moves beyond `C` stays in the member set only if the adapter
+  has proven immutable membership; otherwise manifest mode is mandatory;
 - the discovery cursor has a stable ordering and a source-bound terminal
-  condition;
+  condition only when terminal evidence is bound to that proven membership;
 - modified-time is used to observe versions/updates, not to decide whether an
   already-established member existed;
-- the source must provide a tombstone or deterministic blocking response if a
-  discovered identity is deleted before retrieval;
-- if creation timestamps or identities can be changed by the source, this
-  option is not actually immutable and must use Option 2.
+- source timestamp read-only status is not evidence of the required
+  immutability; and
+- if any proof property is missing, this option is not safe and must use
+  Option 2.
 
 **Performance and state:**
 
@@ -462,9 +523,9 @@ through `H`.
 - no giant query, no offset scan, and no full-payload index response;
 - feasible for millions of orders if the source provides usable creation/ID
   and modified/ID seek plans;
-- no run-long source-side state in the chosen stateless form; the opaque
-  boundary token may be signed metadata but must not depend on mutable local
-  page state;
+- no run-long source-side state only when all five proof properties hold; the
+  opaque boundary token may be signed metadata but must bind the proven
+  membership and terminal evidence;
 - maximum page size is 100 identities;
 - source indexes must support `(created_gmt, id)` for discovery and
   `(modified_gmt, id)` for catch-up, or the source must use the manifest
@@ -472,10 +533,10 @@ through `H`.
 - rate limits, maximum range, bounded query time, and the existing maximum
   Woo concurrency of two remain in force.
 
-**Verdict:** chosen as the smallest contract that preserves Path 1
-completeness without making a source manifest mandatory for every run. Option
-2 is a required source implementation fallback, not permission to return to
-standard REST offset paging.
+**Verdict:** optimization only. It is never the default merely because the
+  source exposes `date_created` as REST read-only. Option 2 remains mandatory
+  whenever the actual HPOS or legacy adapter cannot prove the complete
+  invariant.
 
 ## 6. Chosen architecture
 
@@ -492,16 +553,25 @@ enumeration and boundary evidence. It must not become a catalog feed, a full
 order webhook, a payment integration, a customer/CRM integration, or a second
 durable order writer.
 
-The endpoint must provide two explicit phases:
+The endpoint must provide an authoritative manifest phase and a separate
+catch-up phase:
 
-1. **Initial discovery:** source-created/ID keyset inside immutable `B`/`C`
-   membership and boundary `D`.
-2. **Modified catch-up:** source-modified/ID keyset through a separately
-   captured `H`, bound to the established membership boundary.
+1. **Manifest creation and enumeration:** one source-consistent operation
+   freezes the exact `B`/`C` membership at `D`, returns a snapshot/manifest
+   token, and exposes bounded manifest pages by replayable sequence cursor.
+2. **Modified catch-up:** source-modified/ID traversal through a separately
+   captured `H`, bound to the frozen manifest membership.
 
 The endpoint may expose these as one versioned contract with a phase field or
-as two endpoints. It must not expose a misleading `page`/`offset` contract as
-the only continuation mechanism.
+as separate endpoints. It must not expose a misleading `page`/`offset`
+contract as the only continuation mechanism. A source-native stateless
+creation/ID keyset may be selected for a particular adapter only after the
+proof in §4.C is recorded; it is not the default path.
+
+The manifest operation must be source-consistent/atomic at the membership
+boundary. It may stream bounded chunks into source-side manifest state, but it
+must not page the mutable standard Woo REST collection and must not load full
+order payloads into unbounded PHP memory.
 
 ### 6.2 EventSales flow
 
@@ -509,19 +579,22 @@ The later implementation must follow this sequence:
 
 1. Persist `SyncRun.date_from`/`date_to` and the historical mode before source
    transport begins.
-2. Request the initial source boundary and persist its metadata with the
-   durable cursor.
-3. Consume at most 100 source identities per page.
+2. Request atomic manifest creation and persist its token, boundary/hash, and
+   expiry metadata with the durable cursor.
+3. Consume at most 100 source identities per manifest page.
 4. Retrieve each full Woo order by source ID through the existing approved Woo
    client. The identity feed never supplies the full order payload.
 5. Process the full payload through the existing parser and `OrderUpserter`;
    no parallel order writer is introduced.
-6. Advance the cursor only after durable success or an explicit, durable
-   blocking inventory entry under M1-08 C6.
+6. Advance the cursor only after the page's durable work succeeds. Any
+   unresolved identity fetch or `OrderUpserter` failure leaves the run
+   retryable, paused, or failed-closed; it is not converted into an ID array
+   in `SyncCursor.metadata`.
 7. After discovery terminal evidence, capture `H` and drain modified catch-up
    for the established member boundary.
-8. Persist discovery and catch-up terminal evidence. Only then may the run
-   enter transport `:completed` under §3.3.
+8. Persist manifest and catch-up terminal evidence. Only after every
+   enumerated identity has fetched and written successfully may the run enter
+   transport `:completed` under §3.3.
 9. Leave ORDER/REFUND completeness and the durable watermark to M3-08 and its
    downstream contracts.
 
@@ -530,12 +603,14 @@ The later implementation must follow this sequence:
 The proof is a membership proof, not a pagination hope:
 
 ```text
-An in-scope order has an immutable creation/identity key in D.
-That key remains eligible even if date_modified_gmt changes.
-The source terminal response proves the complete immutable keyset was emitted.
+An in-scope order is present in the atomic manifest created at D.
+The manifest membership remains fixed even if creation or modified metadata
+changes afterward.
+The manifest terminal response proves the complete identity set was emitted.
 EventSales fetches every emitted identity by ID.
-Therefore a modified-time change cannot remove an established member from
-the historical transport set.
+Therefore a modified-time or creation-time change cannot remove an established
+member from the historical transport set, and a late-created/backdated order
+cannot silently enter this run's frozen membership.
 ```
 
 The modified catch-up phase can observe current versions through `H`, but it
@@ -543,12 +618,17 @@ does not change the meaning of `C`. A mutation after `H` belongs to later
 live/reconciliation processing and may invalidate a future completeness
 certification according to M1-08; it does not rewrite this run's cutoff.
 
+The stateless optimization has the same proof only when its adapter has
+already demonstrated every invariant in §4.C. Without that evidence, the
+manifest is authoritative.
+
 ## 7. Rejected alternatives and why
 
 | Alternative | Decision | Reason |
 | --- | --- | --- |
 | Standard Woo REST `page`/`offset` collection | Reject | Mutable result membership can shrink between pages; PR #188 proves an unseen row can be followed by a short terminal page. |
 | Modified-time + ID keyset as the only historical boundary | Reject | A row can leave `modified <= C` before its tuple is reached; no immutable membership evidence remains. |
+| Stateless creation-time/ID keyset as the default | Reject | Woo REST read-only `date_created` does not prove the underlying source value cannot be changed, inserted, or removed by the actual storage/integration path. |
 | Increase `per_page`, add overlap, or retry the same page | Reject | These reduce probability or create duplicates; none proves that every row in a mutable collection was emitted. |
 | `wc_get_orders(limit: -1)` / one giant source query | Reject | Unbounded PHP/database work, poor failure/replay behavior, and unacceptable scale/privacy characteristics. |
 | Direct `wp_posts` SQL as the default | Reject | It is legacy-storage-specific and bypasses Woo's HPOS-compatible data-store boundary. |
@@ -567,17 +647,23 @@ are mandatory.
 
 Every request is authenticated with an order-index key scope and contains:
 
-| Field | Initial discovery | Modified catch-up |
+| Field | Manifest creation/enumeration | Modified catch-up |
 | --- | --- | --- |
-| `phase` | `initial_discovery` | `modified_catch_up` |
-| boundary | `B`, `C`, source boundary request | established `D` and `H` |
-| cursor | opaque creation/ID cursor, absent on first page | opaque modified/ID cursor, absent on first page |
-| bounds | `created_from_gmt`, `created_to_gmt` | `modified_from_gmt`, `modified_to_gmt = H` as applicable |
+| `phase` | `manifest_create` or `manifest_enumerate` | `modified_catch_up` |
+| boundary | `B`, `C`, and source-consistent boundary request | manifest token `D` and `H` |
+| cursor | manifest sequence cursor, absent on first page | opaque modified/ID cursor, absent on first page |
+| bounds | exact source membership predicate for `B`/`C` | `modified_from_gmt`, `modified_to_gmt = H` as applicable |
 | `limit` | 1–100 | 1–100 |
 
-The first response establishes `D`; subsequent requests must echo the opaque
-boundary/cursor issued by the source. A cursor is valid only for the exact
-source system, phase, bounds, and boundary that created it.
+The manifest-create response establishes `D`, freezes membership, and returns
+the opaque snapshot/manifest token and expiry. Subsequent requests must echo
+the token and cursor issued by the source. A cursor is valid only for the
+exact source system, phase, bounds, and manifest boundary that created it.
+
+The manifest-create operation must be source-consistent/atomic. It may
+materialize identity rows in bounded source-side chunks, but the membership
+set must correspond to one observation boundary. It must not be implemented by
+paging the mutable standard Woo REST collection.
 
 The request must not accept an arbitrary `offset` as a continuation mechanism.
 It must not require a full source result count. The endpoint must not use
@@ -591,7 +677,9 @@ Each response contains only:
 | --- | --- |
 | `schema_version` | Version of the index contract |
 | `phase` | Echoed phase |
-| `boundary_token` | Opaque source boundary bound to the requested scope |
+| `boundary_token` | Opaque source boundary/manifest token bound to the requested scope |
+| `manifest_hash` | Hash or equivalent identity-set evidence for the frozen manifest |
+| `manifest_expires_at_gmt` | Expiry after which the token is rejected |
 | `source_observed_at_gmt` | Source observation metadata |
 | `items` | At most 100 identity records |
 | `next_cursor` | Opaque continuation cursor, absent at terminal |
@@ -606,11 +694,13 @@ source_created_at_gmt
 source_modified_at_gmt
 ```
 
-The timestamp fields are UTC and use a documented precision. A source may
-include a source version or tombstone classification when required to explain
-an identity failure. It must not include customer name/email, billing or
-shipping addresses, payment data, order totals, line items, notes, raw
-provider payloads, or authentication material.
+The timestamp fields are UTC and use a documented precision. The creation and
+modified values in a manifest page are the values observed at `D`; catch-up
+responses may expose the current modified value for the same frozen identity.
+A source may include a source version or tombstone classification when
+required to explain an identity failure. It must not include customer
+name/email, billing or shipping addresses, payment data, order totals, line
+items, notes, raw provider payloads, or authentication material.
 
 The response must not expose a total count as a correctness requirement. A
 terminal proof and opaque cursor are authoritative; `items.length < limit`
@@ -630,16 +720,19 @@ replacement full-order API and is not a second writer.
    or catch-up high-water may overwrite it.
 2. `BACKFILL_START` is the durable selected event source creation instant from
    M1-08 C3. It is not reconstructed from local insertion time.
-3. Initial discovery uses a strict `(created_at_gmt, order_id)` seek. Equal
-   timestamps are resolved by the numeric/source-identity tie breaker.
+3. The authoritative initial cursor is a manifest sequence cursor bound to
+   the immutable snapshot token. Equal source creation timestamps are
+   resolved deterministically in the manifest by the source identity/sequence
+   tie breaker.
 4. Catch-up uses a strict `(modified_at_gmt, order_id)` seek only inside the
-   fixed membership/boundary and through `H`.
+   fixed manifest membership/boundary and through `H`. A stateless creation/ID
+   cursor is permitted only when the §4.C adapter proof is recorded.
 5. Timestamps are normalized to UTC with source precision before comparison;
    precision loss that can collapse distinct source values is a contract
    failure.
-6. A cursor is advanced only after the page's durable work succeeds or every
-   failed identity has a durable blocking classification. A failed network or
-   source-boundary request never advances it.
+6. A cursor is advanced only after the page's durable work succeeds. A failed
+   network, source-boundary request, full-order fetch, or durable write never
+   advances it and cannot be converted into a per-ID array in cursor metadata.
 7. Replaying a page with the same boundary and cursor is safe. Duplicate IDs
    are harmless because identity retrieval and `OrderUpserter` are
    idempotent; a replay must not create duplicate durable facts.
@@ -648,17 +741,25 @@ replacement full-order API and is not a second writer.
 9. A source terminal response must be bound to the exact cursor/boundary and
    must prove exhaustion of that immutable phase. An empty or short standard
    REST page is not terminal evidence.
-10. A source-deleted discovered ID must produce a deterministic tombstone or
-    blocking response. It must not disappear from a later page without an
-    inventory record.
-11. If a snapshot/manifest fallback is used, its token binds an immutable
-    membership set and the exact bounds; its rows contain identities/metadata,
-    not order payloads. It expires after the source-defined TTL and is
-    garbage-collected. An expired/abandoned token is rejected rather than
-    silently recreated.
-12. Discovery terminal evidence, catch-up high-water `H`, catch-up terminal
-    evidence, and any blocking inventory are separate evidence from M3-08's
-    later completeness watermark.
+10. A source-deleted discovered ID remains present in the manifest evidence,
+    but the unresolved identity makes transport completion forbidden under the
+    MVP zero-failure rule. A deterministic tombstone is not an implicit
+    completion waiver.
+11. The authoritative manifest token binds the immutable membership set and
+    exact bounds; its rows contain identities/metadata, not order payloads. It
+    has a default TTL of 24 hours and hard maximum TTL of 7 days, is
+    garbage-collected after expiry, and is rejected rather than silently
+    recreated when expired or abandoned.
+12. `SyncCursor.metadata` and bounded run metadata may contain only source
+    phase, boundary token/hash, opaque cursor, source observation/high-water,
+    terminal evidence/hash, and a bounded failure summary/reason. No
+    unbounded source-ID arrays or per-order tombstone ledger is permitted.
+13. A future policy that permits transport termination with unresolved
+    deterministic tombstones requires a separately reviewed durable Postgres
+    per-identity evidence contract/resource. It is not authorized here.
+14. Manifest terminal evidence, catch-up high-water `H`, catch-up terminal
+    evidence, and zero-failure status are separate evidence from M3-08's later
+    completeness watermark.
 
 ## 10. HPOS and legacy storage compatibility
 
@@ -672,21 +773,25 @@ storage mode is not evidence for the other.
 
 Woo's supported `wc_get_orders` / `WC_Order_Query` remains the preferred
 full-order retrieval boundary because Woo documents it as the storage-safe
-API. The new metadata endpoint may use a source adapter to obtain bounded
-identity pages, but it must preserve the same semantics in both stores.
+API. The authoritative metadata endpoint creates and enumerates the same
+identity-only atomic manifest in both stores. A source adapter may select the
+stateless optimization only after proving the complete §4.C invariant for
+that actual store; it must preserve the same membership semantics in both
+stores.
 
 ### 10.2 HPOS
 
 HPOS provides richer `field_query` and date-query capabilities, and its order
 table maps modified ordering to HPOS order-date fields. An HPOS adapter may
-use those supported capabilities to express the creation/ID and modified/ID
-seek logic when the relevant field mappings are available. It must still
+use those supported capabilities to implement the stateless creation/ID and
+modified/ID optimization only when the complete §4.C proof is established.
+Otherwise it must create/enumerate the atomic identity manifest. It must
 return source-bound terminal evidence and must not rely on REST `page`.
 
-The adapter must verify the actual query plan/index support for the two
-canonical orderings. If a bounded seek degenerates into an unbounded scan or
-the field mapping is not available, it must use the manifest fallback or fail
-closed.
+The adapter must verify the actual query plan/index support and the mutation
+properties for the canonical orderings. If a bounded seek degenerates into an
+unbounded scan, the field mapping is unavailable, or membership mutation
+cannot be ruled out, it must use the authoritative manifest or fail closed.
 
 ### 10.3 Legacy order storage
 
@@ -698,9 +803,9 @@ portable query contract. The source adapter must not assume that an HPOS
 The legacy adapter may use a narrowly scoped Woo-supported data-store hook or
 another source-owned, version-tested mechanism. It must not make brittle
 `wp_posts`-only SQL the application-wide architecture. If the legacy adapter
-cannot prove an equivalent immutable creation/ID keyset and terminal
-boundary, it must build the bounded identity manifest fallback and enumerate
-that frozen manifest.
+cannot prove an equivalent immutable creation/ID keyset, insertion/deletion
+invariants, and terminal boundary, it must use the authoritative bounded
+identity manifest and enumerate that frozen manifest.
 
 ### 10.4 Shared limits
 
@@ -768,24 +873,62 @@ correctness and availability controls, not optional optimizations.
 
 ## 12. Failure and replay semantics
 
+For M3-01/02B transport, the fail-closed rule is deliberately simple:
+
+```text
+SyncRun :completed requires zero unresolved source-identity fetch failures
+and zero unresolved durable order-write failures.
+```
+
+An unresolved identity is not made complete by putting its ID into bounded
+cursor metadata. `SyncCursor.metadata` is evidence metadata, not a per-order
+failure/tombstone ledger.
+
 | Failure | Required result |
 | --- | --- |
-| Boundary creation/authentication fails | No cursor advancement; run remains retryable/failed-closed. |
-| Source timeout, 429, or 5xx | Replay the same boundary/cursor; do not skip the page. |
-| Boundary token is invalid or expired | Stop the run; do not create a fresh boundary under the same completion evidence. Operator/new-run policy is required. |
+| Boundary creation/authentication fails | No cursor advancement; retry, pause, or fail closed. `SyncRun :completed` is forbidden. |
+| Source timeout, 429, or 5xx | Replay the same boundary/cursor; do not skip the page. Completion is forbidden until the page succeeds. |
+| Boundary token is invalid or expired | Stop the run; do not create a fresh boundary under the same run completion evidence. Completion is forbidden. |
 | Source reports boundary invalidated | No terminal claim; preserve the run as incomplete and retain the reason. |
-| Discovered ID is deleted/not found | Record a durable blocking identity inventory or source tombstone; never silently drop it. |
-| Full payload fetch fails | Do not advance past the page unless the failure is durably classified under M1-08 C6; otherwise retry the same page. |
-| `OrderUpserter` fails | Keep the page retryable or record explicit durable blocking inventory; no silent source-range skip. |
+| Discovered ID is deleted/not found | The manifest preserves the unresolved identity, but the run retries/pauses/fails closed. A tombstone does not permit completion in this MVP. |
+| Full payload fetch fails | Do not advance past the identity/page; retry, pause, or fail closed. Completion is forbidden. |
+| `OrderUpserter` fails | Do not advance past the identity/page; retry, pause, or fail closed. Completion is forbidden. |
 | Worker crashes after durable writes before checkpoint | Replay the same page; idempotent order/order-item identity prevents duplicate facts. |
-| Duplicate source page or ID | Reprocess safely; no duplicate durable facts and no cursor regression. |
-| Order modified beyond `C` | Keep it in the immutable membership set; fetch by ID and allow catch-up metadata beyond `C` without moving `C`. |
+| Duplicate source page or ID | Reprocess safely; no duplicate durable facts and no cursor regression. Completion remains permitted only after all replayed work succeeds. |
+| Order modified beyond `C` | The manifest keeps the identity in scope; fetch by ID and allow catch-up metadata beyond `C` without moving `C`. This case alone does not forbid completion. |
 | Order changes after `H` | Outside this transport claim; later webhook/reconciliation handles it and M3-08 may invalidate/reopen certification if required. |
-| Snapshot fallback abandoned | Expire and garbage-collect the manifest; reject the token and do not resume under different membership. |
+| Snapshot abandoned or expires | Garbage-collect after expiry; reject the token and do not silently rebuild membership under the same run. Completion is forbidden. |
 
-Transport terminal evidence is not a waiver for a failed source request. It is
-acceptable only for deterministic item-level failures that have been
-durably inventoried so M3-08 can block certification explicitly.
+Transport terminal evidence is never a waiver for an unresolved source
+request, identity fetch, or durable write in this MVP.
+
+### 12.1 Required adversarial contract cases
+
+The following cases are part of the contract, not optional implementation
+examples. “Permitted” means only that the case itself does not prohibit
+transport completion; all other zero-failure and terminal-evidence conditions
+must still pass.
+
+| Case | Manifest protection | Stateless optimization | Run outcome | Transport completion |
+| --- | --- | --- | --- | --- |
+| Modified timestamp moves beyond `C` before fetch | Yes. Frozen identity membership is unaffected; fetch by ID. | Only if the adapter has already proven immutable membership; a modified-time keyset alone is not enough. | Continue with the manifest identity and catch-up metadata. | Permitted for this case alone if fetch/write succeeds. |
+| Creation timestamp changes after `D` | Yes. Manifest membership and the value observed at `D` are frozen as evidence. | Not permitted without proof that creation membership cannot mutate. REST read-only status is insufficient. | Continue from the manifest; do not reclassify membership from the current payload timestamp. | Permitted for this case alone if fetch/write succeeds. |
+| Source code backdates an existing order into `[B,C]` after `D` | Yes. It is absent unless its identity was already in the manifest. | Not permitted without proof that post-`D` backdating/insertion cannot alter membership. | The run's exact `D` membership is unchanged; later reconciliation handles the late change. | Permitted for this case alone; no silent late addition. |
+| New/backfilled order appears with a historical creation timestamp after `D` | Yes. The new identity is outside the frozen membership. | Not permitted without proof that post-`D` insertion cannot occur. | The run remains bounded to `D`; a later run/reconciliation may observe it. | Permitted for this case alone. |
+| Equal creation timestamps | Yes. Manifest sequence plus source ID provides deterministic ordering. | Only if the adapter proves the same ID tie-breaker and terminal evidence. | Continue; replay uses the manifest sequence cursor. | Permitted for this case alone. |
+| Equal modified timestamps | Yes. Catch-up uses the manifest membership and deterministic modified/ID tie-break. | Only if the adapter proves the same modified/ID seek and membership invariants. | Continue; no cursor ambiguity. | Permitted for this case alone. |
+| Source identity deleted after snapshot | Membership evidence remains, but full-order retrieval cannot resolve the identity. | No; the optimization cannot waive unresolved identity. | Retry, pause, or fail closed. A deterministic tombstone classification may be recorded only as bounded failure reason/evidence; it is not a per-ID completion record. | **Forbidden** under the MVP zero-failure rule. |
+| Snapshot expires mid-run | No continuation is allowed with the expired token; the recorded manifest evidence does not make a new token equivalent. | No silent switch to a newly discovered stateless boundary. | Retry only under an explicit new-run/new-boundary policy; otherwise pause/fail closed. | **Forbidden** for the expired run. |
+| Duplicate/replayed manifest page | Yes. Identity and `OrderUpserter` idempotency make replay safe. | Irrelevant to the optimization proof; replay is allowed only with its proven boundary. | Reprocess the same page; do not regress the cursor. | Permitted if every replayed write succeeds. |
+| HPOS adapter cannot prove immutable stateless seek | Yes. Manifest mode is authoritative. | No. The optimization is disabled for that adapter. | Create/enumerate the manifest in bounded chunks. | Permitted if manifest creation, retrieval, and writes succeed. |
+| Legacy adapter cannot prove immutable stateless seek | Yes. Manifest mode is authoritative. | No. The optimization is disabled for that adapter. | Create/enumerate the manifest in bounded chunks. | Permitted if manifest creation, retrieval, and writes succeed. |
+| Unresolved full-order identity fetch | The manifest identifies the exact item that remains unresolved. | No optimization escape. | Retry, pause, or fail closed without advancing past it. | **Forbidden**. |
+| Unresolved `OrderUpserter` write | The manifest page can be replayed without losing membership. | No optimization escape. | Retry, pause, or fail closed without advancing past it. | **Forbidden**. |
+
+If a future programme decision wants transport to terminate with an unresolved
+deterministic tombstone, a dedicated durable per-identity Postgres evidence
+contract/resource is required. That is a separately reviewed architectural
+slice and is **not implemented or implicitly authorized here**.
 
 ## 13. Performance and scaling review
 
@@ -793,14 +936,18 @@ durably inventoried so M3-08 can block certification explicitly.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Standard REST collection | Bounded per response | Usually bounded, but count/page behavior varies | **Yes** | REST hides storage but correctness is unsafe | Unsafe as a completeness primitive | None | N/A | 100 | Existing limits do not repair skips |
 | Modified/ID keyset alone | Bounded | No, if seek plan exists | No, if real keyset | Requires storage-specific proof | Feasible with `(modified,id)` support | None | N/A | 100 | Auth, max range, rate/time/concurrency limits |
-| Frozen identity manifest | Bounded if streamed | No giant response; creation must stream/atomically bound | No after manifest creation | Strongest storage abstraction; adapter still required | Feasible but O(n) manifest storage | Persistent O(n) manifest | Default TTL 24h; hard max 7d; GC; expired tokens reject | 100 | Manifest quotas, no total count, request limits |
-| **Chosen discovery + catch-up** | **Bounded** | **No** | **No** when source seek plans are proven | **Requires tested adapters; manifest fallback otherwise** | **Feasible with `(created,id)` and `(modified,id)` support** | **None by default**; signed boundary metadata only | N/A in default; fallback follows manifest rules | **100** | **Auth, max range, max page, bounded time, max two source calls, no offsets/counts** |
+| **Atomic identity manifest + catch-up (chosen)** | **Bounded if streamed** | **No giant response; source-consistent creation must be bounded** | **No after manifest creation** | **Common contract; storage-specific construction required** | **Feasible with O(n) identity-only manifest state** | **Persistent O(n) identity/metadata manifest** | **Default TTL 24h; hard max 7d; GC; expired tokens reject** | **100** | **Manifest quotas, no total count, auth, bounded time/rate/concurrency** |
+| Stateless creation/ID optimization | Bounded | No, if proven seek plan exists | No, if real keyset exists | Requires actual HPOS/legacy proof of all §4.C invariants | Feasible only with proven source indexes and mutation rules | None or signed boundary metadata | N/A | 100 | Proof gate, auth, max range, rate/time/concurrency limits |
 
 The chosen model does not require unbounded PHP memory, a giant Woo query, or
-repeated O(n) offset scans. It does require source-side query/index evidence.
-If the source cannot provide that evidence in either storage mode, the
-manifest fallback is not an optional performance choice; it is the only safe
-source implementation.
+repeated O(n) offset scans. It does require source-consistent membership
+observation and O(n) source-side identity/metadata state, bounded by quotas
+and TTL. Manifest creation may stream bounded chunks, but it must define one
+membership boundary and must never materialize full order payloads.
+
+The stateless optimization is a performance option, not a correctness
+baseline. If its actual HPOS or legacy adapter cannot prove every §4.C
+property, the source must use the manifest.
 
 The source endpoint should not return a total count. Counting the entire
 matching set on every request adds database work without improving the
@@ -814,28 +961,37 @@ No slice below is implemented by this document. The required order is:
 1. **Source boundary implementation:** create the separate Woo order-index
    feed with separate authentication/key scope, metadata-only responses,
    maximum page 100, and no catalog-feed changes.
-2. **Storage adapters:** prove immutable creation/ID discovery and
-   modified/ID catch-up with legacy storage and HPOS. Record query/index
-   evidence. Use a bounded identity manifest when either adapter cannot prove
-   the stateless boundary.
-3. **Source contract tests:** cover mutation beyond `C`, equal timestamp/ID
-   ties, deletion/tombstone, cursor replay, boundary invalidation, page
-   limits, rate/concurrency limits, and both storage modes.
-4. **EventSales index client:** add only the approved metadata transport. Keep
+2. **Atomic identity manifest:** implement source-consistent immutable
+   identity membership as the authoritative/default source mode. Build and
+   consume it in bounded chunks with identity-only metadata, TTL/GC, replayable
+   cursor, and terminal evidence. Do not page standard REST to create it.
+3. **Storage-specific optimization proof:** only if pursued, prove the full
+   §4.C stateless creation/ID and modified/ID invariants separately for HPOS
+   and legacy storage. If either proof fails, retain manifest mode.
+4. **Source contract tests:** cover mutation beyond `C`, creation mutation
+   after `D`, late/backdated identities, equal timestamp/ID ties,
+   deletion/tombstone, expiry, cursor replay, boundary invalidation, page
+   limits, rate/concurrency limits, zero-failure completion, and both storage
+   modes.
+5. **EventSales index client:** add only the approved metadata transport. Keep
    full order retrieval on the existing Woo client and keep `OrderUpserter` as
    the sole durable writer.
-5. **SyncRun/SyncCursor extension:** persist phase, boundary, creation cursor,
-   catch-up high-water, terminal evidence, and blocking inventory without
-   changing the immutable `date_to` meaning.
-6. **M3-01/02B follow-up:** replace the unsafe standard REST historical
+6. **SyncRun/SyncCursor evidence:** persist only bounded phase, boundary/hash,
+   opaque cursor, observation/high-water, terminal evidence/hash, and bounded
+   failure summary/reason. Do not introduce a per-ID inventory resource in
+   this slice or hide an ID ledger in `SyncCursor.metadata`.
+7. **M3-01/02B follow-up:** replace the unsafe standard REST historical
    traversal with the contracted source boundary, preserve fail-closed page
-   checkpoints, and rerun the PR #188 mutation regression.
-7. **M3-08:** separately implement completeness watermark/certification using
+   checkpoints, enforce zero unresolved fetch/write failures for transport
+   completion, and rerun the PR #188 mutation regression.
+8. **M3-08:** separately implement completeness watermark/certification using
    the transport evidence plus durable order, attribution, refund, timestamp,
    and unresolved-inventory predicates from M1-08.
 
 M3-03 and later implementation work is outside this contract and is not
-started here.
+started here. If a dedicated durable per-identity failure/tombstone resource
+becomes necessary, stop and open a separately reviewed architectural slice;
+this contract does not authorize it.
 
 ## 15. Explicit effect on blocked PR #188
 
@@ -849,14 +1005,15 @@ short-page rule.
 The exact unblocking requirement is a later, separately reviewed change that:
 
 1. consumes the new source order-index contract;
-2. establishes immutable discovery membership and boundary evidence before
-   modified catch-up is treated as progress;
-3. uses bounded source-safe cursors or an atomic identity manifest in both
-   legacy and HPOS modes;
-4. fetches every enumerated identity by ID, including IDs whose current
-   modified timestamp is beyond `run.date_to`;
-5. persists phase/cursor/terminal evidence with the existing fail-closed
-   durable-checkpoint rules; and
+2. establishes the atomic identity manifest and boundary evidence before
+   modified catch-up is treated as progress; a stateless source-safe cursor
+   may replace the manifest only after the complete adapter proof in §4.C;
+3. uses bounded manifest cursors in both legacy and HPOS modes, or records the
+   separately reviewed stateless optimization proof for the actual storage;
+4. fetches and durably writes every enumerated identity by ID, including IDs
+   whose current modified timestamp is beyond `run.date_to`;
+5. persists only bounded phase/cursor/terminal evidence and enforces zero
+   unresolved identity fetch/write failures for transport completion; and
 6. passes the existing mutation regression while proving no unseen member can
    be hidden by a terminal page.
 
@@ -869,7 +1026,11 @@ observed:
 
 - the source cannot provide immutable identity membership or an atomic
   snapshot/manifest;
+- membership correctness requires trusting a mutable creation timestamp
+  without a source/storage proof;
 - a design relies on a standard REST offset page as completeness evidence;
+- snapshot creation itself relies on paging the mutable standard REST
+  collection;
 - satisfying the design requires silently changing `BACKFILL_START`,
   `BACKFILL_CUTOFF`, or the meaning of `SyncRun.date_to`;
 - the chosen membership interpretation contradicts an explicitly locked
@@ -878,6 +1039,11 @@ observed:
   source adapter cannot prove bounded seek behavior;
 - correctness requires unbounded full-order payload materialization, one
   giant Woo query, or repeated O(n) offset scans;
+- safe transport completion requires a new durable per-identity failure or
+  tombstone resource; stop and propose that resource as a separately reviewed
+  slice instead;
+- a migration or new durable resource becomes necessary for this document-only
+  correction;
 - a source boundary, cursor, terminal condition, or snapshot expiry cannot be
   replayed and audited;
 - production WordPress, production Woo, production databases, Railway, VPS,
@@ -906,6 +1072,7 @@ Primary WooCommerce/WordPress evidence:
 - [WooCommerce HPOS query improvements](https://developer.woocommerce.com/docs/features/orders/high-performance-order-storage/wc-order-query-improvements/)
 - [WooCommerce REST controller source](https://raw.githubusercontent.com/woocommerce/woocommerce/trunk/plugins/woocommerce/includes/rest-api/Controllers/Version3/class-wc-rest-crud-controller.php)
 - [WooCommerce order query source](https://raw.githubusercontent.com/woocommerce/woocommerce/trunk/plugins/woocommerce/includes/class-wc-order-query.php)
+- [WooCommerce `WC_Abstract_Order` source](https://raw.githubusercontent.com/woocommerce/woocommerce/trunk/plugins/woocommerce/includes/abstracts/abstract-wc-order.php)
 - [WooCommerce HPOS orders-table query source](https://raw.githubusercontent.com/woocommerce/woocommerce/trunk/plugins/woocommerce/src/Internal/DataStores/Orders/OrdersTableQuery.php)
 - [WordPress `WP_Query` source](https://raw.githubusercontent.com/WordPress/wordpress-develop/trunk/src/wp-includes/class-wp-query.php)
 - [WordPress `WP_Date_Query` source](https://raw.githubusercontent.com/WordPress/wordpress-develop/trunk/src/wp-includes/class-wp-date-query.php)
