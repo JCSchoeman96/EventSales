@@ -125,6 +125,123 @@ defmodule EventSales.Ingestion.HistoricalExecutionTest do
       do: {:error, {:source_contract_violation, :invalid_date}}
   end
 
+  defmodule MutableWooSourceContractClient do
+    def child_spec(opts) do
+      %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}}
+    end
+
+    def start_link(_opts),
+      do: Agent.start_link(fn -> %{orders: [], requests: [], mutation: nil} end, name: __MODULE__)
+
+    def reset!(orders) do
+      Agent.update(__MODULE__, fn _state ->
+        %{
+          orders: orders,
+          requests: [],
+          mutation: %{order_id: 10, modified_at: "2026-05-01T08:11:00"}
+        }
+      end)
+    end
+
+    def fetched_ids do
+      Agent.get(__MODULE__, fn state ->
+        state.requests
+        |> Enum.reverse()
+        |> Enum.flat_map(fn {_params, ids} -> ids end)
+      end)
+    end
+
+    def list_orders_page(params, _opts) do
+      Agent.get_and_update(__MODULE__, fn %{
+                                            orders: orders,
+                                            requests: requests,
+                                            mutation: mutation
+                                          } = state ->
+        {:ok, page_orders} = source_page(orders, params)
+
+        next_orders =
+          if requests == [] do
+            mutate_order(orders, mutation)
+          else
+            orders
+          end
+
+        request = {params, Enum.map(page_orders, & &1["id"])}
+        {{:ok, page_orders}, %{state | orders: next_orders, requests: [request | requests]}}
+      end)
+    end
+
+    defp source_page(orders, params) do
+      with :ok <- require_gmt_filter(params),
+           {:ok, after_bound} <- parse_datetime(params["modified_after"]),
+           {:ok, before_bound} <- parse_datetime(params["modified_before"]),
+           {:ok, page} <- parse_positive_integer(params["page"]),
+           {:ok, per_page} <- parse_positive_integer(params["per_page"]) do
+        page_orders =
+          orders
+          |> Enum.filter(fn order ->
+            {:ok, modified_at} = parse_datetime(order["date_modified_gmt"])
+
+            DateTime.compare(modified_at, after_bound) == :gt and
+              DateTime.compare(modified_at, before_bound) == :lt
+          end)
+          |> Enum.sort_by(fn order ->
+            {:ok, modified_at} = parse_datetime(order["date_modified_gmt"])
+            {DateTime.to_unix(modified_at, :microsecond), order["id"]}
+          end)
+          |> Enum.drop((page - 1) * per_page)
+          |> Enum.take(per_page)
+
+        {:ok, page_orders}
+      end
+    end
+
+    defp mutate_order(orders, %{order_id: order_id, modified_at: modified_at}) do
+      Enum.map(orders, fn
+        %{"id" => ^order_id} = order -> Map.put(order, "date_modified_gmt", modified_at)
+        order -> order
+      end)
+    end
+
+    defp require_gmt_filter(%{
+           "dates_are_gmt" => "true",
+           "orderby" => "modified",
+           "order" => "asc"
+         }),
+         do: :ok
+
+    defp require_gmt_filter(_params),
+      do: {:error, {:source_contract_violation, :gmt_tuple_query_required}}
+
+    defp parse_positive_integer(value) when is_binary(value) do
+      case Integer.parse(value) do
+        {integer, ""} when integer > 0 -> {:ok, integer}
+        _other -> {:error, {:source_contract_violation, :invalid_pagination}}
+      end
+    end
+
+    defp parse_positive_integer(_value),
+      do: {:error, {:source_contract_violation, :invalid_pagination}}
+
+    defp parse_datetime(value) when is_binary(value) do
+      case DateTime.from_iso8601(value) do
+        {:ok, datetime, _offset} ->
+          {:ok, datetime}
+
+        {:error, _reason} ->
+          with {:ok, naive} <- NaiveDateTime.from_iso8601(value),
+               {:ok, datetime} <- DateTime.from_naive(naive, "Etc/UTC") do
+            {:ok, datetime}
+          else
+            _error -> {:error, {:source_contract_violation, :invalid_date}}
+          end
+      end
+    end
+
+    defp parse_datetime(_value),
+      do: {:error, {:source_contract_violation, :invalid_date}}
+  end
+
   defmodule FakeUpserter do
     def child_spec(opts) do
       %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}}
@@ -160,6 +277,7 @@ defmodule EventSales.Ingestion.HistoricalExecutionTest do
   setup do
     start_supervised!(FakeClient)
     start_supervised!(WooSourceContractClient)
+    start_supervised!(MutableWooSourceContractClient)
     start_supervised!(FakeUpserter)
 
     original_rest = Application.get_env(:event_sales, :woocommerce_rest)
@@ -259,6 +377,35 @@ defmodule EventSales.Ingestion.HistoricalExecutionTest do
     assert first_params["page"] == "1"
     assert second_params["page"] == "2"
     assert third_params["page"] == "3"
+  end
+
+  test "mutable source offset drift cannot complete before an unseen tie row is fetched" do
+    context =
+      historical_context!(
+        cursor: %{modified_after: ~U[2026-05-01 08:05:00Z], last_seen_order_id: nil}
+      )
+
+    MutableWooSourceContractClient.reset!(
+      Enum.map([10, 20, 30, 40], &unmatched_order(&1, @tie_time))
+    )
+
+    assert {:continue, _run} =
+             run_step(context, woocommerce_client: MutableWooSourceContractClient)
+
+    second_result =
+      run_step(context, woocommerce_client: MutableWooSourceContractClient)
+
+    fetched_ids = MutableWooSourceContractClient.fetched_ids()
+    run = reloaded_run(context.run)
+    cursor = reloaded_cursor(context.run)
+
+    assert 10 in fetched_ids
+    assert 20 in fetched_ids
+    refute 30 in fetched_ids
+    assert 40 in fetched_ids
+
+    refute run.status == :completed and cursor.status == :done and 30 not in fetched_ids
+    assert 30 in fetched_ids or match?({:error, _reason}, second_result)
   end
 
   test "a lower-ID same-timestamp page is rejected instead of silently skipping a tie row" do
