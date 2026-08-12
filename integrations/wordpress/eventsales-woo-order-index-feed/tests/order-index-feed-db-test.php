@@ -57,6 +57,13 @@ if (!function_exists('wp_load_translations_early')) {
     }
 }
 
+if (!function_exists('__')) {
+    function __($text, $domain = null): string
+    {
+        return (string) $text;
+    }
+}
+
 if (!function_exists('apply_filters')) {
     function apply_filters($hook, $value, ...$args)
     {
