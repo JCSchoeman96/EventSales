@@ -1,8 +1,9 @@
-# Woo Order Index Feed Boundary Contract Checks
+# Woo Order Index Feed — M3-01/02E1 Contract Checks
 
-These checks validate the M3-01/02D WordPress boundary without connecting to
-WordPress, WooCommerce, a database, production credentials, or an EventSales
-runtime.
+These checks cover the M3-01/02D authenticated boundary plus the E1 durable
+manifest storage/lifecycle foundation. The database suite uses only the active
+local WordPress MySQL service. It refuses non-loopback database hosts and never
+prints the supplied local credentials.
 
 ## Locked boundary
 
@@ -11,41 +12,41 @@ namespace       eventsales/v1
 create route    POST /wp-json/eventsales/v1/woo-order-index/manifests
 fetch route     GET /wp-json/eventsales/v1/woo-order-index/manifests/{token}
 schema version  2026-08-12.v1
-max limit       100
+max page        100
 request bound   16 KiB combined raw body + encoded query
 timestamp skew  300 seconds
+default TTL     24 hours
+maximum TTL     7 days
 ```
-
-The plugin uses only these credential scopes:
-
-```text
-EVENTSALES_WOO_ORDER_INDEX_KEY_ID
-EVENTSALES_WOO_ORDER_INDEX_SECRET
-eventsales_woo_order_index_key_id
-eventsales_woo_order_index_secret
-```
-
-The catalog-feed credential is not an accepted fallback.
 
 ## Local commands
 
+The D-only boundary test remains database-independent:
+
 ```bash
 php -l integrations/wordpress/eventsales-woo-order-index-feed/eventsales-woo-order-index-feed.php
-php -l integrations/wordpress/eventsales-woo-order-index-feed/tests/order-index-feed-test.php
+php -l integrations/wordpress/eventsales-woo-order-index-feed/eventsales-woo-order-index-manifest-store.php
 php integrations/wordpress/eventsales-woo-order-index-feed/tests/order-index-feed-test.php
 ```
 
-Expected result:
+The E1 database test requires local-only environment variables:
 
-```text
-No syntax errors detected in .../eventsales-woo-order-index-feed.php
-No syntax errors detected in .../order-index-feed-test.php
-order-index feed tests passed: <n> assertions, 0 failures
+```bash
+EVENTSALES_WP_ROOT=/path/to/local/wordpress \
+EVENTSALES_WP_DB_HOST=localhost:/path/to/local/mysql.sock \
+EVENTSALES_WP_DB_NAME=local \
+EVENTSALES_WP_DB_USER=root \
+EVENTSALES_WP_DB_PASSWORD=<local-only-secret> \
+php integrations/wordpress/eventsales-woo-order-index-feed/tests/order-index-feed-db-test.php
 ```
 
-## Authentication checks
+The actual local run uses the loopback WordPress database only. No production,
+remote staging, EventSales Postgres, Redis, or WooCommerce source endpoint is
+part of this test.
 
-Required headers:
+## Authentication and POST
+
+Required headers remain:
 
 ```text
 X-EventSales-Key-Id
@@ -53,7 +54,7 @@ X-EventSales-Timestamp
 X-EventSales-Signature
 ```
 
-The HMAC-SHA256 base string is:
+The HMAC-SHA256 base string remains:
 
 ```text
 <METHOD>
@@ -64,108 +65,110 @@ timestamp=<timestamp>
 key_id=<key ID>
 ```
 
-The signature header is `v1=<64 lowercase hex characters>`. The test harness
-proves:
+The catalog credential cannot authenticate this boundary. The tests cover
+missing/malformed credentials, unknown key IDs, wrong secrets, stale/future
+timestamps, body/query tampering, malformed JSON, and request-size rejection.
 
-- valid signatures reach the authenticated capability result;
-- missing and malformed signatures are HTTP 401;
-- unknown key IDs, missing order-index secrets, stale timestamps, excessive
-  future timestamps, and wrong secrets are HTTP 401;
-- body and canonical-query tampering invalidates the signature;
-- the catalog-feed secret cannot authenticate this route.
+POST continues to return HTTP 501 with
+`manifest_capability_unavailable`. It never generates a token, creates a
+manifest, queries WooCommerce, or returns source identities.
 
-Authentication errors have the bounded body:
+## Schema and database invariants
 
-```json
-{"error":"unauthorized"}
-```
-
-They do not disclose source/order information, credentials, signatures, or
-raw request data.
-
-## Validation checks
-
-Manifest creation accepts only a JSON object with exactly:
+The store creates these prefixed InnoDB tables idempotently:
 
 ```text
-source_system
-backfill_start
-backfill_cutoff
-limit
+{$wpdb->prefix}eventsales_order_manifests
+{$wpdb->prefix}eventsales_order_manifest_items
 ```
 
-`backfill_start` (`B`) and `backfill_cutoff` (`C`) must be strict UTC `Z`
-timestamps, with `B <= C`. `limit` is an integer in `1..100`. The test
-harness proves rejection of:
+The tests prove the required header fields and identity-only item fields,
+unique token hash, `(status, expires_at_gmt)` cleanup index, primary
+`(manifest_id, sequence)` paging key, and unique `(manifest_id,
+source_order_id)` identity constraint.
 
-- `B > C`, malformed and natural-language dates, and UTC offsets;
-- limits `0`, `101`, strings, arrays, and objects;
-- arrays/objects in scalar fields;
-- `page`, `offset`, and total-count query controls;
-- unknown body fields and missing date bounds;
-- malformed JSON and body/query envelopes larger than 16 KiB, rejected before
-  HMAC canonicalization.
+Database triggers prove:
 
-The fetch route accepts only a bounded token path parameter and no query
-parameters. It does not accept page or offset continuation.
+- only BUILDING manifests accept item inserts;
+- BUILDING items are append-only;
+- READY item insert/update/delete is rejected;
+- READY membership-defining header mutation and deletion are rejected;
+- FAILED and EXPIRED rows cannot be reopened;
+- promotion to READY requires non-null terminal metadata and complete
+  contiguous stored sequence invariants.
 
-## Privacy and fail-closed checks
+The application API also locks the header for every bounded append batch and
+performs a short locked promotion after its streaming integrity pass. No
+partially populated READY manifest is exposed.
 
-The future response contract is closed to the following envelope fields only:
+## Lifecycle and expiry
+
+The only states are:
+
+```text
+building
+ready
+expired
+failed
+```
+
+BUILDING and FAILED manifests return no membership. READY is immutable and
+readable only while unexpired. Expiry validation is mandatory on reads and
+promotion; reads do not renew `expires_at_gmt`. `garbage_collect($batch_size)`
+deletes at most 100 expired/failed/abandoned rows per call through indexed
+status/expiry selection. Active READY manifests are retained.
+
+## Token and cursor checks
+
+Tokens use `bin2hex(random_bytes(32))` and are at least 128-bit entropy. The
+raw bearer token is not stored in the header; only `sha256(raw_token)` is
+persisted. Unknown tokens and all lifecycle errors fail closed without echoing
+the token or any credential.
+
+GET cursors are not offsets. They contain an authenticated last sequence and
+the exact manifest token hash. The domain-separated HMAC input is:
+
+```text
+eventsales/woo-order-index/cursor/v1
+<newline>
+<canonical cursor payload>
+```
+
+The existing order-index secret signs the cursor. The tests prove deterministic
+sequence paging, maximum 100 records, same-cursor replay, cursor tamper
+rejection, and cursor rejection when presented for another manifest. No total
+count or short-page terminal assumption is used.
+
+## Hash and terminal evidence
+
+The final SHA-256 hash includes canonical deterministic evidence for:
 
 ```text
 schema_version
-phase
-boundary_token
-manifest_hash
-manifest_expires_at_gmt
-source_observed_at_gmt
-items
-next_cursor
-has_more
-terminal_evidence
+source_system
+backfill_start_gmt (B)
+backfill_cutoff_gmt (C)
+source_observed_at_gmt (D)
+membership_predicate_version
+item_count
+ordered sequence, source_order_id, source_created_at_gmt,
+source_modified_at_gmt records
 ```
 
-Future identity items are limited to:
+The raw token, secret, current replay wall-clock, and full order payloads are
+excluded. The stored terminal evidence is stable across replay and is returned
+only from the finalized header.
 
-```text
-source_order_id
-source_created_at_gmt
-source_modified_at_gmt
-```
+## Privacy, performance, and source boundary
 
-The current authenticated response is always HTTP 501:
+Items contain only source order identity plus the two observed timestamps. The
+implementation uses bounded append/hash/read batches, the indexed sequence
+keyset, a maximum 100-item HTTP response, and no total-count query. It does
+not materialize a full order payload or require a giant PHP array.
 
-```json
-{
-  "error": "manifest_capability_unavailable",
-  "schema_version": "2026-08-12.v1",
-  "capability": "woo_order_index_manifest",
-  "capability_status": "not_implemented"
-}
-```
+The source scan is intentionally absent. The tests reject any implementation
+reference to `wc_get_orders`, `wc_get_order`, `WP_Query`, direct Woo order
+membership SQL, or Woo REST pagination. HPOS and legacy membership capture are
+not started. M3-01/02E2 owns atomic source membership observation.
 
-The test harness proves that authenticated creation and fetch:
-
-- never call standard Woo REST pagination or full-order retrieval;
-- never create a fake token or return an order ID;
-- never return a cursor, `has_more`, or terminal evidence;
-- never echo customer, payment, billing, shipping, totals, line items,
-  notes, raw Woo payload, secret, or signature fields;
-- do not persist manifest state or use `$wpdb`, `WP_Query`, transients,
-  `update_option`, Redis, ETS, or Cachex;
-- leave the existing Tickera catalog plugin byte-for-byte unchanged.
-
-This is an unavailable capability result, not a historical-boundary success or
-terminal proof.
-
-## Explicit non-coverage
-
-The following remain for M3-01/02E or later reviewed slices:
-
-- atomic source-consistent identity membership;
-- manifest persistence, TTL, replay, terminal evidence, and GC;
-- HPOS or legacy query adapters;
-- Woo order enumeration or full-order retrieval;
-- EventSales client, `SyncRun`, `SyncCursor`, migrations, Ash resources,
-  webhooks, refunds, attribution, or analytics readiness.
+The Tickera catalog plugin remains byte-for-byte unchanged.
