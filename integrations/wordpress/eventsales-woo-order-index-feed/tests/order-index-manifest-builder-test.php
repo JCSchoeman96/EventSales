@@ -48,6 +48,7 @@ final class E2B_Fake_Source
 
     public bool $opened = false;
     public bool $rolled_back = false;
+    public bool $committed = false;
 
     /** @var array<int, array<string, mixed>> */
     private array $candidates;
@@ -127,6 +128,7 @@ final class E2B_Fake_Source
     public function commit_snapshot(): array
     {
         $this->events[] = 'source_commit';
+        $this->committed = true;
         $this->opened = false;
         if (($this->failures['commit'] ?? false) === true) {
             return ['ok' => false, 'error' => 'fake_source_commit_failed'];
@@ -375,7 +377,7 @@ $confirm_result = $confirm_failure['builder']->build(e2b_scope());
 E2B_Test::same('candidate confirmation failure is bounded', 'source_snapshot_failed', $confirm_result['error'] ?? null);
 E2B_Test::ok('candidate confirmation failure does not finalize', !in_array('manifest_finalize', $confirm_failure['events'], true));
 
-$budget_clock_values = [0.0, 0.0, 5.001];
+$budget_clock_values = [0.0, 0.0, 0.0, 5.001];
 $budget_clock = static function () use (&$budget_clock_values): float {
     return array_shift($budget_clock_values) ?? 5.001;
 };
@@ -385,6 +387,41 @@ E2B_Test::same('capture budget is fixed at five seconds', 5, EventSales_Woo_Orde
 E2B_Test::same('budget failure is bounded', 'capture_budget_exceeded', $budget_result['error'] ?? null);
 E2B_Test::same('budget failure reads no next candidate', 1, count($budget['source']->read_limits));
 E2B_Test::ok('budget failure rolls source back and fails manifest', in_array('source_rollback', $budget['events'], true) && $budget['store']->failed);
+
+$read_budget_clock_values = [0.0, 0.0, 0.0, 5.001];
+$read_budget_clock = static function () use (&$read_budget_clock_values): float {
+    return array_shift($read_budget_clock_values) ?? 5.001;
+};
+$read_budget = e2b_builder([], [], $read_budget_clock);
+$read_budget_result = $read_budget['builder']->build(e2b_scope());
+E2B_Test::same('source read crossing budget is bounded', 'capture_budget_exceeded', $read_budget_result['error'] ?? null);
+E2B_Test::same('source read crossing budget reads one candidate', 1, count($read_budget['source']->read_limits));
+E2B_Test::same('source read crossing budget does not append candidate', 0, $read_budget['store']->appended);
+E2B_Test::ok('source read crossing budget does not confirm candidate', !in_array('confirm', $read_budget['events'], true));
+E2B_Test::ok('source read crossing budget does not commit source', !$read_budget['source']->committed);
+E2B_Test::ok('source read crossing budget rolls back and fails manifest', $read_budget['source']->rolled_back && $read_budget['store']->failed);
+
+$terminal_budget_clock_values = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5.001];
+$terminal_budget_clock = static function () use (&$terminal_budget_clock_values): float {
+    return array_shift($terminal_budget_clock_values) ?? 5.001;
+};
+$terminal_budget = e2b_builder([], [], $terminal_budget_clock);
+$terminal_budget_result = $terminal_budget['builder']->build(e2b_scope());
+E2B_Test::same('terminal source read crossing budget is bounded', 'capture_budget_exceeded', $terminal_budget_result['error'] ?? null);
+E2B_Test::ok('terminal source read crossing budget does not confirm terminal', !in_array('confirm_terminal', $terminal_budget['events'], true));
+E2B_Test::ok('terminal source read crossing budget does not commit source', !$terminal_budget['source']->committed);
+E2B_Test::ok('terminal source read crossing budget rolls back and fails manifest', $terminal_budget['source']->rolled_back && $terminal_budget['store']->failed);
+
+$open_budget_clock_values = [0.0, 5.001];
+$open_budget_clock = static function () use (&$open_budget_clock_values): float {
+    return array_shift($open_budget_clock_values) ?? 5.001;
+};
+$open_budget = e2b_builder([], [], $open_budget_clock);
+$open_budget_result = $open_budget['builder']->build(e2b_scope());
+E2B_Test::same('snapshot open crossing budget is bounded', 'capture_budget_exceeded', $open_budget_result['error'] ?? null);
+E2B_Test::ok('snapshot open crossing budget begins no manifest', !in_array('manifest_begin', $open_budget['events'], true));
+E2B_Test::ok('snapshot open crossing budget begins no source read', !in_array('source_read', $open_budget['events'], true));
+E2B_Test::ok('snapshot open crossing budget rolls back source', $open_budget['source']->rolled_back);
 
 $commit_failure = e2b_builder(['commit' => true]);
 $commit_result = $commit_failure['builder']->build(e2b_scope());

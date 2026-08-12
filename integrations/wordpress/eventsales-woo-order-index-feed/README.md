@@ -156,12 +156,17 @@ CAPTURE_BUDGET_SECONDS = 5
 source capture chunk = 1..100 identities
 ```
 
-Elapsed time is checked between every bounded source read, append, confirmation,
-terminal confirmation, and source commit. A timeout rolls back the source
-snapshot, fails the BUILDING manifest where possible, and prevents READY
-publication. The client cannot change or extend this budget. `set_time_limit(0)`
-is not used. This five-second limit is the E2B operating gate for this slice,
-not a claim that every deployment or dataset is safe.
+Elapsed time uses PHP's process-monotonic `hrtime(true)`, converted from
+nanoseconds to seconds; there is no wall-clock fallback. It is checked
+immediately after D opens and after every bounded source read, append,
+confirmation, and terminal confirmation, with another check before source
+commit. If a source read returns after the budget, its candidate is neither
+appended nor
+confirmed. A timeout rolls back the source snapshot, fails the BUILDING
+manifest where possible, and prevents READY publication. The client cannot
+change or extend this budget. `set_time_limit(0)` is not used. This five-second
+limit is the E2B operating gate for this slice, not a claim that every
+deployment or dataset is safe.
 
 The public `busy` result is HTTP 409. Other source, storage, budget, authority,
 and finalization failures are HTTP 503 with a stable bounded error code.
@@ -183,8 +188,8 @@ amount.
 
 | Mode | Total `shop_order` identity space | Matching identities | Rows examined | Source chunks | Snapshot wall time | PHP peak | Largest ID gap | Plan/key |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| HPOS | 5 | 4 | 8 | 1 | 12.512 ms | 105,906,176 bytes | 9 | range / `PRIMARY` |
-| Legacy | 19,745 | 4 | 68,441 | 1 | 187.934 ms | 105,906,176 bytes | 9 | range / `PRIMARY` |
+| HPOS | 5 | 4 | 8 | 1 | 13.313 ms | 105,906,176 bytes | 9 | range / `PRIMARY` |
+| Legacy | 19,745 | 4 | 68,441 | 1 | 54.213 ms | 105,906,176 bytes | 9 | range / `PRIMARY` |
 
 Both representative captures completed below the fixed five-second gate. The
 legacy result still demonstrates the structural cost of primary-ID traversal

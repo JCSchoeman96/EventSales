@@ -54,7 +54,20 @@ final class EventSales_Woo_Order_Manifest_Builder
         };
         $this->lock_acquirer = $lock_acquirer ?? [$this, 'acquire_lock'];
         $this->lock_releaser = $lock_releaser ?? [$this, 'release_lock'];
-        $this->monotonic_clock = $monotonic_clock ?? static fn(): float => microtime(true);
+        if ($monotonic_clock !== null) {
+            $this->monotonic_clock = $monotonic_clock;
+        } elseif (!function_exists('hrtime')) {
+            throw new RuntimeException('monotonic_clock_unavailable');
+        } else {
+            $this->monotonic_clock = static function (): float {
+                $nanoseconds = hrtime(true);
+                if (!is_int($nanoseconds) && !is_float($nanoseconds)) {
+                    throw new RuntimeException('monotonic_clock_unavailable');
+                }
+
+                return (float) $nanoseconds / 1_000_000_000.0;
+            };
+        }
     }
 
     /**
@@ -123,6 +136,7 @@ final class EventSales_Woo_Order_Manifest_Builder
                 return ['ok' => false, 'error' => $this->source_error_code($opened, false)];
             }
             $source_open = true;
+            $this->assert_budget($capture_started_at);
 
             $observed_at = $this->canonical_datetime($opened['source_observed_at_gmt'] ?? null);
             if ($observed_at === null) {
@@ -161,6 +175,7 @@ final class EventSales_Woo_Order_Manifest_Builder
                 } catch (Throwable $error) {
                     return ['ok' => false, 'error' => 'source_snapshot_failed'];
                 }
+                $this->assert_budget($capture_started_at);
                 if (!is_array($candidate) || !($candidate['ok'] ?? false) || !is_array($candidate['rows'] ?? null)) {
                     return ['ok' => false, 'error' => $this->source_error_code($candidate, false)];
                 }
