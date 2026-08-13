@@ -119,6 +119,8 @@
     "lib/event_sales/ingestion/clients/httpc_transport.ex",
     "lib/event_sales/ingestion/clients/tickera_attendee_client.ex",
     "lib/event_sales/ingestion/clients/tickera_error.ex",
+    "lib/event_sales/ingestion/clients/woo_order_index_client.ex",
+    "lib/event_sales/ingestion/clients/woo_order_index_error.ex",
     "lib/event_sales/ingestion/clients/woocommerce_client.ex",
     "lib/event_sales/ingestion/clients/woocommerce_error.ex",
     "lib/event_sales/ingestion/clients/woocommerce_transport.ex",
@@ -2831,6 +2833,70 @@
         }
       ],
       "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 6,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Clients.WooOrderIndexClient",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/clients/woo_order_index_client.ex",
+      "public_funs": [
+        {
+          "arity": 5,
+          "name": "create_manifest"
+        },
+        {
+          "arity": 3,
+          "name": "fetch_manifest_page"
+        },
+        {
+          "arity": 1,
+          "name": "validate_configuration"
+        },
+        {
+          "arity": 1,
+          "name": "canonical_query_string"
+        },
+        {
+          "arity": 6,
+          "name": "canonical_signature_input"
+        },
+        {
+          "arity": 7,
+          "name": "signature"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "Page",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/clients/woo_order_index_client.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Clients.WooOrderIndexError",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/clients/woo_order_index_error.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "exception"
+        },
+        {
+          "arity": 1,
+          "name": "message"
+        }
+      ],
+      "specs?": false,
       "uses": []
     },
     {

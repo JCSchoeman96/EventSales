@@ -75,6 +75,13 @@ config :event_sales, :woocommerce_rest,
   max_concurrency: 2,
   transport: EventSales.Ingestion.Clients.HttpcTransport
 
+config :event_sales, :woo_order_index,
+  base_url: "https://wordpress.example.test",
+  key_id: "order-index-key-1",
+  secret: "order-index-secret",
+  timeout_ms: 7_000,
+  transport: EventSales.Ingestion.Clients.HttpcTransport
+
 config :event_sales, :tickera_catalog_feed,
   base_url: "https://wordpress.example.test",
   secret: "test-feed-secret",

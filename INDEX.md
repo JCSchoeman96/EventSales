@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-347
+349
 
 ## Files
 
@@ -131,6 +131,8 @@ Project root: `.`
 - `lib/event_sales/ingestion/clients/httpc_transport.ex`
 - `lib/event_sales/ingestion/clients/tickera_attendee_client.ex`
 - `lib/event_sales/ingestion/clients/tickera_error.ex`
+- `lib/event_sales/ingestion/clients/woo_order_index_client.ex`
+- `lib/event_sales/ingestion/clients/woo_order_index_error.ex`
 - `lib/event_sales/ingestion/clients/woocommerce_client.ex`
 - `lib/event_sales/ingestion/clients/woocommerce_error.ex`
 - `lib/event_sales/ingestion/clients/woocommerce_transport.ex`
@@ -1051,6 +1053,24 @@ Project root: `.`
   - specs?: true
   - docs_count: 0
   - public_funs: `exception/1`, `message/1`, `retryable?/1`
+  - uses: _none_
+- `EventSales.Ingestion.Clients.WooOrderIndexClient` - `lib/event_sales/ingestion/clients/woo_order_index_client.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 6
+  - public_funs: `create_manifest/5`, `fetch_manifest_page/3`, `validate_configuration/1`, `canonical_query_string/1`, `canonical_signature_input/6`, `signature/7`
+  - uses: _none_
+- `Page` - `lib/event_sales/ingestion/clients/woo_order_index_client.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSales.Ingestion.Clients.WooOrderIndexError` - `lib/event_sales/ingestion/clients/woo_order_index_error.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `exception/1`, `message/1`
   - uses: _none_
 - `EventSales.Ingestion.Clients.WooCommerceClient` - `lib/event_sales/ingestion/clients/woocommerce_client.ex`
   - moduledoc?: true
