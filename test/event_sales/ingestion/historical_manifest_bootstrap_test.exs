@@ -359,6 +359,31 @@ defmodule EventSales.Ingestion.HistoricalManifestBootstrapTest do
     assert [] = FakeTransport.requests()
   end
 
+  test "progressed and terminal evidence are reused without another manifest POST", %{
+    run: run,
+    cursor: cursor
+  } do
+    {:ok, evidence} =
+      HistoricalManifestEvidence.from_metadata(evidence_metadata(@manifest_expires_at))
+
+    in_progress =
+      HistoricalManifestEvidence.in_progress_metadata(evidence, "cursor1234567890.next")
+
+    replace_cursor_metadata!(cursor, in_progress)
+    FakeTransport.reset!([])
+
+    assert {:ok, %HistoricalManifestEvidence{state: "manifest_in_progress"}} =
+             ensure_manifest(run.id)
+
+    terminal = HistoricalManifestEvidence.terminal_metadata(evidence, "terminal-proof")
+    replace_cursor_metadata!(cursor, terminal)
+
+    assert {:ok, %HistoricalManifestEvidence{state: "manifest_terminal"}} =
+             ensure_manifest(run.id)
+
+    assert [] = FakeTransport.requests()
+  end
+
   test "partial or corrupt evidence fails closed without overwrite", %{run: run, cursor: cursor} do
     for metadata <- [
           %{"historical_manifest" => %{"state" => "pending_first_page"}},

@@ -220,9 +220,15 @@ defmodule EventSales.Ingestion.HistoricalManifestBootstrap do
   end
 
   defp validate_cursor(%SyncRun{} = run, %SyncCursor{} = cursor) do
+    page_is_valid =
+      case HistoricalManifestEvidence.state(cursor.metadata) do
+        state when state in [:manifest_in_progress, :manifest_terminal] -> cursor.page >= 1
+        _other -> cursor.page == 1
+      end
+
     if cursor.sync_run_id == run.id and
          cursor.status == :active and
-         cursor.page == 1 and
+         page_is_valid and
          same_datetime?(cursor.modified_after, run.date_from) and
          same_datetime?(cursor.modified_before, run.date_to) and
          is_nil(cursor.last_seen_order_id) do
@@ -262,6 +268,12 @@ defmodule EventSales.Ingestion.HistoricalManifestBootstrap do
       :pending_first_page ->
         parse_existing_evidence(metadata, now)
 
+      :manifest_in_progress ->
+        parse_existing_evidence(metadata, now)
+
+      :manifest_terminal ->
+        parse_terminal_evidence(metadata)
+
       :corrupt ->
         {:error, :corrupt_manifest_evidence}
     end
@@ -275,6 +287,13 @@ defmodule EventSales.Ingestion.HistoricalManifestBootstrap do
       {:ok, {:present, evidence}}
     else
       {:error, :manifest_expired} -> {:error, :manifest_expired}
+      _error -> {:error, :corrupt_manifest_evidence}
+    end
+  end
+
+  defp parse_terminal_evidence(metadata) do
+    case HistoricalManifestEvidence.from_metadata(metadata) do
+      {:ok, evidence} -> {:ok, {:present, evidence}}
       _error -> {:error, :corrupt_manifest_evidence}
     end
   end
@@ -324,10 +343,20 @@ defmodule EventSales.Ingestion.HistoricalManifestBootstrap do
     case validate_cursor(run, current) do
       :ok ->
         case HistoricalManifestEvidence.state(current.metadata) do
-          :missing -> persist_create_claim(current)
-          :create_claimed -> {:in_doubt, current}
-          :pending_first_page -> existing_locked_evidence(current.metadata, now)
-          :corrupt -> Repo.rollback(:corrupt_manifest_evidence)
+          :missing ->
+            persist_create_claim(current)
+
+          :create_claimed ->
+            {:in_doubt, current}
+
+          state when state in [:pending_first_page, :manifest_in_progress] ->
+            existing_locked_evidence(current.metadata, now)
+
+          :manifest_terminal ->
+            parse_terminal_evidence(current.metadata)
+
+          :corrupt ->
+            Repo.rollback(:corrupt_manifest_evidence)
         end
 
       {:error, reason} ->
