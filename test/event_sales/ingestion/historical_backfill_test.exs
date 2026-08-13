@@ -11,14 +11,20 @@ defmodule EventSales.Ingestion.HistoricalBackfillTest do
   alias EventSales.Catalog
   alias EventSales.Catalog.Resources.Event
   alias EventSales.Ingestion
+  alias EventSales.Ingestion.HistoricalManifestEvidence
   alias EventSales.Ingestion.ManualSync
   alias EventSales.Ingestion.Resources.{SyncCursor, SyncRun}
+  alias EventSales.Ingestion.Workers.BackfillOrdersWorker
   alias EventSales.Repo
   alias EventSales.TestSupport.SalesHelpers
 
   @queue_now ~U[2026-08-10 12:00:00.000000Z]
   @backfill_start ~U[2026-08-01 08:00:00.123456Z]
   @cutoff ~U[2026-08-09 23:59:59.999999Z]
+
+  defmodule FailingAuditLogger do
+    def historical_backfill_requested(_attrs), do: {:error, :audit_unavailable}
+  end
 
   setup do
     admin = create_admin!("historical-backfill-admin@example.com")
@@ -251,17 +257,56 @@ defmodule EventSales.Ingestion.HistoricalBackfillTest do
     assert Ash.count!(SyncCursor, domain: Ingestion) == 1
   end
 
-  test "historical queueing creates no orders, items, refunds, or Oban jobs", %{
+  test "historical queueing creates no orders, items, or refunds and enqueues one worker", %{
     admin: admin,
     event: event
   } do
     orders_before = Repo.aggregate(from(order in "sales_orders"), :count, :id)
     items_before = Repo.aggregate(from(item in "sales_order_items"), :count, :id)
 
-    assert {:ok, _result} = queue(event, admin)
+    assert {:ok, %{sync_run: run, job: job}} = queue(event, admin)
 
     assert Repo.aggregate(from(order in "sales_orders"), :count, :id) == orders_before
     assert Repo.aggregate(from(item in "sales_order_items"), :count, :id) == items_before
+    assert job.worker == "EventSales.Ingestion.Workers.BackfillOrdersWorker"
+    assert_enqueued(worker: BackfillOrdersWorker, args: %{"sync_run_id" => run.id})
+  end
+
+  test "audit failure does not enqueue and records bounded audit_failed evidence", %{
+    admin: admin,
+    event: event
+  } do
+    assert {:error, :audit_unavailable} =
+             queue(event, admin, @cutoff,
+               historical_audit_logger: FailingAuditLogger,
+               test_cursor_creator: manifest_cursor_creator()
+             )
+
+    run = latest_run!(event)
+    cursor = cursor_for_run!(run)
+    assert run.status == :cancelled
+    assert cursor.status == :failed
+    assert cursor.metadata["historical_manifest"]["state"] == "pending_first_page"
+    assert cursor.metadata["failure"] == "audit_failed"
+    assert all_enqueued() == []
+  end
+
+  test "worker enqueue failure does not leave an active job and records worker_enqueue_failed", %{
+    admin: admin,
+    event: event
+  } do
+    assert {:error, :enqueue_failed} =
+             queue(event, admin, @cutoff,
+               historical_worker_enqueuer: fn _run -> {:error, :queue_down} end,
+               test_cursor_creator: manifest_cursor_creator()
+             )
+
+    run = latest_run!(event)
+    cursor = cursor_for_run!(run)
+    assert run.status == :cancelled
+    assert cursor.status == :failed
+    assert cursor.metadata["historical_manifest"]["state"] == "pending_first_page"
+    assert cursor.metadata["failure"] == "worker_enqueue_failed"
     assert all_enqueued() == []
   end
 
@@ -272,6 +317,50 @@ defmodule EventSales.Ingestion.HistoricalBackfillTest do
       audit_attrs(admin),
       Keyword.merge([actor: admin, now: @queue_now], opts)
     )
+  end
+
+  defp latest_run!(event) do
+    SyncRun
+    |> Ash.Query.filter(event_id == ^event.id and source_system_id == ^event.source_system_id)
+    |> Ash.read_one!(domain: Ingestion)
+  end
+
+  defp manifest_cursor_creator do
+    fn run ->
+      {:ok, evidence} =
+        HistoricalManifestEvidence.from_metadata(%{
+          "historical_manifest" => %{
+            "schema_version" => "2026-08-12.v1",
+            "phase" => "manifest_enumerate",
+            "boundary_token" => "manifest-token",
+            "manifest_hash" => String.duplicate("a", 64),
+            "manifest_expires_at_gmt" => "2026-08-13T13:00:00.000000Z",
+            "source_observed_at_gmt" => "2026-08-13T11:00:00.000000Z",
+            "state" => "pending_first_page"
+          }
+        })
+
+      Ash.create(
+        SyncCursor,
+        %{
+          sync_run_id: run.id,
+          page: 1,
+          modified_after: run.date_from,
+          modified_before: run.date_to,
+          last_seen_order_id: nil,
+          metadata: HistoricalManifestEvidence.metadata(evidence)
+        },
+        action: :upsert_active,
+        domain: Ingestion,
+        return_notifications?: true
+      )
+    end
+  end
+
+  defp cursor_for_run!(run) do
+    SyncCursor
+    |> Ash.Query.filter(sync_run_id == ^run.id)
+    |> Ash.read_one!(domain: Ingestion)
   end
 
   defp queue!(event, admin, cutoff \\ @cutoff) do
