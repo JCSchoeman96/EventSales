@@ -658,6 +658,8 @@ try {
     $http_page_one = $controller->handle_manifest_fetch(signed_request('GET', $large_path, [], '', ['token' => $large['token']]));
     T::same('authenticated READY GET succeeds', 200, $http_page_one->get_status());
     T::same('authenticated GET returns at most 100 items', 100, count($http_page_one->get_data()['items']));
+    T::same('ordinary M HTTP page 1 preserves phase', 'manifest_enumerate', $http_page_one->get_data()['phase'] ?? null);
+    T::same('ordinary M HTTP page 1 preserves schema', '2026-08-12.v1', $http_page_one->get_data()['schema_version'] ?? null);
     T::same('HTTP page 1 is nonterminal', true, $http_page_one->get_data()['has_more']);
     T::ok('authenticated GET returns an opaque cursor', is_string($http_page_one->get_data()['next_cursor'] ?? null));
     T::ok('HTTP page 1 omits terminal evidence', !array_key_exists('terminal_evidence', $http_page_one->get_data()));
@@ -665,6 +667,8 @@ try {
     $http_page_two = $controller->handle_manifest_fetch(signed_request('GET', $large_path, ['cursor' => $cursor], '', ['token' => $large['token']]));
     $http_page_two_replay = $controller->handle_manifest_fetch(signed_request('GET', $large_path, ['cursor' => $cursor], '', ['token' => $large['token']]));
     T::same('cursor page returns the next deterministic page', 100, count($http_page_two->get_data()['items']));
+    T::same('ordinary M HTTP page 2 preserves phase', 'manifest_enumerate', $http_page_two->get_data()['phase'] ?? null);
+    T::same('ordinary M HTTP page 2 preserves schema', '2026-08-12.v1', $http_page_two->get_data()['schema_version'] ?? null);
     T::same('HTTP page 2 is nonterminal', true, $http_page_two->get_data()['has_more']);
     T::ok('HTTP page 2 returns a continuation cursor', is_string($http_page_two->get_data()['next_cursor'] ?? null));
     T::ok('HTTP page 2 omits terminal evidence', !array_key_exists('terminal_evidence', $http_page_two->get_data()));
@@ -685,11 +689,97 @@ try {
         ['token' => $large['token']]
     ));
     T::same('HTTP page 3 contains the remaining five items', 5, count($http_page_three->get_data()['items']));
+    T::same('ordinary M HTTP page 3 preserves phase', 'manifest_enumerate', $http_page_three->get_data()['phase'] ?? null);
+    T::same('ordinary M HTTP page 3 preserves schema', '2026-08-12.v1', $http_page_three->get_data()['schema_version'] ?? null);
     T::same('HTTP page 3 is terminal', false, $http_page_three->get_data()['has_more']);
     T::ok('HTTP page 3 omits the continuation cursor', !array_key_exists('next_cursor', $http_page_three->get_data()));
     T::same('HTTP page 3 exposes stored terminal evidence', $large['terminal_evidence'], $http_page_three->get_data()['terminal_evidence'] ?? null);
     T::same('terminal replay preserves item ordering', $http_page_three->get_data()['items'], $http_page_three_replay->get_data()['items']);
     T::same('terminal replay preserves evidence', $http_page_three->get_data()['terminal_evidence'], $http_page_three_replay->get_data()['terminal_evidence']);
+
+    $large_catchup = $store->store_resolved_manifest(array_merge($catchup_scope, [
+        'source_observed_at_gmt' => '2026-08-12T13:00:00Z',
+    ]), identity_rows(8001, 205));
+    $catchup_post_builder = new class($store, $large_catchup) {
+        public function __construct(private object $store, private array $manifest)
+        {
+        }
+
+        public function build(array $scope): array
+        {
+            $page = $this->store->read_page((string) $this->manifest['token'], null, 100);
+
+            return [
+                'ok' => true,
+                'status' => 'ready',
+                'token' => (string) $this->manifest['token'],
+                'manifest_hash' => (string) $this->manifest['manifest_hash'],
+                'manifest_expires_at_gmt' => (string) $this->manifest['expires_at_gmt'],
+                'source_observed_at_gmt' => '2026-08-12T13:00:00.000000Z',
+                'page' => $page,
+            ];
+        }
+    };
+    $catchup_controller = new EventSales_Woo_Order_Index_Feed(
+        null,
+        static function (object $database) use ($catchup_post_builder): object {
+            return $catchup_post_builder;
+        },
+        static function (object $database) use (&$now): object {
+            return new EventSales_Woo_Order_Index_Manifest_Store($database, static function () use (&$now): DateTimeImmutable {
+                return $now;
+            });
+        }
+    );
+    $catchup_path = '/wp-json/eventsales/v1/woo-order-index/manifests/' . $first['token'] . '/catch-up';
+    $catchup_post = $catchup_controller->handle_manifest_catchup(signed_request(
+        'POST',
+        $catchup_path,
+        [],
+        json_encode(['source_system' => 'wordpress_woo:localhost', 'limit' => 100], JSON_UNESCAPED_SLASHES),
+        ['parent_token' => $first['token']]
+    ));
+    $catchup_page_one = $catchup_post->get_data();
+    T::same('catch-up POST returns first page', 200, $catchup_post->get_status());
+    T::same('catch-up HTTP page 1 is bounded', 100, count($catchup_page_one['items'] ?? []));
+    T::same('catch-up HTTP page 1 preserves phase', 'catch_up', $catchup_page_one['phase'] ?? null);
+    T::same('catch-up HTTP page 1 is nonterminal', true, $catchup_page_one['has_more'] ?? null);
+    T::ok('catch-up HTTP page 1 has cursor', is_string($catchup_page_one['next_cursor'] ?? null));
+    T::ok('catch-up HTTP page 1 has no terminal evidence', !array_key_exists('terminal_evidence', $catchup_page_one));
+    $catchup_cursor_a = $catchup_page_one['next_cursor'] ?? null;
+    $catchup_page_two_response = $catchup_controller->handle_manifest_fetch(signed_request(
+        'GET',
+        '/wp-json/eventsales/v1/woo-order-index/manifests/' . $large_catchup['token'],
+        ['cursor' => $catchup_cursor_a],
+        '',
+        ['token' => $large_catchup['token']]
+    ));
+    $catchup_page_two = $catchup_page_two_response->get_data();
+    T::same('catch-up HTTP page 2 succeeds', 200, $catchup_page_two_response->get_status());
+    T::same('catch-up HTTP page 2 has 100 items', 100, count($catchup_page_two['items'] ?? []));
+    T::same('catch-up HTTP page 2 preserves phase', 'catch_up', $catchup_page_two['phase'] ?? null);
+    T::same('catch-up HTTP page 2 is nonterminal', true, $catchup_page_two['has_more'] ?? null);
+    T::ok('catch-up HTTP page 2 has cursor', is_string($catchup_page_two['next_cursor'] ?? null));
+    T::ok('catch-up HTTP page 2 has no terminal evidence', !array_key_exists('terminal_evidence', $catchup_page_two));
+    $catchup_cursor_b = $catchup_page_two['next_cursor'] ?? null;
+    $catchup_page_three_response = $catchup_controller->handle_manifest_fetch(signed_request(
+        'GET',
+        '/wp-json/eventsales/v1/woo-order-index/manifests/' . $large_catchup['token'],
+        ['cursor' => $catchup_cursor_b],
+        '',
+        ['token' => $large_catchup['token']]
+    ));
+    $catchup_page_three = $catchup_page_three_response->get_data();
+    T::same('catch-up HTTP page 3 succeeds', 200, $catchup_page_three_response->get_status());
+    T::same('catch-up HTTP page 3 has five items', 5, count($catchup_page_three['items'] ?? []));
+    T::same('catch-up HTTP page 3 preserves phase', 'catch_up', $catchup_page_three['phase'] ?? null);
+    T::same('catch-up HTTP page 3 is terminal', false, $catchup_page_three['has_more'] ?? null);
+    T::ok('catch-up HTTP page 3 has no cursor', !array_key_exists('next_cursor', $catchup_page_three));
+    T::ok('catch-up HTTP page 3 has terminal evidence', is_string($catchup_page_three['terminal_evidence'] ?? null));
+    foreach (['schema_version', 'boundary_token', 'manifest_hash', 'manifest_expires_at_gmt', 'source_observed_at_gmt', 'phase'] as $field) {
+        T::same('catch-up page 2 continuity: ' . $field, $catchup_page_one[$field] ?? null, $catchup_page_two[$field] ?? null);
+        T::same('catch-up page 3 continuity: ' . $field, $catchup_page_one[$field] ?? null, $catchup_page_three[$field] ?? null);
+    }
 
     $_SERVER['REQUEST_URI'] = $large_path;
     $unauthenticated_response = $controller->handle_manifest_fetch(new WP_REST_Request(

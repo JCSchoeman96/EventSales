@@ -305,7 +305,12 @@ final class EventSales_Woo_Order_Index_Feed
             return self::manifest_read_error((string) ($page['error'] ?? 'manifest_unavailable'));
         }
 
-        return $this->manifest_page_response($token, $page, 'manifest_enumerate');
+        $phase = $page['phase'] ?? null;
+        if (!self::is_manifest_phase($phase)) {
+            return self::error_response('manifest_storage_failed', 503);
+        }
+
+        return $this->manifest_page_response($token, $page, $phase);
     }
 
     public function handle_manifest_catchup(WP_REST_Request $request): WP_REST_Response
@@ -790,6 +795,14 @@ final class EventSales_Woo_Order_Index_Feed
      */
     private function manifest_page_response(string $token, array $page, string $phase): WP_REST_Response
     {
+        if (
+            !self::is_manifest_phase($phase)
+            || !self::is_manifest_phase($page['phase'] ?? null)
+            || $page['phase'] !== $phase
+        ) {
+            return self::error_response('manifest_storage_failed', 503);
+        }
+
         $items = $page['items'] ?? null;
         $has_more = ($page['has_more'] ?? null) === true;
         if (
@@ -822,7 +835,7 @@ final class EventSales_Woo_Order_Index_Feed
 
         $response = [
             'schema_version' => $page['schema_version'],
-            'phase' => $phase,
+            'phase' => $page['phase'],
             'boundary_token' => $token,
             'manifest_hash' => $page['manifest_hash'],
             'manifest_expires_at_gmt' => $page['expires_at_gmt'],
@@ -848,6 +861,15 @@ final class EventSales_Woo_Order_Index_Feed
         }
 
         return new WP_REST_Response($response, 200);
+    }
+
+    /** @param mixed $phase */
+    private static function is_manifest_phase($phase): bool
+    {
+        return is_string($phase) && in_array($phase, [
+            EventSales_Woo_Order_Index_Manifest_Store::PHASE_MANIFEST_ENUMERATE,
+            EventSales_Woo_Order_Index_Manifest_Store::PHASE_CATCH_UP,
+        ], true);
     }
 
     private static function manifest_read_error(string $error): WP_REST_Response
