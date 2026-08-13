@@ -28,7 +28,11 @@ defmodule EventSales.RuntimeConfigTest do
     "TICKERA_CATALOG_FEED_MAX_PAGES",
     "TICKERA_RECEIVE_TIMEOUT_MS",
     "TICKERA_PER_PAGE",
-    "TICKERA_PAGE_DELAY_MS"
+    "TICKERA_PAGE_DELAY_MS",
+    "WOO_ORDER_INDEX_BASE_URL",
+    "WOO_ORDER_INDEX_KEY_ID",
+    "WOO_ORDER_INDEX_SECRET",
+    "WOO_ORDER_INDEX_TIMEOUT_MS"
   ]
 
   setup do
@@ -140,6 +144,28 @@ defmodule EventSales.RuntimeConfigTest do
     assert Keyword.fetch!(tickera_config, :page_delay_ms) == 125
     refute Keyword.has_key?(tickera_config, :api_key)
     refute Keyword.has_key?(tickera_config, :max_pages)
+  end
+
+  test "prod runtime config keeps order-index HMAC credentials separate from Woo REST" do
+    put_required_prod_env()
+    System.put_env("WOO_ORDER_INDEX_BASE_URL", "https://wordpress.example.test/")
+    System.put_env("WOO_ORDER_INDEX_KEY_ID", "order-index-key-1")
+    System.put_env("WOO_ORDER_INDEX_SECRET", "order-index-secret")
+    System.put_env("WOO_ORDER_INDEX_TIMEOUT_MS", "7100")
+
+    app_config =
+      @runtime_config_path
+      |> Config.Reader.read!(env: :prod)
+      |> Keyword.get(:event_sales, [])
+
+    order_index = Keyword.fetch!(app_config, :woo_order_index)
+
+    assert Keyword.fetch!(order_index, :base_url) == "https://wordpress.example.test/"
+    assert Keyword.fetch!(order_index, :key_id) == "order-index-key-1"
+    assert Keyword.fetch!(order_index, :secret) == "order-index-secret"
+    assert Keyword.fetch!(order_index, :timeout_ms) == 7_100
+    refute Keyword.has_key?(order_index, :consumer_key)
+    refute Keyword.has_key?(order_index, :consumer_secret)
   end
 
   test "dev runtime config enables the Tickera catalogue feed from env" do

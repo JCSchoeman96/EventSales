@@ -3,7 +3,7 @@ defmodule EventSales.Ingestion.Clients.WooCommerceTransport do
   Behaviour for WooCommerce REST HTTP transports.
   """
 
-  @type method :: :get
+  @type method :: :get | :post
   @type header :: {String.t(), String.t()}
   @type response ::
           {:ok, pos_integer(), [header()], binary()}

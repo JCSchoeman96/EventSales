@@ -88,6 +88,13 @@ config :event_sales, :woocommerce_rest,
   max_concurrency: 2,
   transport: EventSales.Ingestion.Clients.HttpcTransport
 
+config :event_sales, :woo_order_index,
+  base_url: nil,
+  key_id: nil,
+  secret: nil,
+  timeout_ms: 7_000,
+  transport: EventSales.Ingestion.Clients.HttpcTransport
+
 config :event_sales, :webhook_intake_rate_limit,
   enabled: true,
   window_ms: 60_000,

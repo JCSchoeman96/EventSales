@@ -117,6 +117,13 @@ if config_env() == :prod do
     max_concurrency: 2,
     transport: EventSales.Ingestion.Clients.HttpcTransport
 
+  config :event_sales, :woo_order_index,
+    base_url: System.get_env("WOO_ORDER_INDEX_BASE_URL"),
+    key_id: System.get_env("WOO_ORDER_INDEX_KEY_ID"),
+    secret: System.get_env("WOO_ORDER_INDEX_SECRET"),
+    timeout_ms: String.to_integer(System.get_env("WOO_ORDER_INDEX_TIMEOUT_MS", "7000")),
+    transport: EventSales.Ingestion.Clients.HttpcTransport
+
   config :event_sales, :tickera_api,
     default_site_url: System.get_env("TICKERA_DEFAULT_SITE_URL", "https://voelgoed.co.za"),
     timeout_ms: String.to_integer(System.get_env("TICKERA_TIMEOUT_MS", "30000")),
