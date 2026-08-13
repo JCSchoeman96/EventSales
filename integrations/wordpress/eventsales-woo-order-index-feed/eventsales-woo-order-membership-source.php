@@ -392,6 +392,28 @@ final class EventSales_Woo_Order_Membership_Source
     }
 
     /**
+     * Mark the shared source snapshot exhausted for a composed adapter whose
+     * candidate cursor is not the ordinary Woo primary-ID cursor. The caller
+     * remains responsible for proving and durably acknowledging its own
+     * explicit terminal candidate before invoking this narrow hook.
+     *
+     * @return array<string, mixed>
+     */
+    public function confirm_external_terminal(): array
+    {
+        if (!$this->snapshot_open || $this->configuration === null) {
+            return ['ok' => false, 'error' => 'snapshot_not_open'];
+        }
+        if ($this->pending_candidate !== null || $this->terminal_seen) {
+            return ['ok' => false, 'error' => 'source_candidate_unconfirmed'];
+        }
+
+        $this->terminal_seen = true;
+
+        return ['ok' => true, 'terminal' => true];
+    }
+
+    /**
      * Close D only after an empty terminal chunk has been observed.
      *
      * @return array<string, mixed>

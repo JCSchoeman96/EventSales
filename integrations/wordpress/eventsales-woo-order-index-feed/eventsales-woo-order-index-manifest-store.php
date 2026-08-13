@@ -14,6 +14,8 @@ final class EventSales_Woo_Order_Index_Manifest_Store
     public const MAX_TTL_SECONDS = 604800;
     public const MAX_PAGE_SIZE = 100;
     public const MAX_WRITE_BATCH = 100;
+    public const PHASE_MANIFEST_ENUMERATE = 'manifest_enumerate';
+    public const PHASE_CATCH_UP = 'catch_up';
 
     private const STATUS_BUILDING = 'building';
     private const STATUS_READY = 'ready';
@@ -23,6 +25,7 @@ final class EventSales_Woo_Order_Index_Manifest_Store
     private const MAX_SOURCE_ORDER_ID_BYTES = 191;
     private const MAX_SOURCE_SYSTEM_BYTES = 128;
     private const MAX_PREDICATE_VERSION_BYTES = 128;
+    private const MAX_SCHEMA_VERSION_BYTES = 32;
     private const MAX_TERMINAL_EVIDENCE_BYTES = 255;
     private const CURSOR_DOMAIN = 'eventsales/woo-order-index/cursor/v1';
 
@@ -55,6 +58,7 @@ final class EventSales_Woo_Order_Index_Manifest_Store
             $constraint_tag = substr(hash('sha256', $manifest_table . '|' . $item_table), 0, 16);
             $manifest_status_constraint = self::identifier('eventsales_manifest_status_' . $constraint_tag);
             $manifest_count_constraint = self::identifier('eventsales_manifest_item_count_' . $constraint_tag);
+            $manifest_phase_constraint = self::identifier('eventsales_manifest_phase_' . $constraint_tag);
             $item_order_constraint = self::identifier('eventsales_manifest_item_order_' . $constraint_tag);
             $item_id_constraint = self::identifier('eventsales_manifest_item_id_' . $constraint_tag);
 
@@ -62,10 +66,13 @@ final class EventSales_Woo_Order_Index_Manifest_Store
                 id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
                 token_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
                 schema_version VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                phase VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'manifest_enumerate',
+                parent_manifest_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
                 source_system VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
                 backfill_start_gmt DATETIME(6) NOT NULL,
                 backfill_cutoff_gmt DATETIME(6) NOT NULL,
                 source_observed_at_gmt DATETIME(6) NOT NULL,
+                catchup_from_gmt DATETIME(6) NULL,
                 membership_predicate_version VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
                 status VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
                 created_at_gmt DATETIME(6) NOT NULL,
@@ -78,10 +85,15 @@ final class EventSales_Woo_Order_Index_Manifest_Store
                 UNIQUE KEY token_hash (token_hash),
                 KEY status_expires (status, expires_at_gmt),
                 CONSTRAINT {$manifest_status_constraint} CHECK (status IN ('building', 'ready', 'expired', 'failed')),
+                CONSTRAINT {$manifest_phase_constraint} CHECK (phase IN ('manifest_enumerate', 'catch_up')),
                 CONSTRAINT {$manifest_count_constraint} CHECK (item_count >= 0)
             ) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE=utf8mb4_unicode_ci";
 
             if ($wpdb->query($manifest_sql) === false) {
+                return false;
+            }
+
+            if (!self::upgrade_manifest_columns($wpdb, $manifest_table, $constraint_tag)) {
                 return false;
             }
 
@@ -148,23 +160,41 @@ final class EventSales_Woo_Order_Index_Manifest_Store
             $token = self::generate_token();
             $token_hash = self::token_hash($token);
             [$manifest_table] = self::table_names($this->wpdb);
-            $sql = $this->wpdb->prepare(
-                'INSERT INTO ' . self::identifier($manifest_table) . ' '
-                . '(token_hash, schema_version, source_system, backfill_start_gmt, backfill_cutoff_gmt, '
-                . 'source_observed_at_gmt, membership_predicate_version, status, created_at_gmt, expires_at_gmt, item_count) '
-                . 'VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %d)',
+            $parent_hash_placeholder = $validated_scope['parent_manifest_hash'] === null ? 'NULL' : '%s';
+            $catchup_from_placeholder = $validated_scope['catchup_from_gmt'] === null ? 'NULL' : '%s';
+            $query = 'INSERT INTO ' . self::identifier($manifest_table) . ' '
+                . '(token_hash, schema_version, phase, parent_manifest_hash, source_system, backfill_start_gmt, '
+                . 'backfill_cutoff_gmt, source_observed_at_gmt, catchup_from_gmt, membership_predicate_version, '
+                . 'status, created_at_gmt, expires_at_gmt, item_count) '
+                . 'VALUES (%s, %s, %s, ' . $parent_hash_placeholder . ', %s, %s, %s, %s, '
+                . $catchup_from_placeholder . ', %s, %s, %s, %s, %d)';
+            $arguments = [
                 $token_hash,
-                EVENTSALES_WOO_ORDER_INDEX_SCHEMA_VERSION,
+                $validated_scope['schema_version'],
+                $validated_scope['phase'],
+            ];
+            if ($validated_scope['parent_manifest_hash'] !== null) {
+                $arguments[] = $validated_scope['parent_manifest_hash'];
+            }
+            array_push(
+                $arguments,
                 $validated_scope['source_system'],
                 $validated_scope['backfill_start_gmt'],
                 $validated_scope['backfill_cutoff_gmt'],
-                $validated_scope['source_observed_at_gmt'],
+                $validated_scope['source_observed_at_gmt']
+            );
+            if ($validated_scope['catchup_from_gmt'] !== null) {
+                $arguments[] = $validated_scope['catchup_from_gmt'];
+            }
+            array_push(
+                $arguments,
                 $validated_scope['membership_predicate_version'],
                 self::STATUS_BUILDING,
                 self::db_datetime($now),
                 self::db_datetime($expires),
                 0
             );
+            $sql = $this->wpdb->prepare($query, ...$arguments);
 
             if ($this->wpdb->query($sql) === false) {
                 return ['ok' => false, 'error' => 'manifest_storage_failed'];
@@ -178,6 +208,8 @@ final class EventSales_Woo_Order_Index_Manifest_Store
                 'token' => $token,
                 'token_hash' => $token_hash,
                 'status' => self::STATUS_BUILDING,
+                'phase' => $validated_scope['phase'],
+                'schema_version' => $validated_scope['schema_version'],
                 'created_at_gmt' => self::wire_datetime($now),
                 'expires_at_gmt' => self::wire_datetime($expires),
             ];
@@ -383,8 +415,8 @@ final class EventSales_Woo_Order_Index_Manifest_Store
         $token_hash = self::token_hash($token);
         [$manifest_table, $item_table] = self::table_names($this->wpdb);
         $manifest = $this->wpdb->get_row($this->wpdb->prepare(
-            'SELECT id, schema_version, source_system, source_observed_at_gmt, expires_at_gmt, '
-            . 'status, manifest_hash, terminal_evidence FROM ' . self::identifier($manifest_table)
+            'SELECT id, schema_version, phase, source_system, source_observed_at_gmt, expires_at_gmt, '
+                . 'status, manifest_hash, terminal_evidence FROM ' . self::identifier($manifest_table)
             . ' WHERE token_hash = %s',
             $token_hash
         ), ARRAY_A);
@@ -449,6 +481,7 @@ final class EventSales_Woo_Order_Index_Manifest_Store
             'ok' => true,
             'manifest_id' => (int) $manifest['id'],
             'schema_version' => (string) $manifest['schema_version'],
+            'phase' => (string) $manifest['phase'],
             'source_system' => (string) $manifest['source_system'],
             'source_observed_at_gmt' => self::wire_datetime_from_db((string) $manifest['source_observed_at_gmt']),
             'expires_at_gmt' => self::wire_datetime_from_db((string) $manifest['expires_at_gmt']),
@@ -457,6 +490,130 @@ final class EventSales_Woo_Order_Index_Manifest_Store
             'next_sequence' => $next_sequence,
             'has_more' => $has_more,
             'terminal_evidence' => (string) $manifest['terminal_evidence'],
+        ];
+    }
+
+    /**
+     * Resolve the exact immutable M parent required by a catch-up capture.
+     * This lookup is deliberately completed before the H source snapshot is
+     * opened and never returns the raw token.
+     *
+     * @return array<string, mixed>
+     */
+    public function resolve_parent_manifest(string $token, string $source_system): array
+    {
+        if ($token === '' || $source_system === '') {
+            return ['ok' => false, 'error' => 'manifest_not_found'];
+        }
+
+        [$manifest_table] = self::table_names($this->wpdb);
+        $row = $this->wpdb->get_row($this->wpdb->prepare(
+            'SELECT id, schema_version, phase, parent_manifest_hash, source_system, backfill_start_gmt, '
+            . 'backfill_cutoff_gmt, source_observed_at_gmt, catchup_from_gmt, membership_predicate_version, '
+            . 'status, expires_at_gmt, item_count, manifest_hash, terminal_evidence FROM '
+            . self::identifier($manifest_table) . ' WHERE token_hash = %s',
+            self::token_hash($token)
+        ), ARRAY_A);
+        if (!is_array($row) || $row === []) {
+            return ['ok' => false, 'error' => 'manifest_not_found'];
+        }
+
+        if ((string) ($row['source_system'] ?? '') !== $source_system) {
+            return ['ok' => false, 'error' => 'parent_manifest_wrong_source'];
+        }
+
+        if ($this->is_expired((string) ($row['expires_at_gmt'] ?? ''))) {
+            if (in_array((string) ($row['status'] ?? ''), [self::STATUS_BUILDING, self::STATUS_READY], true)) {
+                $this->mark_expired((int) $row['id']);
+            }
+
+            return ['ok' => false, 'error' => 'parent_manifest_expired'];
+        }
+
+        if ((string) ($row['status'] ?? '') !== self::STATUS_READY) {
+            return ['ok' => false, 'error' => 'parent_manifest_not_ready'];
+        }
+
+        if ((string) ($row['phase'] ?? '') !== self::PHASE_MANIFEST_ENUMERATE) {
+            return ['ok' => false, 'error' => 'parent_manifest_wrong_phase'];
+        }
+
+        $manifest_hash = (string) ($row['manifest_hash'] ?? '');
+        $terminal_evidence = (string) ($row['terminal_evidence'] ?? '');
+        $backfill_start = self::wire_datetime_from_db((string) ($row['backfill_start_gmt'] ?? ''));
+        $backfill_cutoff = self::wire_datetime_from_db((string) ($row['backfill_cutoff_gmt'] ?? ''));
+        $source_observed = self::wire_datetime_from_db((string) ($row['source_observed_at_gmt'] ?? ''));
+        $expires_at = self::wire_datetime_from_db((string) ($row['expires_at_gmt'] ?? ''));
+        if (
+            !preg_match('/^[a-f0-9]{64}$/D', $manifest_hash)
+            || $terminal_evidence === ''
+            || $backfill_start === ''
+            || $backfill_cutoff === ''
+            || $source_observed === ''
+            || $expires_at === ''
+            || ($row['parent_manifest_hash'] ?? null) !== null
+            || ($row['catchup_from_gmt'] ?? null) !== null
+            || (string) ($row['schema_version'] ?? '') !== self::default_schema_version()
+            || !is_numeric($row['item_count'] ?? null)
+            || (int) $row['item_count'] < 0
+        ) {
+            return ['ok' => false, 'error' => 'parent_manifest_invalid'];
+        }
+
+        return [
+            'ok' => true,
+            'manifest_id' => (int) $row['id'],
+            'schema_version' => (string) $row['schema_version'],
+            'phase' => self::PHASE_MANIFEST_ENUMERATE,
+            'source_system' => (string) $row['source_system'],
+            'backfill_start_gmt' => $backfill_start,
+            'backfill_cutoff_gmt' => $backfill_cutoff,
+            'source_observed_at_gmt' => $source_observed,
+            'membership_predicate_version' => (string) $row['membership_predicate_version'],
+            'status' => self::STATUS_READY,
+            'expires_at_gmt' => $expires_at,
+            'item_count' => (int) $row['item_count'],
+            'manifest_hash' => $manifest_hash,
+            'terminal_evidence' => $terminal_evidence,
+        ];
+    }
+
+    /**
+     * Read a bounded parent item window by sequence keyset. Catch-up source
+     * capture uses the same SQL shape on its dedicated snapshot connection;
+     * this method is the narrow storage-side reader for non-capture callers.
+     *
+     * @return array<string, mixed>
+     */
+    public function read_manifest_items(int $manifest_id, int $last_sequence = 0, int $limit = self::MAX_PAGE_SIZE): array
+    {
+        if ($manifest_id < 1 || $last_sequence < 0 || $limit < 1 || $limit > self::MAX_PAGE_SIZE) {
+            return ['ok' => false, 'error' => 'invalid_cursor'];
+        }
+
+        [, $item_table] = self::table_names($this->wpdb);
+        $rows = $this->wpdb->get_results($this->wpdb->prepare(
+            'SELECT sequence, source_order_id, source_created_at_gmt, source_modified_at_gmt FROM '
+            . self::identifier($item_table) . ' WHERE manifest_id = %d AND sequence > %d '
+            . 'ORDER BY sequence ASC LIMIT %d',
+            $manifest_id,
+            $last_sequence,
+            $limit
+        ), ARRAY_A);
+        if (!is_array($rows)) {
+            return ['ok' => false, 'error' => 'manifest_storage_failed'];
+        }
+
+        return [
+            'ok' => true,
+            'items' => array_map(static function (array $row): array {
+                return [
+                    'sequence' => (int) $row['sequence'],
+                    'source_order_id' => (string) $row['source_order_id'],
+                    'source_created_at_gmt' => self::wire_datetime_from_db((string) $row['source_created_at_gmt']),
+                    'source_modified_at_gmt' => self::wire_datetime_from_db((string) $row['source_modified_at_gmt']),
+                ];
+            }, $rows),
         ];
     }
 
@@ -524,7 +681,9 @@ final class EventSales_Woo_Order_Index_Manifest_Store
     {
         [$manifest_table] = self::table_names($this->wpdb);
         $row = $this->wpdb->get_row($this->wpdb->prepare(
-            'SELECT id, status, expires_at_gmt, item_count, manifest_hash, terminal_evidence FROM '
+            'SELECT id, status, phase, schema_version, source_system, backfill_start_gmt, '
+            . 'backfill_cutoff_gmt, source_observed_at_gmt, catchup_from_gmt, parent_manifest_hash, '
+            . 'membership_predicate_version, expires_at_gmt, item_count, manifest_hash, terminal_evidence FROM '
             . self::identifier($manifest_table) . ' WHERE id = %d',
             $manifest_id
         ), ARRAY_A);
@@ -535,6 +694,11 @@ final class EventSales_Woo_Order_Index_Manifest_Store
         $row['id'] = (int) $row['id'];
         $row['item_count'] = (int) $row['item_count'];
         $row['expires_at_gmt'] = self::wire_datetime_from_db((string) $row['expires_at_gmt']);
+        foreach (['backfill_start_gmt', 'backfill_cutoff_gmt', 'source_observed_at_gmt', 'catchup_from_gmt'] as $field) {
+            if (($row[$field] ?? null) !== null) {
+                $row[$field] = self::wire_datetime_from_db((string) $row[$field]);
+            }
+        }
 
         return $row;
     }
@@ -636,6 +800,11 @@ final class EventSales_Woo_Order_Index_Manifest_Store
             'source_observed_at_gmt' => self::wire_datetime_from_db((string) $manifest['source_observed_at_gmt']),
             'source_system' => (string) $manifest['source_system'],
         ];
+        if ((string) ($manifest['phase'] ?? self::PHASE_MANIFEST_ENUMERATE) === self::PHASE_CATCH_UP) {
+            $header['catchup_from_gmt'] = self::wire_datetime_from_db((string) ($manifest['catchup_from_gmt'] ?? ''));
+            $header['parent_manifest_hash'] = (string) ($manifest['parent_manifest_hash'] ?? '');
+            $header['phase'] = self::PHASE_CATCH_UP;
+        }
         hash_update($context, self::canonical_json($header) . "\n");
 
         $last_sequence = 0;
@@ -679,7 +848,8 @@ final class EventSales_Woo_Order_Index_Manifest_Store
         }
 
         $manifest_hash = hash_final($context);
-        $terminal_evidence = 'v1;manifest_sha256=' . $manifest_hash . ';item_count=' . $seen . ';last_sequence=' . $last_sequence;
+        $terminal_evidence = ((string) ($manifest['phase'] ?? self::PHASE_MANIFEST_ENUMERATE) === self::PHASE_CATCH_UP ? 'v1;phase=catch_up;' : 'v1;')
+            . 'manifest_sha256=' . $manifest_hash . ';item_count=' . $seen . ';last_sequence=' . $last_sequence;
         if (strlen($terminal_evidence) > self::MAX_TERMINAL_EVIDENCE_BYTES) {
             return ['ok' => false, 'error' => 'manifest_storage_failed'];
         }
@@ -809,19 +979,34 @@ final class EventSales_Woo_Order_Index_Manifest_Store
         $this->wpdb->query('ROLLBACK');
     }
 
-    /** @return array{ok: bool, source_system?: string, backfill_start_gmt?: string, backfill_cutoff_gmt?: string, source_observed_at_gmt?: string, membership_predicate_version?: string} */
+    /** @return array<string, mixed> */
     private static function validate_scope(array $scope): array
     {
-        $expected = [
+        $ordinary_expected = [
             'backfill_cutoff_gmt',
             'backfill_start_gmt',
             'membership_predicate_version',
             'source_observed_at_gmt',
             'source_system',
         ];
+        $catchup_expected = [
+            'backfill_cutoff_gmt',
+            'backfill_start_gmt',
+            'catchup_from_gmt',
+            'membership_predicate_version',
+            'parent_manifest_hash',
+            'phase',
+            'schema_version',
+            'source_observed_at_gmt',
+            'source_system',
+        ];
         $actual = array_map('strval', array_keys($scope));
         sort($actual, SORT_STRING);
-        if ($actual !== $expected) {
+        sort($ordinary_expected, SORT_STRING);
+        sort($catchup_expected, SORT_STRING);
+        $is_ordinary = $actual === $ordinary_expected;
+        $is_catchup = $actual === $catchup_expected;
+        if (!$is_ordinary && !$is_catchup) {
             return ['ok' => false];
         }
 
@@ -840,6 +1025,20 @@ final class EventSales_Woo_Order_Index_Manifest_Store
             return ['ok' => false];
         }
 
+        if ($is_catchup) {
+            if (
+                $scope['phase'] !== self::PHASE_CATCH_UP
+                || !is_string($scope['schema_version'])
+                || trim($scope['schema_version']) === ''
+                || strlen($scope['schema_version']) > self::MAX_SCHEMA_VERSION_BYTES
+                || !preg_match('/^[A-Za-z0-9][A-Za-z0-9._:-]*$/D', $scope['schema_version'])
+                || !is_string($scope['parent_manifest_hash'])
+                || !preg_match('/^[a-f0-9]{64}$/D', $scope['parent_manifest_hash'])
+            ) {
+                return ['ok' => false];
+            }
+        }
+
         $dates = [];
         foreach (['backfill_start_gmt', 'backfill_cutoff_gmt', 'source_observed_at_gmt'] as $field) {
             $date = self::date_from_wire($scope[$field]);
@@ -853,14 +1052,48 @@ final class EventSales_Woo_Order_Index_Manifest_Store
             return ['ok' => false];
         }
 
+        $catchup_from = null;
+        $schema_version = self::default_schema_version();
+        $phase = self::PHASE_MANIFEST_ENUMERATE;
+        $parent_manifest_hash = null;
+        if ($is_catchup) {
+            $catchup_date = self::date_from_wire($scope['catchup_from_gmt']);
+            if ($catchup_date === null) {
+                return ['ok' => false];
+            }
+            $catchup_from = self::db_datetime($catchup_date);
+            if ($catchup_from > $dates['source_observed_at_gmt']) {
+                return ['ok' => false];
+            }
+            $schema_version = trim($scope['schema_version']);
+            $phase = self::PHASE_CATCH_UP;
+            $parent_manifest_hash = strtolower($scope['parent_manifest_hash']);
+        }
+
         return [
             'ok' => true,
+            'schema_version' => $schema_version,
+            'phase' => $phase,
+            'parent_manifest_hash' => $parent_manifest_hash,
             'source_system' => trim($scope['source_system']),
             'backfill_start_gmt' => $dates['backfill_start_gmt'],
             'backfill_cutoff_gmt' => $dates['backfill_cutoff_gmt'],
             'source_observed_at_gmt' => $dates['source_observed_at_gmt'],
+            'catchup_from_gmt' => $catchup_from,
             'membership_predicate_version' => trim($scope['membership_predicate_version']),
         ];
+    }
+
+    private static function default_schema_version(): string
+    {
+        if (defined('EVENTSALES_WOO_ORDER_INDEX_SCHEMA_VERSION')) {
+            $value = constant('EVENTSALES_WOO_ORDER_INDEX_SCHEMA_VERSION');
+            if (is_string($value) && $value !== '') {
+                return $value;
+            }
+        }
+
+        return '2026-08-12.v1';
     }
 
     /** @return array{ok: bool, source_order_id?: string, source_created_at_gmt?: string, source_modified_at_gmt?: string} */
@@ -958,6 +1191,60 @@ final class EventSales_Woo_Order_Index_Manifest_Store
         return $date === null ? '' : self::wire_datetime($date);
     }
 
+    private static function upgrade_manifest_columns(object $wpdb, string $manifest_table, string $constraint_tag): bool
+    {
+        $identifier = self::identifier($manifest_table);
+        $columns = $wpdb->get_results('SHOW COLUMNS FROM ' . $identifier, ARRAY_A);
+        if (!is_array($columns)) {
+            return false;
+        }
+
+        $names = [];
+        foreach ($columns as $column) {
+            if (is_array($column) && isset($column['Field'])) {
+                $names[(string) $column['Field']] = true;
+            }
+        }
+
+        $additions = [
+            'phase' => 'ALTER TABLE ' . $identifier
+                . " ADD COLUMN phase VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'manifest_enumerate' AFTER schema_version",
+            'parent_manifest_hash' => 'ALTER TABLE ' . $identifier
+                . ' ADD COLUMN parent_manifest_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL AFTER phase',
+            'catchup_from_gmt' => 'ALTER TABLE ' . $identifier
+                . ' ADD COLUMN catchup_from_gmt DATETIME(6) NULL AFTER source_observed_at_gmt',
+        ];
+        foreach ($additions as $name => $sql) {
+            if (!isset($names[$name]) && $wpdb->query($sql) === false) {
+                return false;
+            }
+        }
+
+        if ($wpdb->query($wpdb->prepare(
+            'UPDATE ' . $identifier . ' SET phase = %s WHERE phase IS NULL OR phase = %s',
+            self::PHASE_MANIFEST_ENUMERATE,
+            ''
+        )) === false) {
+            return false;
+        }
+
+        $constraint_name = 'eventsales_manifest_phase_' . $constraint_tag;
+        $constraint_exists = $wpdb->get_var($wpdb->prepare(
+            'SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS '
+            . 'WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = %s AND CONSTRAINT_NAME = %s',
+            $manifest_table,
+            $constraint_name
+        ));
+        if ((int) $constraint_exists === 0 && $wpdb->query(
+            'ALTER TABLE ' . $identifier . ' ADD CONSTRAINT ' . self::identifier($constraint_name)
+            . " CHECK (phase IN ('manifest_enumerate', 'catch_up'))"
+        ) === false) {
+            return false;
+        }
+
+        return true;
+    }
+
     /** @param object $wpdb @return array{0: string, 1: string} */
     private static function table_names(object $wpdb): array
     {
@@ -1005,10 +1292,13 @@ BEGIN
 
     IF NOT (
         OLD.schema_version <=> NEW.schema_version
+        AND OLD.phase <=> NEW.phase
+        AND OLD.parent_manifest_hash <=> NEW.parent_manifest_hash
         AND OLD.source_system <=> NEW.source_system
         AND OLD.backfill_start_gmt <=> NEW.backfill_start_gmt
         AND OLD.backfill_cutoff_gmt <=> NEW.backfill_cutoff_gmt
         AND OLD.source_observed_at_gmt <=> NEW.source_observed_at_gmt
+        AND OLD.catchup_from_gmt <=> NEW.catchup_from_gmt
         AND OLD.membership_predicate_version <=> NEW.membership_predicate_version
         AND OLD.created_at_gmt <=> NEW.created_at_gmt
         AND OLD.expires_at_gmt <=> NEW.expires_at_gmt
@@ -1020,10 +1310,13 @@ BEGIN
         IF NEW.status = 'expired' THEN
             IF NOT (
                 OLD.schema_version <=> NEW.schema_version
+                AND OLD.phase <=> NEW.phase
+                AND OLD.parent_manifest_hash <=> NEW.parent_manifest_hash
                 AND OLD.source_system <=> NEW.source_system
                 AND OLD.backfill_start_gmt <=> NEW.backfill_start_gmt
                 AND OLD.backfill_cutoff_gmt <=> NEW.backfill_cutoff_gmt
                 AND OLD.source_observed_at_gmt <=> NEW.source_observed_at_gmt
+                AND OLD.catchup_from_gmt <=> NEW.catchup_from_gmt
                 AND OLD.membership_predicate_version <=> NEW.membership_predicate_version
                 AND OLD.created_at_gmt <=> NEW.created_at_gmt
                 AND OLD.expires_at_gmt <=> NEW.expires_at_gmt
@@ -1092,7 +1385,16 @@ END",
                 $name
             ));
             if ($exists !== null) {
-                continue;
+                if ($name !== $header_trigger) {
+                    continue;
+                }
+                $definition = $wpdb->get_row('SHOW CREATE TRIGGER ' . self::identifier($name), ARRAY_A);
+                if (is_array($definition) && str_contains((string) ($definition['SQL Original Statement'] ?? ''), 'OLD.phase')) {
+                    continue;
+                }
+                if ($wpdb->query('DROP TRIGGER IF EXISTS ' . self::identifier($name)) === false) {
+                    return false;
+                }
             }
             if ($wpdb->query($sql) === false) {
                 return false;

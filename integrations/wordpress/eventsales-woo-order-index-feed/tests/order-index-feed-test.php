@@ -372,10 +372,11 @@ T::same('namespace constant', 'eventsales/v1', EVENTSALES_WOO_ORDER_INDEX_NAMESP
 T::same('create route constant', '/woo-order-index/manifests', EVENTSALES_WOO_ORDER_INDEX_CREATE_ROUTE);
 T::same('fetch route constant', '/woo-order-index/manifests/(?P<token>[A-Za-z0-9._-]{1,128})', EVENTSALES_WOO_ORDER_INDEX_FETCH_ROUTE);
 T::same('maximum request limit', 100, Feed::max_limit());
-T::same('registered route count', 2, count($GLOBALS['registered_routes']));
+T::same('registered route count', 3, count($GLOBALS['registered_routes']));
 T::same('registered namespace', 'eventsales/v1', $GLOBALS['registered_routes'][0]['namespace']);
 T::same('registered create path', '/woo-order-index/manifests', $GLOBALS['registered_routes'][0]['route']);
 T::same('registered fetch path', EVENTSALES_WOO_ORDER_INDEX_FETCH_ROUTE, $GLOBALS['registered_routes'][1]['route']);
+T::same('registered catch-up path', EVENTSALES_WOO_ORDER_INDEX_CATCHUP_ROUTE, $GLOBALS['registered_routes'][2]['route']);
 T::same('key option is separate', 'eventsales_woo_order_index_key_id', Feed::key_id_option_name());
 T::same('secret option is separate', 'eventsales_woo_order_index_secret', Feed::secret_option_name());
 

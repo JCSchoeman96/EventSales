@@ -27,9 +27,15 @@ if (!defined('EVENTSALES_WOO_ORDER_INDEX_FETCH_ROUTE')) {
     define('EVENTSALES_WOO_ORDER_INDEX_FETCH_ROUTE', '/woo-order-index/manifests/(?P<token>[A-Za-z0-9._-]{1,128})');
 }
 
+if (!defined('EVENTSALES_WOO_ORDER_INDEX_CATCHUP_ROUTE')) {
+    define('EVENTSALES_WOO_ORDER_INDEX_CATCHUP_ROUTE', '/woo-order-index/manifests/(?P<parent_token>[A-Za-z0-9._-]{1,128})/catch-up');
+}
+
 require_once __DIR__ . '/eventsales-woo-order-index-manifest-store.php';
 require_once __DIR__ . '/eventsales-woo-order-membership-source.php';
 require_once __DIR__ . '/eventsales-woo-order-manifest-builder.php';
+require_once __DIR__ . '/eventsales-woo-order-catchup-source.php';
+require_once __DIR__ . '/eventsales-woo-order-catchup-manifest-builder.php';
 
 final class EventSales_Woo_Order_Index_Feed
 {
@@ -63,9 +69,21 @@ final class EventSales_Woo_Order_Index_Feed
     /** @var callable(object): object|null */
     private $manifest_builder_factory;
 
-    public function __construct(?callable $manifest_builder_factory = null)
+    /** @var callable(object): object|null */
+    private $catchup_builder_factory;
+
+    /** @var callable(object): object|null */
+    private $manifest_store_factory;
+
+    public function __construct(
+        ?callable $manifest_builder_factory = null,
+        ?callable $catchup_builder_factory = null,
+        ?callable $manifest_store_factory = null
+    )
     {
         $this->manifest_builder_factory = $manifest_builder_factory;
+        $this->catchup_builder_factory = $catchup_builder_factory;
+        $this->manifest_store_factory = $manifest_store_factory;
     }
 
     public static function register(): void
@@ -88,6 +106,16 @@ final class EventSales_Woo_Order_Index_Feed
             [
                 'methods' => 'GET',
                 'callback' => [$controller, 'handle_manifest_fetch'],
+                'permission_callback' => '__return_true',
+            ]
+        );
+
+        register_rest_route(
+            EVENTSALES_WOO_ORDER_INDEX_NAMESPACE,
+            EVENTSALES_WOO_ORDER_INDEX_CATCHUP_ROUTE,
+            [
+                'methods' => 'POST',
+                'callback' => [$controller, 'handle_manifest_catchup'],
                 'permission_callback' => '__return_true',
             ]
         );
@@ -189,8 +217,44 @@ final class EventSales_Woo_Order_Index_Feed
         }
     }
 
+    private function catchup_builder(): ?object
+    {
+        if ($this->catchup_builder_factory !== null) {
+            try {
+                $database = $GLOBALS['wpdb'] ?? new stdClass();
+                $builder = call_user_func($this->catchup_builder_factory, $database);
+
+                return is_object($builder) ? $builder : null;
+            } catch (Throwable $error) {
+                return null;
+            }
+        }
+
+        $database = $GLOBALS['wpdb'] ?? null;
+        if (!is_object($database)) {
+            return null;
+        }
+
+        try {
+            return new EventSales_Woo_Order_Catchup_Manifest_Builder($database);
+        } catch (Throwable $error) {
+            return null;
+        }
+    }
+
     private function manifest_store(): ?EventSales_Woo_Order_Index_Manifest_Store
     {
+        if ($this->manifest_store_factory !== null) {
+            try {
+                $database = $GLOBALS['wpdb'] ?? new stdClass();
+                $store = call_user_func($this->manifest_store_factory, $database);
+
+                return $store instanceof EventSales_Woo_Order_Index_Manifest_Store ? $store : null;
+            } catch (Throwable $error) {
+                return null;
+            }
+        }
+
         $database = $GLOBALS['wpdb'] ?? null;
         if (!is_object($database)) {
             return null;
@@ -242,6 +306,49 @@ final class EventSales_Woo_Order_Index_Feed
         }
 
         return $this->manifest_page_response($token, $page, 'manifest_enumerate');
+    }
+
+    public function handle_manifest_catchup(WP_REST_Request $request): WP_REST_Response
+    {
+        if (!$this->request_size_is_bounded($request)) {
+            return self::error_response('request_too_large', 413);
+        }
+
+        if (!$this->authorized($request)) {
+            return self::error_response('unauthorized', 401);
+        }
+
+        $body = $this->decode_json_body((string) $request->get_body());
+        if (!$body['ok']) {
+            return self::error_response('invalid_request', 400);
+        }
+
+        $validation = self::validate_catchup_request(
+            $request->get_param('parent_token'),
+            $body['value']
+        );
+        if (!$validation['ok']) {
+            return self::error_response('invalid_request', 400);
+        }
+
+        $builder = $this->catchup_builder();
+        if ($builder === null) {
+            return self::error_response('manifest_builder_unavailable', 503);
+        }
+
+        try {
+            $built = $builder->build($validation['values']);
+        } catch (Throwable $error) {
+            return self::catchup_build_error('manifest_storage_failed');
+        }
+        if (!is_array($built) || !($built['ok'] ?? false)) {
+            return self::catchup_build_error((string) ($built['error'] ?? 'manifest_storage_failed'));
+        }
+        if (($built['status'] ?? null) !== 'ready' || !is_string($built['token'] ?? null) || !is_array($built['page'] ?? null)) {
+            return self::error_response('manifest_unavailable', 503);
+        }
+
+        return $this->manifest_page_response((string) $built['token'], $built['page'], 'catch_up');
     }
 
     /**
@@ -339,6 +446,56 @@ final class EventSales_Woo_Order_Index_Feed
         }
 
         return ['ok' => true, 'values' => $values];
+    }
+
+    /**
+     * Validate the bounded catch-up command. Historical scope is intentionally
+     * absent: the builder derives it from the immutable parent manifest.
+     *
+     * @param mixed $parent_token
+     * @param mixed $payload
+     * @return array{ok: bool, values?: array<string, mixed>}
+     */
+    public static function validate_catchup_request($parent_token, $payload): array
+    {
+        if (
+            !is_string($parent_token)
+            || $parent_token === ''
+            || strlen($parent_token) > self::MAX_TOKEN_BYTES
+            || !preg_match('/^[A-Za-z0-9._-]+$/D', $parent_token)
+            || !is_array($payload)
+            || self::is_list($payload)
+        ) {
+            return ['ok' => false];
+        }
+
+        $expected_keys = ['limit', 'source_system'];
+        $actual_keys = array_map('strval', array_keys($payload));
+        sort($expected_keys, SORT_STRING);
+        sort($actual_keys, SORT_STRING);
+        if ($actual_keys !== $expected_keys) {
+            return ['ok' => false];
+        }
+        if (
+            !is_string($payload['source_system'])
+            || trim($payload['source_system']) === ''
+            || strlen($payload['source_system']) > self::MAX_SOURCE_SYSTEM_BYTES
+            || !preg_match('/^[A-Za-z0-9][A-Za-z0-9._:-]*$/D', $payload['source_system'])
+            || !is_int($payload['limit'])
+            || $payload['limit'] < 1
+            || $payload['limit'] > self::MAX_LIMIT
+        ) {
+            return ['ok' => false];
+        }
+
+        return [
+            'ok' => true,
+            'values' => [
+                'parent_token' => $parent_token,
+                'source_system' => trim($payload['source_system']),
+                'limit' => $payload['limit'],
+            ],
+        ];
     }
 
     /**
@@ -590,6 +747,39 @@ final class EventSales_Woo_Order_Index_Feed
         }
 
         return self::error_response($error, $error === 'busy' ? 409 : 503);
+    }
+
+    private static function catchup_build_error(string $error): WP_REST_Response
+    {
+        $safe_errors = [
+            'busy',
+            'capture_budget_exceeded',
+            'catchup_member_unresolved',
+            'manifest_finalize_failed',
+            'manifest_storage_failed',
+            'parent_manifest_invalid',
+            'parent_manifest_not_ready',
+            'parent_manifest_not_found',
+            'parent_manifest_expired',
+            'parent_manifest_changed',
+            'parent_manifest_wrong_phase',
+            'parent_manifest_wrong_source',
+            'source_preflight_failed',
+            'source_snapshot_before_parent',
+            'source_snapshot_failed',
+        ];
+        if (!in_array($error, $safe_errors, true)) {
+            $error = 'manifest_storage_failed';
+        }
+
+        $status = match ($error) {
+            'parent_manifest_not_found' => 404,
+            'parent_manifest_expired' => 410,
+            'busy', 'parent_manifest_invalid', 'parent_manifest_not_ready', 'parent_manifest_wrong_phase', 'parent_manifest_wrong_source' => 409,
+            default => 503,
+        };
+
+        return self::error_response($error, $status);
     }
 
     /**

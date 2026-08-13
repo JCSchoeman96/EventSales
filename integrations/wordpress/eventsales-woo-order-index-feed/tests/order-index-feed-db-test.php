@@ -382,10 +382,13 @@ try {
         'id',
         'token_hash',
         'schema_version',
+        'phase',
+        'parent_manifest_hash',
         'source_system',
         'backfill_start_gmt',
         'backfill_cutoff_gmt',
         'source_observed_at_gmt',
+        'catchup_from_gmt',
         'membership_predicate_version',
         'status',
         'created_at_gmt',
@@ -450,6 +453,99 @@ try {
     ], array_keys($first_page['items'][0]));
     T::same('terminal evidence is stored and returned', $first['terminal_evidence'], $first_page['terminal_evidence']);
     T::same('terminal page has no continuation', false, $first_page['has_more']);
+
+    T::section('catch-up scope and parent authority');
+    $catchup_scope = [
+        'schema_version' => '2026-08-13.catchup.v1',
+        'phase' => EventSales_Woo_Order_Index_Manifest_Store::PHASE_CATCH_UP,
+        'parent_manifest_hash' => $first['manifest_hash'],
+        'catchup_from_gmt' => '2026-08-12T12:00:00Z',
+        'source_system' => 'wordpress_woo:localhost',
+        'backfill_start_gmt' => '2026-08-01T00:00:00Z',
+        'backfill_cutoff_gmt' => '2026-08-12T00:00:00Z',
+        'source_observed_at_gmt' => '2026-08-12T13:00:00Z',
+        'membership_predicate_version' => 'm3-01-02f4a.catchup.v1',
+    ];
+    $catchup = $store->store_resolved_manifest($catchup_scope, identity_rows(9001, 2));
+    T::ok('catch-up scope becomes READY', ($catchup['ok'] ?? false) && ($catchup['status'] ?? null) === 'ready');
+    $catchup_page = $store->read_page($catchup['token'], null, 100);
+    T::same('catch-up READY page has catch_up phase', 'catch_up', $catchup_page['phase'] ?? null);
+    T::same('catch-up schema version is explicit', '2026-08-13.catchup.v1', $catchup_page['schema_version'] ?? null);
+    T::same('catch-up H is returned as source observation', '2026-08-12T13:00:00.000000Z', $catchup_page['source_observed_at_gmt'] ?? null);
+    T::same('exact READY M parent resolves', true, $store->resolve_parent_manifest($first['token'], 'wordpress_woo:localhost')['ok'] ?? false);
+    T::same('wrong parent source is rejected', 'parent_manifest_wrong_source', $store->resolve_parent_manifest($first['token'], 'wrong-source')['error'] ?? null);
+    T::same('catch-up child cannot be reused as parent', 'parent_manifest_wrong_phase', $store->resolve_parent_manifest($catchup['token'], 'wordpress_woo:localhost')['error'] ?? null);
+    T::ok('catch-up hash is phase-bound', $catchup['manifest_hash'] !== $first['manifest_hash']);
+    T::same('catch-up metadata binds parent hash', $first['manifest_hash'], $store->manifest_metadata($catchup['manifest_id'])['parent_manifest_hash'] ?? null);
+    T::same('catch-up metadata binds D', '2026-08-12T12:00:00.000000Z', $store->manifest_metadata($catchup['manifest_id'])['catchup_from_gmt'] ?? null);
+
+    T::section('additive upgrade from pre-F4A schema');
+    $original_prefix = (string) $wpdb->prefix;
+    $old_prefix = 'f4a_old_';
+    $old_manifest_table = $old_prefix . 'eventsales_order_manifests';
+    $old_item_table = $old_prefix . 'eventsales_order_manifest_items';
+    $wpdb->set_prefix($old_prefix);
+    db_query("DROP TABLE IF EXISTS `{$old_item_table}`");
+    db_query("DROP TABLE IF EXISTS `{$old_manifest_table}`");
+    db_query("CREATE TABLE `{$old_manifest_table}` (
+        id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        token_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+        schema_version VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+        source_system VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+        backfill_start_gmt DATETIME(6) NOT NULL,
+        backfill_cutoff_gmt DATETIME(6) NOT NULL,
+        source_observed_at_gmt DATETIME(6) NOT NULL,
+        membership_predicate_version VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+        status VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+        created_at_gmt DATETIME(6) NOT NULL,
+        expires_at_gmt DATETIME(6) NOT NULL,
+        completed_at_gmt DATETIME(6) NULL,
+        item_count BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+        manifest_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
+        terminal_evidence VARCHAR(255) CHARACTER SET ascii COLLATE ascii_bin NULL,
+        PRIMARY KEY (id), UNIQUE KEY token_hash (token_hash), KEY status_expires (status, expires_at_gmt)
+    ) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    db_query("CREATE TABLE `{$old_item_table}` (
+        manifest_id BIGINT(20) UNSIGNED NOT NULL,
+        sequence BIGINT(20) UNSIGNED NOT NULL,
+        source_order_id VARCHAR(191) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+        source_created_at_gmt DATETIME(6) NOT NULL,
+        source_modified_at_gmt DATETIME(6) NOT NULL,
+        PRIMARY KEY (manifest_id, sequence), UNIQUE KEY manifest_order (manifest_id, source_order_id),
+        CONSTRAINT f4a_old_manifest_fk FOREIGN KEY (manifest_id) REFERENCES `{$old_manifest_table}` (id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    $old_hash = str_repeat('d', 64);
+    db_query($wpdb->prepare(
+        "INSERT INTO `{$old_manifest_table}` (token_hash, schema_version, source_system, backfill_start_gmt, backfill_cutoff_gmt, source_observed_at_gmt, membership_predicate_version, status, created_at_gmt, expires_at_gmt, completed_at_gmt, item_count, manifest_hash, terminal_evidence) VALUES (%s, %s, %s, %s, %s, %s, %s, 'ready', %s, %s, %s, 0, %s, %s)",
+        str_repeat('e', 64),
+        '2026-08-12.v1',
+        'wordpress_woo:old',
+        '2026-08-01 00:00:00.000000',
+        '2026-08-12 00:00:00.000000',
+        '2026-08-12 12:00:00.000000',
+        'woo_creation_window_v1',
+        '2026-08-12 12:00:00.000000',
+        '2026-08-13 12:00:00.000000',
+        '2026-08-12 12:01:00.000000',
+        $old_hash,
+        'v1;manifest_sha256=' . $old_hash . ';item_count=0;last_sequence=0'
+    ));
+    T::ok('pre-F4A schema upgrade succeeds', EventSales_Woo_Order_Index_Manifest_Store::install_schema($wpdb));
+    T::ok('upgrade adds phase column', in_array('phase', table_columns($old_manifest_table), true));
+    T::ok('upgrade adds parent hash column', in_array('parent_manifest_hash', table_columns($old_manifest_table), true));
+    T::ok('upgrade adds catch-up origin column', in_array('catchup_from_gmt', table_columns($old_manifest_table), true));
+    T::same('existing READY row is preserved', 'ready', $wpdb->get_var("SELECT status FROM `{$old_manifest_table}` WHERE manifest_hash = '{$old_hash}'"));
+    T::same('existing row receives manifest_enumerate phase', 'manifest_enumerate', $wpdb->get_var("SELECT phase FROM `{$old_manifest_table}` WHERE manifest_hash = '{$old_hash}'"));
+    T::ok('repeated schema upgrade is idempotent', EventSales_Woo_Order_Index_Manifest_Store::install_schema($wpdb));
+    T::ok('upgraded trigger blocks READY phase mutation', $wpdb->query("UPDATE `{$old_manifest_table}` SET phase = 'catch_up' WHERE manifest_hash = '{$old_hash}'") === false);
+    $wpdb->set_prefix($original_prefix);
+    register_shutdown_function(static function () use ($old_manifest_table, $old_item_table): void {
+        global $wpdb;
+        if (isset($wpdb) && is_object($wpdb)) {
+            $wpdb->query("DROP TABLE IF EXISTS `{$old_item_table}`");
+            $wpdb->query("DROP TABLE IF EXISTS `{$old_manifest_table}`");
+        }
+    });
 
     T::section('lifecycle and immutability');
     $building = $store->begin_manifest(manifest_scope());
@@ -549,7 +645,15 @@ try {
     T::same('replay returns identical IDs and order', $large_page_two['items'], $large_page_two_replay['items']);
     T::same('terminal evidence is stable across replay', $large_page_three['terminal_evidence'], $store->read_page($large['token'], $large_page_two['next_sequence'], 100)['terminal_evidence']);
 
-    $controller = new EventSales_Woo_Order_Index_Feed();
+    $controller = new EventSales_Woo_Order_Index_Feed(
+        null,
+        null,
+        static function (object $database) use (&$now): object {
+            return new EventSales_Woo_Order_Index_Manifest_Store($database, static function () use (&$now): DateTimeImmutable {
+                return $now;
+            });
+        }
+    );
     $large_path = '/wp-json/eventsales/v1/woo-order-index/manifests/' . $large['token'];
     $http_page_one = $controller->handle_manifest_fetch(signed_request('GET', $large_path, [], '', ['token' => $large['token']]));
     T::same('authenticated READY GET succeeds', 200, $http_page_one->get_status());
@@ -663,10 +767,14 @@ try {
     $source = file_get_contents(dirname(__DIR__) . '/eventsales-woo-order-index-feed.php')
         . file_get_contents(dirname(__DIR__) . '/eventsales-woo-order-index-manifest-store.php')
         . file_get_contents(dirname(__DIR__) . '/eventsales-woo-order-membership-source.php')
-        . file_get_contents(dirname(__DIR__) . '/eventsales-woo-order-manifest-builder.php');
+        . file_get_contents(dirname(__DIR__) . '/eventsales-woo-order-manifest-builder.php')
+        . file_get_contents(dirname(__DIR__) . '/eventsales-woo-order-catchup-source.php')
+        . file_get_contents(dirname(__DIR__) . '/eventsales-woo-order-catchup-manifest-builder.php');
     foreach (['wc_get_orders', 'wc_get_order', 'WP_Query', '$wpdb->posts', 'wp_posts', 'wc/v3'] as $forbidden) {
         T::ok('no live Woo enumeration reference: ' . $forbidden, strpos($source, $forbidden) === false);
     }
+    T::ok('catch-up source is included in the source boundary proof', strpos($source, 'EventSales_Woo_Order_Catchup_Source') !== false);
+    T::ok('catch-up builder is included in the source boundary proof', strpos($source, 'EventSales_Woo_Order_Catchup_Manifest_Builder') !== false);
     $catalog_plugin = dirname(__DIR__) . '/../eventsales-tickera-catalog-feed/eventsales-tickera-catalog-feed.php';
     T::same(
         'catalog plugin remains byte-for-byte unchanged',
