@@ -166,7 +166,6 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
     else
       false -> {:error, :source_endpoint_mismatch}
       {:error, _reason} -> {:error, :source_client_misconfigured}
-      _other -> {:error, :source_client_misconfigured}
     end
   end
 
@@ -235,53 +234,65 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
   defp resolve_page(run, page, mappings, opts) do
     page
     |> page_value(:items, "items")
-    |> Enum.reduce_while({:ok, zero_counts()}, fn item, {:ok, counts} ->
-      source_order_id = page_value(item, :source_order_id, "source_order_id")
-
-      case fetch_order(source_order_id, opts) do
-        {:ok, order} ->
-          with :ok <- validate_returned_order_id(source_order_id, order),
-               {:ok, filtered_line_items} <- matching_line_items(order, mappings) do
-            next_counts = Map.update!(counts, :orders_seen_count, &(&1 + 1))
-
-            if filtered_line_items == [] do
-              {:cont, {:ok, next_counts}}
-            else
-              filtered_order = put_line_items(order, filtered_line_items)
-
-              case upsert_order(run.source_system_id, filtered_order, opts) do
-                {:ok, :stale_noop} ->
-                  {:cont,
-                   {:ok,
-                    next_counts
-                    |> Map.update!(:orders_matched_count, &(&1 + 1))
-                    |> Map.update!(:orders_stale_count, &(&1 + 1))}}
-
-                {:ok, _persisted_order} ->
-                  {:cont,
-                   {:ok,
-                    next_counts
-                    |> Map.update!(:orders_matched_count, &(&1 + 1))
-                    |> Map.update!(:orders_upserted_count, &(&1 + 1))}}
-
-                {:error, _reason} ->
-                  {:halt, {:error, :order_upsert_failed}}
-
-                _other ->
-                  {:halt, {:error, :order_upsert_failed}}
-              end
-            end
-          else
-            {:error, reason} -> {:halt, {:error, reason}}
-          end
-
-        {:error, reason} ->
-          {:halt, {:error, normalize_order_fetch_error(reason)}}
-
-        _other ->
-          {:halt, {:error, :source_order_fetch_failed}}
-      end
+    |> Enum.reduce_while({:ok, zero_counts()}, fn item, result ->
+      resolve_item(run, item, result, mappings, opts)
     end)
+  end
+
+  defp resolve_item(run, item, {:ok, counts}, mappings, opts) do
+    source_order_id = page_value(item, :source_order_id, "source_order_id")
+
+    case fetch_order(source_order_id, opts) do
+      {:ok, order} -> resolve_fetched_order(run, source_order_id, order, counts, mappings, opts)
+      {:error, reason} -> {:halt, {:error, normalize_order_fetch_error(reason)}}
+    end
+  end
+
+  defp resolve_item(_run, _item, result, _mappings, _opts), do: {:halt, result}
+
+  defp resolve_fetched_order(run, source_order_id, order, counts, mappings, opts) do
+    case validate_returned_order_id(source_order_id, order) do
+      :ok ->
+        case matching_line_items(order, mappings) do
+          {:ok, line_items} ->
+            resolve_line_items(run, order, line_items, counts, opts)
+
+          {:error, reason} ->
+            {:halt, {:error, reason}}
+        end
+
+      {:error, reason} ->
+        {:halt, {:error, reason}}
+    end
+  end
+
+  defp resolve_line_items(_run, _order, [], counts, _opts) do
+    {:cont, {:ok, Map.update!(counts, :orders_seen_count, &(&1 + 1))}}
+  end
+
+  defp resolve_line_items(run, order, line_items, counts, opts) do
+    counts = Map.update!(counts, :orders_seen_count, &(&1 + 1))
+    filtered_order = put_line_items(order, line_items)
+
+    case upsert_order(run.source_system_id, filtered_order, opts) do
+      {:ok, :stale_noop} ->
+        {:cont, {:ok, increment_match_counts(counts, :orders_stale_count)}}
+
+      {:ok, _persisted_order} ->
+        {:cont, {:ok, increment_match_counts(counts, :orders_upserted_count)}}
+
+      {:error, _reason} ->
+        {:halt, {:error, :order_upsert_failed}}
+
+      _other ->
+        {:halt, {:error, :order_upsert_failed}}
+    end
+  end
+
+  defp increment_match_counts(counts, result_key) do
+    counts
+    |> Map.update!(:orders_matched_count, &(&1 + 1))
+    |> Map.update!(result_key, &(&1 + 1))
   end
 
   defp fetch_order(source_order_id, opts) do
@@ -305,9 +316,6 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
       _error -> {:error, :source_order_id_mismatch}
     end
   end
-
-  defp validate_returned_order_id(_source_order_id, _order),
-    do: {:error, :invalid_source_order_response}
 
   defp matching_line_items(order, mappings) do
     case map_value(order, :line_items, "line_items") do
@@ -361,28 +369,41 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
 
   defp checkpoint_page(run, cursor, evidence, page, counts, _opts) do
     with {:ok, next_metadata, result_kind} <- next_metadata(cursor.metadata, evidence, page) do
-      case Repo.transaction(fn ->
-             with {:ok, current_cursor} <- locked_current_cursor(cursor),
-                  :ok <- verify_cursor_authority(current_cursor, cursor),
-                  {:ok, current_run} <- current_run(run),
-                  :ok <- verify_run_authority(current_run, run),
-                  {:ok, updated_run, run_notifications} <- record_counts(current_run, counts),
-                  {:ok, updated_cursor, cursor_notifications} <-
-                    record_progress(current_cursor, next_metadata) do
-               {result_kind, updated_run, updated_cursor,
-                run_notifications ++ cursor_notifications}
-             else
-               {:error, reason} -> Repo.rollback(reason)
-               _other -> Repo.rollback(:checkpoint_conflict)
-             end
-           end) do
-        {:ok, {result_kind, updated_run, updated_cursor, notifications}} ->
-          if notifications != [], do: Ash.Notifier.notify(notifications)
-          {:ok, {result_kind, updated_run, updated_cursor}}
+      case checkpoint_transaction_result(run, cursor, next_metadata, counts, result_kind) do
+        {:ok, checkpoint} ->
+          {:ok, notify_checkpoint(checkpoint)}
 
         {:error, reason} ->
           {:error, reason}
       end
+    end
+  end
+
+  defp checkpoint_transaction_result(run, cursor, next_metadata, counts, result_kind) do
+    Repo.transaction(fn ->
+      checkpoint_transaction(run, cursor, next_metadata, counts, result_kind)
+    end)
+  end
+
+  defp notify_checkpoint({result_kind, updated_run, updated_cursor, []}),
+    do: {result_kind, updated_run, updated_cursor}
+
+  defp notify_checkpoint({result_kind, updated_run, updated_cursor, notifications}) do
+    Ash.Notifier.notify(notifications)
+    {result_kind, updated_run, updated_cursor}
+  end
+
+  defp checkpoint_transaction(run, cursor, next_metadata, counts, result_kind) do
+    with {:ok, current_cursor} <- locked_current_cursor(cursor),
+         :ok <- verify_cursor_authority(current_cursor, cursor),
+         {:ok, current_run} <- current_run(run),
+         :ok <- verify_run_authority(current_run, run),
+         {:ok, updated_run, run_notifications} <- record_counts(current_run, counts),
+         {:ok, updated_cursor, cursor_notifications} <-
+           record_progress(current_cursor, next_metadata) do
+      {result_kind, updated_run, updated_cursor, run_notifications ++ cursor_notifications}
+    else
+      {:error, reason} -> Repo.rollback(reason)
     end
   end
 
@@ -409,7 +430,7 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
          true <- size <= HistoricalManifestEvidence.metadata_max_bytes() do
       {:ok, metadata, result_kind}
     else
-      {:ok, _size} -> {:error, :metadata_too_large}
+      false -> {:error, :metadata_too_large}
       _error -> {:error, :invalid_manifest_evidence}
     end
   end
@@ -473,7 +494,6 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
       {:ok, updated} -> {:ok, updated, []}
       {:ok, updated, notifications} -> {:ok, updated, notifications}
       {:error, _reason} -> {:error, :checkpoint_failed}
-      _other -> {:error, :checkpoint_failed}
     end
   end
 
@@ -488,7 +508,6 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
       {:ok, updated} -> {:ok, updated, []}
       {:ok, updated, notifications} -> {:ok, updated, notifications}
       {:error, _reason} -> {:error, :checkpoint_failed}
-      _other -> {:error, :checkpoint_failed}
     end
   end
 

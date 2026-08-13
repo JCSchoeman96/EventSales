@@ -25,18 +25,18 @@ defmodule EventSales.Ingestion.HistoricalManifestEvidence do
   @manifest_hash_regex ~r/\A[0-9a-f]{64}\z/
   @utc_wire_regex ~r/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z\z/
 
-  @evidence_keys MapSet.new([
-                   "schema_version",
-                   "phase",
-                   "boundary_token",
-                   "manifest_hash",
-                   "manifest_expires_at_gmt",
-                   "source_observed_at_gmt",
-                   "state"
-                 ])
+  @evidence_keys [
+    "schema_version",
+    "phase",
+    "boundary_token",
+    "manifest_hash",
+    "manifest_expires_at_gmt",
+    "source_observed_at_gmt",
+    "state"
+  ]
 
-  @in_progress_keys MapSet.put(@evidence_keys, "next_cursor")
-  @terminal_keys MapSet.put(@evidence_keys, "terminal_evidence")
+  @in_progress_keys @evidence_keys ++ ["next_cursor"]
+  @terminal_keys @evidence_keys ++ ["terminal_evidence"]
 
   @type t :: %__MODULE__{
           schema_version: String.t(),
@@ -89,26 +89,28 @@ defmodule EventSales.Ingestion.HistoricalManifestEvidence do
           | :corrupt
   def state(metadata) when is_map(metadata) do
     case Map.fetch(metadata, @metadata_key) do
-      :error ->
-        if Map.has_key?(metadata, :historical_manifest), do: :corrupt, else: :missing
-
-      {:ok, %{"state" => @claim_state} = raw} when raw == %{"state" => @claim_state} ->
-        :create_claimed
-
-      {:ok, raw} when is_map(raw) ->
-        case Map.get(raw, "state") do
-          @pending_state -> :pending_first_page
-          @in_progress_state -> :manifest_in_progress
-          @terminal_state -> :manifest_terminal
-          _other -> :corrupt
-        end
-
-      {:ok, _raw} ->
-        :corrupt
+      :error -> missing_state(metadata)
+      {:ok, raw} -> namespace_state(raw)
     end
   end
 
   def state(_metadata), do: :corrupt
+
+  defp missing_state(metadata) do
+    if Map.has_key?(metadata, :historical_manifest), do: :corrupt, else: :missing
+  end
+
+  defp namespace_state(%{"state" => @claim_state} = raw)
+       when raw == %{"state" => @claim_state},
+       do: :create_claimed
+
+  defp namespace_state(raw) when is_map(raw), do: known_state(Map.get(raw, "state"))
+  defp namespace_state(_raw), do: :corrupt
+
+  defp known_state(@pending_state), do: :pending_first_page
+  defp known_state(@in_progress_state), do: :manifest_in_progress
+  defp known_state(@terminal_state), do: :manifest_terminal
+  defp known_state(_state), do: :corrupt
 
   @doc "Builds evidence from one validated or validation-compatible source page."
   @spec from_page(Page.t() | map()) :: {:ok, t()} | {:error, reason()}
@@ -296,45 +298,45 @@ defmodule EventSales.Ingestion.HistoricalManifestEvidence do
   end
 
   defp validate_evidence_keys(raw) do
-    expected_keys =
-      case raw["state"] do
-        @pending_state -> @evidence_keys
-        @in_progress_state -> @in_progress_keys
-        @terminal_state -> @terminal_keys
-        _other -> nil
-      end
+    case raw["state"] do
+      @pending_state -> keys_match?(raw, @evidence_keys)
+      @in_progress_state -> keys_match?(raw, @in_progress_keys)
+      @terminal_state -> keys_match?(raw, @terminal_keys)
+      _other -> invalid_evidence()
+    end
+  end
 
-    if expected_keys && MapSet.equal?(MapSet.new(Map.keys(raw)), expected_keys),
+  defp keys_match?(raw, expected_keys) do
+    if Enum.sort(Map.keys(raw)) == Enum.sort(expected_keys),
       do: :ok,
-      else: {:error, :invalid_manifest_evidence}
+      else: invalid_evidence()
   end
 
   defp validate_evidence_values(raw) do
-    if raw["schema_version"] == @schema_version and
-         raw["phase"] == @phase and
-         valid_boundary_token?(raw["boundary_token"]) and
-         valid_manifest_hash?(raw["manifest_hash"]) do
-      case raw["state"] do
-        @pending_state ->
-          :ok
-
-        @in_progress_state ->
-          if valid_cursor?(raw["next_cursor"]),
-            do: :ok,
-            else: {:error, :invalid_manifest_evidence}
-
-        @terminal_state ->
-          if valid_terminal_evidence?(raw["terminal_evidence"]),
-            do: :ok,
-            else: {:error, :invalid_manifest_evidence}
-
-        _other ->
-          {:error, :invalid_manifest_evidence}
-      end
-    else
-      {:error, :invalid_manifest_evidence}
-    end
+    if valid_common_evidence_values?(raw),
+      do: validate_state_values(raw),
+      else: invalid_evidence()
   end
+
+  defp valid_common_evidence_values?(raw) do
+    raw["schema_version"] == @schema_version and
+      raw["phase"] == @phase and
+      valid_boundary_token?(raw["boundary_token"]) and
+      valid_manifest_hash?(raw["manifest_hash"])
+  end
+
+  defp validate_state_values(%{"state" => @pending_state}), do: :ok
+
+  defp validate_state_values(%{"state" => @in_progress_state, "next_cursor" => cursor}) do
+    if valid_cursor?(cursor), do: :ok, else: invalid_evidence()
+  end
+
+  defp validate_state_values(%{"state" => @terminal_state, "terminal_evidence" => evidence}) do
+    if valid_terminal_evidence?(evidence), do: :ok, else: invalid_evidence()
+  end
+
+  defp validate_state_values(_raw), do: invalid_evidence()
+  defp invalid_evidence, do: {:error, :invalid_manifest_evidence}
 
   defp page_fields(page) do
     fields = %{

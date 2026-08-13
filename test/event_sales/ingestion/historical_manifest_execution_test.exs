@@ -113,31 +113,25 @@ defmodule EventSales.Ingestion.HistoricalManifestExecutionTest do
     def upsert_order(source_system_id, payload, _opts) do
       Agent.get_and_update(__MODULE__, fn state ->
         id = payload["id"] || payload[:id]
-        response = Map.get(state.responses, to_string(id))
-
-        result =
-          case response do
-            nil ->
-              if Map.has_key?(state.durable, to_string(id)) do
-                {:ok, %{source_system_id: source_system_id, id: id}}
-              else
-                {:ok, %{source_system_id: source_system_id, id: id}}
-              end
-
-            response ->
-              response
-          end
-
-        durable =
-          case result do
-            {:ok, :stale_noop} -> state.durable
-            {:ok, _persisted} -> Map.put(state.durable, to_string(id), payload)
-            _error -> state.durable
-          end
+        result = upsert_result(state, source_system_id, id)
+        durable = durable_after_result(state.durable, id, payload, result)
 
         {result, %{state | calls: [{source_system_id, payload} | state.calls], durable: durable}}
       end)
     end
+
+    defp upsert_result(state, source_system_id, id) do
+      Map.get(
+        state.responses,
+        to_string(id),
+        {:ok, %{source_system_id: source_system_id, id: id}}
+      )
+    end
+
+    defp durable_after_result(durable, id, payload, {:ok, _result}),
+      do: Map.put(durable, to_string(id), payload)
+
+    defp durable_after_result(durable, _id, _payload, _result), do: durable
   end
 
   setup do

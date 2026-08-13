@@ -7,12 +7,12 @@ defmodule EventSales.Ingestion.Clients.WooCommerceClient do
   boundary.
   """
 
+  alias EventSales.Catalog.Changes.NormalizeBaseUrl
   alias EventSales.Ingestion.Clients.HttpcTransport
   alias EventSales.Ingestion.Clients.WooCommerceError
   alias EventSales.Ingestion.RestCircuitBreaker
   alias EventSales.Ingestion.RestRateLimiter
   alias EventSales.Telemetry
-  alias EventSales.Catalog.Changes.NormalizeBaseUrl
 
   @default_timeout_ms 5_000
   @default_queue_timeout_ms 5_000

@@ -21,8 +21,8 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorker do
 
   alias EventSales.Ingestion
   alias EventSales.Ingestion.HistoricalManifestBootstrap
-  alias EventSales.Ingestion.HistoricalManifestExecution
   alias EventSales.Ingestion.HistoricalManifestEvidence
+  alias EventSales.Ingestion.HistoricalManifestExecution
   alias EventSales.Ingestion.Resources.{SyncCursor, SyncRun}
 
   @transient_reasons [
@@ -65,6 +65,8 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorker do
     :invalid_historical_execution_input,
     :product_mappings_unavailable,
     :invalid_product_mappings,
+    :invalid_manifest_evidence,
+    :invalid_now,
     :checkpoint_conflict,
     :metadata_too_large
   ]
@@ -76,8 +78,7 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorker do
                          :manifest_source_error,
                          :source_order_fetch_failed,
                          :invalid_checkpoint_callback,
-                         :checkpoint_failed,
-                         :invalid_now
+                         :checkpoint_failed
                        ]
                    )
 
@@ -110,19 +111,16 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorker do
       {:ok, active_run} ->
         with {:ok, _evidence} <- ensure_manifest(active_run),
              {:ok, cursor} <- load_required_cursor(active_run) do
-          execution_module()
-          |> apply(:run_step, [active_run, cursor, execution_opts()])
+          executor = execution_module()
+
+          executor.run_step(active_run, cursor, execution_opts())
           |> handle_result(job, active_run)
         else
           {:error, reason} -> handle_error(active_run, job, reason)
-          _other -> handle_error(active_run, job, :historical_execution_failed)
         end
 
       {:error, reason} ->
         handle_error(run, job, reason)
-
-      _other ->
-        handle_error(run, job, :historical_execution_failed)
     end
   end
 
@@ -149,9 +147,9 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorker do
   end
 
   defp ensure_manifest(%SyncRun{} = run) do
-    bootstrap_module()
-    |> apply(:ensure_manifest, [run.id, bootstrap_opts()])
-    |> case do
+    bootstrap = bootstrap_module()
+
+    case bootstrap.ensure_manifest(run.id, bootstrap_opts()) do
       {:ok, evidence} -> {:ok, evidence}
       {:error, reason} -> {:error, reason}
       _other -> {:error, :manifest_bootstrap_failed}
@@ -256,33 +254,26 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorker do
 
   defp mark_cursor_failed(%SyncRun{id: sync_run_id}, failure) do
     with {:ok, %SyncCursor{} = cursor} <- load_cursor_by_id(sync_run_id),
-         {:ok, metadata} <- HistoricalManifestEvidence.with_failure(cursor.metadata, failure),
-         {:ok, _failed, notifications} <-
-           Ash.update(cursor, %{metadata: metadata},
-             action: :mark_failed,
-             domain: Ingestion,
-             return_notifications?: true
-           ) do
-      Ash.Notifier.notify(notifications)
-      :ok
+         {:ok, metadata} <- HistoricalManifestEvidence.with_failure(cursor.metadata, failure) do
+      persist_failed_cursor(cursor, metadata)
     else
-      {:ok, %SyncCursor{} = cursor} ->
-        case HistoricalManifestEvidence.with_failure(cursor.metadata, failure) do
-          {:ok, metadata} ->
-            case Ash.update(cursor, %{metadata: metadata},
-                   action: :mark_failed,
-                   domain: Ingestion
-                 ) do
-              {:ok, _failed} -> :ok
-              _error -> {:error, :cursor_failure_persist_failed}
-            end
-
-          _error ->
-            {:error, :cursor_failure_persist_failed}
-        end
-
-      {:error, _reason} ->
+      _other ->
         {:error, :cursor_failure_persist_failed}
+    end
+  end
+
+  defp persist_failed_cursor(cursor, metadata) do
+    case Ash.update(cursor, %{metadata: metadata},
+           action: :mark_failed,
+           domain: Ingestion,
+           return_notifications?: true
+         ) do
+      {:ok, _failed, notifications} ->
+        Ash.Notifier.notify(notifications)
+        :ok
+
+      {:ok, _failed} ->
+        :ok
 
       _other ->
         {:error, :cursor_failure_persist_failed}
@@ -325,7 +316,6 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorker do
   defp normalize_update({:ok, record}), do: {:ok, record}
   defp normalize_update({:ok, record, _notifications}), do: {:ok, record}
   defp normalize_update({:error, reason}), do: {:error, reason}
-  defp normalize_update(_other), do: {:error, :update_failed}
 
   defp bootstrap_module,
     do:
