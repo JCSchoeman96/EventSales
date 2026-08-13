@@ -6,6 +6,12 @@ that captures one source-consistent membership set at one source boundary `D`,
 stores it through E1, and publishes it only after the immutable manifest is
 READY.
 
+M3-01/02F4A adds source-safe historical catch-up. A READY ordinary manifest is
+the immutable membership boundary `M` observed at `D`; catch-up creates a
+separate immutable changed-only child `U` at a later source boundary `H`.
+`U` is derived only by traversing `M`, so it can never discover a post-`D`
+historical nonmember.
+
 The existing `eventsales-tickera-catalog-feed` remains catalog-only and is not
 modified.
 
@@ -23,6 +29,8 @@ E1 provides:
 - authenticated, bounded READY manifest GET pages with authenticated cursors;
 - an authenticated manifest POST backed by the production source adapter and
   bounded builder.
+- an authenticated catch-up POST backed by a separate source-consistent
+  catch-up adapter and bounded builder.
 
 The E1 store itself does not:
 
@@ -37,7 +45,8 @@ The E1 store itself does not:
 
 M3-01/02E2B owns the source-consistent Woo membership observation and atomic
 builder that supplies rows to this storage API. EventSales Elixir consumption,
-modified-time catch-up, refunds, and later slices are not part of this plugin.
+EventSales catch-up consumption, refunds, and later slices are not part of this
+plugin.
 
 ## Durable tables
 
@@ -54,10 +63,13 @@ The manifest header stores:
 id
 token_hash
 schema_version
+phase
+parent_manifest_hash
 source_system
 backfill_start_gmt
 backfill_cutoff_gmt
 source_observed_at_gmt
+catchup_from_gmt
 membership_predicate_version
 status
 created_at_gmt
@@ -83,8 +95,11 @@ cleanup path. Items use `(manifest_id, sequence)` as their primary paging key
 and a unique `(manifest_id, source_order_id)` identity constraint. A foreign key
 cascades lifecycle cleanup from a manifest header to its items.
 
-Installation is additive and idempotent. Database guards are installed with the
-tables; no destructive upgrade or existing WordPress table alteration is used.
+Installation is additive and idempotent. On a pre-F4A installation, the schema
+upgrade adds only `phase`, `parent_manifest_hash`, and `catchup_from_gmt`,
+backfills existing rows to `manifest_enumerate`, and upgrades the header
+immutability trigger in place. It does not rebuild or destructively replace an
+existing table. Database guards are installed with the tables.
 
 ## Lifecycle and internal storage API
 
@@ -208,6 +223,61 @@ current contract has no idempotency key. There is no durable replay cache or
 Redis correctness dependency. If that duplicate work becomes operationally
 unacceptable, a future slice must add an explicit idempotency design rather
 than pretending the current command is idempotent.
+
+## F4A source-safe catch-up
+
+The catch-up endpoint is:
+
+```text
+POST /wp-json/eventsales/v1/woo-order-index/manifests/{parent_token}/catch-up
+```
+
+Its bounded body contains only `source_system` and a first-page `limit` from 1
+through 100. The authenticated caller cannot provide `B`, `C`, `D`, `H`, a
+modified-time range, a parent hash, an identity list, or a source cursor. The
+builder resolves the opaque parent token through E1 before opening the source
+transaction and requires the exact parent to be READY, unexpired,
+`phase=manifest_enumerate`, validly hashed, and terminally evidenced.
+
+The scope model is:
+
+```text
+B = parent backfill_start_gmt
+C = parent backfill_cutoff_gmt
+D = parent source_observed_at_gmt
+M = parent immutable ordered membership at D
+H = source_observed_at_gmt from the new consistent source snapshot
+U = changed identities selected only from M at H
+```
+
+The child stores `phase=catch_up`, the exact `parent_manifest_hash`,
+`catchup_from_gmt=D`, the parent `B` and `C`, `H`, and the explicit
+`2026-08-13.catchup.v1` plus `m3-01-02f4a.catchup.v1` versions. Its hash and
+terminal evidence include the catch-up phase, parent hash, `D`, `H`, predicate
+version, and ordered child identities, so catch-up evidence cannot be treated
+as ordinary `M` evidence. A catch-up child cannot itself be reused as a parent.
+
+The catch-up predicate compares each authoritative source row resolved by the
+exact Woo order ID against the frozen `M` timestamps. The identity enters `U`
+when either `source_created_at_gmt` or `source_modified_at_gmt` is unequal.
+This intentionally includes timestamp rewrites and backdating. Orders absent
+from `M` are never searched or added. If an `M` identity is missing at `H`, or
+is no longer a `shop_order`, the capture fails closed with no READY child.
+
+F4A uses one dedicated source `wpdb` connection, the existing source-scoped
+zero-wait lock, HPOS/legacy authority preflight, and one InnoDB
+`REPEATABLE READ` / `WITH CONSISTENT SNAPSHOT, READ ONLY` transaction. Parent
+items are streamed by `(manifest_id, sequence)` keyset, source rows are looked
+up by exact primary IDs, and each candidate covers at most 100 parent
+identities. The source candidate/ACK cursor is the parent sequence, not a Woo
+modified timestamp or REST page. A source commit requires a confirmed explicit
+empty terminal candidate and occurs before the child is finalized READY.
+
+The five-second monotonic capture budget is shared with ordinary membership
+capture. It covers H opening, each parent/source candidate, append,
+confirmation, terminal proof, and source commit. Redis, ETS, Cachex, Woo REST
+collection paging, full `WC_Order` hydration, customer data, payment data, and
+full order payloads are not correctness dependencies or manifest contents.
 
 ## Token and cursor security
 

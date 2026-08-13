@@ -611,6 +611,7 @@ function eventsales_proof_capture(object $wpdb, object $source_db, string $mode,
 
         return [
             'manifest_id' => $manifest_id,
+            'token' => (string) $started['token'],
             'manifest_hash' => $finalized['manifest_hash'],
             'items' => $page['items'],
             'captured' => $captured,
@@ -659,6 +660,24 @@ function eventsales_proof_production_capture(object $wpdb, string $mode, int $li
     ];
 
     return $result;
+}
+
+/** @return array<string, mixed> */
+function eventsales_proof_production_catchup(object $wpdb, string $parent_token, string $source_system, int $limit = 100): array
+{
+    $builder = new EventSales_Woo_Order_Catchup_Manifest_Builder(
+        $wpdb,
+        null,
+        static function (object $wordpress_db, object $source_db): object {
+            return new EventSales_Woo_Order_Catchup_Source($wordpress_db, $source_db, null, true);
+        }
+    );
+
+    return $builder->build([
+        'parent_token' => $parent_token,
+        'source_system' => $source_system,
+        'limit' => $limit,
+    ]);
 }
 
 function eventsales_proof_identity_space_size(object $wpdb, string $mode): int
@@ -712,6 +731,21 @@ function eventsales_proof_print_metrics(string $mode, array $metrics, ?array $be
         'php_peak_memory_bytes' => $benchmark['php_peak_memory_bytes'] ?? null,
         'php_peak_memory_delta_bytes' => $benchmark['php_peak_memory_delta_bytes'] ?? null,
         'largest_id_gap' => $metrics['largest_id_gap'] ?? null,
+    ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR) . "\n";
+}
+
+/** @param array<string, mixed> $metrics */
+function eventsales_proof_print_catchup_metrics(string $mode, array $metrics): void
+{
+    echo 'CATCHUP_METRICS ' . $mode . ' ' . json_encode([
+        'source_mode' => $mode,
+        'parent_plan' => $metrics['parent_plan'] ?? [],
+        'source_plan' => $metrics['source_plan'] ?? [],
+        'parent_rows_examined' => $metrics['parent_rows_examined'] ?? null,
+        'source_rows_examined' => $metrics['source_rows_examined'] ?? null,
+        'matching_identities' => $metrics['matching_rows'] ?? null,
+        'chunks' => $metrics['chunks'] ?? null,
+        'snapshot_duration_ms' => $metrics['snapshot_duration_ms'] ?? null,
     ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR) . "\n";
 }
 
@@ -809,6 +843,51 @@ try {
             EventSales_Membership_Proof_Test::ok($mode . ' snapshot duration captured', (float) $baseline['metrics']['snapshot_duration_ms'] >= 0.0);
             EventSales_Membership_Proof_Test::ok($mode . ' largest ID gap captured', (int) $baseline['metrics']['largest_id_gap'] >= 0);
             eventsales_proof_print_metrics($mode, $baseline['metrics']);
+
+            eventsales_proof_update_fixture($mutation_db, $mode, $ids['10'], null, '2099-01-11 00:00:00.000000');
+            eventsales_proof_update_fixture($mutation_db, $mode, $ids['20'], null, '2099-01-09 00:00:00.000000');
+            eventsales_proof_update_fixture($mutation_db, $mode, $ids['30'], '2099-01-11 00:00:00.000000', null);
+            eventsales_proof_update_fixture($mutation_db, $mode, $ids['40'], '2099-01-09 00:00:00.000000', null);
+            eventsales_proof_insert_fixture($mutation_db, $mode, $ids['post_d'], '2099-01-10 14:00:00.000000', '2099-01-11 00:00:00.000000', 'catchup-post-d');
+            $catchup = eventsales_proof_production_catchup($wpdb, (string) $baseline['token'], 'local-proof:' . $mode);
+            EventSales_Membership_Proof_Test::same($mode . ' catch-up returns READY', true, $catchup['ok'] ?? false);
+            EventSales_Membership_Proof_Test::same($mode . ' catch-up phase', 'catch_up', $catchup['page']['phase'] ?? null);
+            EventSales_Membership_Proof_Test::same(
+                $mode . ' catch-up contains changed M members in parent order',
+                [(string) $ids['10'], (string) $ids['20'], (string) $ids['30'], (string) $ids['40']],
+                eventsales_proof_ids($catchup['page']['items'] ?? [])
+            );
+            $catchup_items_by_id = [];
+            foreach ($catchup['page']['items'] ?? [] as $item) {
+                $catchup_items_by_id[(string) $item['source_order_id']] = $item;
+            }
+            EventSales_Membership_Proof_Test::same($mode . ' catch-up includes backdated modified inequality', '2099-01-09T00:00:00.000000Z', $catchup_items_by_id[(string) $ids['20']]['source_modified_at_gmt'] ?? null);
+            EventSales_Membership_Proof_Test::same($mode . ' catch-up includes backdated created inequality', '2099-01-09T00:00:00.000000Z', $catchup_items_by_id[(string) $ids['40']]['source_created_at_gmt'] ?? null);
+            EventSales_Membership_Proof_Test::same($mode . ' catch-up source metrics mode', $mode, $catchup['metrics']['mode'] ?? null);
+            EventSales_Membership_Proof_Test::ok($mode . ' catch-up parent plan captured', ($catchup['metrics']['parent_plan'] ?? []) !== []);
+            EventSales_Membership_Proof_Test::ok($mode . ' catch-up source plan captured', ($catchup['metrics']['source_plan'] ?? []) !== []);
+            EventSales_Membership_Proof_Test::ok($mode . ' catch-up parent rows examined captured', (int) ($catchup['metrics']['parent_rows_examined'] ?? -1) >= 0);
+            EventSales_Membership_Proof_Test::ok($mode . ' catch-up source rows examined captured', (int) ($catchup['metrics']['source_rows_examined'] ?? -1) >= 0);
+            EventSales_Membership_Proof_Test::ok($mode . ' catch-up snapshot is within five seconds', (float) ($catchup['metrics']['snapshot_duration_ms'] ?? 6000) <= 5000.0);
+            eventsales_proof_print_catchup_metrics($mode, $catchup['metrics']);
+            EventSales_Membership_Proof_Test::same($mode . ' catch-up excludes post-D nonmember', false, in_array((string) $ids['post_d'], eventsales_proof_ids($catchup['page']['items'] ?? []), true));
+            $catchup_store = new EventSales_Woo_Order_Index_Manifest_Store($wpdb);
+            $parent_metadata = $catchup_store->manifest_metadata((int) $baseline['manifest_id']);
+            $child_metadata = $catchup_store->manifest_metadata((int) $catchup['manifest_id']);
+            EventSales_Membership_Proof_Test::same($mode . ' catch-up preserves parent B', $parent_metadata['backfill_start_gmt'] ?? null, $child_metadata['backfill_start_gmt'] ?? null);
+            EventSales_Membership_Proof_Test::same($mode . ' catch-up preserves parent C', $parent_metadata['backfill_cutoff_gmt'] ?? null, $child_metadata['backfill_cutoff_gmt'] ?? null);
+            EventSales_Membership_Proof_Test::same($mode . ' catch-up binds parent hash', $baseline['manifest_hash'], $child_metadata['parent_manifest_hash'] ?? null);
+            EventSales_Membership_Proof_Test::same($mode . ' catch-up binds D', $parent_metadata['source_observed_at_gmt'] ?? null, $child_metadata['catchup_from_gmt'] ?? null);
+            EventSales_Membership_Proof_Test::ok($mode . ' catch-up H is not before D', ($child_metadata['source_observed_at_gmt'] ?? '') >= ($child_metadata['catchup_from_gmt'] ?? ''));
+
+            eventsales_proof_delete_fixture($mutation_db, $mode, $ids['40']);
+            $missing_catchup = eventsales_proof_production_catchup($wpdb, (string) $baseline['token'], 'local-proof:' . $mode);
+            EventSales_Membership_Proof_Test::same($mode . ' deleted M member fails closed', 'catchup_member_unresolved', $missing_catchup['error'] ?? null);
+            eventsales_proof_insert_fixture($mutation_db, $mode, $ids['40'], EVENTSALES_PROOF_CUTOFF, '2099-01-10 10:00:00.000000', 'catchup-restored');
+            eventsales_proof_delete_fixture($mutation_db, $mode, $ids['post_d']);
+            eventsales_proof_update_fixture($mutation_db, $mode, $ids['10'], null, '2099-01-10 10:00:00.000000');
+            eventsales_proof_update_fixture($mutation_db, $mode, $ids['20'], null, '2099-01-10 12:00:00.000000');
+            eventsales_proof_update_fixture($mutation_db, $mode, $ids['30'], '2099-01-10 12:00:00.000000', null);
 
             $production = eventsales_proof_production_capture($wpdb, $mode, 2);
             EventSales_Membership_Proof_Test::same($mode . ' production builder returns READY', true, $production['ok'] ?? false);

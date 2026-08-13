@@ -155,6 +155,8 @@ final class FeedTestBuilder
 {
     public int $calls = 0;
 
+    public string $page_phase = 'manifest_enumerate';
+
     /** @var array<int, array<string, mixed>> */
     public array $scopes = [];
 
@@ -182,6 +184,7 @@ final class FeedTestBuilder
             'page' => [
                 'ok' => true,
                 'schema_version' => EVENTSALES_WOO_ORDER_INDEX_SCHEMA_VERSION,
+                'phase' => $this->page_phase,
                 'manifest_hash' => str_repeat('b', 64),
                 'expires_at_gmt' => '2026-08-13T00:00:00.000000Z',
                 'source_observed_at_gmt' => '2026-08-12T00:00:00.000000Z',
@@ -372,10 +375,11 @@ T::same('namespace constant', 'eventsales/v1', EVENTSALES_WOO_ORDER_INDEX_NAMESP
 T::same('create route constant', '/woo-order-index/manifests', EVENTSALES_WOO_ORDER_INDEX_CREATE_ROUTE);
 T::same('fetch route constant', '/woo-order-index/manifests/(?P<token>[A-Za-z0-9._-]{1,128})', EVENTSALES_WOO_ORDER_INDEX_FETCH_ROUTE);
 T::same('maximum request limit', 100, Feed::max_limit());
-T::same('registered route count', 2, count($GLOBALS['registered_routes']));
+T::same('registered route count', 3, count($GLOBALS['registered_routes']));
 T::same('registered namespace', 'eventsales/v1', $GLOBALS['registered_routes'][0]['namespace']);
 T::same('registered create path', '/woo-order-index/manifests', $GLOBALS['registered_routes'][0]['route']);
 T::same('registered fetch path', EVENTSALES_WOO_ORDER_INDEX_FETCH_ROUTE, $GLOBALS['registered_routes'][1]['route']);
+T::same('registered catch-up path', EVENTSALES_WOO_ORDER_INDEX_CATCHUP_ROUTE, $GLOBALS['registered_routes'][2]['route']);
 T::same('key option is separate', 'eventsales_woo_order_index_key_id', Feed::key_id_option_name());
 T::same('secret option is separate', 'eventsales_woo_order_index_secret', Feed::secret_option_name());
 
@@ -401,6 +405,12 @@ $terminal_response = test_controller($terminal_builder)->handle_manifest_create(
 T::same('terminal POST still returns READY', 200, $terminal_response->get_status());
 T::ok('terminal POST omits next_cursor', !array_key_exists('next_cursor', $terminal_response->get_data()));
 T::same('terminal POST returns stored terminal evidence', 'stored-terminal-evidence', $terminal_response->get_data()['terminal_evidence'] ?? null);
+
+$ordinary_phase_mismatch_builder = new FeedTestBuilder();
+$ordinary_phase_mismatch_builder->page_phase = 'catch_up';
+$ordinary_phase_mismatch_response = test_controller($ordinary_phase_mismatch_builder)->handle_manifest_create($valid['request']);
+T::same('ordinary POST phase mismatch fails closed', 503, $ordinary_phase_mismatch_response->get_status());
+T::same('ordinary POST phase mismatch is bounded', 'manifest_storage_failed', $ordinary_phase_mismatch_response->get_data()['error'] ?? null);
 
 $failure_builder = new FeedTestBuilder();
 $failure_builder->forced_result = ['ok' => false, 'error' => 'capture_budget_exceeded'];
