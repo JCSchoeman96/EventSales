@@ -87,6 +87,7 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClient do
   end
 
   @type result :: {:ok, Page.t()} | {:error, WooOrderIndexError.t()}
+  @type method :: :get | :post | String.t()
 
   @doc "Creates and validates exactly one immutable manifest page."
   @spec create_manifest(
@@ -154,7 +155,7 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClient do
 
   @doc false
   @spec canonical_signature_input(
-          String.t(),
+          method(),
           String.t(),
           String.t(),
           binary(),
@@ -176,7 +177,7 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClient do
   end
 
   @doc false
-  @spec signature(String.t(), String.t(), String.t(), binary(), String.t(), String.t(), binary()) ::
+  @spec signature(method(), String.t(), String.t(), binary(), String.t(), String.t(), binary()) ::
           String.t()
   def signature(method, path, canonical_query, raw_body, timestamp, key_id, secret) do
     input = canonical_signature_input(method, path, canonical_query, raw_body, timestamp, key_id)
@@ -320,7 +321,6 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClient do
     else
       {:error, %Jason.DecodeError{}} -> {:error, :invalid_json}
       {:error, :invalid_response} -> {:error, :invalid_response}
-      _other -> {:error, :invalid_response}
     end
   end
 
