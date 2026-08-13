@@ -80,6 +80,12 @@ defmodule EventSales.Ingestion.Resources.SyncCursor do
       validate {BoundedMetadata, max_bytes: @metadata_max_bytes}
     end
 
+    update :record_manifest_progress do
+      accept [:page, :metadata]
+      require_atomic? false
+      validate {BoundedMetadata, max_bytes: @metadata_max_bytes}
+    end
+
     update :claim_manifest_create do
       accept [:metadata]
       require_atomic? false
