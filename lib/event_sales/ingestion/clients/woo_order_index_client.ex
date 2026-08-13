@@ -140,6 +140,15 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClient do
     end
   end
 
+  @doc "Returns the validated, canonical order-index base URL without credentials."
+  @spec configured_base_url(keyword()) :: {:ok, String.t()} | {:error, WooOrderIndexError.t()}
+  def configured_base_url(opts \\ []) do
+    case config(:configured_base_url, opts) do
+      {:ok, %{base_url: base_url}} -> {:ok, base_url}
+      {:error, %WooOrderIndexError{} = error} -> {:error, error}
+    end
+  end
+
   @doc false
   @spec canonical_query_string(map() | keyword()) :: String.t()
   def canonical_query_string(query) when is_map(query) or is_list(query) do
@@ -510,6 +519,7 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClient do
       |> Keyword.merge(opts)
 
     with {:ok, base_url} <- required(app_config, :base_url),
+         base_url <- normalize_base_url(base_url),
          {:ok, key_id} <- required(app_config, :key_id),
          {:ok, secret} <- required(app_config, :secret),
          :ok <- validate_base_url(base_url),
@@ -521,7 +531,7 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClient do
            Keyword.get(app_config, :clock, fn -> System.system_time(:second) end) do
       {:ok,
        %{
-         base_url: String.trim_trailing(base_url, "/"),
+         base_url: base_url,
          key_id: key_id,
          secret: secret,
          timeout_ms: timeout_ms,
@@ -542,6 +552,12 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClient do
       value when is_binary(value) and value != "" -> {:ok, value}
       _other -> :error
     end
+  end
+
+  defp normalize_base_url(base_url) when is_binary(base_url) do
+    base_url
+    |> String.trim()
+    |> String.trim_trailing("/")
   end
 
   defp validate_timeout(value) when is_integer(value) and value > 0, do: {:ok, value}

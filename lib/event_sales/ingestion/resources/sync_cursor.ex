@@ -73,6 +73,18 @@ defmodule EventSales.Ingestion.Resources.SyncCursor do
       change set_attribute(:status, :failed)
       validate {BoundedMetadata, max_bytes: @metadata_max_bytes}
     end
+
+    update :record_manifest_evidence do
+      accept [:metadata]
+      require_atomic? false
+      validate {BoundedMetadata, max_bytes: @metadata_max_bytes}
+    end
+
+    update :claim_manifest_create do
+      accept [:metadata]
+      require_atomic? false
+      validate {BoundedMetadata, max_bytes: @metadata_max_bytes}
+    end
   end
 
   identities do

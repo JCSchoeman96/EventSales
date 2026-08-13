@@ -131,6 +131,8 @@
     "lib/event_sales/ingestion/event_structural_certifier.ex",
     "lib/event_sales/ingestion/findings_csv_export.ex",
     "lib/event_sales/ingestion/handlers/product_updated_handler.ex",
+    "lib/event_sales/ingestion/historical_manifest_bootstrap.ex",
+    "lib/event_sales/ingestion/historical_manifest_evidence.ex",
     "lib/event_sales/ingestion/intake_backpressure.ex",
     "lib/event_sales/ingestion/manual_sync.ex",
     "lib/event_sales/ingestion/order_reconciliation.ex",
@@ -2836,7 +2838,7 @@
       "uses": []
     },
     {
-      "docs_count": 6,
+      "docs_count": 7,
       "moduledoc?": true,
       "name": "EventSales.Ingestion.Clients.WooOrderIndexClient",
       "parse_error": null,
@@ -2853,6 +2855,10 @@
         {
           "arity": 1,
           "name": "validate_configuration"
+        },
+        {
+          "arity": 1,
+          "name": "configured_base_url"
         },
         {
           "arity": 1,
@@ -3087,6 +3093,80 @@
         {
           "arity": 1,
           "name": "handle"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.HistoricalManifestBootstrap",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/historical_manifest_bootstrap.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "ensure_manifest"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 11,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.HistoricalManifestEvidence",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/historical_manifest_evidence.ex",
+      "public_funs": [
+        {
+          "arity": 0,
+          "name": "metadata_key"
+        },
+        {
+          "arity": 0,
+          "name": "claim_metadata"
+        },
+        {
+          "arity": 1,
+          "name": "state"
+        },
+        {
+          "arity": 1,
+          "name": "from_page"
+        },
+        {
+          "arity": 2,
+          "name": "from_page"
+        },
+        {
+          "arity": 1,
+          "name": "from_metadata"
+        },
+        {
+          "arity": 1,
+          "name": "metadata"
+        },
+        {
+          "arity": 1,
+          "name": "encoded_size"
+        },
+        {
+          "arity": 2,
+          "name": "canonical_metadata"
+        },
+        {
+          "arity": 0,
+          "name": "metadata_max_bytes"
+        },
+        {
+          "arity": 2,
+          "name": "validate_unexpired"
+        },
+        {
+          "arity": 2,
+          "name": "validate_continuity"
         }
       ],
       "specs?": true,
