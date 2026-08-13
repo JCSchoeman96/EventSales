@@ -13,8 +13,11 @@ defmodule EventSales.Ingestion.HistoricalManifestEvidence do
   @phase "manifest_enumerate"
   @pending_state "pending_first_page"
   @claim_state "create_claimed"
+  @in_progress_state "manifest_in_progress"
+  @terminal_state "manifest_terminal"
   @metadata_max_bytes 2048
   @max_boundary_token_bytes 128
+  @max_opaque_evidence_bytes 512
   @max_page_items 100
   @boundary_token_regex ~r/\A[A-Za-z0-9._-]+\z/
   @cursor_regex ~r/\A[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\z/
@@ -22,15 +25,18 @@ defmodule EventSales.Ingestion.HistoricalManifestEvidence do
   @manifest_hash_regex ~r/\A[0-9a-f]{64}\z/
   @utc_wire_regex ~r/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z\z/
 
-  @evidence_keys MapSet.new([
-                   "schema_version",
-                   "phase",
-                   "boundary_token",
-                   "manifest_hash",
-                   "manifest_expires_at_gmt",
-                   "source_observed_at_gmt",
-                   "state"
-                 ])
+  @evidence_keys [
+    "schema_version",
+    "phase",
+    "boundary_token",
+    "manifest_hash",
+    "manifest_expires_at_gmt",
+    "source_observed_at_gmt",
+    "state"
+  ]
+
+  @in_progress_keys @evidence_keys ++ ["next_cursor"]
+  @terminal_keys @evidence_keys ++ ["terminal_evidence"]
 
   @type t :: %__MODULE__{
           schema_version: String.t(),
@@ -39,7 +45,9 @@ defmodule EventSales.Ingestion.HistoricalManifestEvidence do
           manifest_hash: String.t(),
           manifest_expires_at: DateTime.t(),
           source_observed_at: DateTime.t(),
-          state: String.t()
+          state: String.t(),
+          next_cursor: String.t() | nil,
+          terminal_evidence: String.t() | nil
         }
 
   @type reason ::
@@ -48,6 +56,7 @@ defmodule EventSales.Ingestion.HistoricalManifestEvidence do
           | :manifest_expired
           | :invalid_now
           | :metadata_too_large
+          | :metadata_not_json_encodable
           | :manifest_continuity_mismatch
 
   defstruct [
@@ -57,7 +66,9 @@ defmodule EventSales.Ingestion.HistoricalManifestEvidence do
     :manifest_hash,
     :manifest_expires_at,
     :source_observed_at,
-    :state
+    :state,
+    :next_cursor,
+    :terminal_evidence
   ]
 
   @doc "Returns the stable top-level metadata namespace used by this evidence."
@@ -69,24 +80,37 @@ defmodule EventSales.Ingestion.HistoricalManifestEvidence do
   def claim_metadata, do: %{@metadata_key => %{"state" => @claim_state}}
 
   @doc "Classifies the historical manifest namespace without performing I/O."
-  @spec state(map()) :: :missing | :create_claimed | :pending_first_page | :corrupt
+  @spec state(map()) ::
+          :missing
+          | :create_claimed
+          | :pending_first_page
+          | :manifest_in_progress
+          | :manifest_terminal
+          | :corrupt
   def state(metadata) when is_map(metadata) do
     case Map.fetch(metadata, @metadata_key) do
-      :error ->
-        if Map.has_key?(metadata, :historical_manifest), do: :corrupt, else: :missing
-
-      {:ok, %{"state" => @claim_state} = raw} when raw == %{"state" => @claim_state} ->
-        :create_claimed
-
-      {:ok, %{"state" => @pending_state}} ->
-        :pending_first_page
-
-      {:ok, _raw} ->
-        :corrupt
+      :error -> missing_state(metadata)
+      {:ok, raw} -> namespace_state(raw)
     end
   end
 
   def state(_metadata), do: :corrupt
+
+  defp missing_state(metadata) do
+    if Map.has_key?(metadata, :historical_manifest), do: :corrupt, else: :missing
+  end
+
+  defp namespace_state(%{"state" => @claim_state} = raw)
+       when raw == %{"state" => @claim_state},
+       do: :create_claimed
+
+  defp namespace_state(raw) when is_map(raw), do: known_state(Map.get(raw, "state"))
+  defp namespace_state(_raw), do: :corrupt
+
+  defp known_state(@pending_state), do: :pending_first_page
+  defp known_state(@in_progress_state), do: :manifest_in_progress
+  defp known_state(@terminal_state), do: :manifest_terminal
+  defp known_state(_state), do: :corrupt
 
   @doc "Builds evidence from one validated or validation-compatible source page."
   @spec from_page(Page.t() | map()) :: {:ok, t()} | {:error, reason()}
@@ -106,7 +130,9 @@ defmodule EventSales.Ingestion.HistoricalManifestEvidence do
          manifest_hash: fields.manifest_hash,
          manifest_expires_at: manifest_expires_at,
          source_observed_at: source_observed_at,
-         state: @pending_state
+         state: @pending_state,
+         next_cursor: nil,
+         terminal_evidence: nil
        }}
     else
       _error -> {:error, :invalid_manifest_page}
@@ -131,7 +157,9 @@ defmodule EventSales.Ingestion.HistoricalManifestEvidence do
          manifest_hash: raw["manifest_hash"],
          manifest_expires_at: manifest_expires_at,
          source_observed_at: source_observed_at,
-         state: raw["state"]
+         state: raw["state"],
+         next_cursor: raw["next_cursor"],
+         terminal_evidence: raw["terminal_evidence"]
        }}
     else
       _error -> {:error, :invalid_manifest_evidence}
@@ -143,17 +171,40 @@ defmodule EventSales.Ingestion.HistoricalManifestEvidence do
   @doc "Returns the canonical nested metadata representation for durable storage."
   @spec metadata(t()) :: %{String.t() => map()}
   def metadata(%__MODULE__{} = evidence) do
-    %{
-      @metadata_key => %{
-        "schema_version" => evidence.schema_version,
-        "phase" => evidence.phase,
-        "boundary_token" => evidence.boundary_token,
-        "manifest_hash" => evidence.manifest_hash,
-        "manifest_expires_at_gmt" => DateTime.to_iso8601(evidence.manifest_expires_at),
-        "source_observed_at_gmt" => DateTime.to_iso8601(evidence.source_observed_at),
-        "state" => evidence.state
-      }
+    namespace = %{
+      "schema_version" => evidence.schema_version,
+      "phase" => evidence.phase,
+      "boundary_token" => evidence.boundary_token,
+      "manifest_hash" => evidence.manifest_hash,
+      "manifest_expires_at_gmt" => DateTime.to_iso8601(evidence.manifest_expires_at),
+      "source_observed_at_gmt" => DateTime.to_iso8601(evidence.source_observed_at),
+      "state" => evidence.state
     }
+
+    namespace =
+      case evidence.state do
+        @in_progress_state -> Map.put(namespace, "next_cursor", evidence.next_cursor)
+        @terminal_state -> Map.put(namespace, "terminal_evidence", evidence.terminal_evidence)
+        _other -> namespace
+      end
+
+    %{@metadata_key => namespace}
+  end
+
+  @doc "Builds the exact in-progress metadata state for a persisted source cursor."
+  @spec in_progress_metadata(t(), String.t()) :: %{String.t() => map()}
+  def in_progress_metadata(%__MODULE__{} = evidence, next_cursor)
+      when is_binary(next_cursor) do
+    %{evidence | state: @in_progress_state, next_cursor: next_cursor, terminal_evidence: nil}
+    |> metadata()
+  end
+
+  @doc "Builds the exact terminal metadata state for a persisted source proof."
+  @spec terminal_metadata(t(), String.t()) :: %{String.t() => map()}
+  def terminal_metadata(%__MODULE__{} = evidence, terminal_evidence)
+      when is_binary(terminal_evidence) do
+    %{evidence | state: @terminal_state, next_cursor: nil, terminal_evidence: terminal_evidence}
+    |> metadata()
   end
 
   @doc "Returns the encoded byte size of a JSON-encodable metadata map."
@@ -181,6 +232,21 @@ defmodule EventSales.Ingestion.HistoricalManifestEvidence do
   end
 
   def canonical_metadata(_metadata, _evidence), do: {:error, :metadata_not_json_encodable}
+
+  @doc "Adds a bounded failure summary without replacing historical manifest evidence."
+  @spec with_failure(map(), String.t()) ::
+          {:ok, map()} | {:error, :metadata_too_large | :metadata_not_json_encodable}
+  def with_failure(metadata, failure) when is_map(metadata) and is_binary(failure) do
+    candidate = Map.put(metadata, "failure", failure)
+
+    case encoded_size(candidate) do
+      {:ok, size} when size <= @metadata_max_bytes -> {:ok, candidate}
+      {:ok, _size} -> {:error, :metadata_too_large}
+      {:error, _reason} -> {:error, :metadata_not_json_encodable}
+    end
+  end
+
+  def with_failure(_metadata, _failure), do: {:error, :metadata_not_json_encodable}
 
   @doc "Returns the durable metadata byte maximum."
   @spec metadata_max_bytes() :: pos_integer()
@@ -232,22 +298,45 @@ defmodule EventSales.Ingestion.HistoricalManifestEvidence do
   end
 
   defp validate_evidence_keys(raw) do
-    if MapSet.equal?(MapSet.new(Map.keys(raw)), @evidence_keys),
+    case raw["state"] do
+      @pending_state -> keys_match?(raw, @evidence_keys)
+      @in_progress_state -> keys_match?(raw, @in_progress_keys)
+      @terminal_state -> keys_match?(raw, @terminal_keys)
+      _other -> invalid_evidence()
+    end
+  end
+
+  defp keys_match?(raw, expected_keys) do
+    if Enum.sort(Map.keys(raw)) == Enum.sort(expected_keys),
       do: :ok,
-      else: {:error, :invalid_manifest_evidence}
+      else: invalid_evidence()
   end
 
   defp validate_evidence_values(raw) do
-    if raw["schema_version"] == @schema_version and
-         raw["phase"] == @phase and
-         raw["state"] == @pending_state and
-         valid_boundary_token?(raw["boundary_token"]) and
-         valid_manifest_hash?(raw["manifest_hash"]) do
-      :ok
-    else
-      {:error, :invalid_manifest_evidence}
-    end
+    if valid_common_evidence_values?(raw),
+      do: validate_state_values(raw),
+      else: invalid_evidence()
   end
+
+  defp valid_common_evidence_values?(raw) do
+    raw["schema_version"] == @schema_version and
+      raw["phase"] == @phase and
+      valid_boundary_token?(raw["boundary_token"]) and
+      valid_manifest_hash?(raw["manifest_hash"])
+  end
+
+  defp validate_state_values(%{"state" => @pending_state}), do: :ok
+
+  defp validate_state_values(%{"state" => @in_progress_state, "next_cursor" => cursor}) do
+    if valid_cursor?(cursor), do: :ok, else: invalid_evidence()
+  end
+
+  defp validate_state_values(%{"state" => @terminal_state, "terminal_evidence" => evidence}) do
+    if valid_terminal_evidence?(evidence), do: :ok, else: invalid_evidence()
+  end
+
+  defp validate_state_values(_raw), do: invalid_evidence()
+  defp invalid_evidence, do: {:error, :invalid_manifest_evidence}
 
   defp page_fields(page) do
     fields = %{
@@ -320,12 +409,11 @@ defmodule EventSales.Ingestion.HistoricalManifestEvidence do
 
   defp validate_paging(%{has_more: true, next_cursor: cursor, terminal_evidence: nil})
        when is_binary(cursor) do
-    if Regex.match?(@cursor_regex, cursor), do: :ok, else: {:error, :invalid_manifest_page}
+    if valid_cursor?(cursor), do: :ok, else: {:error, :invalid_manifest_page}
   end
 
   defp validate_paging(%{has_more: false, next_cursor: nil, terminal_evidence: evidence})
-       when is_binary(evidence) and evidence != "",
-       do: :ok
+       when is_binary(evidence), do: validate_terminal_evidence(evidence)
 
   defp validate_paging(_fields), do: {:error, :invalid_manifest_page}
 
@@ -340,6 +428,24 @@ defmodule EventSales.Ingestion.HistoricalManifestEvidence do
     do: Regex.match?(@manifest_hash_regex, value)
 
   defp valid_manifest_hash?(_value), do: false
+
+  defp valid_cursor?(value)
+       when is_binary(value) and byte_size(value) in 1..@max_opaque_evidence_bytes do
+    Regex.match?(@cursor_regex, value)
+  end
+
+  defp valid_cursor?(_value), do: false
+
+  defp valid_terminal_evidence?(value) when is_binary(value),
+    do: validate_terminal_evidence(value) == :ok
+
+  defp valid_terminal_evidence?(_value), do: false
+
+  defp validate_terminal_evidence(value)
+       when is_binary(value) and byte_size(value) in 1..@max_opaque_evidence_bytes,
+       do: :ok
+
+  defp validate_terminal_evidence(_value), do: {:error, :invalid_manifest_page}
 
   defp utc_datetime(%DateTime{} = value) do
     if value.time_zone == "Etc/UTC" and value.utc_offset == 0 and value.std_offset == 0,

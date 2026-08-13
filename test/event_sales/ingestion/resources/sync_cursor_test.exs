@@ -82,6 +82,25 @@ defmodule EventSales.Ingestion.Resources.SyncCursorTest do
     assert failed.status == :failed
   end
 
+  test ":record_manifest_progress changes only page and bounded metadata" do
+    run = create_manual_run!()
+    {:ok, cursor} = upsert_active!(run.id, %{page: 1, last_seen_order_id: nil})
+
+    assert {:ok, progressed} =
+             Ash.update(cursor, %{page: 2, metadata: %{"manifest_page" => 2}},
+               action: :record_manifest_progress,
+               domain: Ingestion
+             )
+
+    assert progressed.page == 2
+    assert progressed.metadata == %{"manifest_page" => 2}
+    assert progressed.sync_run_id == cursor.sync_run_id
+    assert DateTime.compare(progressed.modified_after, cursor.modified_after) == :eq
+    assert DateTime.compare(progressed.modified_before, cursor.modified_before) == :eq
+    assert progressed.last_seen_order_id == nil
+    assert progressed.status == :active
+  end
+
   defp upsert_active!(sync_run_id, attrs) do
     payload =
       Map.merge(

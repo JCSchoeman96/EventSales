@@ -7,6 +7,7 @@ defmodule EventSales.Ingestion.Clients.WooCommerceClient do
   boundary.
   """
 
+  alias EventSales.Catalog.Changes.NormalizeBaseUrl
   alias EventSales.Ingestion.Clients.HttpcTransport
   alias EventSales.Ingestion.Clients.WooCommerceError
   alias EventSales.Ingestion.RestCircuitBreaker
@@ -28,6 +29,15 @@ defmodule EventSales.Ingestion.Clients.WooCommerceClient do
     with {:ok, id} <- normalize_positive_id(id, :fetch_order),
          {:ok, config} <- config(:fetch_order, opts) do
       request_one(:fetch_order, config, "/orders/#{id}")
+    end
+  end
+
+  @doc "Returns the validated, canonical REST base URL without credentials."
+  @spec configured_base_url(keyword()) :: {:ok, String.t()} | {:error, WooCommerceError.t()}
+  def configured_base_url(opts \\ []) do
+    case config(:configured_base_url, opts) do
+      {:ok, %{base_url: base_url}} -> {:ok, base_url}
+      {:error, %WooCommerceError{} = error} -> {:error, error}
     end
   end
 
@@ -210,10 +220,11 @@ defmodule EventSales.Ingestion.Clients.WooCommerceClient do
     with {:ok, base_url} <- fetch_required(app_config, :base_url),
          {:ok, consumer_key} <- fetch_required(app_config, :consumer_key),
          {:ok, consumer_secret} <- fetch_required(app_config, :consumer_secret),
+         base_url <- NormalizeBaseUrl.normalize(base_url),
          :ok <- validate_base_url(base_url) do
       {:ok,
        %{
-         base_url: trim_trailing_slash(base_url),
+         base_url: base_url,
          consumer_key: consumer_key,
          consumer_secret: consumer_secret,
          timeout_ms: Keyword.get(app_config, :timeout_ms, @default_timeout_ms),
@@ -274,8 +285,6 @@ defmodule EventSales.Ingestion.Clients.WooCommerceClient do
     token = Base.encode64(config.consumer_key <> ":" <> config.consumer_secret)
     [{"authorization", "Basic " <> token}, {"accept", "application/json"}]
   end
-
-  defp trim_trailing_slash(base_url), do: String.trim_trailing(base_url, "/")
 
   defp emit_stop(operation, status, duration) do
     Telemetry.emit(Telemetry.rest_request_stop(), %{count: 1, duration: duration}, %{

@@ -253,15 +253,10 @@ defmodule EventSales.Ingestion.HistoricalManifestBootstrapTest do
   test "concurrent bootstraps authorize at most one manifest POST", %{run: run, cursor: cursor} do
     BlockingClient.reset!(self(), block_endpoint: true)
 
-    first =
-      Task.async(fn ->
-        ensure_manifest(run.id, client: BlockingClient)
-      end)
-
-    second =
-      Task.async(fn ->
-        ensure_manifest(run.id, client: BlockingClient)
-      end)
+    tasks =
+      for _caller <- 1..2 do
+        Task.async(fn -> ensure_manifest(run.id, client: BlockingClient) end)
+      end
 
     assert_receive {:endpoint_validation_ready, first_endpoint_pid}, 5_000
     assert_receive {:endpoint_validation_ready, second_endpoint_pid}, 5_000
@@ -271,13 +266,18 @@ defmodule EventSales.Ingestion.HistoricalManifestBootstrapTest do
     send(first_endpoint_pid, :release_endpoint_validation)
     send(second_endpoint_pid, :release_endpoint_validation)
 
-    assert_receive {:manifest_post_started, first_post_pid}, 5_000
+    assert_receive {:manifest_post_started, winning_post_pid}, 5_000
 
-    send(first_post_pid, {:release_manifest_post, {:ok, page()}})
-    assert {:ok, _evidence} = Task.await(first, 5_000)
+    send(winning_post_pid, {:release_manifest_post, {:ok, page()}})
 
-    assert second_result = Task.await(second, 5_000)
-    assert second_result == {:error, :manifest_create_in_doubt} or match?({:ok, _}, second_result)
+    results = Enum.map(tasks, &Task.await(&1, 5_000))
+
+    assert Enum.all?(results, fn
+             {:error, :manifest_create_in_doubt} -> true
+             {:ok, %HistoricalManifestEvidence{}} -> true
+             _other -> false
+           end)
+
     assert BlockingClient.calls() == 1
   end
 
@@ -356,6 +356,31 @@ defmodule EventSales.Ingestion.HistoricalManifestBootstrapTest do
     FakeTransport.reset!([])
     assert {:ok, second} = ensure_manifest(run.id)
     assert second == first
+    assert [] = FakeTransport.requests()
+  end
+
+  test "progressed and terminal evidence are reused without another manifest POST", %{
+    run: run,
+    cursor: cursor
+  } do
+    {:ok, evidence} =
+      HistoricalManifestEvidence.from_metadata(evidence_metadata(@manifest_expires_at))
+
+    in_progress =
+      HistoricalManifestEvidence.in_progress_metadata(evidence, "cursor1234567890.next")
+
+    replace_cursor_metadata!(cursor, in_progress)
+    FakeTransport.reset!([])
+
+    assert {:ok, %HistoricalManifestEvidence{state: "manifest_in_progress"}} =
+             ensure_manifest(run.id)
+
+    terminal = HistoricalManifestEvidence.terminal_metadata(evidence, "terminal-proof")
+    replace_cursor_metadata!(cursor, terminal)
+
+    assert {:ok, %HistoricalManifestEvidence{state: "manifest_terminal"}} =
+             ensure_manifest(run.id)
+
     assert [] = FakeTransport.requests()
   end
 

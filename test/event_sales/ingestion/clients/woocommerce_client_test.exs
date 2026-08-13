@@ -96,6 +96,13 @@ defmodule EventSales.Ingestion.Clients.WooCommerceClientTest do
     assert {"authorization", "Basic " <> _encoded} = List.keyfind(headers, "authorization", 0)
   end
 
+  test "configured_base_url returns only the normalized source endpoint" do
+    assert {:ok, "https://woo.example.test"} = WooCommerceClient.configured_base_url()
+
+    refute inspect(WooCommerceClient.configured_base_url()) =~ "ck_test_secret"
+    refute inspect(WooCommerceClient.configured_base_url()) =~ "cs_test_secret"
+  end
+
   test "fetch_product accepts positive numeric string ids and returns decoded product data" do
     FakeTransport.reset!([{:ok, 200, [], ~s({"id":456,"name":"VIP Ticket"})}])
 

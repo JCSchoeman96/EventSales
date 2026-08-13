@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-351
+352
 
 ## Files
 
@@ -145,6 +145,7 @@ Project root: `.`
 - `lib/event_sales/ingestion/handlers/product_updated_handler.ex`
 - `lib/event_sales/ingestion/historical_manifest_bootstrap.ex`
 - `lib/event_sales/ingestion/historical_manifest_evidence.ex`
+- `lib/event_sales/ingestion/historical_manifest_execution.ex`
 - `lib/event_sales/ingestion/intake_backpressure.ex`
 - `lib/event_sales/ingestion/manual_sync.ex`
 - `lib/event_sales/ingestion/order_reconciliation.ex`
@@ -1077,8 +1078,8 @@ Project root: `.`
 - `EventSales.Ingestion.Clients.WooCommerceClient` - `lib/event_sales/ingestion/clients/woocommerce_client.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 5
-  - public_funs: `fetch_order/2`, `fetch_product/2`, `list_orders/2`, `list_products/2`, `validate_configuration/1`
+  - docs_count: 6
+  - public_funs: `fetch_order/2`, `configured_base_url/1`, `fetch_product/2`, `list_orders/2`, `list_products/2`, `validate_configuration/1`
   - uses: _none_
 - `EventSales.Ingestion.Clients.WooCommerceError` - `lib/event_sales/ingestion/clients/woocommerce_error.ex`
   - moduledoc?: true
@@ -1143,8 +1144,14 @@ Project root: `.`
 - `EventSales.Ingestion.HistoricalManifestEvidence` - `lib/event_sales/ingestion/historical_manifest_evidence.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 11
-  - public_funs: `metadata_key/0`, `claim_metadata/0`, `state/1`, `from_page/1`, `from_page/2`, `from_metadata/1`, `metadata/1`, `encoded_size/1`, `canonical_metadata/2`, `metadata_max_bytes/0`, `validate_unexpired/2`, `validate_continuity/2`
+  - docs_count: 14
+  - public_funs: `metadata_key/0`, `claim_metadata/0`, `state/1`, `from_page/1`, `from_page/2`, `from_metadata/1`, `metadata/1`, `in_progress_metadata/2`, `terminal_metadata/2`, `encoded_size/1`, `canonical_metadata/2`, `with_failure/2`, `metadata_max_bytes/0`, `validate_unexpired/2`, `validate_continuity/2`
+  - uses: _none_
+- `EventSales.Ingestion.HistoricalManifestExecution` - `lib/event_sales/ingestion/historical_manifest_execution.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `run_step/3`
   - uses: _none_
 - `EventSales.Ingestion.IntakeBackpressure` - `lib/event_sales/ingestion/intake_backpressure.ex`
   - moduledoc?: true
@@ -1516,8 +1523,8 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: _none_
-  - uses: _none_
+  - public_funs: `perform/1`
+  - uses: `Oban.Worker`
 - `EventSales.Ingestion.Workers.CatalogChangeDispatchWorker` - `lib/event_sales/ingestion/workers/catalog_change_dispatch_worker.ex`
   - moduledoc?: true
   - specs?: false
@@ -2604,6 +2611,7 @@ _none_
 - `EventSales.Analytics.Workers.RefreshSnapshotWorker` - `lib/event_sales/analytics/workers/refresh_snapshot_worker.ex`
 - `EventSales.Catalog.Workers.MappingChangedWorker` - `lib/event_sales/catalog/workers/mapping_changed_worker.ex`
 - `EventSales.Ingestion.Workers.ApplyTickeraCatalogWorker` - `lib/event_sales/ingestion/workers/apply_tickera_catalog_worker.ex`
+- `EventSales.Ingestion.Workers.BackfillOrdersWorker` - `lib/event_sales/ingestion/workers/backfill_orders_worker.ex`
 - `EventSales.Ingestion.Workers.CatalogChangeDispatchWorker` - `lib/event_sales/ingestion/workers/catalog_change_dispatch_worker.ex`
 - `EventSales.Ingestion.Workers.DiscoverTickeraCatalogWorker` - `lib/event_sales/ingestion/workers/discover_tickera_catalog_worker.ex`
 - `EventSales.Ingestion.Workers.EvaluateTickeraCatalogAutoApplyWorker` - `lib/event_sales/ingestion/workers/evaluate_tickera_catalog_auto_apply_worker.ex`
