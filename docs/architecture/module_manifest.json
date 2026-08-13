@@ -3114,7 +3114,7 @@
       "uses": []
     },
     {
-      "docs_count": 9,
+      "docs_count": 11,
       "moduledoc?": true,
       "name": "EventSales.Ingestion.HistoricalManifestEvidence",
       "parse_error": null,
@@ -3123,6 +3123,14 @@
         {
           "arity": 0,
           "name": "metadata_key"
+        },
+        {
+          "arity": 0,
+          "name": "claim_metadata"
+        },
+        {
+          "arity": 1,
+          "name": "state"
         },
         {
           "arity": 1,

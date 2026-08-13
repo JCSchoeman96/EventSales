@@ -48,8 +48,65 @@ defmodule EventSales.Ingestion.HistoricalManifestBootstrapTest do
     end
   end
 
+  defmodule BlockingClient do
+    def child_spec(opts) do
+      %{
+        id: __MODULE__,
+        start: {__MODULE__, :start_link, [opts]}
+      }
+    end
+
+    def start_link(_opts),
+      do:
+        Agent.start_link(fn -> %{owner: nil, calls: 0, block_endpoint: false} end,
+          name: __MODULE__
+        )
+
+    def reset!(owner, opts \\ []) do
+      block_endpoint = Keyword.get(opts, :block_endpoint, false)
+
+      Agent.update(__MODULE__, fn _state ->
+        %{owner: owner, calls: 0, block_endpoint: block_endpoint}
+      end)
+    end
+
+    def calls, do: Agent.get(__MODULE__, & &1.calls)
+
+    def configured_base_url(_opts) do
+      case Agent.get(__MODULE__, & &1) do
+        %{owner: owner, block_endpoint: true} = _state ->
+          send(owner, {:endpoint_validation_ready, self()})
+
+          receive do
+            :release_endpoint_validation -> {:ok, "https://store.example.test"}
+          after
+            5_000 -> {:error, :timeout}
+          end
+
+        _state ->
+          {:ok, "https://store.example.test"}
+      end
+    end
+
+    def create_manifest(_source_system_id, _date_from, _date_to, _limit) do
+      owner =
+        Agent.get_and_update(__MODULE__, fn state ->
+          {state.owner, %{state | calls: state.calls + 1}}
+        end)
+
+      send(owner, {:manifest_post_started, self()})
+
+      receive do
+        {:release_manifest_post, response} -> response
+      after
+        5_000 -> {:error, :timeout}
+      end
+    end
+  end
+
   setup do
     start_supervised!(FakeTransport)
+    start_supervised!(BlockingClient)
 
     original_config = Application.get_env(:event_sales, :woo_order_index)
     original_env = Application.get_env(:event_sales, :env)
@@ -124,32 +181,35 @@ defmodule EventSales.Ingestion.HistoricalManifestBootstrapTest do
     assert [%{method: :post}] = FakeTransport.requests()
   end
 
-  test "endpoint mismatch fails before transport", %{run: run} do
+  test "endpoint mismatch fails before transport", %{run: run, cursor: cursor} do
     put_endpoint_config("https://other.example.test")
     FakeTransport.reset!([])
 
     assert {:error, :source_endpoint_mismatch} = ensure_manifest(run.id)
     assert [] = FakeTransport.requests()
+    assert Ash.get!(SyncCursor, cursor.id, domain: Ingestion).metadata == %{}
   end
 
-  test "inactive SourceSystem fails before transport", %{source: source, run: run} do
+  test "inactive SourceSystem fails before transport", %{source: source, run: run, cursor: cursor} do
     assert {:ok, _inactive} = Ash.update(source, %{}, action: :deactivate, domain: Catalog)
     FakeTransport.reset!([])
 
     assert {:error, :source_system_inactive} = ensure_manifest(run.id)
     assert [] = FakeTransport.requests()
+    assert Ash.get!(SyncCursor, cursor.id, domain: Ingestion).metadata == %{}
   end
 
   test "non-historical SyncRun fails before transport", %{source: source, event: event} do
     run = create_manual_run!(source, event)
-    _cursor = create_cursor!(run)
+    cursor = create_cursor!(run)
     FakeTransport.reset!([])
 
     assert {:error, :not_historical_backfill} = ensure_manifest(run.id)
     assert [] = FakeTransport.requests()
+    assert Ash.get!(SyncCursor, cursor.id, domain: Ingestion).metadata == %{}
   end
 
-  test "invalid persisted historical bounds fail before transport", %{run: run} do
+  test "invalid persisted historical bounds fail before transport", %{run: run, cursor: cursor} do
     FakeTransport.reset!([])
 
     for invalid_run <- [
@@ -163,6 +223,7 @@ defmodule EventSales.Ingestion.HistoricalManifestBootstrapTest do
                ensure_manifest(run.id, test_sync_run_loader: fn _id -> {:ok, invalid_run} end)
 
       assert [] = FakeTransport.requests()
+      assert Ash.get!(SyncCursor, cursor.id, domain: Ingestion).metadata == %{}
     end
   end
 
@@ -185,7 +246,59 @@ defmodule EventSales.Ingestion.HistoricalManifestBootstrapTest do
                )
 
       assert [] = FakeTransport.requests()
+      assert Ash.get!(SyncCursor, cursor.id, domain: Ingestion).metadata == %{}
     end
+  end
+
+  test "concurrent bootstraps authorize at most one manifest POST", %{run: run, cursor: cursor} do
+    BlockingClient.reset!(self(), block_endpoint: true)
+
+    first =
+      Task.async(fn ->
+        ensure_manifest(run.id, client: BlockingClient)
+      end)
+
+    second =
+      Task.async(fn ->
+        ensure_manifest(run.id, client: BlockingClient)
+      end)
+
+    assert_receive {:endpoint_validation_ready, first_endpoint_pid}, 5_000
+    assert_receive {:endpoint_validation_ready, second_endpoint_pid}, 5_000
+
+    assert Ash.get!(SyncCursor, cursor.id, domain: Ingestion).metadata == %{}
+
+    send(first_endpoint_pid, :release_endpoint_validation)
+    send(second_endpoint_pid, :release_endpoint_validation)
+
+    assert_receive {:manifest_post_started, first_post_pid}, 5_000
+
+    send(first_post_pid, {:release_manifest_post, {:ok, page()}})
+    assert {:ok, _evidence} = Task.await(first, 5_000)
+
+    assert second_result = Task.await(second, 5_000)
+    assert second_result == {:error, :manifest_create_in_doubt} or match?({:ok, _}, second_result)
+    assert BlockingClient.calls() == 1
+  end
+
+  test "a durable claim is present while the source POST is blocked", %{
+    run: run,
+    cursor: cursor
+  } do
+    BlockingClient.reset!(self())
+
+    task =
+      Task.async(fn ->
+        ensure_manifest(run.id, client: BlockingClient)
+      end)
+
+    assert_receive {:manifest_post_started, post_pid}, 5_000
+
+    assert Ash.get!(SyncCursor, cursor.id, domain: Ingestion).metadata ==
+             HistoricalManifestEvidence.claim_metadata()
+
+    send(post_pid, {:release_manifest_post, {:ok, page()}})
+    assert {:ok, _evidence} = Task.await(task, 5_000)
   end
 
   test "successful bootstrap performs one POST and zero GETs", %{run: run} do
@@ -283,24 +396,37 @@ defmodule EventSales.Ingestion.HistoricalManifestBootstrapTest do
     assert Ash.get!(SyncCursor, cursor.id, domain: Ingestion).metadata == metadata
   end
 
-  test "ambiguous create performs one attempt and leaves metadata unchanged", %{
+  test "existing create claim fails closed without an HTTP request", %{run: run, cursor: cursor} do
+    claim = HistoricalManifestEvidence.claim_metadata()
+    replace_cursor_metadata!(cursor, claim)
+    FakeTransport.reset!([manifest_response()])
+
+    assert {:error, :manifest_create_in_doubt} = ensure_manifest(run.id)
+    assert [] = FakeTransport.requests()
+    assert Ash.get!(SyncCursor, cursor.id, domain: Ingestion).metadata == claim
+  end
+
+  test "ambiguous create performs one attempt and retains the durable claim", %{
     run: run,
     cursor: cursor
   } do
-    before = Ash.get!(SyncCursor, cursor.id, domain: Ingestion)
     FakeTransport.reset!([{:error, :timeout}, manifest_response()])
 
     assert {:error, :ambiguous_create} = ensure_manifest(run.id)
     assert length(FakeTransport.requests()) == 1
-    assert Ash.get!(SyncCursor, cursor.id, domain: Ingestion).metadata == before.metadata
+
+    assert Ash.get!(SyncCursor, cursor.id, domain: Ingestion).metadata ==
+             HistoricalManifestEvidence.claim_metadata()
+
+    FakeTransport.reset!([manifest_response()])
+    assert {:error, :manifest_create_in_doubt} = ensure_manifest(run.id)
+    assert [] = FakeTransport.requests()
   end
 
-  test "known deterministic source failure leaves metadata unchanged and is not retried", %{
+  test "known deterministic source failure retains the durable claim and is not retried", %{
     run: run,
     cursor: cursor
   } do
-    before = Ash.get!(SyncCursor, cursor.id, domain: Ingestion)
-
     FakeTransport.reset!([
       {:ok, 503, [], Jason.encode!(%{"error" => "source_preflight_failed"})},
       manifest_response()
@@ -308,11 +434,18 @@ defmodule EventSales.Ingestion.HistoricalManifestBootstrapTest do
 
     assert {:error, :source_preflight_failed} = ensure_manifest(run.id)
     assert length(FakeTransport.requests()) == 1
-    assert Ash.get!(SyncCursor, cursor.id, domain: Ingestion).metadata == before.metadata
+
+    assert Ash.get!(SyncCursor, cursor.id, domain: Ingestion).metadata ==
+             HistoricalManifestEvidence.claim_metadata()
+
+    FakeTransport.reset!([manifest_response()])
+    assert {:error, :manifest_create_in_doubt} = ensure_manifest(run.id)
+    assert [] = FakeTransport.requests()
   end
 
   test "successful create with evidence persistence failure is distinct and not retried", %{
-    run: run
+    run: run,
+    cursor: cursor
   } do
     FakeTransport.reset!([manifest_response(), manifest_response()])
 
@@ -322,12 +455,42 @@ defmodule EventSales.Ingestion.HistoricalManifestBootstrapTest do
              )
 
     assert length(FakeTransport.requests()) == 1
+
+    assert Ash.get!(SyncCursor, cursor.id, domain: Ingestion).metadata ==
+             HistoricalManifestEvidence.claim_metadata()
+
+    FakeTransport.reset!([manifest_response()])
+    assert {:error, :manifest_create_in_doubt} = ensure_manifest(run.id)
+    assert [] = FakeTransport.requests()
   end
 
   test "configured_base_url returns only normalized URL and no credential material" do
     assert {:ok, @source_url} = WooOrderIndexClient.configured_base_url()
     refute inspect(WooOrderIndexClient.configured_base_url()) =~ "test-order-index-key"
     refute inspect(WooOrderIndexClient.configured_base_url()) =~ "test-order-index-secret"
+  end
+
+  test "bootstrap errors expose no source secrets, tokens, PII, payment data, or IDs", %{
+    run: run
+  } do
+    sensitive_values = [
+      "test-order-index-secret",
+      "v1=" <> String.duplicate("b", 64),
+      "sensitive-boundary",
+      "sensitive-cursor.xx",
+      "customer@example.test",
+      "payment-token-123",
+      "source-order-id-9001"
+    ]
+
+    FakeTransport.reset!([
+      {:ok, 400, [], Jason.encode!(%{"error" => Enum.join(sensitive_values, " ")})}
+    ])
+
+    result = ensure_manifest(run.id)
+    inspected = inspect(result)
+
+    refute Enum.any?(sensitive_values, &String.contains?(inspected, &1))
   end
 
   test "SyncCursor evidence action updates metadata only", %{run: run, cursor: cursor} do
@@ -346,6 +509,55 @@ defmodule EventSales.Ingestion.HistoricalManifestBootstrapTest do
     assert updated.last_seen_order_id == cursor.last_seen_order_id
     assert updated.status == cursor.status
     assert updated.sync_run_id == run.id
+  end
+
+  test "SyncCursor claim action updates metadata only", %{run: run, cursor: cursor} do
+    metadata = HistoricalManifestEvidence.claim_metadata()
+
+    assert {:ok, updated} =
+             Ash.update(cursor, %{metadata: metadata},
+               action: :claim_manifest_create,
+               domain: Ingestion
+             )
+
+    assert updated.metadata == metadata
+    assert updated.page == cursor.page
+    assert updated.modified_after == cursor.modified_after
+    assert updated.modified_before == cursor.modified_before
+    assert updated.last_seen_order_id == cursor.last_seen_order_id
+    assert updated.status == cursor.status
+    assert updated.sync_run_id == run.id
+  end
+
+  test "manifest claim and pending evidence metadata stay within the durable bound" do
+    assert {:ok, claim_size} =
+             HistoricalManifestEvidence.encoded_size(HistoricalManifestEvidence.claim_metadata())
+
+    assert claim_size <= HistoricalManifestEvidence.metadata_max_bytes()
+
+    assert {:ok, evidence} = HistoricalManifestEvidence.from_page(page())
+
+    assert {:ok, pending_size} =
+             evidence
+             |> HistoricalManifestEvidence.metadata()
+             |> HistoricalManifestEvidence.encoded_size()
+
+    assert pending_size <= HistoricalManifestEvidence.metadata_max_bytes()
+  end
+
+  test "manifest metadata state distinguishes missing, claimed, pending, and corrupt" do
+    assert HistoricalManifestEvidence.state(%{}) == :missing
+    assert HistoricalManifestEvidence.state(%{"other" => "value"}) == :missing
+
+    assert HistoricalManifestEvidence.state(HistoricalManifestEvidence.claim_metadata()) ==
+             :create_claimed
+
+    assert HistoricalManifestEvidence.state(evidence_metadata(@manifest_expires_at)) ==
+             :pending_first_page
+
+    assert HistoricalManifestEvidence.state(%{
+             "historical_manifest" => %{"state" => "create_claimed", "extra" => "x"}
+           }) == :corrupt
   end
 
   test "evidence continuity validation is pure and deterministic" do

@@ -11,7 +11,8 @@ defmodule EventSales.Ingestion.HistoricalManifestEvidence do
   @metadata_key "historical_manifest"
   @schema_version "2026-08-12.v1"
   @phase "manifest_enumerate"
-  @state "pending_first_page"
+  @pending_state "pending_first_page"
+  @claim_state "create_claimed"
   @metadata_max_bytes 2048
   @max_boundary_token_bytes 128
   @max_page_items 100
@@ -63,6 +64,30 @@ defmodule EventSales.Ingestion.HistoricalManifestEvidence do
   @spec metadata_key() :: String.t()
   def metadata_key, do: @metadata_key
 
+  @doc "Returns the minimal durable metadata for an authorized create attempt."
+  @spec claim_metadata() :: %{String.t() => map()}
+  def claim_metadata, do: %{@metadata_key => %{"state" => @claim_state}}
+
+  @doc "Classifies the historical manifest namespace without performing I/O."
+  @spec state(map()) :: :missing | :create_claimed | :pending_first_page | :corrupt
+  def state(metadata) when is_map(metadata) do
+    case Map.fetch(metadata, @metadata_key) do
+      :error ->
+        if Map.has_key?(metadata, :historical_manifest), do: :corrupt, else: :missing
+
+      {:ok, %{"state" => @claim_state} = raw} when raw == %{"state" => @claim_state} ->
+        :create_claimed
+
+      {:ok, %{"state" => @pending_state}} ->
+        :pending_first_page
+
+      {:ok, _raw} ->
+        :corrupt
+    end
+  end
+
+  def state(_metadata), do: :corrupt
+
   @doc "Builds evidence from one validated or validation-compatible source page."
   @spec from_page(Page.t() | map()) :: {:ok, t()} | {:error, reason()}
   def from_page(page), do: from_page(page, [])
@@ -81,7 +106,7 @@ defmodule EventSales.Ingestion.HistoricalManifestEvidence do
          manifest_hash: fields.manifest_hash,
          manifest_expires_at: manifest_expires_at,
          source_observed_at: source_observed_at,
-         state: @state
+         state: @pending_state
        }}
     else
       _error -> {:error, :invalid_manifest_page}
@@ -215,7 +240,7 @@ defmodule EventSales.Ingestion.HistoricalManifestEvidence do
   defp validate_evidence_values(raw) do
     if raw["schema_version"] == @schema_version and
          raw["phase"] == @phase and
-         raw["state"] == @state and
+         raw["state"] == @pending_state and
          valid_boundary_token?(raw["boundary_token"]) and
          valid_manifest_hash?(raw["manifest_hash"]) do
       :ok

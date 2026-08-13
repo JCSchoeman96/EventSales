@@ -1143,8 +1143,8 @@ Project root: `.`
 - `EventSales.Ingestion.HistoricalManifestEvidence` - `lib/event_sales/ingestion/historical_manifest_evidence.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 9
-  - public_funs: `metadata_key/0`, `from_page/1`, `from_page/2`, `from_metadata/1`, `metadata/1`, `encoded_size/1`, `canonical_metadata/2`, `metadata_max_bytes/0`, `validate_unexpired/2`, `validate_continuity/2`
+  - docs_count: 11
+  - public_funs: `metadata_key/0`, `claim_metadata/0`, `state/1`, `from_page/1`, `from_page/2`, `from_metadata/1`, `metadata/1`, `encoded_size/1`, `canonical_metadata/2`, `metadata_max_bytes/0`, `validate_unexpired/2`, `validate_continuity/2`
   - uses: _none_
 - `EventSales.Ingestion.IntakeBackpressure` - `lib/event_sales/ingestion/intake_backpressure.ex`
   - moduledoc?: true

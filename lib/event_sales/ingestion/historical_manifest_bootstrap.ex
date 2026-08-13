@@ -8,6 +8,8 @@ defmodule EventSales.Ingestion.HistoricalManifestBootstrap do
   existing SyncCursor. It never traverses or processes manifest pages.
   """
 
+  import Ecto.Query, only: [from: 2]
+
   require Ash.Query
 
   alias EventSales.Catalog
@@ -17,6 +19,7 @@ defmodule EventSales.Ingestion.HistoricalManifestBootstrap do
   alias EventSales.Ingestion.Clients.{WooOrderIndexClient, WooOrderIndexError}
   alias EventSales.Ingestion.HistoricalManifestEvidence
   alias EventSales.Ingestion.Resources.{SyncCursor, SyncRun}
+  alias EventSales.Repo
 
   @create_limit 100
   @source_error_reasons [
@@ -49,10 +52,10 @@ defmodule EventSales.Ingestion.HistoricalManifestBootstrap do
   @doc """
   Ensures that one valid historical run has durable manifest evidence.
 
-  A run without evidence may make one source POST. A run with valid evidence
-  never makes another source request. All options are local dependency
-  injection points for deterministic tests; production defaults use the
-  existing Ash resources and Woo client.
+  A run without evidence first durably claims its one source POST. A run with
+  valid evidence or an in-doubt claim never makes another source request. All
+  options are local dependency injection points for deterministic tests;
+  production defaults use the existing Ash resources and Woo client.
   """
   @spec ensure_manifest(Ecto.UUID.t(), keyword()) :: result()
   def ensure_manifest(sync_run_id, opts \\ [])
@@ -85,7 +88,33 @@ defmodule EventSales.Ingestion.HistoricalManifestBootstrap do
 
     with {:ok, configured_base_url} <- configured_base_url(client, client_opts),
          :ok <- validate_endpoint_binding(source_system, configured_base_url),
-         {:ok, page} <- create_manifest(client, run, client_opts),
+         {:ok, claim_result} <- claim_manifest_create(run, cursor, now) do
+      case claim_result do
+        {:claimed, claimed_cursor} ->
+          create_and_record_evidence(
+            client,
+            client_opts,
+            run,
+            claimed_cursor,
+            now,
+            opts
+          )
+
+        {:present, evidence} ->
+          {:ok, evidence}
+
+        {:in_doubt, _current} ->
+          {:error, :manifest_create_in_doubt}
+      end
+    else
+      {:error, %WooOrderIndexError{reason: reason}} -> {:error, safe_source_reason(reason)}
+      {:error, reason} when is_atom(reason) -> {:error, reason}
+      _error -> {:error, :manifest_evidence_persist_failed}
+    end
+  end
+
+  defp create_and_record_evidence(client, client_opts, run, cursor, now, opts) do
+    with {:ok, page} <- create_manifest(client, run, client_opts),
          {:ok, evidence} <- HistoricalManifestEvidence.from_page(page),
          :ok <- HistoricalManifestEvidence.validate_unexpired(evidence, now),
          {:ok, metadata} <-
@@ -223,24 +252,109 @@ defmodule EventSales.Ingestion.HistoricalManifestBootstrap do
   end
 
   defp existing_evidence(metadata, now) when is_map(metadata) do
-    case Map.has_key?(metadata, HistoricalManifestEvidence.metadata_key()) do
-      false ->
-        if Map.has_key?(metadata, :historical_manifest),
-          do: {:error, :corrupt_manifest_evidence},
-          else: {:ok, :missing}
+    case HistoricalManifestEvidence.state(metadata) do
+      :missing ->
+        {:ok, :missing}
 
-      true ->
-        with {:ok, evidence} <- HistoricalManifestEvidence.from_metadata(metadata),
-             :ok <- HistoricalManifestEvidence.validate_unexpired(evidence, now) do
-          {:ok, {:present, evidence}}
-        else
-          {:error, :manifest_expired} -> {:error, :manifest_expired}
-          _error -> {:error, :corrupt_manifest_evidence}
-        end
+      :create_claimed ->
+        {:error, :manifest_create_in_doubt}
+
+      :pending_first_page ->
+        parse_existing_evidence(metadata, now)
+
+      :corrupt ->
+        {:error, :corrupt_manifest_evidence}
     end
   end
 
   defp existing_evidence(_metadata, _now), do: {:error, :corrupt_manifest_evidence}
+
+  defp parse_existing_evidence(metadata, now) do
+    with {:ok, evidence} <- HistoricalManifestEvidence.from_metadata(metadata),
+         :ok <- HistoricalManifestEvidence.validate_unexpired(evidence, now) do
+      {:ok, {:present, evidence}}
+    else
+      {:error, :manifest_expired} -> {:error, :manifest_expired}
+      _error -> {:error, :corrupt_manifest_evidence}
+    end
+  end
+
+  defp claim_manifest_create(%SyncRun{} = run, %SyncCursor{} = cursor, now) do
+    Repo.transaction(fn -> claim_manifest_create_transaction(run, cursor, now) end)
+    |> normalize_claim_transaction()
+  rescue
+    _error -> {:error, :manifest_create_claim_failed}
+  end
+
+  defp claim_manifest_create_transaction(run, %SyncCursor{} = cursor, now) do
+    case lock_cursor(cursor.id) do
+      nil ->
+        Repo.rollback(:sync_cursor_not_found)
+
+      _locked_id ->
+        case Ash.get(SyncCursor, cursor.id, domain: Ingestion) do
+          {:ok, %SyncCursor{} = current} -> claim_locked_cursor(run, current, now)
+          {:ok, nil} -> Repo.rollback(:sync_cursor_not_found)
+          {:error, _reason} -> Repo.rollback(:sync_cursor_load_failed)
+        end
+    end
+  end
+
+  defp normalize_claim_transaction({:ok, {:claimed, %SyncCursor{} = claimed, notifications}}) do
+    Ash.Notifier.notify(notifications)
+    {:ok, {:claimed, claimed}}
+  end
+
+  defp normalize_claim_transaction({:ok, value}), do: {:ok, value}
+  defp normalize_claim_transaction({:error, reason}) when is_atom(reason), do: {:error, reason}
+
+  defp normalize_claim_transaction({:error, _reason}),
+    do: {:error, :manifest_create_claim_failed}
+
+  defp lock_cursor(cursor_id) do
+    Repo.one(
+      from cursor in "ingestion_sync_cursors",
+        where: cursor.id == type(^cursor_id, :binary_id),
+        lock: "FOR UPDATE",
+        select: cursor.id
+    )
+  end
+
+  defp claim_locked_cursor(run, %SyncCursor{} = current, now) do
+    case validate_cursor(run, current) do
+      :ok ->
+        case HistoricalManifestEvidence.state(current.metadata) do
+          :missing -> persist_create_claim(current)
+          :create_claimed -> {:in_doubt, current}
+          :pending_first_page -> existing_locked_evidence(current.metadata, now)
+          :corrupt -> Repo.rollback(:corrupt_manifest_evidence)
+        end
+
+      {:error, reason} ->
+        Repo.rollback(reason)
+    end
+  end
+
+  defp existing_locked_evidence(metadata, now) do
+    case parse_existing_evidence(metadata, now) do
+      {:ok, {:present, evidence}} -> {:present, evidence}
+      {:error, reason} -> Repo.rollback(reason)
+    end
+  end
+
+  defp persist_create_claim(%SyncCursor{} = cursor) do
+    metadata = Map.merge(cursor.metadata, HistoricalManifestEvidence.claim_metadata())
+
+    case Ash.update(cursor, %{metadata: metadata},
+           action: :claim_manifest_create,
+           domain: Ingestion,
+           return_notifications?: true
+         ) do
+      {:ok, %SyncCursor{} = claimed, notifications} -> {:claimed, claimed, notifications}
+      {:ok, %SyncCursor{} = claimed} -> {:claimed, claimed, []}
+      {:error, _reason} -> Repo.rollback(:manifest_create_claim_failed)
+    end
+  end
 
   defp configured_base_url(client, client_opts) when is_atom(client) and is_list(client_opts) do
     if client == WooOrderIndexClient do
