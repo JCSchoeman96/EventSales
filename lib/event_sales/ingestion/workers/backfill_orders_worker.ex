@@ -65,6 +65,10 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorker do
     :invalid_historical_execution_input,
     :product_mappings_unavailable,
     :invalid_product_mappings,
+    :historical_event_missing,
+    :historical_event_source_mismatch,
+    :historical_event_backfill_start_mismatch,
+    :historical_event_not_backfill_pending,
     :invalid_manifest_evidence,
     :invalid_now,
     :checkpoint_conflict,
@@ -211,6 +215,7 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorker do
   end
 
   defp transient_reason?(reason), do: reason in @transient_reasons
+  defp permanent_reason?({:historical_event_not_backfill_pending, _state}), do: true
   defp permanent_reason?(reason), do: reason in @permanent_reasons
 
   defp pause_for_retry(%SyncRun{} = run, reason) do
@@ -304,6 +309,9 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorker do
   end
 
   defp mark_run_failed(%SyncRun{} = run, _failure), do: {:ok, run}
+
+  defp failure_summary({:historical_event_not_backfill_pending, _state}),
+    do: "historical_event_not_backfill_pending"
 
   defp failure_summary(reason) when is_atom(reason) do
     if MapSet.member?(@failure_reasons, reason),

@@ -12,7 +12,7 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
 
   alias EventSales.Catalog
   alias EventSales.Catalog.Changes.NormalizeBaseUrl
-  alias EventSales.Catalog.Resources.{ProductMapping, SourceSystem}
+  alias EventSales.Catalog.Resources.{Event, ProductMapping, SourceSystem}
 
   alias EventSales.Ingestion.Clients.{
     WooCommerceClient,
@@ -29,7 +29,7 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
   @type result ::
           {:continue, SyncRun.t(), SyncCursor.t()}
           | {:manifest_terminal, SyncRun.t(), SyncCursor.t()}
-          | {:error, atom()}
+          | {:error, atom() | {:historical_event_not_backfill_pending, atom()}}
 
   @manifest_client WooOrderIndexClient
   @woocommerce_client WooCommerceClient
@@ -43,6 +43,8 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
     with :ok <- validate_run(run),
          :ok <- validate_cursor(run, cursor),
          {:ok, evidence} <- load_evidence(cursor),
+         {:ok, event} <- load_event(run, opts),
+         :ok <- validate_event(event, run),
          {:ok, source} <- load_source_system(run, opts),
          :ok <- validate_source_system(source, run),
          :ok <- validate_client_bindings(source, opts) do
@@ -141,6 +143,48 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
 
   defp default_source_system_loader(source_system_id),
     do: Ash.get(SourceSystem, source_system_id, domain: Catalog)
+
+  defp load_event(%SyncRun{event_id: event_id}, opts) do
+    loader = Keyword.get(opts, :test_event_loader, &default_event_loader/1)
+
+    case loader.(event_id) do
+      {:ok, %Event{} = event} -> {:ok, event}
+      %Event{} = event -> {:ok, event}
+      {:ok, nil} -> {:error, :historical_event_missing}
+      {:error, _reason} -> {:error, :historical_event_missing}
+      _other -> {:error, :historical_event_missing}
+    end
+  end
+
+  defp default_event_loader(event_id), do: Ash.get(Event, event_id, domain: Catalog)
+
+  defp validate_event(%Event{} = event, %SyncRun{} = run) do
+    cond do
+      event.id != run.event_id ->
+        {:error, :historical_event_missing}
+
+      event.source_system_id != run.source_system_id ->
+        {:error, :historical_event_source_mismatch}
+
+      not utc_datetime?(event.source_created_at) ->
+        {:error, :historical_event_backfill_start_mismatch}
+
+      not same_datetime?(event.source_created_at, run.date_from) ->
+        {:error, :historical_event_backfill_start_mismatch}
+
+      event.analytics_onboarding_state != :backfill_pending ->
+        {:error, {:historical_event_not_backfill_pending, event.analytics_onboarding_state}}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp utc_datetime?(%DateTime{} = value) do
+    value.time_zone == "Etc/UTC" and value.utc_offset == 0 and value.std_offset == 0
+  end
+
+  defp utc_datetime?(_value), do: false
 
   defp validate_source_system(%SourceSystem{} = source, run) do
     cond do
@@ -398,6 +442,8 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
          :ok <- verify_cursor_authority(current_cursor, cursor),
          {:ok, current_run} <- current_run(run),
          :ok <- verify_run_authority(current_run, run),
+         {:ok, current_event} <- current_event(current_run),
+         :ok <- validate_event(current_event, current_run),
          {:ok, updated_run, run_notifications} <- record_counts(current_run, counts),
          {:ok, updated_cursor, cursor_notifications} <-
            record_progress(current_cursor, next_metadata) do
@@ -464,6 +510,15 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
   end
 
   defp current_run(%SyncRun{id: run_id}), do: Ash.get(SyncRun, run_id, domain: Ingestion)
+
+  defp current_event(%SyncRun{event_id: event_id}) do
+    case Ash.get(Event, event_id, domain: Catalog) do
+      {:ok, %Event{} = event} -> {:ok, event}
+      {:ok, nil} -> {:error, :historical_event_missing}
+      {:error, _reason} -> {:error, :historical_event_missing}
+      _other -> {:error, :historical_event_missing}
+    end
+  end
 
   defp verify_run_authority(current, expected) do
     if current.id == expected.id and current.sync_type == :historical_backfill and

@@ -163,6 +163,23 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorkerTest do
     assert failed_cursor.metadata["failure"] == "manifest_continuity_mismatch"
   end
 
+  test "Event authority failure is permanent and preserves manifest evidence", %{
+    run: run,
+    cursor: cursor
+  } do
+    BootstrapFake.put_response!({:ok, :evidence})
+    ExecutionFake.put_response!({:error, :historical_event_source_mismatch})
+
+    assert {:discard, :historical_event_source_mismatch} = perform(run.id)
+
+    failed_run = Ash.get!(SyncRun, run.id, domain: Ingestion)
+    failed_cursor = Ash.get!(SyncCursor, cursor.id, domain: Ingestion)
+    assert failed_run.status == :failed
+    assert failed_cursor.status == :failed
+    assert failed_cursor.metadata["historical_manifest"]["state"] == "pending_first_page"
+    assert failed_cursor.metadata["failure"] == "historical_event_source_mismatch"
+  end
+
   test "future paused runs snooze without bootstrap or execution", %{run: run} do
     paused_until = DateTime.add(DateTime.utc_now(), 120, :second)
     running = Ash.update!(run, %{}, action: :start, domain: Ingestion)

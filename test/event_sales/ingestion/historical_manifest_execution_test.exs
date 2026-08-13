@@ -164,6 +164,8 @@ defmodule EventSales.Ingestion.HistoricalManifestExecutionTest do
         }
       )
 
+    event = Ash.update!(event, %{}, action: :mark_backfill_pending, domain: Catalog)
+
     run =
       SyncRun
       |> Ash.Changeset.for_create(:queue_historical_backfill, %{
@@ -434,12 +436,91 @@ defmodule EventSales.Ingestion.HistoricalManifestExecutionTest do
     assert updated_cursor.metadata["historical_manifest"]["state"] == "manifest_in_progress"
   end
 
+  test "event source mismatch blocks source work", %{run: run, cursor: cursor} do
+    mismatched_run = %{run | source_system_id: Ecto.UUID.generate()}
+
+    assert {:error, :historical_event_source_mismatch} = run_step(mismatched_run, cursor)
+    assert ManifestClient.calls() == []
+    assert WooClient.calls() == []
+    assert Upserter.calls() == []
+  end
+
+  test "event backfill start must equal the SyncRun date_from", %{run: run, cursor: cursor} do
+    mismatched_date_from = DateTime.add(run.date_from, 1, :second)
+    mismatched_run = %{run | date_from: mismatched_date_from}
+    mismatched_cursor = %{cursor | modified_after: mismatched_date_from}
+
+    assert {:error, :historical_event_backfill_start_mismatch} =
+             run_step(mismatched_run, mismatched_cursor)
+
+    assert ManifestClient.calls() == []
+    assert WooClient.calls() == []
+    assert Upserter.calls() == []
+  end
+
+  test "missing event blocks source work", %{run: run, cursor: cursor} do
+    missing_event_run = %{run | event_id: Ecto.UUID.generate()}
+
+    assert {:error, :historical_event_missing} = run_step(missing_event_run, cursor)
+    assert ManifestClient.calls() == []
+    assert WooClient.calls() == []
+    assert Upserter.calls() == []
+  end
+
+  test "event invalidation before checkpoint prevents counts and cursor progress", %{
+    event: event,
+    source: source,
+    run: run,
+    cursor: cursor
+  } do
+    mapping = mapping(source, event, 42, 7)
+    enqueue_page(page())
+
+    WooClient.put_order!(
+      42,
+      {:ok, order_payload(42, [%{"product_id" => 42, "variation_id" => 7}])}
+    )
+
+    before_checkpoint = fn ->
+      pending = Ash.get!(EventSales.Catalog.Resources.Event, event.id, domain: Catalog)
+      Ash.update!(pending, %{}, action: :invalidate_onboarding, domain: Catalog)
+      :ok
+    end
+
+    assert {:error, {:historical_event_not_backfill_pending, :unverified}} =
+             run_step(run, cursor, mappings: [mapping], before_checkpoint: before_checkpoint)
+
+    assert length(Upserter.calls()) == 1
+    assert cursor_unchanged?(cursor)
+    assert run_counts(run) == %{seen: 0, matched: 0, upserted: 0, stale: 0}
+    assert Ash.get!(SyncRun, run.id, domain: Ingestion).status == :queued
+
+    assert Ash.get!(EventSales.Catalog.Resources.Event, event.id, domain: Catalog).analytics_onboarding_state ==
+             :unverified
+  end
+
   test "create_claimed blocks execution without a manifest GET", %{run: run, cursor: cursor} do
     replace_cursor!(cursor, 1, HistoricalManifestEvidence.claim_metadata())
 
     assert {:error, :manifest_create_in_doubt} = run_step(run, current_cursor(cursor))
     assert ManifestClient.calls() == []
     assert WooClient.calls() == []
+  end
+
+  test "an invalidated Event blocks all source work before execution", %{
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    Ash.update!(event, %{}, action: :invalidate_onboarding, domain: Catalog)
+
+    assert {:error, {:historical_event_not_backfill_pending, :unverified}} =
+             run_step(run, cursor)
+
+    assert ManifestClient.calls() == []
+    assert WooClient.calls() == []
+    assert Upserter.calls() == []
+    assert cursor_unchanged?(cursor)
   end
 
   defp run_step(run, cursor, opts \\ []) do
