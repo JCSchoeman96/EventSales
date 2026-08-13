@@ -1,7 +1,8 @@
-# Woo Order Index Feed — M3-01/02E1 Contract Checks
+# Woo Order Index Feed — M3-01/02E2B Contract Checks
 
-These checks cover the M3-01/02D authenticated boundary plus the E1 durable
-manifest storage/lifecycle foundation. The database suite uses only the active
+These checks cover the M3-01/02D authenticated boundary, the E1 durable
+manifest storage/lifecycle foundation, and the E2B production source-to-E1
+builder. The database suite uses only the active
 local WordPress MySQL service. It refuses non-loopback database hosts and never
 prints the supplied local credentials.
 
@@ -13,6 +14,8 @@ create route    POST /wp-json/eventsales/v1/woo-order-index/manifests
 fetch route     GET /wp-json/eventsales/v1/woo-order-index/manifests/{token}
 schema version  2026-08-12.v1
 max page        100
+source chunk    100 maximum
+capture budget  5 seconds, server-controlled
 request bound   16 KiB combined raw body + encoded query
 timestamp skew  300 seconds
 default TTL     24 hours
@@ -69,9 +72,29 @@ The catalog credential cannot authenticate this boundary. The tests cover
 missing/malformed credentials, unknown key IDs, wrong secrets, stale/future
 timestamps, body/query tampering, malformed JSON, and request-size rejection.
 
-POST continues to return HTTP 501 with
-`manifest_capability_unavailable`. It never generates a token, creates a
-manifest, queries WooCommerce, or returns source identities.
+POST is implemented only after the representative HPOS and legacy performance
+gate passes under the fixed five-second budget. Authentication and validation
+run before the source-scoped zero-wait MySQL connection lock or any source work.
+The builder then creates exactly one `D`, one BUILDING E1 manifest, and one
+source-owned acknowledged keyset capture. It returns success only after source
+terminal confirmation, source COMMIT, and E1 READY finalization.
+
+`limit` controls only the number of immutable READY identities returned in the
+first POST response page. It does not control source chunk size; source chunks
+remain at most 100. Nonterminal responses include `next_cursor` and omit
+`terminal_evidence`. Terminal responses omit `next_cursor` and include only the
+immutable stored terminal evidence. POST never returns BUILDING.
+
+The lock is load/concurrency control, not membership authority. Simultaneous
+capture attempts return bounded `busy`; a later authenticated replay
+intentionally creates a new manifest and new `D` because this contract has no
+idempotency key. Redis/cache is not correctness authority.
+
+On failure, the source snapshot rolls back where open, BUILDING becomes FAILED
+where possible, and no failed attempt is resumed under a new `D`. Public errors
+are bounded and do not expose SQL, credentials, signatures, tokens, or order
+payloads. A concurrent `busy` result is HTTP 409; other source, storage,
+budget, authority, and finalization failures are HTTP 503.
 
 ## Schema and database invariants
 
@@ -171,9 +194,19 @@ implementation uses bounded append/hash/read batches, the indexed sequence
 keyset, a maximum 100-item HTTP response, and no total-count query. It does
 not materialize a full order payload or require a giant PHP array.
 
-The source scan is intentionally absent. The tests reject any implementation
-reference to `wc_get_orders`, `wc_get_order`, `WP_Query`, direct Woo order
-membership SQL, or Woo REST pagination. HPOS and legacy membership capture are
-not started. M3-01/02E2 owns atomic source membership observation.
+The production source scan uses one dedicated authoritative MySQL connection,
+InnoDB `REPEATABLE READ`, `WITH CONSISTENT SNAPSHOT, READ ONLY`, same-snapshot
+HPOS/legacy authority, identity-only rows, inclusive `[B,C]`, exact
+`shop_order`, and primary-ID keyset reads. It does not use Woo REST offsets,
+mutable live paging, or full Woo payloads. The adapter's internal
+`confirmed_cursor` advances only after E1 append success; an unconfirmed
+candidate replays exactly, arbitrary jumps are rejected, and an empty terminal
+candidate must be confirmed before source COMMIT.
+
+HPOS and legacy support remain individually fail-closed if their representative
+capture cannot complete within five seconds. The source performance gate must
+record total identity-space size, matching identities, rows examined, source
+chunks, snapshot wall time, PHP peak memory, largest emitted ID gap, and the
+query plan/key. No unsupported scale claim is made.
 
 The Tickera catalog plugin remains byte-for-byte unchanged.

@@ -3,10 +3,10 @@
 declare(strict_types=1);
 
 /**
- * Non-public, identity-only WooCommerce source membership proof adapter.
+ * Identity-only WooCommerce source membership snapshot adapter.
  *
- * This class is intentionally not required by the public feed plugin. E2B may
- * compose it with the E1 manifest store after this proof is accepted.
+ * The adapter owns source continuation while D is open. It is composed with
+ * the E1 manifest store by the production manifest builder.
  */
 final class EventSales_Woo_Order_Membership_Source
 {
@@ -27,7 +27,16 @@ final class EventSales_Woo_Order_Membership_Source
     private ?array $configuration = null;
 
     private bool $snapshot_open = false;
+    private bool $snapshot_used = false;
     private bool $terminal_seen = false;
+    private string $confirmed_cursor = '0';
+
+    /** @var array<string, mixed>|null */
+    private ?array $pending_candidate = null;
+
+    /** @var array<string, string>|null */
+    private ?array $capture_scope = null;
+
     private ?string $last_emitted_id = null;
     private float $snapshot_started_at = 0.0;
 
@@ -102,6 +111,9 @@ final class EventSales_Woo_Order_Membership_Source
         if ($this->snapshot_open) {
             return ['ok' => false, 'error' => 'snapshot_already_open'];
         }
+        if ($this->snapshot_used) {
+            return ['ok' => false, 'error' => 'snapshot_already_used'];
+        }
 
         if (($preflight['ok'] ?? false) !== true || !in_array($preflight['mode'] ?? null, [self::MODE_HPOS, self::MODE_LEGACY], true)) {
             return ['ok' => false, 'error' => 'invalid_preflight'];
@@ -136,6 +148,7 @@ final class EventSales_Woo_Order_Membership_Source
             if ($this->source_db->query('START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY') === false) {
                 throw new RuntimeException('snapshot_start_failed');
             }
+            $this->snapshot_used = true;
             $this->snapshot_open = true;
             $this->snapshot_started_at = microtime(true);
 
@@ -169,6 +182,9 @@ final class EventSales_Woo_Order_Membership_Source
 
             $this->configuration = $configuration;
             $this->terminal_seen = false;
+            $this->confirmed_cursor = '0';
+            $this->pending_candidate = null;
+            $this->capture_scope = null;
             $this->last_emitted_id = null;
             $this->metrics = [
                 'mode' => $preflight['mode'],
@@ -197,16 +213,20 @@ final class EventSales_Woo_Order_Membership_Source
     }
 
     /**
-     * Read one bounded identity-only keyset chunk from D.
+     * Read the next bounded identity-only candidate from D.
+     *
+     * The candidate remains pending until confirm_persisted() succeeds. A
+     * repeated read before confirmation returns the exact same candidate and
+     * does not issue another source query.
      *
      * @return array<string, mixed>
      */
-    public function read_chunk(string $backfill_start_gmt, string $backfill_cutoff_gmt, string $last_id = '0', int $limit = self::MAX_CHUNK_SIZE): array
+    public function read_next_candidate(string $backfill_start_gmt, string $backfill_cutoff_gmt, int $limit = self::MAX_CHUNK_SIZE): array
     {
         if (!$this->snapshot_open || $this->configuration === null) {
             return ['ok' => false, 'error' => 'snapshot_not_open'];
         }
-        if ($limit < 1 || $limit > self::MAX_CHUNK_SIZE || !preg_match('/^(?:0|[1-9][0-9]*)$/D', $last_id)) {
+        if ($limit < 1 || $limit > self::MAX_CHUNK_SIZE) {
             return ['ok' => false, 'error' => 'invalid_chunk'];
         }
 
@@ -215,8 +235,24 @@ final class EventSales_Woo_Order_Membership_Source
         if ($start === null || $cutoff === null || strcmp($start, $cutoff) > 0) {
             return ['ok' => false, 'error' => 'invalid_bounds'];
         }
+        if ($this->capture_scope === null) {
+            $this->capture_scope = ['start' => $start, 'cutoff' => $cutoff];
+        } elseif ($this->capture_scope !== ['start' => $start, 'cutoff' => $cutoff]) {
+            return ['ok' => false, 'error' => 'capture_scope_changed'];
+        }
+        if ($this->pending_candidate !== null) {
+            if ((int) ($this->pending_candidate['candidate_limit'] ?? 0) !== $limit) {
+                return ['ok' => false, 'error' => 'candidate_context_changed'];
+            }
+
+            return $this->pending_candidate;
+        }
+        if ($this->terminal_seen) {
+            return ['ok' => false, 'error' => 'source_terminal_already_confirmed'];
+        }
 
         $configuration = $this->configuration;
+        $candidate_start_id = $this->confirmed_cursor;
         $query = 'SELECT ' . self::identifier($configuration['id_field']) . ' AS source_order_id, '
             . self::identifier($configuration['created_field']) . ' AS source_created_at_gmt, '
             . self::identifier($configuration['modified_field']) . ' AS source_modified_at_gmt '
@@ -226,7 +262,7 @@ final class EventSales_Woo_Order_Membership_Source
             . self::identifier($configuration['created_field']) . ' >= %s AND '
             . self::identifier($configuration['created_field']) . ' <= %s '
             . 'ORDER BY ' . self::identifier($configuration['id_field']) . ' ASC LIMIT %d';
-        $prepared = $this->source_db->prepare($query, $last_id, 'shop_order', $start, $cutoff, $limit);
+        $prepared = $this->source_db->prepare($query, $candidate_start_id, 'shop_order', $start, $cutoff, $limit);
 
         try {
             if ($this->collect_query_metrics && $this->metrics['plan'] === []) {
@@ -276,39 +312,83 @@ final class EventSales_Woo_Order_Membership_Source
                     $this->metrics['rows_examined'] += max(0, $after_rows_examined - $before_rows_examined);
                 }
             }
-            if ($normalized === []) {
-                $this->terminal_seen = true;
-
-                return [
-                    'ok' => true,
-                    'rows' => [],
-                    'next_id' => $last_id,
-                    'terminal' => true,
-                ];
-            }
-
-            $this->metrics['chunks']++;
-            $this->metrics['matching_rows'] += count($normalized);
-            foreach ($normalized as $row) {
-                $id = $row['source_order_id'];
-                if ($this->last_emitted_id !== null) {
-                    $gap = self::decimal_gap($this->last_emitted_id, $id);
-                    if ($gap !== null) {
-                        $this->metrics['largest_id_gap'] = max((int) $this->metrics['largest_id_gap'], $gap);
+            if ($normalized !== []) {
+                $this->metrics['chunks']++;
+                $this->metrics['matching_rows'] += count($normalized);
+                foreach ($normalized as $row) {
+                    $id = $row['source_order_id'];
+                    if ($this->last_emitted_id !== null) {
+                        $gap = self::decimal_gap($this->last_emitted_id, $id);
+                        if ($gap !== null) {
+                            $this->metrics['largest_id_gap'] = max((int) $this->metrics['largest_id_gap'], $gap);
+                        }
                     }
+                    $this->last_emitted_id = $id;
                 }
-                $this->last_emitted_id = $id;
             }
 
-            return [
+            $candidate = [
                 'ok' => true,
                 'rows' => $normalized,
-                'next_id' => $normalized[count($normalized) - 1]['source_order_id'],
-                'terminal' => false,
+                'candidate_start_id' => $candidate_start_id,
+                'candidate_next_id' => $normalized === [] ? $candidate_start_id : $normalized[count($normalized) - 1]['source_order_id'],
+                'candidate_limit' => $limit,
+                'terminal' => $normalized === [],
             ];
+            $candidate['candidate_digest'] = self::candidate_digest($candidate);
+            $this->pending_candidate = $candidate;
+
+            return $candidate;
         } catch (Throwable $error) {
             return ['ok' => false, 'error' => $this->error_code($error)];
         }
+    }
+
+    /**
+     * Confirm that the exact candidate has been durably appended to E1.
+     *
+     * @param array<string, mixed> $candidate
+     * @return array<string, mixed>
+     */
+    public function confirm_persisted(array $candidate): array
+    {
+        if (!$this->snapshot_open || $this->configuration === null) {
+            return ['ok' => false, 'error' => 'snapshot_not_open'];
+        }
+        if ($this->pending_candidate === null) {
+            return ['ok' => false, 'error' => 'no_pending_candidate'];
+        }
+
+        $expected = $this->pending_candidate;
+        $same_identity = ($candidate['candidate_start_id'] ?? null) === ($expected['candidate_start_id'] ?? null)
+            && ($candidate['candidate_next_id'] ?? null) === ($expected['candidate_next_id'] ?? null)
+            && ($candidate['terminal'] ?? null) === ($expected['terminal'] ?? null)
+            && ($candidate['rows'] ?? null) === ($expected['rows'] ?? null)
+            && ($candidate['candidate_limit'] ?? null) === ($expected['candidate_limit'] ?? null)
+            && is_string($candidate['candidate_digest'] ?? null)
+            && hash_equals((string) $expected['candidate_digest'], (string) $candidate['candidate_digest']);
+        if (!$same_identity) {
+            return ['ok' => false, 'error' => 'candidate_mismatch'];
+        }
+
+        if (($expected['terminal'] ?? false) === true) {
+            if (($expected['candidate_next_id'] ?? null) !== $this->confirmed_cursor) {
+                return ['ok' => false, 'error' => 'candidate_mismatch'];
+            }
+            $this->terminal_seen = true;
+            $this->pending_candidate = null;
+
+            return ['ok' => true, 'terminal' => true, 'confirmed_cursor' => $this->confirmed_cursor];
+        }
+
+        $next_id = (string) ($expected['candidate_next_id'] ?? '');
+        if (!preg_match('/^[1-9][0-9]*$/D', $next_id) || self::decimal_compare($next_id, $this->confirmed_cursor) <= 0) {
+            return ['ok' => false, 'error' => 'candidate_not_forward'];
+        }
+        $this->confirmed_cursor = $next_id;
+        $this->pending_candidate = null;
+
+        return ['ok' => true, 'terminal' => false, 'confirmed_cursor' => $this->confirmed_cursor];
     }
 
     /**
@@ -320,6 +400,11 @@ final class EventSales_Woo_Order_Membership_Source
     {
         if (!$this->snapshot_open || $this->configuration === null) {
             return ['ok' => false, 'error' => 'snapshot_not_open'];
+        }
+        if ($this->pending_candidate !== null) {
+            $this->rollback_snapshot();
+
+            return ['ok' => false, 'error' => 'source_candidate_unconfirmed'];
         }
         if (!$this->terminal_seen) {
             $this->rollback_snapshot();
@@ -357,6 +442,8 @@ final class EventSales_Woo_Order_Membership_Source
 
         $result = $this->source_db->query('ROLLBACK');
         $this->snapshot_open = false;
+        $this->pending_candidate = null;
+        $this->capture_scope = null;
         $this->metrics['snapshot_duration_ms'] = round((microtime(true) - $this->snapshot_started_at) * 1000, 3);
 
         return $result === false ? ['ok' => false, 'error' => 'source_rollback_failed'] : ['ok' => true];
@@ -717,6 +804,31 @@ final class EventSales_Woo_Order_Membership_Source
         }
 
         return $date->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\\TH:i:s.u\\Z');
+    }
+
+    /** @param array<string, mixed> $candidate */
+    private static function candidate_digest(array $candidate): string
+    {
+        return hash('sha256', json_encode([
+            'candidate_start_id' => (string) ($candidate['candidate_start_id'] ?? ''),
+            'candidate_next_id' => (string) ($candidate['candidate_next_id'] ?? ''),
+            'candidate_limit' => (int) ($candidate['candidate_limit'] ?? 0),
+            'terminal' => ($candidate['terminal'] ?? false) === true,
+            'rows' => $candidate['rows'] ?? [],
+        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
+    }
+
+    private static function decimal_compare(string $left, string $right): int
+    {
+        $left = ltrim($left, '0');
+        $right = ltrim($right, '0');
+        $left = $left === '' ? '0' : $left;
+        $right = $right === '' ? '0' : $right;
+        if (strlen($left) !== strlen($right)) {
+            return strlen($left) <=> strlen($right);
+        }
+
+        return strcmp($left, $right);
     }
 
     private static function decimal_gap(string $previous, string $current): ?int

@@ -1,8 +1,10 @@
 # EventSales Woo Order Index Feed
 
 This plugin is the separate WordPress trust boundary for the historical WooCommerce
-order-identity manifest. M3-01/02E1 adds the durable destination and lifecycle
-behind that boundary. It does not discover or enumerate live WooCommerce orders.
+order-identity manifest. M3-01/02E2B activates one authenticated, bounded POST
+that captures one source-consistent membership set at one source boundary `D`,
+stores it through E1, and publishes it only after the immutable manifest is
+READY.
 
 The existing `eventsales-tickera-catalog-feed` remains catalog-only and is not
 modified.
@@ -18,21 +20,24 @@ E1 provides:
 - immutable READY membership, deterministic hash evidence, and terminal metadata;
 - 24-hour expiry with a seven-day hard maximum;
 - directly callable bounded garbage collection, including abandoned BUILDING rows;
-- authenticated, bounded READY manifest GET pages with authenticated cursors.
+- authenticated, bounded READY manifest GET pages with authenticated cursors;
+- an authenticated manifest POST backed by the production source adapter and
+  bounded builder.
 
-E1 does not:
+The E1 store itself does not:
 
 - call `wc_get_orders`, `WC_Order_Query`, `wc_get_order`, `WP_Query`, HPOS, or
   legacy order storage;
 - page the WooCommerce REST API or perform any source membership query;
-- create a live manifest through the public POST endpoint;
+- decide Woo membership or open the source snapshot;
 - store customer, billing, shipping, payment, totals, line-item, notes, or raw
   WooCommerce payload data;
 - change EventSales/Ash/Postgres code, `SyncRun`, `SyncCursor`, or the catalog
   plugin.
 
-M3-01/02E2 owns the source-consistent Woo membership observation and atomic
-builder that will supply rows to this storage API.
+M3-01/02E2B owns the source-consistent Woo membership observation and atomic
+builder that supplies rows to this storage API. EventSales Elixir consumption,
+modified-time catch-up, refunds, and later slices are not part of this plugin.
 
 ## Durable tables
 
@@ -123,12 +128,93 @@ deletion, reopening FAILED/EXPIRED rows, and promotion without complete stored
 sequence invariants. Application guards provide the narrow lifecycle API in
 addition to those database guards.
 
+## E2B production capture
+
+The production orchestration boundary is
+`EventSales_Woo_Order_Manifest_Builder` in
+`eventsales-woo-order-manifest-builder.php`. It runs after HMAC authentication
+and request validation, then acquires a source-scoped zero-wait MySQL named lock
+for load/concurrency control. The lock key is derived from the authoritative
+database host, database name, and table prefix; it is connection-scoped and is
+released on every path. A simultaneous capture returns bounded `busy`. The lock
+does not decide membership, source continuation, or `D`.
+
+The builder uses one dedicated source `wpdb` connection, preserves the E2A
+OrderUtil preflight and same-snapshot HPOS/legacy authority checks, and opens
+one InnoDB `REPEATABLE READ` transaction with
+`WITH CONSISTENT SNAPSHOT, READ ONLY`. The source adapter owns an internal
+confirmed primary-ID cursor. A candidate is replayable until its exact rows,
+start ID, end ID, limit, and digest are confirmed after the corresponding E1
+append succeeds. The source cannot commit until the empty terminal candidate is
+also confirmed. A retry never resumes a failed attempt: it creates a new
+manifest and a new `D`.
+
+The server-controlled capture limit is:
+
+```text
+CAPTURE_BUDGET_SECONDS = 5
+source capture chunk = 1..100 identities
+```
+
+Elapsed time uses PHP's process-monotonic `hrtime(true)`, converted from
+nanoseconds to seconds; there is no wall-clock fallback. It is checked
+immediately after D opens and after every bounded source read, append,
+confirmation, and terminal confirmation, with another check before source
+commit. If a source read returns after the budget, its candidate is neither
+appended nor
+confirmed. A timeout rolls back the source snapshot, fails the BUILDING
+manifest where possible, and prevents READY publication. The client cannot
+change or extend this budget. `set_time_limit(0)` is not used. This five-second
+limit is the E2B operating gate for this slice, not a claim that every
+deployment or dataset is safe.
+
+The public `busy` result is HTTP 409. Other source, storage, budget, authority,
+and finalization failures are HTTP 503 with a stable bounded error code.
+
+HPOS and legacy support are enabled only when their representative local
+capture completes within this fixed five-second budget. The legacy source uses
+the primary-ID path over `wp_posts` and may examine a large identity space
+because `post_date_gmt` is not a standard indexed seek field. If a representative
+mode cannot complete within five seconds, that mode is fail-closed and E2B is
+blocked pending a different source materialization mechanism. No unsupported
+legacy deployment-scale claim is made.
+
+The representative local E2B benchmark below used the verified loopback
+WordPress/MySQL installation, synthetic four-match fixtures, and proof-only
+`EXPLAIN ANALYZE` metrics in the test adapter. The production default adapter
+does not run that instrumentation. PHP memory is the process peak reported by
+the harness; it is not a claim that the source chunk itself consumes that full
+amount.
+
+| Mode | Total `shop_order` identity space | Matching identities | Rows examined | Source chunks | Snapshot wall time | PHP peak | Largest ID gap | Plan/key |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| HPOS | 5 | 4 | 8 | 1 | 13.313 ms | 105,906,176 bytes | 9 | range / `PRIMARY` |
+| Legacy | 19,745 | 4 | 68,441 | 1 | 54.213 ms | 105,906,176 bytes | 9 | range / `PRIMARY` |
+
+Both representative captures completed below the fixed five-second gate. The
+legacy result still demonstrates the structural cost of primary-ID traversal
+over `wp_posts`; it does not support an unsupported scale claim.
+
+The POST request `limit` has one meaning only: it controls the number of READY
+manifest identities returned in the first response page, from 1 through 100.
+It does not change source capture chunk size. For example, `limit=20` still
+captures source chunks of at most 100 and returns at most 20 immutable E1
+identities. The response uses the existing E1 READY reader; it never exposes
+BUILDING state.
+
+An exact authenticated request replay after a completed request intentionally
+starts a new source snapshot and returns a new manifest/new `D`, because the
+current contract has no idempotency key. There is no durable replay cache or
+Redis correctness dependency. If that duplicate work becomes operationally
+unacceptable, a future slice must add an explicit idempotency design rather
+than pretending the current command is idempotent.
+
 ## Token and cursor security
 
 Tokens are `bin2hex(random_bytes(32))`: 256 bits of cryptographic entropy. The
 manifest token is an opaque boundary/lookup identifier, not a standalone
 access authority. It is returned to the internal builder and as the locked
-`boundary_token` field only after an authenticated READY GET. Surrounding HTTP
+`boundary_token` field only in an authenticated READY POST/GET response. Surrounding HTTP
 infrastructure may record URLs, so possession of the token alone must not grant
 access. Order-index HMAC authentication remains mandatory before membership is
 returned. The plugin does not deliberately log the raw token, persist it, or
@@ -216,19 +302,33 @@ GET  /wp-json/eventsales/v1/woo-order-index/manifests/{token}
 
 ### POST
 
-POST remains deliberately fail-closed in E1. After the existing request-size,
-HMAC, and scope validation it returns HTTP 501:
+POST is implemented by E2B only when the fixed five-second representative
+HPOS/legacy performance gate has passed for the enabled mode. After request
+size, HMAC, and explicit UTC `[B,C]` validation, it acquires the source-scoped
+zero-wait lock and performs one bounded source capture. The request `limit`
+controls only the first READY response page; source chunks remain at most 100.
+
+Success returns the existing E1 READY reader envelope:
 
 ```json
 {
-  "error": "manifest_capability_unavailable",
   "schema_version": "2026-08-12.v1",
-  "capability": "woo_order_index_manifest",
-  "capability_status": "not_implemented"
+  "phase": "manifest_enumerate",
+  "boundary_token": "<opaque token>",
+  "manifest_hash": "<sha256>",
+  "manifest_expires_at_gmt": "<UTC>",
+  "source_observed_at_gmt": "<UTC>",
+  "items": ["<metadata-only identities>"],
+  "has_more": true,
+  "next_cursor": "<opaque authenticated cursor>"
 }
 ```
 
-It does not create a token, query WooCommerce, or write a BUILDING/READY row.
+The terminal page omits `next_cursor` and includes the immutable stored
+`terminal_evidence`. POST never returns BUILDING. On any failure it returns a
+bounded non-success error and does not expose a token, SQL, request signature,
+credentials, or order/customer data. A failed attempt is not resumed; retry
+means a new manifest and new `D`.
 
 ### GET
 
@@ -261,6 +361,9 @@ has_more
 terminal_evidence (terminal pages only)
 ```
 
+The HMAC secret remains the access authority. The token is only the immutable
+manifest lookup/boundary identifier and does not replace HMAC authentication.
+
 ## Tests
 
 The standalone D boundary harness remains available:
@@ -268,7 +371,12 @@ The standalone D boundary harness remains available:
 ```bash
 php -l integrations/wordpress/eventsales-woo-order-index-feed/eventsales-woo-order-index-feed.php
 php -l integrations/wordpress/eventsales-woo-order-index-feed/eventsales-woo-order-index-manifest-store.php
+php -l integrations/wordpress/eventsales-woo-order-index-feed/eventsales-woo-order-membership-source.php
+php -l integrations/wordpress/eventsales-woo-order-index-feed/eventsales-woo-order-manifest-builder.php
 php integrations/wordpress/eventsales-woo-order-index-feed/tests/order-index-feed-test.php
+php integrations/wordpress/eventsales-woo-order-index-feed/tests/order-index-manifest-builder-test.php
+php integrations/wordpress/eventsales-woo-order-index-feed/tests/order-index-membership-proof-test.php --mode=hpos
+php integrations/wordpress/eventsales-woo-order-index-feed/tests/order-index-membership-proof-test.php --mode=legacy
 ```
 
 The E1 harness uses the real local WordPress `wpdb`/MySQL service. It refuses a
@@ -289,11 +397,19 @@ The database tests prove schema idempotence and indexes, token hashing,
 READY/FAILED/EXPIRED/BUILDING lifecycle behavior, database immutability,
 duplicate identity constraints, deterministic hashes, bounded pages, cursor
 replay/binding, TTL, and bounded GC. They also prove that no live Woo
-enumeration reference is introduced and that the catalog plugin is unchanged.
+enumeration reference is introduced, the activated POST fails closed when the
+verified local source runtime is absent, and the catalog plugin is unchanged.
 
-## Next slice
+The E2B performance gate must also record, separately for HPOS and legacy,
+source mode, total source identity-space size, matching identities, rows
+examined, source chunks, snapshot wall time, PHP peak memory, largest emitted
+ID gap, and the query plan/key. Both enabled modes must complete within the
+fixed five-second budget. These local measurements do not claim unsupported
+deployment scale.
 
-**M3-01/02E2 — atomic Woo membership capture** will supply source-consistent
-synthetic-to-real identity rows at the source observation boundary. It owns
-HPOS/legacy membership mechanics and source atomicity; E1 remains the durable
-WordPress destination.
+## Later slices
+
+E2B intentionally stops at the authenticated READY manifest boundary. Later
+work may consume the immutable manifest from EventSales Elixir, but this slice
+does not change Elixir, `SyncRun`, `SyncCursor`, modified-time catch-up `H`,
+refunds, or M3-03+ behavior.

@@ -151,6 +151,60 @@ final class WP_REST_Response
 require dirname(__DIR__) . '/eventsales-woo-order-index-feed.php';
 class_alias('EventSales_Woo_Order_Index_Feed', 'Feed');
 
+final class FeedTestBuilder
+{
+    public int $calls = 0;
+
+    /** @var array<int, array<string, mixed>> */
+    public array $scopes = [];
+
+    public bool $terminal = false;
+
+    /** @var array<string, mixed>|null */
+    public ?array $forced_result = null;
+
+    /** @param array<string, mixed> $scope */
+    public function build(array $scope): array
+    {
+        $this->calls++;
+        $this->scopes[] = $scope;
+        if ($this->forced_result !== null) {
+            return $this->forced_result;
+        }
+
+        return [
+            'ok' => true,
+            'status' => 'ready',
+            'token' => 'test-ready-token',
+            'manifest_hash' => str_repeat('b', 64),
+            'manifest_expires_at_gmt' => '2026-08-13T00:00:00.000000Z',
+            'source_observed_at_gmt' => '2026-08-12T00:00:00.000000Z',
+            'page' => [
+                'ok' => true,
+                'schema_version' => EVENTSALES_WOO_ORDER_INDEX_SCHEMA_VERSION,
+                'manifest_hash' => str_repeat('b', 64),
+                'expires_at_gmt' => '2026-08-13T00:00:00.000000Z',
+                'source_observed_at_gmt' => '2026-08-12T00:00:00.000000Z',
+                'items' => [[
+                    'source_order_id' => '10',
+                    'source_created_at_gmt' => '2026-08-01T00:00:00.000000Z',
+                    'source_modified_at_gmt' => '2026-08-01T00:00:00.000000Z',
+                ]],
+                'has_more' => !$this->terminal,
+                'next_sequence' => $this->terminal ? null : 1,
+                'terminal_evidence' => $this->terminal ? 'stored-terminal-evidence' : null,
+            ],
+        ];
+    }
+}
+
+function test_controller(FeedTestBuilder $builder): EventSales_Woo_Order_Index_Feed
+{
+    return new EventSales_Woo_Order_Index_Feed(
+        static fn(object $database): object => $builder
+    );
+}
+
 final class T
 {
     public static int $passes = 0;
@@ -333,8 +387,33 @@ $valid = signed_request(
     [],
     valid_payload()
 );
-$valid_response = (new EventSales_Woo_Order_Index_Feed())->handle_manifest_create($valid['request']);
-T::same('valid signature reaches the authenticated capability result', 501, $valid_response->get_status());
+$valid_builder = new FeedTestBuilder();
+$valid_response = test_controller($valid_builder)->handle_manifest_create($valid['request']);
+T::same('valid signature returns a READY manifest page', 200, $valid_response->get_status());
+T::same('valid POST returns the requested item limit', 1, count($valid_response->get_data()['items'] ?? []));
+T::same('valid POST returns a nonterminal cursor', true, $valid_response->get_data()['has_more'] ?? false);
+T::ok('valid POST includes next_cursor only when nonterminal', array_key_exists('next_cursor', $valid_response->get_data()) && !array_key_exists('terminal_evidence', $valid_response->get_data()));
+T::same('builder receives the validated POST scope', valid_payload(), $valid_builder->scopes[0] ?? null);
+
+$terminal_builder = new FeedTestBuilder();
+$terminal_builder->terminal = true;
+$terminal_response = test_controller($terminal_builder)->handle_manifest_create($valid['request']);
+T::same('terminal POST still returns READY', 200, $terminal_response->get_status());
+T::ok('terminal POST omits next_cursor', !array_key_exists('next_cursor', $terminal_response->get_data()));
+T::same('terminal POST returns stored terminal evidence', 'stored-terminal-evidence', $terminal_response->get_data()['terminal_evidence'] ?? null);
+
+$failure_builder = new FeedTestBuilder();
+$failure_builder->forced_result = ['ok' => false, 'error' => 'capture_budget_exceeded'];
+$failure_response = test_controller($failure_builder)->handle_manifest_create($valid['request']);
+T::same('builder failure is non-success', 503, $failure_response->get_status());
+T::same('builder failure is bounded', 'capture_budget_exceeded', $failure_response->get_data()['error'] ?? null);
+T::ok('builder failure exposes no token or source data', !array_key_exists('boundary_token', $failure_response->get_data()) && !array_key_exists('items', $failure_response->get_data()));
+
+$busy_builder = new FeedTestBuilder();
+$busy_builder->forced_result = ['ok' => false, 'error' => 'busy'];
+$busy_response = test_controller($busy_builder)->handle_manifest_create($valid['request']);
+T::same('concurrent builder failure is conflict', 409, $busy_response->get_status());
+T::same('concurrent builder failure is bounded', 'busy', $busy_response->get_data()['error'] ?? null);
 
 $known_vector_base = "POST\n"
     . "/wp-json/eventsales/v1/woo-order-index/manifests\n"
@@ -389,12 +468,15 @@ $missing_signature = request_for(
     $valid['request']->get_body(),
     $missing_signature_headers
 );
-$response = (new EventSales_Woo_Order_Index_Feed())->handle_manifest_create($missing_signature);
+$auth_builder = new FeedTestBuilder();
+$auth_controller = test_controller($auth_builder);
+$response = $auth_controller->handle_manifest_create($missing_signature);
 T::same('missing signature rejected', 401, $response->get_status());
+T::same('missing signature runs no builder/source work', 0, $auth_builder->calls);
 
 $malformed_headers = $valid['headers'];
 $malformed_headers['X-EventSales-Signature'] = 'not-a-signature';
-$response = (new EventSales_Woo_Order_Index_Feed())->handle_manifest_create(request_for(
+$response = $auth_controller->handle_manifest_create(request_for(
     'POST',
     '/wp-json/eventsales/v1/woo-order-index/manifests',
     [],
@@ -402,6 +484,7 @@ $response = (new EventSales_Woo_Order_Index_Feed())->handle_manifest_create(requ
     $malformed_headers
 ));
 T::same('malformed signature rejected', 401, $response->get_status());
+T::same('wrong HMAC format runs no builder/source work', 0, $auth_builder->calls);
 
 $unknown_key = signed_request(
     'POST',
@@ -444,8 +527,9 @@ $wrong_secret = signed_request(
     'order-index-key-1',
     'wrong-secret'
 );
-$response = (new EventSales_Woo_Order_Index_Feed())->handle_manifest_create($wrong_secret['request']);
+$response = $auth_controller->handle_manifest_create($wrong_secret['request']);
 T::same('wrong secret rejected', 401, $response->get_status());
+T::same('wrong HMAC secret runs no builder/source work', 0, $auth_builder->calls);
 
 $missing_secret_options = $GLOBALS['options'];
 $GLOBALS['options']['eventsales_woo_order_index_secret'] = '';
@@ -592,6 +676,17 @@ T::ok('missing cutoff rejects unbounded range', !Feed::validate_manifest_request
     'limit' => 100,
 ], [])['ok']);
 
+$malformed_scope_builder = new FeedTestBuilder();
+$malformed_scope = signed_request(
+    'POST',
+    '/wp-json/eventsales/v1/woo-order-index/manifests',
+    [],
+    valid_payload(['backfill_start' => '2026-08-01'])
+);
+$malformed_scope_response = test_controller($malformed_scope_builder)->handle_manifest_create($malformed_scope['request']);
+T::same('malformed source scope is rejected before builder work', 400, $malformed_scope_response->get_status());
+T::same('malformed source scope invokes no builder', 0, $malformed_scope_builder->calls);
+
 $valid_get = signed_request(
     'GET',
     '/wp-json/eventsales/v1/woo-order-index/manifests/opaque-token',
@@ -607,7 +702,7 @@ $get_request = request_for(
     ['token' => 'opaque-token']
 );
 $fetch_response = (new EventSales_Woo_Order_Index_Feed())->handle_manifest_fetch($get_request);
-T::same('valid fetch token reaches unavailable capability result', 501, $fetch_response->get_status());
+T::same('valid fetch token fails closed without local storage', 503, $fetch_response->get_status());
 T::ok('fetch page rejected', !Feed::validate_manifest_fetch_request('opaque-token', ['page' => '1'])['ok']);
 T::ok('fetch offset rejected', !Feed::validate_manifest_fetch_request('opaque-token', ['offset' => '0'])['ok']);
 T::ok('fetch malformed token rejected', !Feed::validate_manifest_fetch_request(['token'], [])['ok']);
@@ -673,22 +768,25 @@ $unauthorized_response = (new EventSales_Woo_Order_Index_Feed())->handle_manifes
 $unauthorized_json = json_encode($unauthorized_response->get_data());
 T::ok('unauthorized/error envelope has no PII fields', !preg_match('/customer|billing|shipping|payment|line_item|order_total|notes|raw_payload/i', (string) $unauthorized_json));
 
-T::section('fail-closed capability boundary');
+T::section('activated READY boundary');
 
-$capability_data = $valid_response->get_data();
-T::same('not-implemented status code', 'manifest_capability_unavailable', $capability_data['error'] ?? null);
-T::same('capability schema version', EVENTSALES_WOO_ORDER_INDEX_SCHEMA_VERSION, $capability_data['schema_version'] ?? null);
-T::same('capability name', 'woo_order_index_manifest', $capability_data['capability'] ?? null);
-T::same('capability status', 'not_implemented', $capability_data['capability_status'] ?? null);
-T::ok('no fake boundary token', !array_key_exists('boundary_token', $capability_data) && !array_key_exists('manifest_token', $capability_data));
-T::ok('no live identities', !array_key_exists('items', $capability_data) && !array_key_exists('source_order_id', $capability_data));
-T::ok('no cursor or has_more', !array_key_exists('next_cursor', $capability_data) && !array_key_exists('cursor', $capability_data) && !array_key_exists('has_more', $capability_data));
-T::ok('no terminal evidence claimed', !array_key_exists('terminal_evidence', $capability_data));
+$post_data = $valid_response->get_data();
+T::same('activated POST status code', 200, $valid_response->get_status());
+T::same('activated POST phase', 'manifest_enumerate', $post_data['phase'] ?? null);
+T::same('activated POST boundary token', 'test-ready-token', $post_data['boundary_token'] ?? null);
+T::same('activated POST response schema version', EVENTSALES_WOO_ORDER_INDEX_SCHEMA_VERSION, $post_data['schema_version'] ?? null);
+T::ok('nonterminal POST has no terminal evidence', !array_key_exists('terminal_evidence', $post_data));
+T::ok('terminal response has no cursor', !array_key_exists('next_cursor', $terminal_response->get_data()));
+T::ok('POST has no page or offset fields', !array_key_exists('page', $post_data) && !array_key_exists('offset', $post_data));
 T::same('standard Woo enumeration never called', 0, $GLOBALS['woo_calls']);
 
-$fetch_data = $fetch_response;
-T::same('fetch also fails closed', 501, $fetch_data->get_status());
-T::same('fetch error code', 'manifest_capability_unavailable', $fetch_data->get_data()['error'] ?? null);
+$fetch_data = $fetch_response->get_data();
+T::same('GET fails closed without local storage', 503, $fetch_response->get_status());
+T::same('GET storage error is bounded', 'manifest_storage_unavailable', $fetch_data['error'] ?? null);
+
+$unavailable_response = (new EventSales_Woo_Order_Index_Feed())->handle_manifest_create($valid['request']);
+T::same('production POST without WordPress storage fails closed', 503, $unavailable_response->get_status());
+T::same('production POST storage error is bounded', 'manifest_builder_unavailable', $unavailable_response->get_data()['error'] ?? null);
 
 $plugin_source = (string) file_get_contents(dirname(__DIR__) . '/eventsales-woo-order-index-feed.php');
 foreach (['wc_get_orders', 'wc_get_order', 'WP_Query', '$wpdb', 'OrderUpserter', 'set_transient', 'update_option', 'wp_insert_post'] as $forbidden) {
