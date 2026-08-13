@@ -559,7 +559,7 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClient do
 
   defp validate_source_system_id(value) when is_binary(value) do
     case Ecto.UUID.cast(value) do
-      {:ok, _uuid} -> {:ok, value}
+      {:ok, uuid} -> {:ok, uuid}
       :error -> emit_exception(:create_manifest, :invalid_request)
     end
   end
@@ -666,6 +666,7 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClient do
   defp status_reason(_method, 410), do: :manifest_expired
   defp status_reason(:get, 404), do: :manifest_not_found
   defp status_reason(:post, 404), do: :manifest_unavailable
+  defp status_reason(:post, status) when status in 500..599, do: :ambiguous_create
   defp status_reason(_method, status) when status in 500..599, do: :server_error
   defp status_reason(_method, _status), do: :server_error
 

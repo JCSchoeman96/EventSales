@@ -169,6 +169,22 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClientTest do
               )}
   end
 
+  test "create_manifest places the canonical UUID returned by Ecto on the wire" do
+    FakeTransport.reset!([{:ok, 200, [], Jason.encode!(valid_page())}])
+
+    uppercase_source_system_id = String.upcase(@source_system_id)
+
+    assert {:ok, _page} =
+             WooOrderIndexClient.create_manifest(
+               uppercase_source_system_id,
+               @start,
+               @cutoff
+             )
+
+    assert [request] = FakeTransport.requests()
+    assert Jason.decode!(request.body)["source_system"] == @source_system_id
+  end
+
   test "create_manifest accepts only limits 1 through 100" do
     for limit <- [1, 100] do
       FakeTransport.reset!([{:ok, 200, [], Jason.encode!(valid_page())}])
@@ -311,6 +327,7 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClientTest do
           {404, :manifest_unavailable, "{}"},
           {503, :source_authority_changed,
            Jason.encode!(%{"error" => "source_authority_changed"})},
+          {503, :capture_budget_exceeded, Jason.encode!(%{"error" => "capture_budget_exceeded"})},
           {302, :ambiguous_create, "redirect"}
         ] do
       FakeTransport.reset!([{:ok, status, [], body}, {:ok, 200, [], Jason.encode!(valid_page())}])
@@ -318,6 +335,43 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClientTest do
       assert_error(
         WooOrderIndexClient.create_manifest(@source_system_id, @start, @cutoff),
         reason
+      )
+
+      assert length(FakeTransport.requests()) == 1
+    end
+  end
+
+  test "unknown POST server outcomes are ambiguous and never retried" do
+    cases = [
+      {500, Jason.encode!(%{"error" => "upstream_failed"})},
+      {502, "Bad Gateway"},
+      {503, Jason.encode!(%{"error" => "unknown_source_error"})},
+      {503, "not json"},
+      {504, "Gateway Timeout"}
+    ]
+
+    for {status, body} <- cases do
+      FakeTransport.reset!([
+        {:ok, status, [], body},
+        {:ok, 200, [], Jason.encode!(valid_page())}
+      ])
+
+      assert_error(
+        WooOrderIndexClient.create_manifest(@source_system_id, @start, @cutoff),
+        :ambiguous_create
+      )
+
+      assert length(FakeTransport.requests()) == 1
+    end
+  end
+
+  test "GET 500 and 502 retain server error classification" do
+    for status <- [500, 502] do
+      FakeTransport.reset!([{:ok, status, [], "upstream failed"}])
+
+      assert_error(
+        WooOrderIndexClient.fetch_manifest_page("manifest-token"),
+        :server_error
       )
 
       assert length(FakeTransport.requests()) == 1
