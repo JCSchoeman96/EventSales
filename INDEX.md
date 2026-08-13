@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-349
+351
 
 ## Files
 
@@ -143,6 +143,8 @@ Project root: `.`
 - `lib/event_sales/ingestion/event_structural_certifier.ex`
 - `lib/event_sales/ingestion/findings_csv_export.ex`
 - `lib/event_sales/ingestion/handlers/product_updated_handler.ex`
+- `lib/event_sales/ingestion/historical_manifest_bootstrap.ex`
+- `lib/event_sales/ingestion/historical_manifest_evidence.ex`
 - `lib/event_sales/ingestion/intake_backpressure.ex`
 - `lib/event_sales/ingestion/manual_sync.ex`
 - `lib/event_sales/ingestion/order_reconciliation.ex`
@@ -1057,8 +1059,8 @@ Project root: `.`
 - `EventSales.Ingestion.Clients.WooOrderIndexClient` - `lib/event_sales/ingestion/clients/woo_order_index_client.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 6
-  - public_funs: `create_manifest/5`, `fetch_manifest_page/3`, `validate_configuration/1`, `canonical_query_string/1`, `canonical_signature_input/6`, `signature/7`
+  - docs_count: 7
+  - public_funs: `create_manifest/5`, `fetch_manifest_page/3`, `validate_configuration/1`, `configured_base_url/1`, `canonical_query_string/1`, `canonical_signature_input/6`, `signature/7`
   - uses: _none_
 - `Page` - `lib/event_sales/ingestion/clients/woo_order_index_client.ex`
   - moduledoc?: true
@@ -1131,6 +1133,18 @@ Project root: `.`
   - specs?: true
   - docs_count: 1
   - public_funs: `handle/1`
+  - uses: _none_
+- `EventSales.Ingestion.HistoricalManifestBootstrap` - `lib/event_sales/ingestion/historical_manifest_bootstrap.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `ensure_manifest/2`
+  - uses: _none_
+- `EventSales.Ingestion.HistoricalManifestEvidence` - `lib/event_sales/ingestion/historical_manifest_evidence.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 9
+  - public_funs: `metadata_key/0`, `from_page/1`, `from_page/2`, `from_metadata/1`, `metadata/1`, `encoded_size/1`, `canonical_metadata/2`, `metadata_max_bytes/0`, `validate_unexpired/2`, `validate_continuity/2`
   - uses: _none_
 - `EventSales.Ingestion.IntakeBackpressure` - `lib/event_sales/ingestion/intake_backpressure.ex`
   - moduledoc?: true
