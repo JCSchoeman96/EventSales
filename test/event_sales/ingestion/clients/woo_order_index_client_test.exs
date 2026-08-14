@@ -169,6 +169,129 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClientTest do
               )}
   end
 
+  test "create_catchup_manifest sends the exact parent-bound request and accepts only catch-up pages" do
+    FakeTransport.reset!([{:ok, 200, [], Jason.encode!(valid_catchup_page())}])
+
+    assert {:ok, page} =
+             WooOrderIndexClient.create_catchup_manifest(
+               "parent-manifest-token",
+               @source_system_id
+             )
+
+    assert page.schema_version == "2026-08-13.catchup.v1"
+    assert page.phase == "catch_up"
+    assert page.boundary_token == "child-manifest-token"
+
+    assert [request] = FakeTransport.requests()
+    assert request.method == :post
+
+    assert request.url ==
+             "https://wordpress.example.test" <>
+               @path <> "/parent-manifest-token/catch-up"
+
+    assert request.body ==
+             ~s({"source_system":"550e8400-e29b-41d4-a716-446655440000","limit":100})
+
+    assert URI.parse(request.url).query == nil
+    assert Jason.decode!(request.body) == %{"source_system" => @source_system_id, "limit" => 100}
+    assert request.opts == [timeout_ms: 7_000]
+
+    assert List.keyfind(request.headers, "content-type", 0) ==
+             {"content-type", "application/json"}
+
+    assert request.headers |> List.keyfind("x-eventsales-signature", 0) ==
+             {"x-eventsales-signature",
+              WooOrderIndexClient.signature(
+                "POST",
+                @path <> "/parent-manifest-token/catch-up",
+                "",
+                request.body,
+                Integer.to_string(@timestamp),
+                "order-index-key-1",
+                "order-index-secret"
+              )}
+  end
+
+  test "catch-up and ordinary page contracts reject each other's phases" do
+    FakeTransport.reset!([{:ok, 200, [], Jason.encode!(valid_page())}])
+
+    assert_error(
+      WooOrderIndexClient.create_catchup_manifest("parent-manifest-token", @source_system_id),
+      :ambiguous_create
+    )
+
+    FakeTransport.reset!([{:ok, 200, [], Jason.encode!(valid_catchup_page())}])
+
+    assert_error(
+      WooOrderIndexClient.fetch_manifest_page("child-manifest-token"),
+      :invalid_response
+    )
+
+    FakeTransport.reset!([{:ok, 200, [], Jason.encode!(valid_page())}])
+
+    assert_error(
+      WooOrderIndexClient.fetch_catchup_page("child-manifest-token"),
+      :invalid_response
+    )
+  end
+
+  test "catch-up child identity and request limits are strict" do
+    FakeTransport.reset!([
+      {:ok, 200, [], Jason.encode!(Map.put(valid_catchup_page(), "boundary_token", "parent"))}
+    ])
+
+    assert_error(
+      WooOrderIndexClient.create_catchup_manifest("parent", @source_system_id),
+      :ambiguous_create
+    )
+
+    for limit <- [0, 101] do
+      assert_error(
+        WooOrderIndexClient.create_catchup_manifest("parent", @source_system_id, limit),
+        :invalid_request
+      )
+    end
+
+    assert length(FakeTransport.requests()) == 1
+  end
+
+  test "catch-up status mappings stay bounded and never retry" do
+    cases = [
+      {404, :parent_manifest_not_found, "{}"},
+      {410, :parent_manifest_expired, "{}"},
+      {409, :parent_manifest_wrong_phase,
+       Jason.encode!(%{"error" => "parent_manifest_wrong_phase"})},
+      {503, :capture_budget_exceeded, Jason.encode!(%{"error" => "capture_budget_exceeded"})},
+      {503, :ambiguous_create, Jason.encode!(%{"error" => "unknown_source_error"})}
+    ]
+
+    for {status, reason, body} <- cases do
+      FakeTransport.reset!([
+        {:ok, status, [], body},
+        {:ok, 200, [], Jason.encode!(valid_catchup_page())}
+      ])
+
+      assert_error(
+        WooOrderIndexClient.create_catchup_manifest("parent", @source_system_id),
+        reason
+      )
+
+      assert length(FakeTransport.requests()) == 1
+    end
+
+    FakeTransport.reset!([
+      {:error, :timeout},
+      {:ok, 200, [], Jason.encode!(valid_catchup_page())}
+    ])
+
+    assert_error(
+      WooOrderIndexClient.create_catchup_manifest("parent", @source_system_id),
+      :ambiguous_create
+    )
+
+    assert length(FakeTransport.requests()) == 1
+  end
+
   test "create_manifest places the canonical UUID returned by Ecto on the wire" do
     FakeTransport.reset!([{:ok, 200, [], Jason.encode!(valid_page())}])
 
@@ -599,6 +722,27 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClientTest do
       Map.put(base, "next_cursor", "next-cursor.part")
     else
       Map.put(base, "terminal_evidence", "v1;manifest_sha256=hash;item_count=1;last_sequence=1")
+    end
+  end
+
+  defp valid_catchup_page(opts \\ []) do
+    has_more = Keyword.get(opts, :has_more, false)
+
+    base = %{
+      "schema_version" => "2026-08-13.catchup.v1",
+      "phase" => "catch_up",
+      "boundary_token" => "child-manifest-token",
+      "manifest_hash" => String.duplicate("b", 64),
+      "manifest_expires_at_gmt" => "2026-08-13T13:00:00.000000Z",
+      "source_observed_at_gmt" => "2026-08-13T12:00:00.000000Z",
+      "items" => [item()],
+      "has_more" => has_more
+    }
+
+    if has_more do
+      Map.put(base, "next_cursor", "catchup-cursor.part")
+    else
+      Map.put(base, "terminal_evidence", "catchup-terminal-proof")
     end
   end
 

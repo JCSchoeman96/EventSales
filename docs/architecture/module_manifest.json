@@ -131,6 +131,8 @@
     "lib/event_sales/ingestion/event_structural_certifier.ex",
     "lib/event_sales/ingestion/findings_csv_export.ex",
     "lib/event_sales/ingestion/handlers/product_updated_handler.ex",
+    "lib/event_sales/ingestion/historical_catchup_bootstrap.ex",
+    "lib/event_sales/ingestion/historical_catchup_evidence.ex",
     "lib/event_sales/ingestion/historical_manifest_bootstrap.ex",
     "lib/event_sales/ingestion/historical_manifest_evidence.ex",
     "lib/event_sales/ingestion/historical_manifest_execution.ex",
@@ -2839,7 +2841,7 @@
       "uses": []
     },
     {
-      "docs_count": 7,
+      "docs_count": 9,
       "moduledoc?": true,
       "name": "EventSales.Ingestion.Clients.WooOrderIndexClient",
       "parse_error": null,
@@ -2850,8 +2852,16 @@
           "name": "create_manifest"
         },
         {
+          "arity": 4,
+          "name": "create_catchup_manifest"
+        },
+        {
           "arity": 3,
           "name": "fetch_manifest_page"
+        },
+        {
+          "arity": 3,
+          "name": "fetch_catchup_page"
         },
         {
           "arity": 1,
@@ -3098,6 +3108,80 @@
         {
           "arity": 1,
           "name": "handle"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.HistoricalCatchupBootstrap",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/historical_catchup_bootstrap.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "ensure_catchup"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 12,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.HistoricalCatchupEvidence",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/historical_catchup_evidence.ex",
+      "public_funs": [
+        {
+          "arity": 0,
+          "name": "metadata_key"
+        },
+        {
+          "arity": 0,
+          "name": "claim_metadata"
+        },
+        {
+          "arity": 1,
+          "name": "state"
+        },
+        {
+          "arity": 2,
+          "name": "from_page"
+        },
+        {
+          "arity": 1,
+          "name": "from_metadata"
+        },
+        {
+          "arity": 1,
+          "name": "metadata"
+        },
+        {
+          "arity": 1,
+          "name": "encoded_size"
+        },
+        {
+          "arity": 2,
+          "name": "canonical_metadata"
+        },
+        {
+          "arity": 0,
+          "name": "metadata_max_bytes"
+        },
+        {
+          "arity": 2,
+          "name": "validate_unexpired"
+        },
+        {
+          "arity": 1,
+          "name": "validate_parent"
+        },
+        {
+          "arity": 2,
+          "name": "validate_parent_binding"
         }
       ],
       "specs?": true,

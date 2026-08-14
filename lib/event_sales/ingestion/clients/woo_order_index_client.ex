@@ -14,6 +14,8 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClient do
   @manifest_path "/wp-json/eventsales/v1/woo-order-index/manifests"
   @schema_version "2026-08-12.v1"
   @phase "manifest_enumerate"
+  @catchup_schema_version "2026-08-13.catchup.v1"
+  @catchup_phase "catch_up"
   @default_limit 100
   @max_page_items 100
   @default_timeout_ms 7_000
@@ -50,6 +52,24 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClient do
     :source_snapshot_failed,
     :lock_unavailable,
     :manifest_unavailable
+  ]
+
+  @known_catchup_reasons [
+    :parent_manifest_not_found,
+    :parent_manifest_expired,
+    :parent_manifest_invalid,
+    :parent_manifest_not_ready,
+    :parent_manifest_changed,
+    :parent_manifest_wrong_phase,
+    :parent_manifest_wrong_source,
+    :catchup_member_unresolved,
+    :source_snapshot_before_parent,
+    :busy,
+    :capture_budget_exceeded,
+    :manifest_storage_failed,
+    :manifest_finalize_failed,
+    :source_preflight_failed,
+    :source_snapshot_failed
   ]
 
   defmodule Page do
@@ -112,7 +132,38 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClient do
          {:ok, config} <- config(:create_manifest, opts) do
       body = encode_manifest_request(source_system_id, start_wire, cutoff_wire, limit)
 
-      request(:create_manifest, :post, @manifest_path, "", body, config, limit, nil)
+      request(:create_manifest, :post, @manifest_path, "", body, config, {limit, nil, :manifest})
+    end
+  end
+
+  @doc "Creates and validates exactly one immutable catch-up manifest page."
+  @spec create_catchup_manifest(String.t(), String.t(), pos_integer(), keyword()) :: result()
+  def create_catchup_manifest(
+        parent_boundary_token,
+        source_system_id,
+        limit \\ @default_limit,
+        opts \\ []
+      ) do
+    with :ok <- validate_boundary_token(parent_boundary_token),
+         {:ok, source_system_id} <-
+           validate_source_system_id(source_system_id, :create_catchup_manifest),
+         :ok <- validate_limit(limit, :create_catchup_manifest),
+         {:ok, config} <- config(:create_catchup_manifest, opts) do
+      body = encode_catchup_request(source_system_id, limit)
+      path = @manifest_path <> "/" <> parent_boundary_token <> "/catch-up"
+
+      request(
+        :create_catchup_manifest,
+        :post,
+        path,
+        "",
+        body,
+        config,
+        {limit, {:not_equal, parent_boundary_token}, :catchup}
+      )
+    else
+      :error -> emit_exception(:create_catchup_manifest, :invalid_request)
+      {:error, %WooOrderIndexError{} = error} -> {:error, error}
     end
   end
 
@@ -124,9 +175,34 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClient do
          {:ok, config} <- config(:fetch_manifest_page, opts) do
       path = @manifest_path <> "/" <> boundary_token
       query = if is_nil(cursor), do: "", else: canonical_query_string(%{"cursor" => cursor})
-      request(:fetch_manifest_page, :get, path, query, "", config, nil, boundary_token)
+
+      request(
+        :fetch_manifest_page,
+        :get,
+        path,
+        query,
+        "",
+        config,
+        {nil, boundary_token, :manifest}
+      )
     else
       :error -> emit_exception(:fetch_manifest_page, :invalid_request)
+      {:error, %WooOrderIndexError{} = error} -> {:error, error}
+    end
+  end
+
+  @doc "Fetches and validates exactly one immutable catch-up manifest page."
+  @spec fetch_catchup_page(String.t(), String.t() | nil, keyword()) :: result()
+  def fetch_catchup_page(boundary_token, cursor \\ nil, opts \\ []) do
+    with :ok <- validate_boundary_token(boundary_token),
+         :ok <- validate_cursor(cursor),
+         {:ok, config} <- config(:fetch_catchup_page, opts) do
+      path = @manifest_path <> "/" <> boundary_token
+      query = if is_nil(cursor), do: "", else: canonical_query_string(%{"cursor" => cursor})
+
+      request(:fetch_catchup_page, :get, path, query, "", config, {nil, boundary_token, :catchup})
+    else
+      :error -> emit_exception(:fetch_catchup_page, :invalid_request)
       {:error, %WooOrderIndexError{} = error} -> {:error, error}
     end
   end
@@ -200,8 +276,7 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClient do
          canonical_query,
          raw_body,
          config,
-         requested_limit,
-         requested_boundary
+         request_context
        ) do
     case request_timestamp(config.clock) do
       {:ok, timestamp} ->
@@ -212,7 +287,7 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClient do
           canonical_query,
           raw_body,
           config,
-          {requested_limit, requested_boundary},
+          request_context,
           timestamp
         )
 
@@ -228,7 +303,7 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClient do
          canonical_query,
          raw_body,
          config,
-         {requested_limit, requested_boundary},
+         {requested_limit, requested_boundary, response_contract},
          timestamp
        ) do
     url = config.base_url <> path <> query_suffix(canonical_query)
@@ -252,6 +327,7 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClient do
           response_body,
           requested_limit,
           requested_boundary,
+          response_contract,
           System.monotonic_time(:microsecond) - started_at
         )
 
@@ -270,6 +346,7 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClient do
          response_body,
          requested_limit,
          requested_boundary,
+         response_contract,
          duration
        ) do
     emit_stop(operation, status, duration)
@@ -282,11 +359,12 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClient do
           status,
           response_body,
           requested_limit,
-          requested_boundary
+          requested_boundary,
+          response_contract
         )
 
       false ->
-        failure_from_status(operation, method, status, response_body)
+        failure_from_status(operation, method, status, response_body, response_contract)
     end
   end
 
@@ -296,9 +374,10 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClient do
          status,
          response_body,
          requested_limit,
-         requested_boundary
+         requested_boundary,
+         response_contract
        ) do
-    case decode_success(response_body, requested_limit, requested_boundary) do
+    case decode_success(response_body, requested_limit, requested_boundary, response_contract) do
       {:ok, page} -> {:ok, page}
       {:error, reason} -> failure(operation, method, :invalid_success, reason, status)
     end
@@ -323,9 +402,10 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClient do
     :throw, _value -> {:error, :transport_failure}
   end
 
-  defp decode_success(body, requested_limit, requested_boundary) do
+  defp decode_success(body, requested_limit, requested_boundary, response_contract) do
     with {:ok, decoded} <- Jason.decode(body),
-         {:ok, page} <- validate_page(decoded, requested_limit, requested_boundary) do
+         {:ok, page} <-
+           validate_page(decoded, requested_limit, requested_boundary, response_contract) do
       {:ok, page}
     else
       {:error, %Jason.DecodeError{}} -> {:error, :invalid_json}
@@ -333,10 +413,10 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClient do
     end
   end
 
-  defp validate_page(decoded, requested_limit, requested_boundary) when is_map(decoded) do
+  defp validate_page(decoded, requested_limit, requested_boundary, response_contract)
+       when is_map(decoded) do
     with :ok <- validate_response_keys(decoded),
-         true <- decoded["schema_version"] == @schema_version,
-         true <- decoded["phase"] == @phase,
+         :ok <- validate_contract(decoded, response_contract),
          :ok <- validate_boundary_token(decoded["boundary_token"]),
          :ok <- validate_requested_boundary(decoded["boundary_token"], requested_boundary),
          :ok <- validate_manifest_hash(decoded["manifest_hash"]),
@@ -350,8 +430,21 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClient do
     end
   end
 
-  defp validate_page(_decoded, _requested_limit, _requested_boundary),
+  defp validate_page(_decoded, _requested_limit, _requested_boundary, _response_contract),
     do: {:error, :invalid_response}
+
+  defp validate_contract(decoded, :manifest) do
+    if decoded["schema_version"] == @schema_version and decoded["phase"] == @phase,
+      do: :ok,
+      else: :error
+  end
+
+  defp validate_contract(decoded, :catchup) do
+    if decoded["schema_version"] == @catchup_schema_version and
+         decoded["phase"] == @catchup_phase,
+       do: :ok,
+       else: :error
+  end
 
   defp validate_response_keys(decoded) do
     keys = MapSet.new(Map.keys(decoded))
@@ -366,6 +459,12 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClient do
   end
 
   defp validate_requested_boundary(_boundary_token, nil), do: :ok
+
+  defp validate_requested_boundary(boundary_token, {:not_equal, parent_boundary})
+       when is_binary(parent_boundary) and boundary_token != parent_boundary,
+       do: :ok
+
+  defp validate_requested_boundary(_boundary_token, {:not_equal, _parent_boundary}), do: :error
 
   defp validate_requested_boundary(boundary_token, requested_boundary)
        when boundary_token == requested_boundary,
@@ -512,6 +611,17 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClient do
     |> IO.iodata_to_binary()
   end
 
+  defp encode_catchup_request(source_system_id, limit) do
+    [
+      "{\"source_system\":",
+      Jason.encode!(source_system_id),
+      ",\"limit\":",
+      Jason.encode!(limit),
+      "}"
+    ]
+    |> IO.iodata_to_binary()
+  end
+
   defp config(operation, opts) when is_list(opts) do
     app_config =
       :event_sales
@@ -573,14 +683,17 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClient do
     end
   end
 
-  defp validate_source_system_id(value) when is_binary(value) do
+  defp validate_source_system_id(value, operation \\ :create_manifest)
+
+  defp validate_source_system_id(value, operation) when is_binary(value) do
     case Ecto.UUID.cast(value) do
       {:ok, uuid} -> {:ok, uuid}
-      :error -> emit_exception(:create_manifest, :invalid_request)
+      :error -> emit_exception(operation, :invalid_request)
     end
   end
 
-  defp validate_source_system_id(_value), do: emit_exception(:create_manifest, :invalid_request)
+  defp validate_source_system_id(_value, operation),
+    do: emit_exception(operation, :invalid_request)
 
   defp normalize_wire_timestamp(value) when is_binary(value) do
     case parse_wire_timestamp(value) do
@@ -623,8 +736,13 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClient do
     end
   end
 
-  defp validate_limit(value) when is_integer(value) and value in 1..@max_page_items, do: :ok
-  defp validate_limit(_value), do: emit_exception(:create_manifest, :invalid_request)
+  defp validate_limit(value, operation \\ :create_manifest)
+
+  defp validate_limit(value, _operation)
+       when is_integer(value) and value in 1..@max_page_items,
+       do: :ok
+
+  defp validate_limit(_value, operation), do: emit_exception(operation, :invalid_request)
 
   defp validate_boundary_token(value)
        when is_binary(value) and byte_size(value) >= 1 and
@@ -686,20 +804,35 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClient do
   defp status_reason(_method, status) when status in 500..599, do: :server_error
   defp status_reason(_method, _status), do: :server_error
 
-  defp status_reason_from_body(method, status, body) when status == 503 do
+  defp status_reason_from_body(:create_catchup_manifest, :post, status, body),
+    do: catchup_status_reason(status, body)
+
+  defp status_reason_from_body(_operation, method, 503, body),
+    do: decode_known_reason(body, @known_503_reasons, status_reason(method, 503))
+
+  defp status_reason_from_body(_operation, method, status, _body),
+    do: status_reason(method, status)
+
+  defp catchup_status_reason(404, _body), do: :parent_manifest_not_found
+  defp catchup_status_reason(410, _body), do: :parent_manifest_expired
+
+  defp catchup_status_reason(status, body) when status in [400, 409, 503],
+    do: decode_known_reason(body, @known_catchup_reasons, status_reason(:post, status))
+
+  defp catchup_status_reason(status, _body), do: status_reason(:post, status)
+
+  defp decode_known_reason(body, known_reasons, fallback) do
     case Jason.decode(body) do
       {:ok, %{"error" => error}} when is_binary(error) ->
-        case Enum.find(@known_503_reasons, &(Atom.to_string(&1) == error)) do
-          nil -> status_reason(method, status)
+        case Enum.find(known_reasons, &(Atom.to_string(&1) == error)) do
+          nil -> fallback
           reason -> reason
         end
 
       _error ->
-        status_reason(method, status)
+        fallback
     end
   end
-
-  defp status_reason_from_body(method, status, _body), do: status_reason(method, status)
 
   defp emit_stop(operation, status, duration) do
     Telemetry.emit(Telemetry.rest_request_stop(), %{count: 1, duration: duration}, %{
@@ -709,13 +842,13 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexClient do
     })
   end
 
-  defp failure_from_status(operation, method, status, body) do
+  defp failure_from_status(operation, method, status, body, _response_contract) do
     reason =
       if method == :post and status not in [400, 401, 403, 404, 409, 410] and
            status not in 500..599 do
         :ambiguous_create
       else
-        status_reason_from_body(method, status, body)
+        status_reason_from_body(operation, method, status, body)
       end
 
     emit_exception(operation, reason, status)

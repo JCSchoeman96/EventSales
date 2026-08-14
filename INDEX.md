@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-352
+354
 
 ## Files
 
@@ -143,6 +143,8 @@ Project root: `.`
 - `lib/event_sales/ingestion/event_structural_certifier.ex`
 - `lib/event_sales/ingestion/findings_csv_export.ex`
 - `lib/event_sales/ingestion/handlers/product_updated_handler.ex`
+- `lib/event_sales/ingestion/historical_catchup_bootstrap.ex`
+- `lib/event_sales/ingestion/historical_catchup_evidence.ex`
 - `lib/event_sales/ingestion/historical_manifest_bootstrap.ex`
 - `lib/event_sales/ingestion/historical_manifest_evidence.ex`
 - `lib/event_sales/ingestion/historical_manifest_execution.ex`
@@ -1060,8 +1062,8 @@ Project root: `.`
 - `EventSales.Ingestion.Clients.WooOrderIndexClient` - `lib/event_sales/ingestion/clients/woo_order_index_client.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 7
-  - public_funs: `create_manifest/5`, `fetch_manifest_page/3`, `validate_configuration/1`, `configured_base_url/1`, `canonical_query_string/1`, `canonical_signature_input/6`, `signature/7`
+  - docs_count: 9
+  - public_funs: `create_manifest/5`, `create_catchup_manifest/4`, `fetch_manifest_page/3`, `fetch_catchup_page/3`, `validate_configuration/1`, `configured_base_url/1`, `canonical_query_string/1`, `canonical_signature_input/6`, `signature/7`
   - uses: _none_
 - `Page` - `lib/event_sales/ingestion/clients/woo_order_index_client.ex`
   - moduledoc?: true
@@ -1134,6 +1136,18 @@ Project root: `.`
   - specs?: true
   - docs_count: 1
   - public_funs: `handle/1`
+  - uses: _none_
+- `EventSales.Ingestion.HistoricalCatchupBootstrap` - `lib/event_sales/ingestion/historical_catchup_bootstrap.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `ensure_catchup/2`
+  - uses: _none_
+- `EventSales.Ingestion.HistoricalCatchupEvidence` - `lib/event_sales/ingestion/historical_catchup_evidence.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 12
+  - public_funs: `metadata_key/0`, `claim_metadata/0`, `state/1`, `from_page/2`, `from_metadata/1`, `metadata/1`, `encoded_size/1`, `canonical_metadata/2`, `metadata_max_bytes/0`, `validate_unexpired/2`, `validate_parent/1`, `validate_parent_binding/2`
   - uses: _none_
 - `EventSales.Ingestion.HistoricalManifestBootstrap` - `lib/event_sales/ingestion/historical_manifest_bootstrap.ex`
   - moduledoc?: true

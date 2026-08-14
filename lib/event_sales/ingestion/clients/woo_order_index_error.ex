@@ -15,6 +15,15 @@ defmodule EventSales.Ingestion.Clients.WooOrderIndexError do
           | :manifest_expired
           | :manifest_not_found
           | :manifest_unavailable
+          | :parent_manifest_not_found
+          | :parent_manifest_expired
+          | :parent_manifest_invalid
+          | :parent_manifest_not_ready
+          | :parent_manifest_changed
+          | :parent_manifest_wrong_phase
+          | :parent_manifest_wrong_source
+          | :catchup_member_unresolved
+          | :source_snapshot_before_parent
           | :source_authority_changed
           | :capture_budget_exceeded
           | :manifest_storage_failed
