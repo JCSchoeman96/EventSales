@@ -81,6 +81,10 @@ defmodule EventSales.Sales.Resources.OrderItem do
   actions do
     defaults [:read]
 
+    destroy :destroy_source_absent do
+      require_atomic? false
+    end
+
     create :create_normalized do
       accept @create_accept
       change ValidateTicketTypeEvent
@@ -89,6 +93,23 @@ defmodule EventSales.Sales.Resources.OrderItem do
 
     update :sync_from_order do
       accept [
+        :woo_product_id,
+        :woo_variation_id,
+        :name,
+        :quantity,
+        :line_subtotal,
+        :line_total,
+        :discount_total,
+        :source_tickera_event_id,
+        :attribution_status_reason
+      ]
+
+      validate compare(:quantity, greater_than: 0)
+    end
+
+    update :sync_from_event_reconciliation do
+      accept [
+        :event_id,
         :woo_product_id,
         :woo_variation_id,
         :name,

@@ -13,6 +13,7 @@ defmodule EventSales.Sales.OrderUpserter do
   alias EventSales.Sales.SourceVersionGuard
 
   @type upsert_result :: {:ok, Order.t()} | {:ok, :stale_noop} | {:error, term()}
+  @type reconcile_result :: upsert_result()
 
   @doc """
   Parses and persists a WooCommerce order payload for a source system.
@@ -23,6 +24,57 @@ defmodule EventSales.Sales.OrderUpserter do
       when is_binary(source_system_id) and is_map(payload) do
     with {:ok, normalized} <- WoocommerceOrderParser.parse(payload) do
       upsert_normalized_order(source_system_id, normalized, opts)
+    end
+  end
+
+  @doc """
+  Reconciles the exact current line-item subset for one historical event.
+
+  The full source order remains authoritative for the order header and coupons;
+  only its line_items field is replaced with the supplied event subset before
+  the existing WooCommerce parser and source-version guard are used.
+  """
+  @spec reconcile_event_order(Ecto.UUID.t(), Ecto.UUID.t(), map(), list()) :: reconcile_result()
+  @spec reconcile_event_order(Ecto.UUID.t(), Ecto.UUID.t(), map(), list(), keyword()) ::
+          reconcile_result()
+  def reconcile_event_order(
+        source_system_id,
+        event_id,
+        full_order_payload,
+        event_line_items,
+        opts \\ []
+      ) do
+    with :ok <- validate_reconciliation_ids(source_system_id, event_id),
+         {:ok, full_source_lines} <- validate_full_order_payload(full_order_payload),
+         {:ok, current_event_line_ids} <-
+           validate_event_line_subset(full_source_lines, event_line_items),
+         {:ok, normalized} <-
+           WoocommerceOrderParser.parse(
+             Map.put(full_order_payload, "line_items", event_line_items)
+           ) do
+      normalized = put_event_id_on_lines(normalized, event_id)
+
+      reconciliation_opts =
+        opts
+        |> Keyword.put(:event_reconciliation?, true)
+        |> Keyword.put(:map_pending_items?, false)
+
+      case upsert_normalized_order(source_system_id, normalized, reconciliation_opts) do
+        {:ok, :stale_noop} = stale ->
+          stale
+
+        {:ok, %Order{} = order} ->
+          reconcile_accepted_order(
+            order,
+            event_id,
+            current_event_line_ids,
+            normalized.coupons,
+            opts
+          )
+
+        {:error, _reason} = error ->
+          error
+      end
     end
   end
 
@@ -94,8 +146,18 @@ defmodule EventSales.Sales.OrderUpserter do
 
   defp upsert_child_rows(%Order{} = order, normalized, opts) do
     with :ok <- upsert_order_items(order, normalized.line_items, opts),
-         :ok <- upsert_coupons(order, normalized.coupons, opts),
-         {:ok, _mapped_items} <- OrderItemMapper.map_pending_items_for_order(order) do
+         :ok <- upsert_coupons(order, normalized.coupons, opts) do
+      maybe_map_pending_items(order, opts)
+    end
+  end
+
+  defp maybe_map_pending_items(%Order{} = order, opts) do
+    if Keyword.get(opts, :map_pending_items?, true) do
+      case OrderItemMapper.map_pending_items_for_order(order) do
+        {:ok, _mapped_items} -> :ok
+        {:error, reason} -> {:error, reason}
+      end
+    else
       :ok
     end
   end
@@ -136,10 +198,15 @@ defmodule EventSales.Sales.OrderUpserter do
 
       {:ok, %OrderItem{} = existing} ->
         action =
-          if mapped_import_line?(line_item) do
-            :sync_from_mapped_import
-          else
-            :sync_from_order
+          cond do
+            Keyword.get(opts, :event_reconciliation?, false) ->
+              :sync_from_event_reconciliation
+
+            mapped_import_line?(line_item) ->
+              :sync_from_mapped_import
+
+            true ->
+              :sync_from_order
           end
 
         attrs = order_item_update_attrs(existing, line_item, action)
@@ -190,6 +257,147 @@ defmodule EventSales.Sales.OrderUpserter do
       :attribution_status_reason
     ])
     |> protect_mapped_source_identity(existing, line_item)
+  end
+
+  defp order_item_update_attrs(
+         %OrderItem{} = existing,
+         line_item,
+         :sync_from_event_reconciliation
+       ) do
+    line_item
+    |> Map.take([
+      :event_id,
+      :woo_product_id,
+      :woo_variation_id,
+      :name,
+      :quantity,
+      :line_subtotal,
+      :line_total,
+      :discount_total,
+      :source_tickera_event_id,
+      :attribution_status_reason
+    ])
+    |> protect_mapped_source_identity(existing, line_item)
+  end
+
+  defp validate_reconciliation_ids(source_system_id, event_id) do
+    if valid_uuid?(source_system_id) and valid_uuid?(event_id) do
+      :ok
+    else
+      {:error, {:invalid_order_reconciliation, :identifiers}}
+    end
+  end
+
+  defp valid_uuid?(value) when is_binary(value) do
+    match?({:ok, _uuid}, Ecto.UUID.cast(value))
+  end
+
+  defp valid_uuid?(_value), do: false
+
+  defp validate_full_order_payload(full_order_payload) when is_map(full_order_payload) do
+    with :ok <- validate_positive_order_id(full_order_payload),
+         {:ok, full_source_lines} <- fetch_source_lines(full_order_payload),
+         :ok <- validate_source_lines(full_source_lines) do
+      {:ok, full_source_lines}
+    end
+  end
+
+  defp validate_full_order_payload(_full_order_payload),
+    do: {:error, {:invalid_order_reconciliation, :full_order_payload}}
+
+  defp validate_positive_order_id(%{"id" => order_id}) when is_integer(order_id) and order_id > 0,
+    do: :ok
+
+  defp validate_positive_order_id(_payload),
+    do: {:error, {:invalid_order_reconciliation, :order_id}}
+
+  defp fetch_source_lines(%{"line_items" => line_items}) when is_list(line_items),
+    do: {:ok, line_items}
+
+  defp fetch_source_lines(_payload),
+    do: {:error, {:invalid_order_reconciliation, :line_items}}
+
+  defp validate_source_lines(lines) do
+    with :ok <- validate_line_shapes(lines) do
+      validate_unique_line_ids(lines)
+    end
+  end
+
+  defp validate_line_shapes(lines) do
+    Enum.reduce_while(lines, :ok, fn line, :ok ->
+      if valid_source_line?(line) do
+        {:cont, :ok}
+      else
+        {:halt, {:error, {:invalid_order_reconciliation, :line_item_identity}}}
+      end
+    end)
+  end
+
+  defp valid_source_line?(line) when is_map(line) do
+    positive_integer?(Map.get(line, "id")) and
+      positive_integer?(Map.get(line, "product_id")) and
+      valid_variation_id?(Map.get(line, "variation_id"))
+  end
+
+  defp valid_source_line?(_line), do: false
+
+  defp positive_integer?(value), do: is_integer(value) and value > 0
+
+  defp valid_variation_id?(nil), do: true
+  defp valid_variation_id?(value), do: is_integer(value) and value >= 0
+
+  defp validate_unique_line_ids(lines) do
+    ids = Enum.map(lines, &Map.get(&1, "id"))
+
+    if length(ids) == length(Enum.uniq(ids)) do
+      :ok
+    else
+      {:error, {:invalid_order_reconciliation, :duplicate_line_item_id}}
+    end
+  end
+
+  defp validate_event_line_subset(full_source_lines, event_line_items)
+       when is_list(event_line_items) do
+    with :ok <- validate_source_lines(event_line_items),
+         :ok <- validate_subset_membership(full_source_lines, event_line_items) do
+      {:ok, Enum.map(event_line_items, &Map.get(&1, "id"))}
+    end
+  end
+
+  defp validate_event_line_subset(_full_source_lines, _event_line_items),
+    do: {:error, {:invalid_order_reconciliation, :event_line_items}}
+
+  defp validate_subset_membership(full_source_lines, event_line_items) do
+    Enum.reduce_while(event_line_items, :ok, fn event_line, :ok ->
+      if Enum.any?(full_source_lines, &same_source_line?(&1, event_line)) do
+        {:cont, :ok}
+      else
+        {:halt, {:error, {:invalid_order_reconciliation, :event_line_membership}}}
+      end
+    end)
+  end
+
+  defp same_source_line?(left, right) when left == right, do: true
+
+  defp same_source_line?(left, right) do
+    source_line_identity(left) == source_line_identity(right)
+  end
+
+  defp source_line_identity(line) do
+    {Map.get(line, "id"), Map.get(line, "product_id"), Map.get(line, "variation_id")}
+  end
+
+  defp put_event_id_on_lines(normalized, event_id) do
+    Map.update!(normalized, :line_items, fn lines ->
+      Enum.map(lines, &Map.put(&1, :event_id, event_id))
+    end)
+  end
+
+  defp reconcile_accepted_order(order, event_id, current_event_line_ids, current_coupons, opts) do
+    with :ok <- remove_absent_event_items(order, event_id, current_event_line_ids, opts),
+         :ok <- remove_absent_coupons(order, current_coupons, opts) do
+      {:ok, order}
+    end
   end
 
   defp protect_mapped_source_identity(
@@ -297,6 +505,69 @@ defmodule EventSales.Sales.OrderUpserter do
     |> Ash.read_one(domain: Sales)
   end
 
+  defp remove_absent_event_items(%Order{id: order_id}, event_id, current_line_ids, opts) do
+    current_line_ids = MapSet.new(current_line_ids)
+
+    OrderItem
+    |> Ash.Query.filter(order_id == ^order_id and event_id == ^event_id)
+    |> Ash.read(domain: Sales)
+    |> handle_event_item_read(current_line_ids, opts)
+  end
+
+  defp handle_event_item_read({:ok, items}, current_line_ids, opts) do
+    Enum.reduce_while(items, :ok, fn item, :ok ->
+      item
+      |> remove_event_item_if_absent(current_line_ids, opts)
+      |> continue_or_halt()
+    end)
+  end
+
+  defp handle_event_item_read({:error, reason}, _current_line_ids, _opts),
+    do: {:error, reason}
+
+  defp continue_or_halt(:ok), do: {:cont, :ok}
+  defp continue_or_halt({:error, reason}), do: {:halt, {:error, reason}}
+  defp continue_or_halt(other), do: {:halt, other}
+
+  defp remove_event_item_if_absent(item, current_line_ids, opts) do
+    if MapSet.member?(current_line_ids, item.woo_line_item_id) do
+      :ok
+    else
+      ash_destroy(item, :destroy_source_absent, opts)
+    end
+  end
+
+  defp remove_absent_coupons(%Order{id: order_id}, current_coupons, opts) do
+    current_coupon_codes =
+      current_coupons
+      |> Enum.map(& &1.code)
+      |> MapSet.new()
+
+    CouponSnapshot
+    |> Ash.Query.filter(order_id == ^order_id)
+    |> Ash.read(domain: Sales)
+    |> handle_coupon_read(current_coupon_codes, opts)
+  end
+
+  defp handle_coupon_read({:ok, coupons}, current_coupon_codes, opts) do
+    Enum.reduce_while(coupons, :ok, fn coupon, :ok ->
+      coupon
+      |> remove_coupon_if_absent(current_coupon_codes, opts)
+      |> continue_or_halt()
+    end)
+  end
+
+  defp handle_coupon_read({:error, reason}, _current_coupon_codes, _opts),
+    do: {:error, reason}
+
+  defp remove_coupon_if_absent(coupon, current_coupon_codes, opts) do
+    if MapSet.member?(current_coupon_codes, coupon.code) do
+      :ok
+    else
+      ash_destroy(coupon, :destroy_source_absent, opts)
+    end
+  end
+
   defp ash_opts(opts, action) do
     opts
     |> Keyword.get(:ash_action_opts, [])
@@ -316,6 +587,22 @@ defmodule EventSales.Sales.OrderUpserter do
       other -> other
     end
   end
+
+  defp ash_destroy(record, action, opts) do
+    case Keyword.get(opts, :source_absent_destroyer) do
+      destroyer when is_function(destroyer, 3) ->
+        result = destroyer.(record, action, ash_opts(opts, action))
+        normalize_destroy_result(result)
+
+      _missing ->
+        normalize_destroy_result(Ash.destroy(record, ash_opts(opts, action)))
+    end
+  end
+
+  defp normalize_destroy_result({:ok, _record, _notifications}), do: :ok
+  defp normalize_destroy_result({:ok, _record}), do: :ok
+  defp normalize_destroy_result(:ok), do: :ok
+  defp normalize_destroy_result(other), do: other
 
   defp order_attrs(source_system_id, normalized) do
     normalized

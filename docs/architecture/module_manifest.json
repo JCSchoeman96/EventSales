@@ -5383,7 +5383,7 @@
       "uses": []
     },
     {
-      "docs_count": 3,
+      "docs_count": 4,
       "moduledoc?": true,
       "name": "EventSales.Sales.OrderUpserter",
       "parse_error": null,
@@ -5392,6 +5392,10 @@
         {
           "arity": 3,
           "name": "upsert_order"
+        },
+        {
+          "arity": 5,
+          "name": "reconcile_event_order"
         },
         {
           "arity": 3,
