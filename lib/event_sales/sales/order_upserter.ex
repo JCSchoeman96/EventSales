@@ -133,8 +133,9 @@ defmodule EventSales.Sales.OrderUpserter do
         end
 
       DateTime.compare(existing.updated_at_source, normalized.updated_at_source) == :eq ->
-        with :ok <- upsert_child_rows(existing, normalized, opts) do
-          {:ok, existing}
+        with {:ok, order} <- maybe_hydrate_paid_at(existing, normalized, opts),
+             :ok <- upsert_equal_version_children(order, normalized, opts) do
+          {:ok, order}
         end
 
       true ->
@@ -184,6 +185,7 @@ defmodule EventSales.Sales.OrderUpserter do
             :quantity,
             :line_subtotal,
             :line_total,
+            :line_total_tax,
             :discount_total,
             :item_kind,
             :mapping_status,
@@ -234,6 +236,7 @@ defmodule EventSales.Sales.OrderUpserter do
       :quantity,
       :line_subtotal,
       :line_total,
+      :line_total_tax,
       :discount_total,
       :source_tickera_event_id,
       :attribution_status_reason
@@ -250,6 +253,7 @@ defmodule EventSales.Sales.OrderUpserter do
       :quantity,
       :line_subtotal,
       :line_total,
+      :line_total_tax,
       :discount_total,
       :source_tickera_event_id,
       :attribution_status_reason
@@ -272,8 +276,69 @@ defmodule EventSales.Sales.OrderUpserter do
       :quantity,
       :line_subtotal,
       :line_total,
+      :line_total_tax,
       :discount_total
     ])
+  end
+
+  defp maybe_hydrate_paid_at(
+         %Order{paid_at: nil} = existing,
+         %{
+           paid_at: %DateTime{} = paid_at,
+           updated_at_source: %DateTime{} = expected_updated_at_source
+         },
+         opts
+       ) do
+    case ash_update(
+           existing,
+           %{
+             paid_at: paid_at,
+             expected_updated_at_source: expected_updated_at_source
+           },
+           :hydrate_paid_at,
+           opts
+         ) do
+      {:ok, order} ->
+        {:ok, order}
+
+      {:error, %Ash.Error.Invalid{errors: errors} = error} ->
+        if stale_record_error?(errors) do
+          refetch_after_paid_at_hydration_race(existing, error)
+        else
+          {:error, error}
+        end
+
+      other ->
+        other
+    end
+  end
+
+  defp maybe_hydrate_paid_at(%Order{} = existing, _normalized, _opts), do: {:ok, existing}
+
+  defp upsert_equal_version_children(
+         %Order{updated_at_source: current_source_version} = order,
+         %{updated_at_source: incoming_source_version} = normalized,
+         opts
+       ) do
+    if DateTime.compare(current_source_version, incoming_source_version) == :eq do
+      upsert_child_rows(order, normalized, opts)
+    else
+      :ok
+    end
+  end
+
+  defp stale_record_error?(errors) when is_list(errors) do
+    Enum.any?(errors, &match?(%Ash.Error.Changes.StaleRecord{}, &1))
+  end
+
+  defp stale_record_error?(_errors), do: false
+
+  defp refetch_after_paid_at_hydration_race(existing, original_error) do
+    case find_order(existing.source_system_id, existing.woo_order_id) do
+      {:ok, %Order{} = current} -> {:ok, current}
+      {:ok, nil} -> {:error, original_error}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   defp validate_reconciliation_ids(source_system_id, event_id) do
@@ -632,6 +697,7 @@ defmodule EventSales.Sales.OrderUpserter do
       :status,
       :currency,
       :completed_at,
+      :paid_at,
       :created_at_source,
       :updated_at_source,
       :customer_name,

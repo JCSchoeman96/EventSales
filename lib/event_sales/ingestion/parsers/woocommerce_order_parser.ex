@@ -20,6 +20,7 @@ defmodule EventSales.Ingestion.Parsers.WoocommerceOrderParser do
            required_gmt_datetime(payload, "date_modified_gmt", :date_modified_gmt),
          {:ok, completed_at} <-
            optional_gmt_datetime(payload, "date_completed_gmt", :date_completed_gmt),
+         {:ok, paid_at} <- optional_gmt_datetime(payload, "date_paid_gmt", :date_paid_gmt),
          {:ok, raw_total} <- required_decimal(payload, "total", :total),
          {:ok, raw_discount_total} <- optional_decimal(payload, "discount_total", :discount_total),
          {:ok, raw_tax_total} <- optional_decimal(payload, "total_tax", :total_tax),
@@ -32,6 +33,7 @@ defmodule EventSales.Ingestion.Parsers.WoocommerceOrderParser do
          status: status,
          currency: currency,
          completed_at: completed_at,
+         paid_at: paid_at,
          created_at_source: created_at_source,
          updated_at_source: updated_at_source,
          customer_name: customer_name(Map.get(payload, "billing")),
@@ -82,6 +84,7 @@ defmodule EventSales.Ingestion.Parsers.WoocommerceOrderParser do
          {:ok, quantity} <- positive_integer(line, "quantity", :quantity),
          {:ok, line_subtotal} <- required_decimal(line, "subtotal", :line_subtotal),
          {:ok, line_total} <- required_decimal(line, "total", :line_total),
+         {:ok, line_total_tax} <- nullable_decimal(line, "total_tax", :line_total_tax),
          {:ok, woo_variation_id} <- optional_integer(line, "variation_id", :variation_id),
          {:ok, discount_total} <- line_discount_total(line, line_subtotal, line_total),
          {:ok, source_tickera_event_id, attribution_status_reason} <-
@@ -95,6 +98,7 @@ defmodule EventSales.Ingestion.Parsers.WoocommerceOrderParser do
          quantity: quantity,
          line_subtotal: line_subtotal,
          line_total: line_total,
+         line_total_tax: line_total_tax,
          discount_total: discount_total,
          item_kind: :unknown,
          mapping_status: :pending_mapping_resolution,
@@ -237,6 +241,26 @@ defmodule EventSales.Ingestion.Parsers.WoocommerceOrderParser do
 
   defp optional_decimal(payload, key, field),
     do: parse_decimal(Map.get(payload, key), field, false)
+
+  defp nullable_decimal(payload, key, field) do
+    case Map.get(payload, key) do
+      nil ->
+        {:ok, nil}
+
+      value ->
+        parse_nullable_decimal(value, field)
+    end
+  end
+
+  defp parse_nullable_decimal(value, field) do
+    with {:ok, %Decimal{} = decimal} <- parse_decimal(value, field, true),
+         false <- Decimal.nan?(decimal) or Decimal.inf?(decimal) do
+      {:ok, decimal}
+    else
+      true -> {:error, {:invalid_order_payload, field, :invalid}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
 
   defp parse_decimal(nil, field, true), do: {:error, {:invalid_order_payload, field, :required}}
   defp parse_decimal(nil, _field, false), do: {:ok, Decimal.new("0")}

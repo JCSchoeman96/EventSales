@@ -38,6 +38,7 @@ defmodule EventSales.Sales.Resources.OrderItem do
     :quantity,
     :line_subtotal,
     :line_total,
+    :line_total_tax,
     :discount_total,
     :item_kind,
     :mapping_status,
@@ -99,6 +100,7 @@ defmodule EventSales.Sales.Resources.OrderItem do
         :quantity,
         :line_subtotal,
         :line_total,
+        :line_total_tax,
         :discount_total,
         :source_tickera_event_id,
         :attribution_status_reason
@@ -117,6 +119,7 @@ defmodule EventSales.Sales.Resources.OrderItem do
         :quantity,
         :line_subtotal,
         :line_total,
+        :line_total_tax,
         :discount_total
       ]
 
@@ -133,6 +136,7 @@ defmodule EventSales.Sales.Resources.OrderItem do
         :quantity,
         :line_subtotal,
         :line_total,
+        :line_total_tax,
         :discount_total,
         :source_tickera_event_id,
         :attribution_status_reason
@@ -243,6 +247,10 @@ defmodule EventSales.Sales.Resources.OrderItem do
 
     attribute :line_total, :decimal do
       allow_nil? false
+      public? true
+    end
+
+    attribute :line_total_tax, :decimal do
       public? true
     end
 
