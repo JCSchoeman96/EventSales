@@ -2,9 +2,10 @@ defmodule EventSales.Ingestion.HistoricalCatchupEvidence do
   @moduledoc """
   Bounded, durable evidence for the immutable historical catch-up manifest.
 
-  Catch-up evidence stores only the child manifest identity and its source
-  high-water timestamp. It deliberately does not store page items, cursors,
-  terminal proofs, or a duplicate of the parent manifest binding.
+  Catch-up evidence stores only the child manifest identity, its source
+  high-water timestamp, and one bounded continuation proof. It deliberately
+  does not store page items, identity arrays, or a duplicate of the parent
+  manifest binding.
   """
 
   alias EventSales.Ingestion.Clients.WooOrderIndexClient.Page
@@ -15,6 +16,8 @@ defmodule EventSales.Ingestion.HistoricalCatchupEvidence do
   @phase "catch_up"
   @pending_state "pending_first_page"
   @claim_state "create_claimed"
+  @in_progress_state "catchup_in_progress"
+  @terminal_state "catchup_terminal"
   @metadata_max_bytes 2048
   @max_boundary_token_bytes 128
   @max_opaque_evidence_bytes 512
@@ -35,6 +38,9 @@ defmodule EventSales.Ingestion.HistoricalCatchupEvidence do
     "state"
   ]
 
+  @in_progress_keys @evidence_keys ++ ["next_cursor"]
+  @terminal_keys @evidence_keys ++ ["terminal_evidence"]
+
   @type t :: %__MODULE__{
           schema_version: String.t(),
           phase: String.t(),
@@ -42,7 +48,9 @@ defmodule EventSales.Ingestion.HistoricalCatchupEvidence do
           manifest_hash: String.t(),
           manifest_expires_at: DateTime.t(),
           source_observed_at: DateTime.t(),
-          state: String.t()
+          state: String.t(),
+          next_cursor: String.t() | nil,
+          terminal_evidence: String.t() | nil
         }
 
   @type reason ::
@@ -54,6 +62,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupEvidence do
           | :metadata_not_json_encodable
           | :invalid_parent_manifest
           | :catchup_high_water_before_parent
+          | :catchup_continuity_mismatch
 
   defstruct [
     :schema_version,
@@ -62,7 +71,9 @@ defmodule EventSales.Ingestion.HistoricalCatchupEvidence do
     :manifest_hash,
     :manifest_expires_at,
     :source_observed_at,
-    :state
+    :state,
+    :next_cursor,
+    :terminal_evidence
   ]
 
   @doc "Returns the stable top-level metadata namespace used by this evidence."
@@ -74,7 +85,13 @@ defmodule EventSales.Ingestion.HistoricalCatchupEvidence do
   def claim_metadata, do: %{@metadata_key => %{"state" => @claim_state}}
 
   @doc "Classifies the catch-up namespace without performing I/O."
-  @spec state(map()) :: :missing | :create_claimed | :pending_first_page | :corrupt
+  @spec state(map()) ::
+          :missing
+          | :create_claimed
+          | :pending_first_page
+          | :catchup_in_progress
+          | :catchup_terminal
+          | :corrupt
   def state(metadata) when is_map(metadata) do
     case Map.fetch(metadata, @metadata_key) do
       :error -> if Map.has_key?(metadata, :historical_catchup), do: :corrupt, else: :missing
@@ -92,6 +109,12 @@ defmodule EventSales.Ingestion.HistoricalCatchupEvidence do
     case raw["state"] do
       @pending_state ->
         if valid_pending_namespace?(raw), do: :pending_first_page, else: :corrupt
+
+      @in_progress_state ->
+        if valid_in_progress_namespace?(raw), do: :catchup_in_progress, else: :corrupt
+
+      @terminal_state ->
+        if valid_terminal_namespace?(raw), do: :catchup_terminal, else: :corrupt
 
       _other ->
         :corrupt
@@ -111,16 +134,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupEvidence do
          {:ok, source_observed_at} <- utc_datetime(fields.source_observed_at),
          :ok <- validate_child_boundary(fields.boundary_token, parent.boundary_token),
          :ok <- validate_high_water(source_observed_at, parent.source_observed_at) do
-      {:ok,
-       %__MODULE__{
-         schema_version: fields.schema_version,
-         phase: fields.phase,
-         boundary_token: fields.boundary_token,
-         manifest_hash: fields.manifest_hash,
-         manifest_expires_at: manifest_expires_at,
-         source_observed_at: source_observed_at,
-         state: @pending_state
-       }}
+      {:ok, build_evidence(fields, manifest_expires_at, source_observed_at, @pending_state)}
     else
       {:error, reason}
       when reason in [:invalid_parent_manifest, :catchup_high_water_before_parent] ->
@@ -133,15 +147,15 @@ defmodule EventSales.Ingestion.HistoricalCatchupEvidence do
 
   def from_page(_page, _parent), do: {:error, :invalid_parent_manifest}
 
-  @doc "Parses and strictly validates pending child metadata."
+  @doc "Parses and strictly validates one legal child metadata namespace."
   @spec from_metadata(map()) :: {:ok, t()} | {:error, reason()}
   def from_metadata(metadata) when is_map(metadata) do
     with {:ok, raw} <- fetch_namespace(metadata),
-         :ok <- keys_match?(raw, @evidence_keys),
+         :ok <- validate_evidence_keys(raw),
          :ok <- validate_common_values(raw),
          {:ok, manifest_expires_at} <- utc_wire_datetime(raw["manifest_expires_at_gmt"]),
          {:ok, source_observed_at} <- utc_wire_datetime(raw["source_observed_at_gmt"]),
-         true <- raw["state"] == @pending_state do
+         :ok <- validate_state_values(raw) do
       {:ok,
        %__MODULE__{
          schema_version: raw["schema_version"],
@@ -150,7 +164,9 @@ defmodule EventSales.Ingestion.HistoricalCatchupEvidence do
          manifest_hash: raw["manifest_hash"],
          manifest_expires_at: manifest_expires_at,
          source_observed_at: source_observed_at,
-         state: raw["state"]
+         state: raw["state"],
+         next_cursor: raw["next_cursor"],
+         terminal_evidence: raw["terminal_evidence"]
        }}
     else
       _error -> {:error, :invalid_catchup_evidence}
@@ -162,17 +178,51 @@ defmodule EventSales.Ingestion.HistoricalCatchupEvidence do
   @doc "Returns the canonical nested metadata representation for durable storage."
   @spec metadata(t()) :: %{String.t() => map()}
   def metadata(%__MODULE__{} = evidence) do
+    namespace = %{
+      "schema_version" => evidence.schema_version,
+      "phase" => evidence.phase,
+      "boundary_token" => evidence.boundary_token,
+      "manifest_hash" => evidence.manifest_hash,
+      "manifest_expires_at_gmt" => DateTime.to_iso8601(evidence.manifest_expires_at),
+      "source_observed_at_gmt" => DateTime.to_iso8601(evidence.source_observed_at),
+      "state" => evidence.state
+    }
+
+    namespace =
+      case evidence.state do
+        @in_progress_state -> Map.put(namespace, "next_cursor", evidence.next_cursor)
+        @terminal_state -> Map.put(namespace, "terminal_evidence", evidence.terminal_evidence)
+        _other -> namespace
+      end
+
     %{
       @metadata_key => %{
-        "schema_version" => evidence.schema_version,
-        "phase" => evidence.phase,
-        "boundary_token" => evidence.boundary_token,
-        "manifest_hash" => evidence.manifest_hash,
-        "manifest_expires_at_gmt" => DateTime.to_iso8601(evidence.manifest_expires_at),
-        "source_observed_at_gmt" => DateTime.to_iso8601(evidence.source_observed_at),
-        "state" => evidence.state
+        "schema_version" => namespace["schema_version"],
+        "phase" => namespace["phase"],
+        "boundary_token" => namespace["boundary_token"],
+        "manifest_hash" => namespace["manifest_hash"],
+        "manifest_expires_at_gmt" => namespace["manifest_expires_at_gmt"],
+        "source_observed_at_gmt" => namespace["source_observed_at_gmt"],
+        "state" => namespace["state"]
       }
     }
+    |> put_optional_metadata(namespace, "next_cursor")
+    |> put_optional_metadata(namespace, "terminal_evidence")
+  end
+
+  @doc "Builds the exact in-progress metadata state for a persisted U cursor."
+  @spec in_progress_metadata(t(), String.t()) :: %{String.t() => map()}
+  def in_progress_metadata(%__MODULE__{} = evidence, next_cursor) when is_binary(next_cursor) do
+    %{evidence | state: @in_progress_state, next_cursor: next_cursor, terminal_evidence: nil}
+    |> metadata()
+  end
+
+  @doc "Builds the exact terminal metadata state for an explicit U proof."
+  @spec terminal_metadata(t(), String.t()) :: %{String.t() => map()}
+  def terminal_metadata(%__MODULE__{} = evidence, terminal_evidence)
+      when is_binary(terminal_evidence) do
+    %{evidence | state: @terminal_state, next_cursor: nil, terminal_evidence: terminal_evidence}
+    |> metadata()
   end
 
   @doc "Returns the encoded byte size of a JSON-encodable metadata map."
@@ -239,7 +289,8 @@ defmodule EventSales.Ingestion.HistoricalCatchupEvidence do
   @spec validate_parent_binding(t(), HistoricalManifestEvidence.t()) ::
           :ok | {:error, :invalid_parent_manifest | :invalid_catchup_evidence | reason()}
   def validate_parent_binding(%__MODULE__{} = child, %HistoricalManifestEvidence{} = parent) do
-    with true <- child.state == @pending_state,
+    with true <- child.state in [@pending_state, @in_progress_state, @terminal_state],
+         {:ok, _child} <- from_metadata(metadata(child)),
          {:ok, parent} <- validate_parent(parent),
          :ok <- validate_child_boundary(child.boundary_token, parent.boundary_token),
          :ok <- validate_high_water(child.source_observed_at, parent.source_observed_at) do
@@ -253,6 +304,21 @@ defmodule EventSales.Ingestion.HistoricalCatchupEvidence do
 
   def validate_parent_binding(_child, _parent), do: {:error, :invalid_parent_manifest}
 
+  @doc "Validates the immutable child identity on one later U page."
+  @spec validate_continuity(t(), Page.t() | map()) ::
+          :ok | {:error, :catchup_continuity_mismatch}
+  def validate_continuity(%__MODULE__{} = evidence, page) when is_map(page) do
+    with {:ok, page_evidence} <- page_evidence(page),
+         true <- same_identity?(evidence, page_evidence) do
+      :ok
+    else
+      _error -> {:error, :catchup_continuity_mismatch}
+    end
+  end
+
+  def validate_continuity(_evidence, _page),
+    do: {:error, :catchup_continuity_mismatch}
+
   defp parent_metadata(parent) do
     HistoricalManifestEvidence.metadata(parent)
   end
@@ -265,19 +331,31 @@ defmodule EventSales.Ingestion.HistoricalCatchupEvidence do
   end
 
   defp valid_pending_namespace?(raw) do
-    with :ok <- keys_match?(raw, @evidence_keys),
+    with :ok <- validate_evidence_keys(raw),
          :ok <- validate_common_values(raw),
          {:ok, _expires_at} <- utc_wire_datetime(raw["manifest_expires_at_gmt"]),
          {:ok, _observed_at} <- utc_wire_datetime(raw["source_observed_at_gmt"]),
-         true <- raw["state"] == @pending_state do
+         :ok <- validate_state_values(raw) do
       true
     else
       _error -> false
     end
   end
 
-  defp keys_match?(raw, expected_keys) do
-    if Enum.sort(Map.keys(raw)) == Enum.sort(expected_keys), do: :ok, else: :error
+  defp valid_in_progress_namespace?(raw), do: valid_namespace?(raw, @in_progress_state)
+  defp valid_terminal_namespace?(raw), do: valid_namespace?(raw, @terminal_state)
+
+  defp valid_namespace?(raw, expected_state) do
+    with :ok <- validate_evidence_keys(raw),
+         :ok <- validate_common_values(raw),
+         {:ok, _expires_at} <- utc_wire_datetime(raw["manifest_expires_at_gmt"]),
+         {:ok, _observed_at} <- utc_wire_datetime(raw["source_observed_at_gmt"]),
+         true <- raw["state"] == expected_state,
+         :ok <- validate_state_values(raw) do
+      true
+    else
+      _error -> false
+    end
   end
 
   defp validate_common_values(raw) do
@@ -288,6 +366,27 @@ defmodule EventSales.Ingestion.HistoricalCatchupEvidence do
        do: :ok,
        else: :error
   end
+
+  defp validate_evidence_keys(raw) do
+    case raw["state"] do
+      @pending_state -> keys_match(raw, @evidence_keys)
+      @in_progress_state -> keys_match(raw, @in_progress_keys)
+      @terminal_state -> keys_match(raw, @terminal_keys)
+      _other -> :error
+    end
+  end
+
+  defp validate_state_values(%{"state" => @pending_state}), do: :ok
+
+  defp validate_state_values(%{"state" => @in_progress_state, "next_cursor" => cursor}) do
+    if valid_cursor?(cursor), do: :ok, else: :error
+  end
+
+  defp validate_state_values(%{"state" => @terminal_state, "terminal_evidence" => evidence}) do
+    if valid_terminal_evidence?(evidence), do: :ok, else: :error
+  end
+
+  defp validate_state_values(_raw), do: :error
 
   defp page_fields(page) when is_struct(page, Page) do
     page = Map.from_struct(page)
@@ -440,6 +539,37 @@ defmodule EventSales.Ingestion.HistoricalCatchupEvidence do
 
   defp validate_paging(_fields), do: {:error, :invalid_catchup_page}
 
+  defp page_evidence(page) do
+    with {:ok, fields} <- page_fields(page),
+         :ok <- validate_page_fields(fields),
+         {:ok, manifest_expires_at} <- utc_datetime(fields.manifest_expires_at),
+         {:ok, source_observed_at} <- utc_datetime(fields.source_observed_at) do
+      {:ok, build_evidence(fields, manifest_expires_at, source_observed_at, @pending_state)}
+    else
+      _error -> {:error, :catchup_continuity_mismatch}
+    end
+  end
+
+  defp build_evidence(fields, manifest_expires_at, source_observed_at, state) do
+    %__MODULE__{
+      schema_version: fields.schema_version,
+      phase: fields.phase,
+      boundary_token: fields.boundary_token,
+      manifest_hash: fields.manifest_hash,
+      manifest_expires_at: manifest_expires_at,
+      source_observed_at: source_observed_at,
+      state: state,
+      next_cursor: nil,
+      terminal_evidence: nil
+    }
+  end
+
+  defp put_optional_metadata(metadata, namespace, key) do
+    if Map.has_key?(namespace, key),
+      do: put_in(metadata, [@metadata_key, key], namespace[key]),
+      else: metadata
+  end
+
   defp validate_child_boundary(child, parent)
        when is_binary(child) and is_binary(parent) and child != parent do
     :ok
@@ -476,6 +606,12 @@ defmodule EventSales.Ingestion.HistoricalCatchupEvidence do
 
   defp valid_cursor?(_value), do: false
 
+  defp valid_terminal_evidence?(value)
+       when is_binary(value) and byte_size(value) in 1..@max_opaque_evidence_bytes,
+       do: true
+
+  defp valid_terminal_evidence?(_value), do: false
+
   defp utc_datetime(%DateTime{} = value) do
     if value.time_zone == "Etc/UTC" and value.utc_offset == 0 and value.std_offset == 0,
       do: {:ok, value},
@@ -497,4 +633,17 @@ defmodule EventSales.Ingestion.HistoricalCatchupEvidence do
   end
 
   defp utc_wire_datetime(_value), do: {:error, :invalid_utc_datetime}
+
+  defp keys_match(raw, expected_keys) do
+    if Enum.sort(Map.keys(raw)) == Enum.sort(expected_keys), do: :ok, else: :error
+  end
+
+  defp same_identity?(left, right) do
+    left.schema_version == right.schema_version and
+      left.phase == right.phase and
+      left.boundary_token == right.boundary_token and
+      left.manifest_hash == right.manifest_hash and
+      DateTime.compare(left.manifest_expires_at, right.manifest_expires_at) == :eq and
+      DateTime.compare(left.source_observed_at, right.source_observed_at) == :eq
+  end
 end

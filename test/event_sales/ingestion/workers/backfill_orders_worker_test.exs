@@ -3,6 +3,7 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorkerTest do
   use Oban.Testing, repo: EventSales.Repo
 
   alias EventSales.Ingestion
+  alias EventSales.Ingestion.HistoricalCatchupEvidence
   alias EventSales.Ingestion.HistoricalManifestEvidence
   alias EventSales.Ingestion.Resources.{SyncCursor, SyncRun}
   alias EventSales.Ingestion.Workers.BackfillOrdersWorker
@@ -64,11 +65,67 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorkerTest do
     end
   end
 
+  defmodule CatchupBootstrapFake do
+    def child_spec(opts), do: %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}}
+
+    def start_link(_opts),
+      do: Agent.start_link(fn -> %{responses: [], calls: []} end, name: __MODULE__)
+
+    def reset!, do: Agent.update(__MODULE__, fn _ -> %{responses: [], calls: []} end)
+
+    def put_response!(response),
+      do: Agent.update(__MODULE__, &Map.update!(&1, :responses, fn xs -> xs ++ [response] end))
+
+    def calls, do: Agent.get(__MODULE__, &Enum.reverse(&1.calls))
+
+    def ensure_catchup(run_id, _opts) do
+      Agent.get_and_update(__MODULE__, fn state ->
+        response = List.first(state.responses) || {:ok, :catchup_evidence}
+        responses = if state.responses == [], do: [], else: tl(state.responses)
+        {response, %{state | responses: responses, calls: [run_id | state.calls]}}
+      end)
+    end
+  end
+
+  defmodule CatchupExecutionFake do
+    def child_spec(opts), do: %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}}
+
+    def start_link(_opts),
+      do: Agent.start_link(fn -> %{responses: [], calls: []} end, name: __MODULE__)
+
+    def reset!, do: Agent.update(__MODULE__, fn _ -> %{responses: [], calls: []} end)
+
+    def put_response!(response),
+      do: Agent.update(__MODULE__, &Map.update!(&1, :responses, fn xs -> xs ++ [response] end))
+
+    def calls, do: Agent.get(__MODULE__, &Enum.reverse(&1.calls))
+
+    def run_step(run, cursor, _opts) do
+      Agent.get_and_update(__MODULE__, fn state ->
+        response = List.first(state.responses) || :continue
+        responses = if state.responses == [], do: [], else: tl(state.responses)
+
+        result =
+          case response do
+            :continue -> {:continue, run, cursor}
+            :ok -> :ok
+            {:error, reason} -> {:error, reason}
+          end
+
+        {result, %{state | responses: responses, calls: [{run.id, cursor.page} | state.calls]}}
+      end)
+    end
+  end
+
   setup do
     start_supervised!(BootstrapFake)
     start_supervised!(ExecutionFake)
+    start_supervised!(CatchupBootstrapFake)
+    start_supervised!(CatchupExecutionFake)
     BootstrapFake.reset!()
     ExecutionFake.reset!()
+    CatchupBootstrapFake.reset!()
+    CatchupExecutionFake.reset!()
 
     original_bootstrap = Application.get_env(:event_sales, :historical_manifest_bootstrap)
     original_execution = Application.get_env(:event_sales, :historical_manifest_execution)
@@ -76,9 +133,18 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorkerTest do
     original_execution_opts =
       Application.get_env(:event_sales, :historical_manifest_execution_opts)
 
+    original_catchup_bootstrap = Application.get_env(:event_sales, :historical_catchup_bootstrap)
+    original_catchup_execution = Application.get_env(:event_sales, :historical_catchup_execution)
+
+    original_catchup_execution_opts =
+      Application.get_env(:event_sales, :historical_catchup_execution_opts)
+
     Application.put_env(:event_sales, :historical_manifest_bootstrap, BootstrapFake)
     Application.put_env(:event_sales, :historical_manifest_execution, ExecutionFake)
     Application.put_env(:event_sales, :historical_manifest_execution_opts, now: fn -> @now end)
+    Application.put_env(:event_sales, :historical_catchup_bootstrap, CatchupBootstrapFake)
+    Application.put_env(:event_sales, :historical_catchup_execution, CatchupExecutionFake)
+    Application.put_env(:event_sales, :historical_catchup_execution_opts, now: fn -> @now end)
 
     source = SalesHelpers.create_source_system!()
 
@@ -92,6 +158,9 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorkerTest do
       restore_env(:historical_manifest_bootstrap, original_bootstrap)
       restore_env(:historical_manifest_execution, original_execution)
       restore_env(:historical_manifest_execution_opts, original_execution_opts)
+      restore_env(:historical_catchup_bootstrap, original_catchup_bootstrap)
+      restore_env(:historical_catchup_execution, original_catchup_execution)
+      restore_env(:historical_catchup_execution_opts, original_catchup_execution_opts)
     end)
 
     {:ok, source: source, event: event, run: run, cursor: cursor}
@@ -109,14 +178,14 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorkerTest do
     assert Ash.get!(SyncRun, run.id, domain: Ingestion).status == :running
   end
 
-  test "terminal manifest result stops the worker without completing the run", %{
+  test "terminal manifest result yields so the next step can bootstrap catch-up", %{
     run: run,
     cursor: cursor
   } do
     BootstrapFake.put_response!({:ok, :evidence})
     ExecutionFake.put_response!(:terminal)
 
-    assert :ok = perform(run.id)
+    assert {:snooze, 1} = perform(run.id)
     updated_run = Ash.get!(SyncRun, run.id, domain: Ingestion)
     updated_cursor = Ash.get!(SyncCursor, cursor.id, domain: Ingestion)
     assert updated_run.status == :running
@@ -129,6 +198,64 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorkerTest do
 
     assert {:discard, :manifest_create_in_doubt} = perform(run.id)
     assert ExecutionFake.calls() == []
+  end
+
+  test "M terminal plus missing U bootstraps and snoozes without a U GET", %{
+    run: run,
+    cursor: cursor
+  } do
+    replace_cursor!(cursor, terminal_manifest_metadata())
+    BootstrapFake.put_response!({:ok, :evidence})
+    CatchupBootstrapFake.put_response!({:ok, :pending_catchup})
+
+    assert {:snooze, 1} = perform(run.id)
+    assert CatchupBootstrapFake.calls() == [run.id]
+    assert CatchupExecutionFake.calls() == []
+    assert ExecutionFake.calls() == []
+  end
+
+  test "M terminal plus pending U executes one page and snoozes", %{run: run, cursor: cursor} do
+    replace_cursor!(cursor, pending_catchup_metadata())
+    BootstrapFake.put_response!({:ok, :evidence})
+    CatchupExecutionFake.put_response!(:continue)
+
+    assert {:snooze, 1} = perform(run.id)
+    assert CatchupBootstrapFake.calls() == []
+    assert CatchupExecutionFake.calls() == [{run.id, 1}]
+    assert ExecutionFake.calls() == []
+  end
+
+  test "recovered transient catch-up failure retains its diagnostic after resume", %{
+    run: run,
+    cursor: cursor
+  } do
+    replace_cursor!(cursor, pending_catchup_metadata())
+    BootstrapFake.put_response!({:ok, :evidence})
+    CatchupExecutionFake.put_response!({:error, :rate_limited})
+
+    assert {:snooze, seconds} = perform(run.id)
+    assert seconds > 0
+
+    paused = Ash.get!(SyncRun, run.id, domain: Ingestion)
+    assert paused.status == :paused
+    assert paused.last_error == "rate_limited"
+
+    resumed = Ash.update!(paused, %{}, action: :resume, domain: Ingestion)
+    assert resumed.status == :running
+    assert resumed.last_error == "rate_limited"
+
+    CatchupExecutionFake.put_response!(:ok)
+    assert :ok = perform(resumed.id)
+    assert CatchupExecutionFake.calls() == [{run.id, 1}, {run.id, 1}]
+  end
+
+  test "terminal U completion returns ok through the worker", %{run: run, cursor: cursor} do
+    replace_cursor!(cursor, pending_catchup_metadata())
+    BootstrapFake.put_response!({:ok, :evidence})
+    CatchupExecutionFake.put_response!(:ok)
+
+    assert :ok = perform(run.id)
+    assert CatchupExecutionFake.calls() == [{run.id, 1}]
   end
 
   test "retryable source failures pause the run and snooze", %{run: run} do
@@ -255,6 +382,59 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorkerTest do
       action: :upsert_active,
       domain: Ingestion
     )
+  end
+
+  defp replace_cursor!(cursor, metadata) do
+    Ash.create!(
+      SyncCursor,
+      %{
+        sync_run_id: cursor.sync_run_id,
+        page: 1,
+        modified_after: cursor.modified_after,
+        modified_before: cursor.modified_before,
+        last_seen_order_id: nil,
+        metadata: metadata
+      },
+      action: :upsert_active,
+      domain: Ingestion
+    )
+  end
+
+  defp terminal_manifest_metadata do
+    %{
+      "historical_manifest" => %{
+        "schema_version" => "2026-08-12.v1",
+        "phase" => "manifest_enumerate",
+        "boundary_token" => "manifest-token",
+        "manifest_hash" => String.duplicate("a", 64),
+        "manifest_expires_at_gmt" => "2026-08-13T13:00:00.000000Z",
+        "source_observed_at_gmt" => "2026-08-13T11:00:00.000000Z",
+        "state" => "manifest_terminal",
+        "terminal_evidence" => "manifest-proof"
+      }
+    }
+  end
+
+  defp pending_catchup_metadata do
+    {:ok, parent} = HistoricalManifestEvidence.from_metadata(terminal_manifest_metadata())
+
+    {:ok, child} =
+      HistoricalCatchupEvidence.from_page(
+        %{
+          "schema_version" => "2026-08-13.catchup.v1",
+          "phase" => "catch_up",
+          "boundary_token" => "catchup-token",
+          "manifest_hash" => String.duplicate("b", 64),
+          "manifest_expires_at_gmt" => "2026-08-13T13:00:00.000000Z",
+          "source_observed_at_gmt" => "2026-08-13T12:00:00.000000Z",
+          "items" => [],
+          "has_more" => false,
+          "terminal_evidence" => "post-proof"
+        },
+        parent
+      )
+
+    Map.merge(terminal_manifest_metadata(), HistoricalCatchupEvidence.metadata(child))
   end
 
   defp restore_env(key, nil), do: Application.delete_env(:event_sales, key)

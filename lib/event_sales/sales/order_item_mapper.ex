@@ -56,6 +56,20 @@ defmodule EventSales.Sales.OrderItemMapper do
   end
 
   @doc """
+  Resolves one normalized line through canonical attribution without writing.
+
+  The input may be a persisted `OrderItem` or the normalized line map emitted
+  by `WoocommerceOrderParser`. Source Tickera event identity remains the first
+  authority; ProductMapping is consulted only when source identity is absent.
+  """
+  @spec resolve_canonical_attribution(Ecto.UUID.t(), map()) ::
+          {:ok, {:event_first | :product_mapping, map()}} | {:error, term()}
+  def resolve_canonical_attribution(source_system_id, line)
+      when is_binary(source_system_id) and is_map(line) do
+    canonical_resolution(line, source_system_id)
+  end
+
+  @doc """
   Re-evaluates one exact order item through canonical attribution authority.
 
   Unlike normal automatic mapping, this operation also re-evaluates mapped
@@ -131,65 +145,53 @@ defmodule EventSales.Sales.OrderItemMapper do
     end
   end
 
-  defp map_loaded_item(
-         %OrderItem{attribution_status_reason: :invalid_source_tickera_event_id} = item,
-         _source_system_id
-       ) do
-    apply_normal_resolution(item, {
-      :event_first,
-      %{
-        status: :pending,
-        source_tickera_event_id: item.source_tickera_event_id,
-        attribution_status_reason: :invalid_source_tickera_event_id
-      }
-    })
-  end
-
   defp map_loaded_item(%OrderItem{} = item, source_system_id) do
-    with {:ok, resolution} <- canonical_resolution(item, source_system_id) do
+    with {:ok, resolution} <- resolve_canonical_attribution(source_system_id, item) do
       apply_normal_resolution(item, resolution)
     end
   end
 
-  defp canonical_resolution(
-         %OrderItem{attribution_status_reason: :invalid_source_tickera_event_id} = item,
-         _source_system_id
-       ) do
-    {:ok,
-     {
-       :event_first,
-       %{
-         status: :pending,
-         source_tickera_event_id: item.source_tickera_event_id,
-         attribution_status_reason: :invalid_source_tickera_event_id
-       }
-     }}
-  end
+  defp canonical_resolution(line, source_system_id) when is_map(line) do
+    source_tickera_event_id = line_value(line, :source_tickera_event_id)
+    attribution_status_reason = line_value(line, :attribution_status_reason)
+    woo_product_id = line_value(line, :woo_product_id)
+    woo_variation_id = line_value(line, :woo_variation_id)
 
-  defp canonical_resolution(
-         %OrderItem{source_tickera_event_id: source_tickera_event_id} = item,
-         source_system_id
-       )
-       when is_integer(source_tickera_event_id) do
-    with {:ok, resolution} <-
-           OrderAttributionResolver.resolve(
-             source_system_id,
-             source_tickera_event_id,
-             item.woo_product_id,
-             item.woo_variation_id
-           ) do
-      {:ok, {:event_first, resolution}}
+    cond do
+      attribution_status_reason == :invalid_source_tickera_event_id ->
+        {:ok,
+         {:event_first,
+          %{
+            status: :pending,
+            event_id: nil,
+            ticket_type_id: nil,
+            source_tickera_event_id: source_tickera_event_id,
+            attribution_status_reason: :invalid_source_tickera_event_id
+          }}}
+
+      is_integer(source_tickera_event_id) ->
+        with {:ok, resolution} <-
+               OrderAttributionResolver.resolve(
+                 source_system_id,
+                 source_tickera_event_id,
+                 woo_product_id,
+                 woo_variation_id
+               ) do
+          {:ok, {:event_first, resolution}}
+        end
+
+      true ->
+        with {:ok, resolution} <-
+               MappingResolver.resolve(source_system_id, woo_product_id, woo_variation_id) do
+          {:ok, {:product_mapping, normalize_mapping_resolution(resolution)}}
+        end
     end
   end
 
-  defp canonical_resolution(%OrderItem{} = item, source_system_id) do
-    with {:ok, resolution} <-
-           MappingResolver.resolve(
-             source_system_id,
-             item.woo_product_id,
-             item.woo_variation_id
-           ) do
-      {:ok, {:product_mapping, normalize_mapping_resolution(resolution)}}
+  defp line_value(line, atom_key) do
+    case Map.fetch(line, atom_key) do
+      {:ok, value} -> value
+      :error -> Map.get(line, Atom.to_string(atom_key))
     end
   end
 
@@ -263,7 +265,7 @@ defmodule EventSales.Sales.OrderItemMapper do
     do: {:ok, item}
 
   defp reconcile_eligible_item(%OrderItem{} = item, source_system_id, target_event_id) do
-    with {:ok, resolution} <- canonical_resolution(item, source_system_id),
+    with {:ok, resolution} <- resolve_canonical_attribution(source_system_id, item),
          :ok <- ensure_target_event(item, target_event_id, resolution),
          {:ok, reconciled} <- apply_reconciliation_resolution(item, resolution) do
       case resolution do

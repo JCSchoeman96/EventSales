@@ -133,6 +133,8 @@
     "lib/event_sales/ingestion/handlers/product_updated_handler.ex",
     "lib/event_sales/ingestion/historical_catchup_bootstrap.ex",
     "lib/event_sales/ingestion/historical_catchup_evidence.ex",
+    "lib/event_sales/ingestion/historical_catchup_execution.ex",
+    "lib/event_sales/ingestion/historical_event_line_selector.ex",
     "lib/event_sales/ingestion/historical_manifest_bootstrap.ex",
     "lib/event_sales/ingestion/historical_manifest_evidence.ex",
     "lib/event_sales/ingestion/historical_manifest_execution.ex",
@@ -3129,7 +3131,7 @@
       "uses": []
     },
     {
-      "docs_count": 12,
+      "docs_count": 15,
       "moduledoc?": true,
       "name": "EventSales.Ingestion.HistoricalCatchupEvidence",
       "parse_error": null,
@@ -3160,6 +3162,14 @@
           "name": "metadata"
         },
         {
+          "arity": 2,
+          "name": "in_progress_metadata"
+        },
+        {
+          "arity": 2,
+          "name": "terminal_metadata"
+        },
+        {
           "arity": 1,
           "name": "encoded_size"
         },
@@ -3182,6 +3192,40 @@
         {
           "arity": 2,
           "name": "validate_parent_binding"
+        },
+        {
+          "arity": 2,
+          "name": "validate_continuity"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.HistoricalCatchupExecution",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/historical_catchup_execution.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "run_step"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.HistoricalEventLineSelector",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/historical_event_line_selector.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "select"
         }
       ],
       "specs?": true,
@@ -5356,7 +5400,7 @@
       "uses": []
     },
     {
-      "docs_count": 5,
+      "docs_count": 6,
       "moduledoc?": true,
       "name": "EventSales.Sales.OrderItemMapper",
       "parse_error": null,
@@ -5369,6 +5413,10 @@
         {
           "arity": 1,
           "name": "map_item"
+        },
+        {
+          "arity": 2,
+          "name": "resolve_canonical_attribution"
         },
         {
           "arity": 2,

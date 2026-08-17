@@ -1,10 +1,10 @@
 defmodule EventSales.Ingestion.Workers.BackfillOrdersWorker do
   @moduledoc """
-  Oban worker for one bounded immutable historical manifest page.
+  Oban worker for one bounded immutable historical backfill page.
 
   A perform call bootstraps existing manifest evidence, executes one page, and
   snoozes only after that page has been durably checkpointed. It never uses
-  mutable WooCommerce collection paging and never completes the historical run.
+  mutable WooCommerce collection paging.
   """
 
   use Oban.Worker,
@@ -20,6 +20,9 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorker do
   require Ash.Query
 
   alias EventSales.Ingestion
+  alias EventSales.Ingestion.HistoricalCatchupBootstrap
+  alias EventSales.Ingestion.HistoricalCatchupEvidence
+  alias EventSales.Ingestion.HistoricalCatchupExecution
   alias EventSales.Ingestion.HistoricalManifestBootstrap
   alias EventSales.Ingestion.HistoricalManifestEvidence
   alias EventSales.Ingestion.HistoricalManifestExecution
@@ -72,7 +75,27 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorker do
     :invalid_manifest_evidence,
     :invalid_now,
     :checkpoint_conflict,
-    :metadata_too_large
+    :metadata_too_large,
+    :invalid_catchup_evidence,
+    :catchup_create_in_doubt,
+    :catchup_create_claim_failed,
+    :catchup_evidence_persist_failed,
+    :catchup_high_water_before_parent,
+    :ambiguous_create,
+    :source_client_unavailable,
+    :catchup_evidence_missing,
+    :corrupt_catchup_evidence,
+    :catchup_manifest_expired,
+    :catchup_continuity_mismatch,
+    :invalid_catchup_page,
+    :invalid_catchup_page_response,
+    :historical_catchup_already_terminal,
+    :historical_event_line_selection_failed,
+    :historical_event_kind_invalid,
+    :historical_event_external_id_invalid,
+    :completion_failed,
+    :order_reconcile_failed,
+    :catchup_bootstrap_failed
   ]
 
   @failure_reasons MapSet.new(
@@ -115,16 +138,60 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorker do
       {:ok, active_run} ->
         with {:ok, _evidence} <- ensure_manifest(active_run),
              {:ok, cursor} <- load_required_cursor(active_run) do
-          executor = execution_module()
-
-          executor.run_step(active_run, cursor, execution_opts())
-          |> handle_result(job, active_run)
+          route_historical_step(active_run, cursor, job)
         else
           {:error, reason} -> handle_error(active_run, job, reason)
         end
 
       {:error, reason} ->
         handle_error(run, job, reason)
+    end
+  end
+
+  defp route_historical_step(run, cursor, job) do
+    case HistoricalManifestEvidence.state(cursor.metadata) do
+      :manifest_terminal ->
+        route_catchup_step(run, cursor, job)
+
+      state when state in [:pending_first_page, :manifest_in_progress] ->
+        execute_manifest_step(run, cursor, job)
+
+      :create_claimed ->
+        handle_error(run, job, :manifest_create_in_doubt)
+
+      :missing ->
+        handle_error(run, job, :manifest_evidence_missing)
+
+      :corrupt ->
+        handle_error(run, job, :corrupt_manifest_evidence)
+    end
+  end
+
+  defp execute_manifest_step(run, cursor, job) do
+    execution_module().run_step(run, cursor, execution_opts())
+    |> handle_manifest_result(job, run)
+  end
+
+  defp route_catchup_step(run, cursor, job) do
+    case HistoricalCatchupEvidence.state(cursor.metadata) do
+      :missing ->
+        case ensure_catchup(run) do
+          {:ok, _evidence} -> {:snooze, 1}
+          {:error, reason} -> handle_error(run, job, reason)
+        end
+
+      state when state in [:pending_first_page, :catchup_in_progress] ->
+        catchup_execution_module().run_step(run, cursor, catchup_execution_opts())
+        |> handle_catchup_result(job, run)
+
+      :create_claimed ->
+        handle_error(run, job, :catchup_create_in_doubt)
+
+      :catchup_terminal ->
+        handle_error(run, job, :historical_catchup_already_terminal)
+
+      :corrupt ->
+        handle_error(run, job, :corrupt_catchup_evidence)
     end
   end
 
@@ -160,6 +227,16 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorker do
     end
   end
 
+  defp ensure_catchup(%SyncRun{} = run) do
+    bootstrap = catchup_bootstrap_module()
+
+    case bootstrap.ensure_catchup(run.id, catchup_bootstrap_opts()) do
+      {:ok, evidence} -> {:ok, evidence}
+      {:error, reason} -> {:error, reason}
+      _other -> {:error, :catchup_bootstrap_failed}
+    end
+  end
+
   defp check_future_paused(%SyncRun{status: :paused, paused_until: %DateTime{} = paused_until}) do
     seconds = DateTime.diff(paused_until, DateTime.utc_now(), :second)
 
@@ -188,13 +265,24 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorker do
     end
   end
 
-  defp handle_result({:continue, _run, _cursor}, _job, _loaded_run), do: {:snooze, 1}
-  defp handle_result({:manifest_terminal, _run, _cursor}, _job, _loaded_run), do: :ok
+  defp handle_manifest_result({:continue, _run, _cursor}, _job, _loaded_run), do: {:snooze, 1}
 
-  defp handle_result({:error, reason}, job, loaded_run),
+  defp handle_manifest_result({:manifest_terminal, _run, _cursor}, _job, _loaded_run),
+    do: {:snooze, 1}
+
+  defp handle_manifest_result({:error, reason}, job, loaded_run),
     do: handle_error(loaded_run, job, reason)
 
-  defp handle_result(_other, job, loaded_run),
+  defp handle_manifest_result(_other, job, loaded_run),
+    do: handle_error(loaded_run, job, :historical_execution_failed)
+
+  defp handle_catchup_result({:continue, _run, _cursor}, _job, _loaded_run), do: {:snooze, 1}
+  defp handle_catchup_result(:ok, _job, _loaded_run), do: :ok
+
+  defp handle_catchup_result({:error, reason}, job, loaded_run),
+    do: handle_error(loaded_run, job, reason)
+
+  defp handle_catchup_result(_other, job, loaded_run),
     do: handle_error(loaded_run, job, :historical_execution_failed)
 
   defp handle_error(%SyncRun{} = run, %Oban.Job{} = job, reason) do
@@ -216,6 +304,7 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorker do
 
   defp transient_reason?(reason), do: reason in @transient_reasons
   defp permanent_reason?({:historical_event_not_backfill_pending, _state}), do: true
+  defp permanent_reason?({:historical_event_line_unresolved, _line_id, _reason}), do: true
   defp permanent_reason?(reason), do: reason in @permanent_reasons
 
   defp pause_for_retry(%SyncRun{} = run, reason) do
@@ -313,6 +402,9 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorker do
   defp failure_summary({:historical_event_not_backfill_pending, _state}),
     do: "historical_event_not_backfill_pending"
 
+  defp failure_summary({:historical_event_line_unresolved, _line_id, _reason}),
+    do: "historical_event_line_unresolved"
+
   defp failure_summary(reason) when is_atom(reason) do
     if MapSet.member?(@failure_reasons, reason),
       do: Atom.to_string(reason),
@@ -336,6 +428,17 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorker do
   defp bootstrap_opts,
     do: Application.get_env(:event_sales, :historical_manifest_bootstrap_opts, [])
 
+  defp catchup_bootstrap_module,
+    do:
+      Application.get_env(
+        :event_sales,
+        :historical_catchup_bootstrap,
+        HistoricalCatchupBootstrap
+      )
+
+  defp catchup_bootstrap_opts,
+    do: Application.get_env(:event_sales, :historical_catchup_bootstrap_opts, [])
+
   defp execution_module,
     do:
       Application.get_env(
@@ -356,6 +459,29 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorker do
     Keyword.merge(
       configured,
       Application.get_env(:event_sales, :historical_manifest_execution_opts, [])
+    )
+  end
+
+  defp catchup_execution_module,
+    do:
+      Application.get_env(
+        :event_sales,
+        :historical_catchup_execution,
+        HistoricalCatchupExecution
+      )
+
+  defp catchup_execution_opts do
+    configured =
+      [
+        catchup_client: Application.get_env(:event_sales, :woo_order_index_client),
+        woocommerce_client: Application.get_env(:event_sales, :woocommerce_client),
+        order_upserter: Application.get_env(:event_sales, :order_upserter)
+      ]
+      |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+
+    Keyword.merge(
+      configured,
+      Application.get_env(:event_sales, :historical_catchup_execution_opts, [])
     )
   end
 end
