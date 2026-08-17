@@ -24,11 +24,13 @@ defmodule EventSales.Sales.OrderUpserterTest do
     assert order.woo_order_id == 10_001
     assert order.status == :completed
     assert order.payment_gateway_transaction_id == "synthetic-txn-completed"
+    assert order.paid_at == nil
 
     assert [line] = order_items(order.id)
     assert line.woo_line_item_id == 70_001
     assert line.quantity == 2
     assert line.line_total == Decimal.new("900.00")
+    assert line.line_total_tax == Decimal.new("0.00")
     assert line.mapping_status == :pending_mapping_resolution
     assert line.item_kind == :unknown
 
@@ -149,18 +151,102 @@ defmodule EventSales.Sales.OrderUpserterTest do
       |> Map.put("status", "completed")
       |> Map.put("date_modified_gmt", "2026-05-01T09:10:00")
       |> Map.put("date_completed_gmt", "2026-05-01T09:10:00")
+      |> Map.put("date_paid_gmt", "2026-05-01T09:09:00.123456")
       |> Map.put("total", "500.00")
       |> put_in(["line_items", Access.at(0), "total"], "500.00")
+      |> put_in(["line_items", Access.at(0), "total_tax"], "10.25")
 
     assert {:ok, updated} = OrderUpserter.upsert_order(source.id, newer)
 
     assert updated.id == order.id
     assert updated.status == :completed
     assert updated.updated_at_source == ~U[2026-05-01 09:10:00.000000Z]
+    assert updated.paid_at == ~U[2026-05-01 09:09:00.123456Z]
     assert updated.raw_total == Decimal.new("500.00")
 
     assert [line] = order_items(order.id)
     assert line.line_total == Decimal.new("500.00")
+    assert line.line_total_tax == Decimal.new("10.25")
+  end
+
+  test "equal source replay hydrates only missing payment time", %{source: source} do
+    initial =
+      fixture(:order_pending)
+      |> put_in(["line_items", Access.at(0), "total_tax"], nil)
+
+    assert {:ok, order} = OrderUpserter.upsert_order(source.id, initial)
+    assert order.paid_at == nil
+    assert [%{line_total_tax: nil}] = order_items(order.id)
+
+    replay =
+      initial
+      |> Map.put("date_paid_gmt", "2026-05-01T08:03:00.000000")
+      |> Map.put("status", "completed")
+      |> Map.put("number", "SHOULD-NOT-OVERWRITE")
+      |> Map.put("total", "1.00")
+      |> put_in(["line_items", Access.at(0), "total_tax"], "5.25")
+
+    assert {:ok, hydrated} = OrderUpserter.upsert_order(source.id, replay)
+    assert hydrated.id == order.id
+    assert hydrated.paid_at == ~U[2026-05-01 08:03:00.000000Z]
+
+    persisted = Ash.get!(Order, order.id, domain: Sales)
+    assert persisted.paid_at == ~U[2026-05-01 08:03:00.000000Z]
+    assert persisted.status == :pending
+    assert persisted.order_number == initial["number"]
+    assert persisted.raw_total == Decimal.new(initial["total"])
+    assert [%{line_total_tax: line_total_tax}] = order_items(order.id)
+    assert line_total_tax == Decimal.new("5.25")
+  end
+
+  test "equal source replay never clears or replaces an existing payment time", %{
+    source: source
+  } do
+    initial = Map.put(fixture(:order_completed), "date_paid_gmt", "2026-05-01T08:03:00")
+    assert {:ok, order} = OrderUpserter.upsert_order(source.id, initial)
+
+    cleared = Map.put(initial, "date_paid_gmt", nil)
+    assert {:ok, replayed} = OrderUpserter.upsert_order(source.id, cleared)
+    assert replayed.paid_at == ~U[2026-05-01 08:03:00.000000Z]
+
+    replaced = Map.put(initial, "date_paid_gmt", "2026-05-01T08:04:00")
+    assert {:ok, replayed_again} = OrderUpserter.upsert_order(source.id, replaced)
+    assert replayed_again.paid_at == ~U[2026-05-01 08:03:00.000000Z]
+
+    assert {:error, _error} =
+             Ash.update(
+               order,
+               %{
+                 paid_at: ~U[2026-05-01 08:05:00.000000Z],
+                 expected_updated_at_source: order.updated_at_source
+               },
+               action: :hydrate_paid_at,
+               domain: Sales
+             )
+  end
+
+  test "equal-version payment hydration rejects a source-version race", %{source: source} do
+    initial = fixture(:order_pending)
+    assert {:ok, order} = OrderUpserter.upsert_order(source.id, initial)
+
+    newer = Map.put(initial, "date_modified_gmt", "2026-05-01T09:10:00")
+    assert {:ok, updated} = OrderUpserter.upsert_order(source.id, newer)
+    assert updated.updated_at_source == ~U[2026-05-01 09:10:00.000000Z]
+    assert updated.paid_at == nil
+
+    assert {:error, %Ash.Error.Invalid{errors: errors}} =
+             Ash.update(
+               order,
+               %{
+                 paid_at: ~U[2026-05-01 08:03:00.000000Z],
+                 expected_updated_at_source: order.updated_at_source
+               },
+               action: :hydrate_paid_at,
+               domain: Sales
+             )
+
+    assert Enum.any?(errors, &match?(%Ash.Error.Changes.StaleRecord{}, &1))
+    assert Ash.get!(Order, order.id, domain: Sales).paid_at == nil
   end
 
   test "ordinary sync does not clear source event metadata on mapped rows", %{source: source} do
@@ -255,15 +341,21 @@ defmodule EventSales.Sales.OrderUpserterTest do
   test "stale payload returns stale_noop before mutating order, items, or coupons", %{
     source: source
   } do
-    newer = fixture(:order_completed)
+    newer =
+      fixture(:order_completed)
+      |> Map.put("date_paid_gmt", "2026-05-01T08:03:00")
+      |> put_in(["line_items", Access.at(0), "total_tax"], "7.50")
+
     assert {:ok, order} = OrderUpserter.upsert_order(source.id, newer)
 
     stale =
       newer
       |> Map.put("date_modified_gmt", "2026-05-01T08:01:00")
+      |> Map.put("date_paid_gmt", "2026-05-02T08:03:00")
       |> Map.put("status", "pending")
       |> Map.put("total", "1.00")
       |> put_in(["line_items", Access.at(0), "total"], "1.00")
+      |> put_in(["line_items", Access.at(0), "total_tax"], "99.00")
       |> Map.put("coupon_lines", [
         %{"id" => 91_111, "code" => "STALE", "discount" => "999.00", "discount_tax" => "0.00"}
       ])
@@ -273,9 +365,11 @@ defmodule EventSales.Sales.OrderUpserterTest do
     persisted = Ash.get!(Order, order.id, domain: Sales)
     assert persisted.status == :completed
     assert persisted.raw_total == Decimal.new("900.00")
+    assert persisted.paid_at == ~U[2026-05-01 08:03:00.000000Z]
 
     assert [line] = order_items(order.id)
     assert line.line_total == Decimal.new("900.00")
+    assert line.line_total_tax == Decimal.new("7.50")
 
     assert [%CouponSnapshot{code: "SYNTHETIC100"}] = coupons(order.id)
   end

@@ -27,6 +27,56 @@ defmodule EventSales.Ingestion.Parsers.WoocommerceOrderParserTest do
       assert order.payment_gateway_transaction_id == "synthetic-txn-completed"
     end
 
+    test "parses the optional payment timestamp and line tax without fabricating values" do
+      payload =
+        fixture(:order_completed)
+        |> Map.put("date_paid_gmt", "2026-05-01T08:03:00.123456")
+        |> put_in(["line_items", Access.at(0), "total_tax"], "12.3456")
+
+      assert {:ok, order} = WoocommerceOrderParser.parse(payload)
+      assert order.paid_at == ~U[2026-05-01 08:03:00.123456Z]
+      assert [line] = order.line_items
+      assert line.line_total_tax == Decimal.new("12.3456")
+
+      missing =
+        payload
+        |> Map.delete("date_paid_gmt")
+        |> put_in(["line_items", Access.at(0), "total_tax"], nil)
+
+      assert {:ok, %{paid_at: nil, line_items: [%{line_total_tax: nil}]}} =
+               WoocommerceOrderParser.parse(missing)
+
+      blank = Map.put(payload, "date_paid_gmt", "   ")
+      assert {:ok, %{paid_at: nil}} = WoocommerceOrderParser.parse(blank)
+    end
+
+    test "rejects malformed optional payment timestamp and line tax" do
+      malformed_paid = Map.put(fixture(:order_completed), "date_paid_gmt", "not-a-datetime")
+
+      assert {:error, {:invalid_order_payload, :date_paid_gmt, :invalid}} =
+               WoocommerceOrderParser.parse(malformed_paid)
+
+      malformed_tax =
+        put_in(
+          fixture(:order_completed),
+          ["line_items", Access.at(0), "total_tax"],
+          "not-decimal"
+        )
+
+      assert {:error, {:invalid_order_payload, :line_total_tax, :invalid}} =
+               WoocommerceOrderParser.parse(malformed_tax)
+
+      non_finite_tax =
+        put_in(
+          fixture(:order_completed),
+          ["line_items", Access.at(0), "total_tax"],
+          "NaN"
+        )
+
+      assert {:error, {:invalid_order_payload, :line_total_tax, :invalid}} =
+               WoocommerceOrderParser.parse(non_finite_tax)
+    end
+
     test "parses pending, refunded, and cancelled statuses with explicit mapping" do
       pending = fixture(:order_pending)
       refunded = fixture(:order_refunded)

@@ -50,7 +50,11 @@ defmodule EventSales.Sales.OrderUpserterExactReconciliationTest do
     event_a: event,
     ticket_a: ticket
   } do
-    payload = fixture(:order_completed)
+    payload =
+      fixture(:order_completed)
+      |> Map.put("date_paid_gmt", "2026-05-01T08:03:00.000000")
+      |> put_in(["line_items", Access.at(0), "total_tax"], "12.50")
+
     [line] = payload["line_items"]
 
     assert {:ok, order} =
@@ -58,6 +62,7 @@ defmodule EventSales.Sales.OrderUpserterExactReconciliationTest do
 
     assert order.status == :completed
     assert order.raw_total == Decimal.new("900.00")
+    assert order.paid_at == ~U[2026-05-01 08:03:00.000000Z]
     assert order.payment_method == "payfast"
     assert order.payment_gateway_transaction_id == "synthetic-txn-completed"
 
@@ -67,12 +72,14 @@ defmodule EventSales.Sales.OrderUpserterExactReconciliationTest do
                ticket_type_id: ticket_type_id,
                mapping_status: :mapped,
                item_kind: :ticket,
-               woo_line_item_id: 70_001
+               woo_line_item_id: 70_001,
+               line_total_tax: line_total_tax
              }
            ] = order_items(order.id)
 
     assert event_id == event.id
     assert ticket_type_id == ticket.id
+    assert line_total_tax == Decimal.new("12.50")
     assert [%CouponSnapshot{code: "SYNTHETIC100"}] = coupons(order.id)
   end
 

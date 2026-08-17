@@ -28,6 +28,7 @@ defmodule EventSales.Sales.Resources.Order do
     :status,
     :currency,
     :completed_at,
+    :paid_at,
     :created_at_source,
     :updated_at_source,
     :customer_name,
@@ -65,7 +66,7 @@ defmodule EventSales.Sales.Resources.Order do
     end
 
     update :sync_status_from_source do
-      accept [:status, :updated_at_source, :completed_at]
+      accept [:status, :updated_at_source, :completed_at, :paid_at]
       require_atomic? false
       change GuardSourceVersion
       change SyncStatusFromSource
@@ -76,6 +77,21 @@ defmodule EventSales.Sales.Resources.Order do
       require_atomic? false
       change GuardSourceVersion
       change SyncStatusFromSource
+    end
+
+    update :hydrate_paid_at do
+      argument :expected_updated_at_source, :utc_datetime_usec do
+        allow_nil? false
+      end
+
+      accept [:paid_at]
+      require_atomic? false
+      validate present(:paid_at)
+      change get_and_lock_for_update()
+
+      change filter(
+               expr(is_nil(paid_at) and updated_at_source == ^arg(:expected_updated_at_source))
+             )
     end
 
     update :mark_processing do
@@ -124,6 +140,10 @@ defmodule EventSales.Sales.Resources.Order do
     end
 
     attribute :completed_at, :utc_datetime_usec do
+      public? true
+    end
+
+    attribute :paid_at, :utc_datetime_usec do
       public? true
     end
 
