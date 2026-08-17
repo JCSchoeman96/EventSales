@@ -225,6 +225,30 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorkerTest do
     assert ExecutionFake.calls() == []
   end
 
+  test "recovered transient catch-up failure retains its diagnostic after resume", %{
+    run: run,
+    cursor: cursor
+  } do
+    replace_cursor!(cursor, pending_catchup_metadata())
+    BootstrapFake.put_response!({:ok, :evidence})
+    CatchupExecutionFake.put_response!({:error, :rate_limited})
+
+    assert {:snooze, seconds} = perform(run.id)
+    assert seconds > 0
+
+    paused = Ash.get!(SyncRun, run.id, domain: Ingestion)
+    assert paused.status == :paused
+    assert paused.last_error == "rate_limited"
+
+    resumed = Ash.update!(paused, %{}, action: :resume, domain: Ingestion)
+    assert resumed.status == :running
+    assert resumed.last_error == "rate_limited"
+
+    CatchupExecutionFake.put_response!(:ok)
+    assert :ok = perform(resumed.id)
+    assert CatchupExecutionFake.calls() == [{run.id, 1}, {run.id, 1}]
+  end
+
   test "terminal U completion returns ok through the worker", %{run: run, cursor: cursor} do
     replace_cursor!(cursor, pending_catchup_metadata())
     BootstrapFake.put_response!({:ok, :evidence})

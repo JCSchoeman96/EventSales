@@ -200,6 +200,57 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     assert current_cursor(cursor).metadata["historical_catchup"]["state"] == "catchup_terminal"
   end
 
+  test "recovered transient diagnostic does not block terminal completion", %{
+    run: run,
+    cursor: cursor
+  } do
+    paused =
+      Ash.update!(
+        current_run(run),
+        %{
+          paused_until: DateTime.add(@now, 30, :second),
+          pause_reason: :rate_limited,
+          last_error: "rate_limited"
+        },
+        action: :pause,
+        domain: Ingestion
+      )
+
+    resumed = Ash.update!(paused, %{}, action: :resume, domain: Ingestion)
+    assert resumed.status == :running
+    assert resumed.last_error == "rate_limited"
+
+    CatchupClient.enqueue!(page([], has_more: false, terminal_evidence: "u-recovered-proof"))
+
+    assert :ok = run_step(resumed, current_cursor(cursor))
+    assert current_cursor(cursor).status == :done
+    assert current_run(run).status == :completed
+  end
+
+  test "orders_failed_count blocks terminal completion", %{run: run, cursor: cursor} do
+    record_failure_counts!(run, orders_failed_count: 1)
+    assert_terminal_authority_rejected(run, cursor, "u-failed-count-proof")
+  end
+
+  test "errors_count blocks terminal completion", %{run: run, cursor: cursor} do
+    record_failure_counts!(run, errors_count: 1)
+    assert_terminal_authority_rejected(run, cursor, "u-error-count-proof")
+  end
+
+  test "persisted cursor failure summary blocks terminal completion", %{
+    run: run,
+    cursor: cursor
+  } do
+    Ash.update!(
+      cursor,
+      %{metadata: Map.put(cursor.metadata, "failure", "rate_limited")},
+      action: :record_catchup_evidence,
+      domain: Ingestion
+    )
+
+    assert_terminal_authority_rejected(run, cursor, "u-cursor-failure-proof")
+  end
+
   test "stale_noop is accepted and the empty selected subset is still written", %{
     run: run,
     cursor: cursor
@@ -560,6 +611,20 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
 
   defp current_cursor(cursor), do: Ash.get!(SyncCursor, cursor.id, domain: Ingestion)
   defp current_run(run), do: Ash.get!(SyncRun, run.id, domain: Ingestion)
+
+  defp record_failure_counts!(run, attrs) do
+    Ash.update!(current_run(run), attrs, action: :record_counts, domain: Ingestion)
+  end
+
+  defp assert_terminal_authority_rejected(run, cursor, terminal_evidence) do
+    CatchupClient.enqueue!(page([], has_more: false, terminal_evidence: terminal_evidence))
+
+    assert {:error, :historical_completion_authority_invalid} =
+             run_step(current_run(run), current_cursor(cursor))
+
+    assert current_cursor(cursor).status == :active
+    assert current_run(run).status == :running
+  end
 
   defp seed_m_counters!(run) do
     Ash.update!(

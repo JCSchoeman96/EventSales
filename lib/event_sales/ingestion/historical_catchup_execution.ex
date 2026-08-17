@@ -545,7 +545,6 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
            DateTime.compare(terminal.source_observed_at, parent.source_observed_at) in [:eq, :gt],
          true <- run.orders_failed_count == 0,
          true <- run.errors_count == 0,
-         true <- is_nil(run.last_error),
          false <- Map.has_key?(cursor.metadata, "failure") do
       :ok
     else
