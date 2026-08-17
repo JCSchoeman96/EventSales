@@ -106,6 +106,29 @@ defmodule EventSales.Ingestion.Parsers.WoocommerceRefundParserTest do
     assert malformed.binding_reason == "invalid_refunded_item_id"
   end
 
+  test "non-positive binders fail closed without crashing" do
+    payload = %{
+      "id" => 91_010,
+      "amount" => "3.00",
+      "line_items" => [
+        %{
+          "id" => 88_011,
+          "meta_data" => [%{"key" => "_refunded_item_id", "value" => "0"}]
+        },
+        %{
+          "id" => 88_012,
+          "meta_data" => [%{"key" => "_refunded_item_id", "value" => "-1"}]
+        }
+      ]
+    }
+
+    assert {:ok, %{line_items: [zero, negative]}} = WoocommerceRefundParser.parse(payload)
+    assert zero.woo_refunded_item_id == nil
+    assert zero.binding_reason == "invalid_refunded_item_id"
+    assert negative.woo_refunded_item_id == nil
+    assert negative.binding_reason == "invalid_refunded_item_id"
+  end
+
   test "rejects malformed required detail and timestamp values" do
     assert {:error, {:invalid_refund_payload, :id, :must_be_positive}} =
              WoocommerceRefundParser.parse(%{"id" => 0, "amount" => "1.00"})

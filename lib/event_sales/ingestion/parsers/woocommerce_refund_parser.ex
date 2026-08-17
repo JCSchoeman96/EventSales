@@ -195,15 +195,15 @@ defmodule EventSales.Ingestion.Parsers.WoocommerceRefundParser do
   defp normalize_refunded_item_values(values) do
     parsed = Enum.map(values, &positive_integer/1)
 
-    if Enum.any?(parsed, &(&1 == :error)) do
-      {nil, "invalid_refunded_item_id"}
-    else
+    if Enum.all?(parsed, &match?({:ok, _id}, &1)) do
       ids = parsed |> Enum.map(fn {:ok, id} -> id end) |> Enum.uniq()
 
       case ids do
         [id] -> {id, nil}
         _ids -> {nil, "conflicting_refunded_item_id"}
       end
+    else
+      {nil, "invalid_refunded_item_id"}
     end
   end
 

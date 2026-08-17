@@ -90,9 +90,7 @@ defmodule EventSales.Sales.Resources.Refund do
         :fee_refund_tax,
         :unallocated_header_amount,
         :reason,
-        :source_created_at,
-        :voided_at,
-        :void_reason
+        :source_created_at
       ]
 
       require_atomic? false
@@ -107,6 +105,7 @@ defmodule EventSales.Sales.Resources.Refund do
     update :mark_voided do
       accept [:void_reason, :voided_at]
       require_atomic? false
+      validate present(:voided_at)
       change set_attribute(:source_state, :voided)
     end
   end

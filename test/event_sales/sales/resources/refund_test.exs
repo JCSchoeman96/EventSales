@@ -132,6 +132,20 @@ defmodule EventSales.Sales.Resources.RefundTest do
     assert voided.voided_at == ~U[2026-05-01 10:00:00.000000Z]
   end
 
+  test "requires local observation time when marking a refund voided" do
+    source = SalesHelpers.create_source_system!()
+    refund = create_reference!(source, %{woo_refund_id: 91_008})
+
+    assert_raise Ash.Error.Invalid, fn ->
+      Ash.update!(
+        refund,
+        %{void_reason: "source_absent"},
+        action: :mark_voided,
+        domain: Sales
+      )
+    end
+  end
+
   defp create_reference!(source, attrs) do
     defaults = %{source_system_id: source.id, woo_order_id: 10_001, woo_refund_id: 91_000}
 
