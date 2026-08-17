@@ -317,6 +317,12 @@ defmodule EventSales.Ingestion.HistoricalCatchupBootstrap do
       event.analytics_onboarding_state != :backfill_pending ->
         {:error, {:historical_event_not_backfill_pending, event.analytics_onboarding_state}}
 
+      event.external_event_kind != :tickera_event ->
+        {:error, :historical_event_kind_invalid}
+
+      not positive_external_event_id?(event.external_event_id) ->
+        {:error, :historical_event_external_id_invalid}
+
       true ->
         :ok
     end
@@ -379,7 +385,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupBootstrap do
       :create_claimed ->
         {:error, :catchup_create_in_doubt}
 
-      :pending_first_page ->
+      state when state in [:pending_first_page, :catchup_in_progress, :catchup_terminal] ->
         with {:ok, evidence} <- HistoricalCatchupEvidence.from_metadata(metadata),
              :ok <- HistoricalCatchupEvidence.validate_unexpired(evidence, now),
              :ok <- HistoricalCatchupEvidence.validate_parent_binding(evidence, parent) do
@@ -552,7 +558,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupBootstrap do
       :create_claimed ->
         {:in_doubt, current}
 
-      :pending_first_page ->
+      state when state in [:pending_first_page, :catchup_in_progress, :catchup_terminal] ->
         with {:ok, evidence} <- HistoricalCatchupEvidence.from_metadata(current.metadata),
              :ok <- HistoricalCatchupEvidence.validate_unexpired(evidence, now),
              :ok <- HistoricalCatchupEvidence.validate_parent_binding(evidence, parent) do
@@ -798,6 +804,8 @@ defmodule EventSales.Ingestion.HistoricalCatchupBootstrap do
     do: DateTime.compare(left, right) == :eq
 
   defp same_datetime?(_left, _right), do: false
+
+  defp positive_external_event_id?(value), do: is_integer(value) and value > 0
 
   defp valid_base_url?(value) when is_binary(value) do
     uri = URI.parse(value)

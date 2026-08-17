@@ -61,6 +61,90 @@ defmodule EventSales.Ingestion.HistoricalCatchupEvidenceTest do
            }) == :corrupt
   end
 
+  test "in-progress and terminal U states contain exactly one continuation field" do
+    assert {:ok, parent} = HistoricalManifestEvidence.from_metadata(parent_metadata())
+    assert {:ok, pending} = HistoricalCatchupEvidence.from_page(catchup_page(), parent)
+
+    in_progress_metadata =
+      HistoricalCatchupEvidence.in_progress_metadata(pending, "cursor-a.cursor-b")
+
+    assert HistoricalCatchupEvidence.state(in_progress_metadata) == :catchup_in_progress
+    assert {:ok, in_progress} = HistoricalCatchupEvidence.from_metadata(in_progress_metadata)
+    assert in_progress.next_cursor == "cursor-a.cursor-b"
+    assert is_nil(in_progress.terminal_evidence)
+
+    assert Map.keys(in_progress_metadata["historical_catchup"]) |> Enum.sort() ==
+             [
+               "boundary_token",
+               "manifest_expires_at_gmt",
+               "manifest_hash",
+               "next_cursor",
+               "phase",
+               "schema_version",
+               "source_observed_at_gmt",
+               "state"
+             ]
+
+    terminal_metadata =
+      HistoricalCatchupEvidence.terminal_metadata(pending, "u-terminal-proof")
+
+    assert HistoricalCatchupEvidence.state(terminal_metadata) == :catchup_terminal
+    assert {:ok, terminal} = HistoricalCatchupEvidence.from_metadata(terminal_metadata)
+    assert terminal.terminal_evidence == "u-terminal-proof"
+    assert is_nil(terminal.next_cursor)
+
+    assert Map.keys(terminal_metadata["historical_catchup"]) |> Enum.sort() ==
+             [
+               "boundary_token",
+               "manifest_expires_at_gmt",
+               "manifest_hash",
+               "phase",
+               "schema_version",
+               "source_observed_at_gmt",
+               "state",
+               "terminal_evidence"
+             ]
+
+    assert HistoricalCatchupEvidence.from_metadata(%{
+             "historical_catchup" =>
+               Map.merge(
+                 in_progress_metadata["historical_catchup"],
+                 %{"terminal_evidence" => "forbidden"}
+               )
+           }) == {:error, :invalid_catchup_evidence}
+  end
+
+  test "validates immutable U page continuity and explicit terminal proof" do
+    assert {:ok, parent} = HistoricalManifestEvidence.from_metadata(parent_metadata())
+    assert {:ok, pending} = HistoricalCatchupEvidence.from_page(catchup_page(), parent)
+
+    page =
+      catchup_page()
+      |> Map.put("items", [catchup_item("901")])
+      |> Map.put("has_more", true)
+      |> Map.put("next_cursor", "cursor-a.cursor-b")
+      |> Map.delete("terminal_evidence")
+
+    assert HistoricalCatchupEvidence.validate_continuity(pending, page) == :ok
+
+    assert HistoricalCatchupEvidence.validate_continuity(
+             pending,
+             Map.put(page, "manifest_hash", @parent_hash)
+           ) == {:error, :catchup_continuity_mismatch}
+
+    assert HistoricalCatchupEvidence.from_page(
+             Map.delete(catchup_page(), "terminal_evidence"),
+             parent
+           ) == {:error, :invalid_catchup_page}
+
+    assert {:ok, terminal} =
+             HistoricalCatchupEvidence.from_metadata(
+               HistoricalCatchupEvidence.terminal_metadata(pending, "u-terminal-proof")
+             )
+
+    assert DateTime.compare(terminal.source_observed_at, @parent_observed_at) in [:eq, :gt]
+  end
+
   test "maximum parent evidence plus catch-up states fit the 2048-byte cursor bound" do
     parent_metadata = max_parent_metadata()
     assert {:ok, parent} = HistoricalManifestEvidence.from_metadata(parent_metadata)
@@ -74,17 +158,26 @@ defmodule EventSales.Ingestion.HistoricalCatchupEvidenceTest do
     assert claim_size <= HistoricalCatchupEvidence.metadata_max_bytes()
     assert pending_size <= HistoricalCatchupEvidence.metadata_max_bytes()
 
-    future_cursor = String.duplicate("a", 510) <> ".b"
+    {:ok, pending} = HistoricalCatchupEvidence.from_metadata(pending_metadata)
+    max_cursor = String.duplicate("a", 510) <> ".b"
+    max_terminal_evidence = String.duplicate("u", 512)
 
-    future_metadata =
-      Map.update!(
-        pending_metadata,
-        "historical_catchup",
-        &Map.put(&1, "next_cursor", future_cursor)
+    in_progress_metadata =
+      Map.merge(
+        parent_metadata,
+        HistoricalCatchupEvidence.in_progress_metadata(pending, max_cursor)
       )
 
-    assert {:ok, future_size} = HistoricalCatchupEvidence.encoded_size(future_metadata)
-    assert future_size <= HistoricalCatchupEvidence.metadata_max_bytes()
+    terminal_metadata =
+      Map.merge(
+        parent_metadata,
+        HistoricalCatchupEvidence.terminal_metadata(pending, max_terminal_evidence)
+      )
+
+    assert {:ok, in_progress_size} = HistoricalCatchupEvidence.encoded_size(in_progress_metadata)
+    assert {:ok, terminal_size} = HistoricalCatchupEvidence.encoded_size(terminal_metadata)
+    assert in_progress_size <= HistoricalCatchupEvidence.metadata_max_bytes()
+    assert terminal_size <= HistoricalCatchupEvidence.metadata_max_bytes()
   end
 
   defp parent_metadata do
@@ -113,6 +206,14 @@ defmodule EventSales.Ingestion.HistoricalCatchupEvidenceTest do
       "items" => [],
       "has_more" => false,
       "terminal_evidence" => "child-terminal-proof"
+    }
+  end
+
+  defp catchup_item(order_id) do
+    %{
+      "source_order_id" => order_id,
+      "source_created_at_gmt" => "2026-08-13T12:01:00.000000Z",
+      "source_modified_at_gmt" => "2026-08-13T12:02:00.000000Z"
     }
   end
 

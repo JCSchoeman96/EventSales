@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-354
+356
 
 ## Files
 
@@ -145,6 +145,8 @@ Project root: `.`
 - `lib/event_sales/ingestion/handlers/product_updated_handler.ex`
 - `lib/event_sales/ingestion/historical_catchup_bootstrap.ex`
 - `lib/event_sales/ingestion/historical_catchup_evidence.ex`
+- `lib/event_sales/ingestion/historical_catchup_execution.ex`
+- `lib/event_sales/ingestion/historical_event_line_selector.ex`
 - `lib/event_sales/ingestion/historical_manifest_bootstrap.ex`
 - `lib/event_sales/ingestion/historical_manifest_evidence.ex`
 - `lib/event_sales/ingestion/historical_manifest_execution.ex`
@@ -1146,8 +1148,20 @@ Project root: `.`
 - `EventSales.Ingestion.HistoricalCatchupEvidence` - `lib/event_sales/ingestion/historical_catchup_evidence.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 12
-  - public_funs: `metadata_key/0`, `claim_metadata/0`, `state/1`, `from_page/2`, `from_metadata/1`, `metadata/1`, `encoded_size/1`, `canonical_metadata/2`, `metadata_max_bytes/0`, `validate_unexpired/2`, `validate_parent/1`, `validate_parent_binding/2`
+  - docs_count: 15
+  - public_funs: `metadata_key/0`, `claim_metadata/0`, `state/1`, `from_page/2`, `from_metadata/1`, `metadata/1`, `in_progress_metadata/2`, `terminal_metadata/2`, `encoded_size/1`, `canonical_metadata/2`, `metadata_max_bytes/0`, `validate_unexpired/2`, `validate_parent/1`, `validate_parent_binding/2`, `validate_continuity/2`
+  - uses: _none_
+- `EventSales.Ingestion.HistoricalCatchupExecution` - `lib/event_sales/ingestion/historical_catchup_execution.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `run_step/3`
+  - uses: _none_
+- `EventSales.Ingestion.HistoricalEventLineSelector` - `lib/event_sales/ingestion/historical_event_line_selector.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `select/3`
   - uses: _none_
 - `EventSales.Ingestion.HistoricalManifestBootstrap` - `lib/event_sales/ingestion/historical_manifest_bootstrap.ex`
   - moduledoc?: true
@@ -1758,8 +1772,8 @@ Project root: `.`
 - `EventSales.Sales.OrderItemMapper` - `lib/event_sales/sales/order_item_mapper.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 5
-  - public_funs: `automatic_mapping_eligibility/1`, `map_item/1`, `reconcile_item/2`, `map_pending_items_for_order/1`, `list_unmapped_queue/1`
+  - docs_count: 6
+  - public_funs: `automatic_mapping_eligibility/1`, `map_item/1`, `resolve_canonical_attribution/2`, `reconcile_item/2`, `map_pending_items_for_order/1`, `list_unmapped_queue/1`
   - uses: _none_
 - `EventSales.Sales.OrderUpserter` - `lib/event_sales/sales/order_upserter.ex`
   - moduledoc?: true

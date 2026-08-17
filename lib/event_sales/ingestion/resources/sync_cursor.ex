@@ -98,6 +98,19 @@ defmodule EventSales.Ingestion.Resources.SyncCursor do
       validate {BoundedMetadata, max_bytes: @metadata_max_bytes}
     end
 
+    update :record_catchup_progress do
+      accept [:page, :metadata]
+      require_atomic? false
+      validate {BoundedMetadata, max_bytes: @metadata_max_bytes}
+    end
+
+    update :complete_historical do
+      accept [:page, :metadata]
+      require_atomic? false
+      change set_attribute(:status, :done)
+      validate {BoundedMetadata, max_bytes: @metadata_max_bytes}
+    end
+
     update :claim_catchup_create do
       accept [:metadata]
       require_atomic? false

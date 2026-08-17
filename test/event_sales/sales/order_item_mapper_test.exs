@@ -111,6 +111,48 @@ defmodule EventSales.Sales.OrderItemMapperTest do
     assert mapped.attribution_status_reason == :order_event_mapping_conflict
   end
 
+  test "read-only canonical attribution resolves source event before ProductMapping", %{
+    source: source,
+    event: fallback_event
+  } do
+    source_event =
+      SalesHelpers.create_event!(source, %{
+        name: "Source Event",
+        external_event_id: 880_001,
+        external_event_kind: :tickera_event
+      })
+
+    source_ticket =
+      SalesHelpers.create_variation_ticket_type!(source_event, 501, 601, %{
+        name: "Source Ticket"
+      })
+
+    fallback_ticket =
+      SalesHelpers.create_variation_ticket_type!(fallback_event, 501, 601, %{
+        name: "Fallback Ticket"
+      })
+
+    create_mapping!(source, fallback_event, fallback_ticket, %{
+      woo_product_id: 501,
+      woo_variation_id: 601
+    })
+
+    line = %{
+      source_tickera_event_id: 880_001,
+      attribution_status_reason: nil,
+      woo_product_id: 501,
+      woo_variation_id: 601
+    }
+
+    assert {:ok, {:event_first, resolution}} =
+             OrderItemMapper.resolve_canonical_attribution(source.id, line)
+
+    assert resolution.status == :mapped
+    assert resolution.event_id == source_event.id
+    assert resolution.ticket_type_id == source_ticket.id
+    assert resolution.event_id != fallback_event.id
+  end
+
   test "invalid source event reason prevents legacy fallback", %{
     source: source,
     order: order,

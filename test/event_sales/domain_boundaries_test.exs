@@ -229,6 +229,7 @@ defmodule EventSales.DomainBoundariesTest do
       "lib/event_sales/ingestion/workers/reconcile_orders_worker.ex",
       "lib/event_sales/ingestion/order_reconciliation.ex",
       "lib/event_sales/ingestion/historical_manifest_execution.ex",
+      "lib/event_sales/ingestion/historical_catchup_execution.ex",
       "lib/event_sales/ingestion/woocommerce_rest_config.ex"
     ]
 
