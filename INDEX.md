@@ -1758,14 +1758,14 @@ Project root: `.`
 - `EventSales.Sales.OrderItemMapper` - `lib/event_sales/sales/order_item_mapper.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 4
-  - public_funs: `automatic_mapping_eligibility/1`, `map_item/1`, `map_pending_items_for_order/1`, `list_unmapped_queue/1`
+  - docs_count: 5
+  - public_funs: `automatic_mapping_eligibility/1`, `map_item/1`, `reconcile_item/2`, `map_pending_items_for_order/1`, `list_unmapped_queue/1`
   - uses: _none_
 - `EventSales.Sales.OrderUpserter` - `lib/event_sales/sales/order_upserter.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 3
-  - public_funs: `upsert_order/3`, `upsert_normalized_order/3`, `upsert_from_webhook_event/1`
+  - docs_count: 4
+  - public_funs: `upsert_order/3`, `reconcile_event_order/5`, `upsert_normalized_order/3`, `upsert_from_webhook_event/1`
   - uses: _none_
 - `EventSales.Sales.Resources.CouponSnapshot` - `lib/event_sales/sales/resources/coupon_snapshot.ex`
   - moduledoc?: true

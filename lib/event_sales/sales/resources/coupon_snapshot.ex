@@ -23,6 +23,10 @@ defmodule EventSales.Sales.Resources.CouponSnapshot do
   actions do
     defaults [:read]
 
+    destroy :destroy_source_absent do
+      require_atomic? false
+    end
+
     create :create_snapshot do
       accept [:order_id, :code, :discount_amount, :discount_tax]
     end
