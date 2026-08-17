@@ -366,8 +366,11 @@ defmodule EventSales.Ingestion.Parsers.WoocommerceRefundParser do
   end
 
   defp unallocated_header_amount(header_amount, line_items, shipping, fees) do
-    line_totals = Enum.map(line_items, & &1.refund_total_amount)
-    amounts = line_totals ++ component_amounts(shipping) ++ component_amounts(fees)
+    line_totals = Enum.map(line_items, &tax_inclusive_line_amount/1)
+
+    amounts =
+      line_totals ++
+        tax_inclusive_component_amounts(shipping) ++ tax_inclusive_component_amounts(fees)
 
     if Enum.all?(amounts, &match?(%Decimal{}, &1)) do
       residual = Decimal.sub(header_amount, Enum.reduce(amounts, Decimal.new(0), &Decimal.add/2))
@@ -379,8 +382,20 @@ defmodule EventSales.Ingestion.Parsers.WoocommerceRefundParser do
     end
   end
 
-  defp component_amounts(%{present?: false}), do: []
-  defp component_amounts(%{amount: amount}), do: [amount]
+  defp tax_inclusive_line_amount(line) do
+    tax_inclusive_amount(line.refund_total_amount, line.refund_total_tax)
+  end
+
+  defp tax_inclusive_component_amounts(%{present?: false}), do: []
+
+  defp tax_inclusive_component_amounts(%{present?: true, amount: amount, tax: tax}) do
+    [tax_inclusive_amount(amount, tax)]
+  end
+
+  defp tax_inclusive_amount(%Decimal{} = amount, %Decimal{} = tax),
+    do: Decimal.add(amount, tax)
+
+  defp tax_inclusive_amount(_amount, _tax), do: nil
 
   defp component_amount_field(:shipping), do: :shipping_total
   defp component_amount_field(:fee), do: :fee_total

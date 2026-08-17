@@ -59,7 +59,65 @@ defmodule EventSales.Ingestion.Parsers.WoocommerceRefundParserTest do
 
     assert refund.line_items == []
     assert refund.header_amount == Decimal.new("12.50")
+    assert refund.unallocated_header_amount == Decimal.new("12.50")
     assert refund.source_created_at == nil
+  end
+
+  test "calculates zero residual from tax-inclusive product, shipping, and fee amounts" do
+    assert {:ok, refund} =
+             WoocommerceRefundParser.parse(tax_inclusive_components_payload("57.20"))
+
+    assert refund.unallocated_header_amount == Decimal.new("0.00")
+    assert %Decimal{} = refund.unallocated_header_amount
+  end
+
+  test "calculates positive residual from tax-inclusive component amounts" do
+    assert {:ok, refund} =
+             WoocommerceRefundParser.parse(tax_inclusive_components_payload("60.00"))
+
+    assert refund.unallocated_header_amount == Decimal.new("2.80")
+  end
+
+  test "leaves residual unknown when product-line tax is absent" do
+    payload = %{
+      "id" => 91_011,
+      "amount" => "45.00",
+      "line_items" => [%{"id" => 88_013, "total" => "-45.00"}],
+      "shipping_lines" => [],
+      "fee_lines" => []
+    }
+
+    assert {:ok, refund} = WoocommerceRefundParser.parse(payload)
+    assert refund.unallocated_header_amount == nil
+  end
+
+  test "calculates residual when product-line tax is explicitly zero" do
+    payload = %{
+      "id" => 91_012,
+      "amount" => "45.00",
+      "line_items" => [%{"id" => 88_014, "total" => "-45.00", "total_tax" => "0.00"}],
+      "shipping_lines" => [],
+      "fee_lines" => []
+    }
+
+    assert {:ok, refund} = WoocommerceRefundParser.parse(payload)
+    assert refund.unallocated_header_amount == Decimal.new("0.00")
+  end
+
+  test "leaves residual unknown when an existing shipping or fee tax is absent" do
+    for {id, key} <- [{91_013, "shipping_lines"}, {91_014, "fee_lines"}] do
+      payload = %{
+        "id" => id,
+        "amount" => "5.00",
+        "line_items" => [],
+        "shipping_lines" => [],
+        "fee_lines" => [],
+        key => [%{"total" => "-5.00"}]
+      }
+
+      assert {:ok, refund} = WoocommerceRefundParser.parse(payload)
+      assert refund.unallocated_header_amount == nil
+    end
   end
 
   test "keeps absent quantity and tax distinct from explicit zero" do
@@ -142,5 +200,17 @@ defmodule EventSales.Ingestion.Parsers.WoocommerceRefundParserTest do
                "amount" => "1.00",
                "date_created_gmt" => "not-a-datetime"
              })
+  end
+
+  defp tax_inclusive_components_payload(header_amount) do
+    %{
+      "id" => 91_015,
+      "amount" => "-" <> header_amount,
+      "line_items" => [
+        %{"id" => 88_015, "total" => "-45.00", "total_tax" => "-4.50"}
+      ],
+      "shipping_lines" => [%{"total" => "-5.00", "total_tax" => "-0.50"}],
+      "fee_lines" => [%{"total" => "-2.00", "total_tax" => "-0.20"}]
+    }
   end
 end
