@@ -101,6 +101,10 @@ defmodule EventSales.Catalog.Resources.SourceSystem do
     has_many :product_mappings, EventSales.Catalog.Resources.ProductMapping do
       destination_attribute :source_system_id
     end
+
+    has_many :refunds, EventSales.Sales.Resources.Refund do
+      destination_attribute :source_system_id
+    end
   end
 
   identities do

@@ -783,6 +783,30 @@
         "uses": [
           "Ash.Resource"
         ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Sales.Resources.Refund",
+        "parse_error": null,
+        "path": "lib/event_sales/sales/resources/refund.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Sales.Resources.RefundLine",
+        "parse_error": null,
+        "path": "lib/event_sales/sales/resources/refund_line.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
       }
     ],
     "validations": [

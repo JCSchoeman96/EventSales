@@ -112,6 +112,58 @@ defmodule EventSales.Ingestion.Clients.WooCommerceClientTest do
              FakeTransport.requests()
   end
 
+  test "fetch_refund uses the exact parent-scoped endpoint and validates the refund id" do
+    FakeTransport.reset!([{:ok, 200, [], ~s({"id":91003,"amount":"45.00"})}])
+
+    assert {:ok, %{"id" => 91_003, "amount" => "45.00"}} =
+             WooCommerceClient.fetch_refund(10_001, 91_003)
+
+    assert [%{url: "https://woo.example.test/wp-json/wc/v3/orders/10001/refunds/91003"}] =
+             FakeTransport.requests()
+  end
+
+  test "fetch_refund fails closed when the response id differs from the request" do
+    FakeTransport.reset!([{:ok, 200, [], ~s({"id":91004,"amount":"45.00"})}])
+
+    assert {:error, %WooCommerceError{reason: :response_mismatch}} =
+             WooCommerceClient.fetch_refund(10_001, 91_003)
+  end
+
+  test "list_refunds paginates within one parent order" do
+    FakeTransport.reset!([
+      {:ok, 200, [], Jason.encode!([%{id: 91_003}, %{id: 91_004}])},
+      {:ok, 200, [], Jason.encode!([%{id: 91_005}])}
+    ])
+
+    assert {:ok, [%{"id" => 91_003}, %{"id" => 91_004}, %{"id" => 91_005}]} =
+             WooCommerceClient.list_refunds(10_001, %{"orderby" => "date"})
+
+    assert [
+             %{
+               url:
+                 "https://woo.example.test/wp-json/wc/v3/orders/10001/refunds?page=1&per_page=2&orderby=date"
+             },
+             %{
+               url:
+                 "https://woo.example.test/wp-json/wc/v3/orders/10001/refunds?page=2&per_page=2&orderby=date"
+             }
+           ] = FakeTransport.requests()
+  end
+
+  test "refund endpoints reject non-positive parent and refund ids before transport" do
+    FakeTransport.reset!([{:ok, 200, [], ~s({"id":91003})}])
+
+    for {order_id, refund_id} <- [{0, 91_003}, {10_001, 0}, {"bad", 91_003}, {10_001, "bad"}] do
+      assert {:error, %WooCommerceError{reason: :invalid_request}} =
+               WooCommerceClient.fetch_refund(order_id, refund_id)
+    end
+
+    assert {:error, %WooCommerceError{reason: :invalid_request}} =
+             WooCommerceClient.list_refunds(0)
+
+    assert [] = FakeTransport.requests()
+  end
+
   test "fetch_order rejects invalid ids before transport" do
     FakeTransport.reset!([{:ok, 200, [], ~s({"id":1})}])
 

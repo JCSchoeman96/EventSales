@@ -14,6 +14,7 @@ defmodule EventSales.Ingestion.Clients.WooCommerceError do
           | :timeout
           | :transport_error
           | :invalid_json
+          | :response_mismatch
           | :misconfigured
           | :queue_timeout
           | :pagination_limit

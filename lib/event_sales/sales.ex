@@ -9,5 +9,7 @@ defmodule EventSales.Sales do
     resource EventSales.Sales.Resources.Order
     resource EventSales.Sales.Resources.OrderItem
     resource EventSales.Sales.Resources.CouponSnapshot
+    resource EventSales.Sales.Resources.Refund
+    resource EventSales.Sales.Resources.RefundLine
   end
 end

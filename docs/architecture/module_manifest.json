@@ -142,6 +142,8 @@
     "lib/event_sales/ingestion/manual_sync.ex",
     "lib/event_sales/ingestion/order_reconciliation.ex",
     "lib/event_sales/ingestion/parsers/woocommerce_order_parser.ex",
+    "lib/event_sales/ingestion/parsers/woocommerce_refund_parser.ex",
+    "lib/event_sales/ingestion/parsers/woocommerce_refund_reference_parser.ex",
     "lib/event_sales/ingestion/reconciliation_peak_guard.ex",
     "lib/event_sales/ingestion/redis_rate_limiter.ex",
     "lib/event_sales/ingestion/redis_rate_limiter/adapter.ex",
@@ -238,6 +240,8 @@
     "lib/event_sales/sales/resources/coupon_snapshot.ex",
     "lib/event_sales/sales/resources/order.ex",
     "lib/event_sales/sales/resources/order_item.ex",
+    "lib/event_sales/sales/resources/refund.ex",
+    "lib/event_sales/sales/resources/refund_line.ex",
     "lib/event_sales/sales/source_version_guard.ex",
     "lib/event_sales/sales/status_rules.ex",
     "lib/event_sales/sales/unmapped_alert_resolver.ex",
@@ -2919,7 +2923,7 @@
       "uses": []
     },
     {
-      "docs_count": 6,
+      "docs_count": 8,
       "moduledoc?": true,
       "name": "EventSales.Ingestion.Clients.WooCommerceClient",
       "parse_error": null,
@@ -2928,6 +2932,10 @@
         {
           "arity": 2,
           "name": "fetch_order"
+        },
+        {
+          "arity": 3,
+          "name": "fetch_refund"
         },
         {
           "arity": 1,
@@ -2940,6 +2948,10 @@
         {
           "arity": 2,
           "name": "list_orders"
+        },
+        {
+          "arity": 3,
+          "name": "list_refunds"
         },
         {
           "arity": 2,
@@ -3403,6 +3415,36 @@
       "name": "EventSales.Ingestion.Parsers.WoocommerceOrderParser",
       "parse_error": null,
       "path": "lib/event_sales/ingestion/parsers/woocommerce_order_parser.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "parse"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Parsers.WoocommerceRefundParser",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/parsers/woocommerce_refund_parser.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "parse"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Parsers.WoocommerceRefundReferenceParser",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/parsers/woocommerce_refund_reference_parser.ex",
       "public_funs": [
         {
           "arity": 1,
@@ -5491,6 +5533,30 @@
       "name": "EventSales.Sales.Resources.OrderItem",
       "parse_error": null,
       "path": "lib/event_sales/sales/resources/order_item.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Sales.Resources.Refund",
+      "parse_error": null,
+      "path": "lib/event_sales/sales/resources/refund.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Sales.Resources.RefundLine",
+      "parse_error": null,
+      "path": "lib/event_sales/sales/resources/refund_line.ex",
       "public_funs": [],
       "specs?": false,
       "uses": [

@@ -211,6 +211,10 @@ defmodule EventSales.Sales.Resources.Order do
     has_many :coupon_snapshots, EventSales.Sales.Resources.CouponSnapshot do
       destination_attribute :order_id
     end
+
+    has_many :refunds, EventSales.Sales.Resources.Refund do
+      destination_attribute :order_id
+    end
   end
 
   identities do
