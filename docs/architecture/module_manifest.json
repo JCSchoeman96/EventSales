@@ -5356,7 +5356,7 @@
       "uses": []
     },
     {
-      "docs_count": 4,
+      "docs_count": 5,
       "moduledoc?": true,
       "name": "EventSales.Sales.OrderItemMapper",
       "parse_error": null,
@@ -5369,6 +5369,10 @@
         {
           "arity": 1,
           "name": "map_item"
+        },
+        {
+          "arity": 2,
+          "name": "reconcile_item"
         },
         {
           "arity": 1,

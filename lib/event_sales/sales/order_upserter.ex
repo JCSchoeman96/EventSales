@@ -52,8 +52,6 @@ defmodule EventSales.Sales.OrderUpserter do
            WoocommerceOrderParser.parse(
              Map.put(full_order_payload, "line_items", event_line_items)
            ) do
-      normalized = put_event_id_on_lines(normalized, event_id)
-
       reconciliation_opts =
         opts
         |> Keyword.put(:event_reconciliation?, true)
@@ -200,7 +198,7 @@ defmodule EventSales.Sales.OrderUpserter do
         action =
           cond do
             Keyword.get(opts, :event_reconciliation?, false) ->
-              :sync_from_event_reconciliation
+              :sync_from_source_reconciliation
 
             mapped_import_line?(line_item) ->
               :sync_from_mapped_import
@@ -260,24 +258,22 @@ defmodule EventSales.Sales.OrderUpserter do
   end
 
   defp order_item_update_attrs(
-         %OrderItem{} = existing,
+         %OrderItem{},
          line_item,
-         :sync_from_event_reconciliation
+         :sync_from_source_reconciliation
        ) do
     line_item
     |> Map.take([
-      :event_id,
+      :source_tickera_event_id,
+      :attribution_status_reason,
       :woo_product_id,
       :woo_variation_id,
       :name,
       :quantity,
       :line_subtotal,
       :line_total,
-      :discount_total,
-      :source_tickera_event_id,
-      :attribution_status_reason
+      :discount_total
     ])
-    |> protect_mapped_source_identity(existing, line_item)
   end
 
   defp validate_reconciliation_ids(source_system_id, event_id) do
@@ -369,7 +365,7 @@ defmodule EventSales.Sales.OrderUpserter do
 
   defp validate_subset_membership(full_source_lines, event_line_items) do
     Enum.reduce_while(event_line_items, :ok, fn event_line, :ok ->
-      if Enum.any?(full_source_lines, &same_source_line?(&1, event_line)) do
+      if Enum.any?(full_source_lines, &(&1 == event_line)) do
         {:cont, :ok}
       else
         {:halt, {:error, {:invalid_order_reconciliation, :event_line_membership}}}
@@ -377,27 +373,51 @@ defmodule EventSales.Sales.OrderUpserter do
     end)
   end
 
-  defp same_source_line?(left, right) when left == right, do: true
-
-  defp same_source_line?(left, right) do
-    source_line_identity(left) == source_line_identity(right)
-  end
-
-  defp source_line_identity(line) do
-    {Map.get(line, "id"), Map.get(line, "product_id"), Map.get(line, "variation_id")}
-  end
-
-  defp put_event_id_on_lines(normalized, event_id) do
-    Map.update!(normalized, :line_items, fn lines ->
-      Enum.map(lines, &Map.put(&1, :event_id, event_id))
-    end)
-  end
-
-  defp reconcile_accepted_order(order, event_id, current_event_line_ids, current_coupons, opts) do
-    with :ok <- remove_absent_event_items(order, event_id, current_event_line_ids, opts),
+  defp reconcile_accepted_order(
+         order,
+         event_id,
+         current_event_line_ids,
+         current_coupons,
+         opts
+       ) do
+    with :ok <- reconcile_current_event_items(order, event_id, current_event_line_ids),
+         :ok <- remove_absent_event_items(order, event_id, current_event_line_ids, opts),
          :ok <- remove_absent_coupons(order, current_coupons, opts) do
       {:ok, order}
     end
+  end
+
+  defp reconcile_current_event_items(%Order{}, _event_id, []), do: :ok
+
+  defp reconcile_current_event_items(%Order{id: order_id}, event_id, line_ids) do
+    OrderItem
+    |> Ash.Query.filter(order_id == ^order_id and woo_line_item_id in ^line_ids)
+    |> Ash.read(domain: Sales)
+    |> handle_current_event_items_read(order_id, event_id, line_ids)
+  end
+
+  defp handle_current_event_items_read({:ok, items}, _order_id, event_id, line_ids) do
+    found_ids = MapSet.new(items, & &1.woo_line_item_id)
+
+    if MapSet.size(found_ids) == length(line_ids) do
+      reconcile_current_items(items, event_id)
+    else
+      missing_id = Enum.find(line_ids, &(!MapSet.member?(found_ids, &1)))
+      {:error, {:event_line_attribution_mismatch, missing_id, :order_item_not_found}}
+    end
+  end
+
+  defp handle_current_event_items_read({:error, reason}, _order_id, _event_id, _line_ids),
+    do: {:error, reason}
+
+  defp reconcile_current_items(items, event_id) do
+    Enum.reduce_while(items, :ok, fn item, :ok ->
+      case OrderItemMapper.reconcile_item(item, event_id) do
+        {:ok, %OrderItem{}} -> {:cont, :ok}
+        {:ok, :deferred} -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
   end
 
   defp protect_mapped_source_identity(

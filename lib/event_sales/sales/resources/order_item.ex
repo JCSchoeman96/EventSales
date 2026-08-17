@@ -107,18 +107,17 @@ defmodule EventSales.Sales.Resources.OrderItem do
       validate compare(:quantity, greater_than: 0)
     end
 
-    update :sync_from_event_reconciliation do
+    update :sync_from_source_reconciliation do
       accept [
-        :event_id,
+        :source_tickera_event_id,
+        :attribution_status_reason,
         :woo_product_id,
         :woo_variation_id,
         :name,
         :quantity,
         :line_subtotal,
         :line_total,
-        :discount_total,
-        :source_tickera_event_id,
-        :attribution_status_reason
+        :discount_total
       ]
 
       validate compare(:quantity, greater_than: 0)

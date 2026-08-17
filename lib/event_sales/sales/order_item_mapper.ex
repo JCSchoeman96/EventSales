@@ -56,6 +56,28 @@ defmodule EventSales.Sales.OrderItemMapper do
   end
 
   @doc """
+  Re-evaluates one exact order item through canonical attribution authority.
+
+  Unlike normal automatic mapping, this operation also re-evaluates mapped
+  rows. The target event is a scoping expectation and is never used to set
+  attribution directly.
+  """
+  @spec reconcile_item(OrderItem.t(), Ecto.UUID.t()) ::
+          {:ok, OrderItem.t()} | {:ok, :deferred} | {:error, term()}
+  def reconcile_item(%OrderItem{} = item, target_event_id) when is_binary(target_event_id) do
+    with {:ok, loaded} <- Ash.load(item, :order, domain: Sales),
+         %Order{source_system_id: source_system_id} <- loaded.order do
+      case automatic_mapping_eligibility(loaded) do
+        :eligible -> reconcile_eligible_item(loaded, source_system_id, target_event_id)
+        :deferred -> {:ok, :deferred}
+      end
+    else
+      {:error, reason} -> {:error, reason}
+      _other -> {:error, :order_not_loaded}
+    end
+  end
+
+  @doc """
   Maps pending items for an order and leaves all other mapping states unchanged.
   """
   @spec map_pending_items_for_order(Order.t()) :: {:ok, [OrderItem.t()]} | {:error, term()}
@@ -113,13 +135,38 @@ defmodule EventSales.Sales.OrderItemMapper do
          %OrderItem{attribution_status_reason: :invalid_source_tickera_event_id} = item,
          _source_system_id
        ) do
-    set_attribution_status_reason(item, %{
-      source_tickera_event_id: item.source_tickera_event_id,
-      attribution_status_reason: :invalid_source_tickera_event_id
+    apply_normal_resolution(item, {
+      :event_first,
+      %{
+        status: :pending,
+        source_tickera_event_id: item.source_tickera_event_id,
+        attribution_status_reason: :invalid_source_tickera_event_id
+      }
     })
   end
 
-  defp map_loaded_item(
+  defp map_loaded_item(%OrderItem{} = item, source_system_id) do
+    with {:ok, resolution} <- canonical_resolution(item, source_system_id) do
+      apply_normal_resolution(item, resolution)
+    end
+  end
+
+  defp canonical_resolution(
+         %OrderItem{attribution_status_reason: :invalid_source_tickera_event_id} = item,
+         _source_system_id
+       ) do
+    {:ok,
+     {
+       :event_first,
+       %{
+         status: :pending,
+         source_tickera_event_id: item.source_tickera_event_id,
+         attribution_status_reason: :invalid_source_tickera_event_id
+       }
+     }}
+  end
+
+  defp canonical_resolution(
          %OrderItem{source_tickera_event_id: source_tickera_event_id} = item,
          source_system_id
        )
@@ -131,20 +178,46 @@ defmodule EventSales.Sales.OrderItemMapper do
              item.woo_product_id,
              item.woo_variation_id
            ) do
-      apply_event_first_resolution(item, resolution)
+      {:ok, {:event_first, resolution}}
     end
   end
 
-  defp map_loaded_item(%OrderItem{} = item, source_system_id) do
+  defp canonical_resolution(%OrderItem{} = item, source_system_id) do
     with {:ok, resolution} <-
            MappingResolver.resolve(
              source_system_id,
              item.woo_product_id,
              item.woo_variation_id
            ) do
-      apply_resolution(item, resolution)
+      {:ok, {:product_mapping, normalize_mapping_resolution(resolution)}}
     end
   end
+
+  defp normalize_mapping_resolution({:mapped, %ProductMapping{} = mapping}) do
+    %{
+      status: :mapped,
+      event_id: mapping.event_id,
+      ticket_type_id: mapping.ticket_type_id,
+      source_tickera_event_id: nil,
+      attribution_status_reason: nil
+    }
+  end
+
+  defp normalize_mapping_resolution(:pending_mapping_resolution) do
+    %{
+      status: :pending,
+      event_id: nil,
+      ticket_type_id: nil,
+      source_tickera_event_id: nil,
+      attribution_status_reason: :pending_mapping_resolution
+    }
+  end
+
+  defp apply_normal_resolution(item, {:event_first, resolution}),
+    do: apply_event_first_resolution(item, resolution)
+
+  defp apply_normal_resolution(item, {:product_mapping, resolution}),
+    do: apply_product_mapping_resolution(item, resolution)
 
   defp apply_event_first_resolution(%OrderItem{} = item, %{status: :mapped} = resolution) do
     Ash.update(
@@ -171,12 +244,12 @@ defmodule EventSales.Sales.OrderItemMapper do
     Ash.update(item, attrs, action: :set_attribution_status_reason, domain: Sales)
   end
 
-  defp apply_resolution(%OrderItem{} = item, {:mapped, %ProductMapping{} = mapping}) do
+  defp apply_product_mapping_resolution(%OrderItem{} = item, %{status: :mapped} = resolution) do
     Ash.update(
       item,
       %{
-        event_id: mapping.event_id,
-        ticket_type_id: mapping.ticket_type_id,
+        event_id: resolution.event_id,
+        ticket_type_id: resolution.ticket_type_id,
         woo_product_id: item.woo_product_id,
         woo_variation_id: item.woo_variation_id,
         name: item.name
@@ -186,5 +259,65 @@ defmodule EventSales.Sales.OrderItemMapper do
     )
   end
 
-  defp apply_resolution(%OrderItem{} = item, :pending_mapping_resolution), do: {:ok, item}
+  defp apply_product_mapping_resolution(%OrderItem{} = item, %{status: :pending}),
+    do: {:ok, item}
+
+  defp reconcile_eligible_item(%OrderItem{} = item, source_system_id, target_event_id) do
+    with {:ok, resolution} <- canonical_resolution(item, source_system_id),
+         :ok <- ensure_target_event(item, target_event_id, resolution),
+         {:ok, reconciled} <- apply_reconciliation_resolution(item, resolution) do
+      case resolution do
+        {_origin, %{status: :mapped}} ->
+          {:ok, reconciled}
+
+        {_origin, %{status: :pending, attribution_status_reason: reason}} ->
+          {:error, attribution_failure(item, reason)}
+      end
+    end
+  end
+
+  defp ensure_target_event(
+         %OrderItem{} = item,
+         target_event_id,
+         {_origin, %{status: :mapped, event_id: resolved_event_id}}
+       ) do
+    if target_event_id == resolved_event_id do
+      :ok
+    else
+      {:error, attribution_failure(item, {:target_event_mismatch, resolved_event_id})}
+    end
+  end
+
+  defp ensure_target_event(_item, _target_event_id, {_origin, %{status: :pending}}), do: :ok
+
+  defp apply_reconciliation_resolution(
+         %OrderItem{} = item,
+         {_origin, %{status: :mapped} = resolution}
+       ) do
+    attrs =
+      resolution
+      |> Map.take([
+        :event_id,
+        :ticket_type_id,
+        :source_tickera_event_id,
+        :attribution_status_reason
+      ])
+
+    Ash.update(item, attrs, action: :sync_from_mapped_import, domain: Sales)
+  end
+
+  defp apply_reconciliation_resolution(
+         %OrderItem{} = item,
+         {_origin, %{status: :pending} = resolution}
+       ) do
+    attrs =
+      resolution
+      |> Map.take([:source_tickera_event_id, :attribution_status_reason])
+
+    set_attribution_status_reason(item, attrs)
+  end
+
+  defp attribution_failure(%OrderItem{woo_line_item_id: line_item_id}, reason) do
+    {:event_line_attribution_mismatch, line_item_id, reason}
+  end
 end
