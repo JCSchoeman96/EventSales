@@ -29,7 +29,9 @@ defmodule EventSales.AshResourceSmokeTest do
     EventSales.Sales => [
       EventSales.Sales.Resources.Order,
       EventSales.Sales.Resources.OrderItem,
-      EventSales.Sales.Resources.CouponSnapshot
+      EventSales.Sales.Resources.CouponSnapshot,
+      EventSales.Sales.Resources.Refund,
+      EventSales.Sales.Resources.RefundLine
     ],
     EventSales.Ingestion => [
       EventSales.Ingestion.Resources.WebhookEvent,

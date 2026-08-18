@@ -32,6 +32,20 @@ defmodule EventSales.Ingestion.Clients.WooCommerceClient do
     end
   end
 
+  @doc "Fetches one WooCommerce refund by its exact parent order and refund IDs."
+  @spec fetch_refund(pos_integer() | String.t(), pos_integer() | String.t(), keyword()) ::
+          {:ok, map()} | {:error, WooCommerceError.t()}
+  def fetch_refund(order_id, refund_id, opts \\ []) do
+    with {:ok, order_id} <- normalize_positive_id(order_id, :fetch_refund),
+         {:ok, refund_id} <- normalize_positive_id(refund_id, :fetch_refund),
+         {:ok, config} <- config(:fetch_refund, opts),
+         {:ok, response} <-
+           request_one(:fetch_refund, config, "/orders/#{order_id}/refunds/#{refund_id}"),
+         :ok <- validate_refund_response(response, refund_id) do
+      {:ok, response}
+    end
+  end
+
   @doc "Returns the validated, canonical REST base URL without credentials."
   @spec configured_base_url(keyword()) :: {:ok, String.t()} | {:error, WooCommerceError.t()}
   def configured_base_url(opts \\ []) do
@@ -59,6 +73,16 @@ defmodule EventSales.Ingestion.Clients.WooCommerceClient do
     end
   end
 
+  @doc "Lists refunds for one exact WooCommerce parent order using bounded pages."
+  @spec list_refunds(pos_integer() | String.t(), params(), keyword()) ::
+          {:ok, [map()]} | {:error, WooCommerceError.t()}
+  def list_refunds(order_id, params \\ %{}, opts \\ []) do
+    with {:ok, order_id} <- normalize_positive_id(order_id, :list_refunds),
+         {:ok, config} <- config(:list_refunds, opts) do
+      request_pages(:list_refunds, config, "/orders/#{order_id}/refunds", params)
+    end
+  end
+
   @doc "Lists WooCommerce products using bounded page iteration."
   @spec list_products(params(), keyword()) :: {:ok, [map()]} | {:error, WooCommerceError.t()}
   def list_products(params \\ %{}, opts \\ []) do
@@ -81,6 +105,18 @@ defmodule EventSales.Ingestion.Clients.WooCommerceClient do
   defp request_one(operation, config, path) do
     guarded_request(operation, config, url(config, path, []))
   end
+
+  defp validate_refund_response(response, refund_id) when is_map(response) do
+    response_id = Map.get(response, "id") || Map.get(response, :id)
+
+    case positive_id_value(response_id) do
+      {:ok, ^refund_id} -> :ok
+      _other -> emit_exception(:fetch_refund, :response_mismatch)
+    end
+  end
+
+  defp validate_refund_response(_response, _refund_id),
+    do: emit_exception(:fetch_refund, :response_mismatch)
 
   defp request_pages(operation, config, path, params) do
     page_result =
@@ -210,6 +246,17 @@ defmodule EventSales.Ingestion.Clients.WooCommerceClient do
   end
 
   defp normalize_positive_id(_id, operation), do: emit_exception(operation, :invalid_request)
+
+  defp positive_id_value(value) when is_integer(value) and value > 0, do: {:ok, value}
+
+  defp positive_id_value(value) when is_binary(value) do
+    case Integer.parse(String.trim(value)) do
+      {parsed, ""} when parsed > 0 -> {:ok, parsed}
+      _other -> :error
+    end
+  end
+
+  defp positive_id_value(_value), do: :error
 
   defp config(operation, opts) do
     app_config =

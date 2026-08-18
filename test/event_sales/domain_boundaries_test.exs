@@ -27,7 +27,9 @@ defmodule EventSales.DomainBoundariesTest do
   @sales_resources [
     EventSales.Sales.Resources.Order,
     EventSales.Sales.Resources.OrderItem,
-    EventSales.Sales.Resources.CouponSnapshot
+    EventSales.Sales.Resources.CouponSnapshot,
+    EventSales.Sales.Resources.Refund,
+    EventSales.Sales.Resources.RefundLine
   ]
   @ingestion_resources [
     EventSales.Ingestion.Resources.WebhookEvent,
