@@ -237,6 +237,7 @@
     "lib/event_sales/sales/order_attribution_correction.ex",
     "lib/event_sales/sales/order_item_mapper.ex",
     "lib/event_sales/sales/order_upserter.ex",
+    "lib/event_sales/sales/refund_upserter.ex",
     "lib/event_sales/sales/resources/coupon_snapshot.ex",
     "lib/event_sales/sales/resources/order.ex",
     "lib/event_sales/sales/resources/order_item.ex",
@@ -5498,6 +5499,29 @@
         {
           "arity": 1,
           "name": "upsert_from_webhook_event"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Sales.RefundUpserter",
+      "parse_error": null,
+      "path": "lib/event_sales/sales/refund_upserter.ex",
+      "public_funs": [
+        {
+          "arity": 4,
+          "name": "upsert_reference"
+        },
+        {
+          "arity": 4,
+          "name": "upsert_refund"
+        },
+        {
+          "arity": 4,
+          "name": "upsert_normalized_refund"
         }
       ],
       "specs?": true,
