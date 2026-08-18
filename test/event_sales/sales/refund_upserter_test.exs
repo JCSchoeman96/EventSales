@@ -959,6 +959,111 @@ defmodule EventSales.Sales.RefundUpserterTest do
     assert Ash.read!(Refund, domain: Sales) == []
   end
 
+  test "marks the exact active refund source-deleted and retains its facts", %{
+    source: source
+  } do
+    %{order: order, item: item} = create_ticket_order_fixture!(source, 2)
+
+    assert {:ok, refund} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               order.woo_order_id,
+               normalized_refund(97_001, [refund_line(91_001, item.woo_line_item_id)])
+             )
+
+    observed_at = ~U[2026-08-18 10:00:00Z]
+
+    assert {:ok, voided} =
+             RefundUpserter.mark_source_deleted(
+               source.id,
+               order.woo_order_id,
+               refund.woo_refund_id,
+               observed_at
+             )
+
+    assert voided.source_state == :voided
+    assert voided.void_reason == "source_deleted"
+    assert DateTime.compare(voided.voided_at, observed_at) == :eq
+    assert [%RefundLine{refunded_quantity: 1}] = refund_lines(voided.id)
+    assert voided.header_amount == Decimal.new("45.00")
+  end
+
+  test "source-deleted void replay preserves the original voided_at", %{source: source} do
+    _refund = create_refund_fixture!(source, 97_002)
+    first_at = ~U[2026-08-18 10:01:00Z]
+    second_at = ~U[2026-08-18 10:02:00Z]
+
+    assert {:ok, first} =
+             RefundUpserter.mark_source_deleted(source.id, 10_001, 97_002, first_at)
+
+    assert {:ok, second} =
+             RefundUpserter.mark_source_deleted(source.id, 10_001, 97_002, second_at)
+
+    assert first.id == second.id
+    assert DateTime.compare(second.voided_at, first_at) == :eq
+    assert second.source_state == :voided
+    assert second.void_reason == "source_deleted"
+  end
+
+  test "source-deleted void is scoped by source, order, and refund identity", %{
+    source: source
+  } do
+    other_source = SalesHelpers.create_source_system!()
+    _same_id_other_source = create_refund_fixture!(other_source, 97_003)
+    _same_source_other_order = create_refund_fixture!(source, 97_004, 10_002)
+
+    assert {:error, :refund_not_found} =
+             RefundUpserter.mark_source_deleted(
+               source.id,
+               10_001,
+               97_003,
+               ~U[2026-08-18 10:03:00Z]
+             )
+
+    assert {:error, :refund_not_found} =
+             RefundUpserter.mark_source_deleted(
+               source.id,
+               10_001,
+               97_004,
+               ~U[2026-08-18 10:03:00Z]
+             )
+
+    assert [%Refund{source_state: :active}] =
+             Refund
+             |> Ash.Query.filter(source_system_id == ^other_source.id and woo_refund_id == 97_003)
+             |> Ash.read!(domain: Sales)
+
+    assert [%Refund{source_state: :active}] =
+             Refund
+             |> Ash.Query.filter(
+               source_system_id == ^source.id and
+                 woo_order_id == 10_002 and
+                 woo_refund_id == 97_004
+             )
+             |> Ash.read!(domain: Sales)
+  end
+
+  test "source-deleted void returns an error for a missing exact refund", %{source: source} do
+    assert {:error, :refund_not_found} =
+             RefundUpserter.mark_source_deleted(
+               source.id,
+               10_001,
+               97_005,
+               ~U[2026-08-18 10:04:00Z]
+             )
+  end
+
+  defp create_refund_fixture!(source, refund_id, woo_order_id \\ 10_001) do
+    assert {:ok, refund} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               woo_order_id,
+               normalized_refund(refund_id, [])
+             )
+
+    refund
+  end
+
   defp normalized_refund(refund_id, line_items) do
     %{
       woo_refund_id: refund_id,

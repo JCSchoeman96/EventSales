@@ -57,6 +57,28 @@ defmodule EventSales.Sales.RefundUpserter do
     end
   end
 
+  @spec mark_source_deleted(
+          Ecto.UUID.t(),
+          pos_integer(),
+          pos_integer(),
+          DateTime.t(),
+          keyword()
+        ) :: result()
+  def mark_source_deleted(
+        source_system_id,
+        woo_order_id,
+        woo_refund_id,
+        observed_at,
+        _opts \\ []
+      ) do
+    with :ok <- validate_identity(source_system_id, woo_order_id),
+         {:ok, _refund_id} <-
+           positive_identity(%{woo_refund_id: woo_refund_id}, :woo_refund_id),
+         :ok <- validate_observed_at(observed_at) do
+      persist_source_deleted(source_system_id, woo_order_id, woo_refund_id, observed_at)
+    end
+  end
+
   @spec upsert_normalized_refund(Ecto.UUID.t(), pos_integer(), map(), keyword()) :: result()
   def upsert_normalized_refund(source_system_id, woo_order_id, normalized_refund, opts \\ [])
 
@@ -903,6 +925,36 @@ defmodule EventSales.Sales.RefundUpserter do
     |> Ash.read_one(domain: Sales)
   end
 
+  defp persist_source_deleted(source_system_id, woo_order_id, woo_refund_id, observed_at) do
+    Repo.transaction(fn ->
+      case lock_refund(source_system_id, woo_order_id, woo_refund_id) do
+        {:ok, %Refund{} = refund} ->
+          mark_locked_refund(refund, observed_at)
+
+        {:ok, nil} ->
+          Repo.rollback(:refund_not_found)
+
+        {:error, _reason} ->
+          Repo.rollback(:refund_void_failed)
+      end
+    end)
+    |> normalize_transaction_result()
+  end
+
+  defp mark_locked_refund(%Refund{source_state: :active} = refund, observed_at) do
+    case ash_update(
+           refund,
+           %{void_reason: "source_deleted", voided_at: observed_at},
+           :mark_voided
+         ) do
+      {:ok, voided} -> voided
+      {:error, _reason} -> Repo.rollback(:refund_void_failed)
+    end
+  end
+
+  defp mark_locked_refund(%Refund{source_state: :voided} = refund, _observed_at),
+    do: refund
+
   defp validate_identity(source_system_id, woo_order_id) do
     cond do
       not valid_uuid?(source_system_id) ->
@@ -915,6 +967,9 @@ defmodule EventSales.Sales.RefundUpserter do
         :ok
     end
   end
+
+  defp validate_observed_at(%DateTime{}), do: :ok
+  defp validate_observed_at(_observed_at), do: {:error, {:invalid_refund_identity, :observed_at}}
 
   defp positive_identity(map, key) do
     case Map.get(map, key) do
