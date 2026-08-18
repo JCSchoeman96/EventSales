@@ -141,6 +141,7 @@
     "lib/event_sales/ingestion/intake_backpressure.ex",
     "lib/event_sales/ingestion/manual_sync.ex",
     "lib/event_sales/ingestion/order_reconciliation.ex",
+    "lib/event_sales/ingestion/order_refund_sync.ex",
     "lib/event_sales/ingestion/parsers/woocommerce_order_parser.ex",
     "lib/event_sales/ingestion/parsers/woocommerce_refund_parser.ex",
     "lib/event_sales/ingestion/parsers/woocommerce_refund_reference_parser.ex",
@@ -3411,6 +3412,21 @@
       "uses": []
     },
     {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.OrderRefundSync",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/order_refund_sync.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "sync_order"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
       "docs_count": 1,
       "moduledoc?": true,
       "name": "EventSales.Ingestion.Parsers.WoocommerceOrderParser",
@@ -5518,6 +5534,10 @@
         {
           "arity": 4,
           "name": "upsert_refund"
+        },
+        {
+          "arity": 5,
+          "name": "mark_source_deleted"
         },
         {
           "arity": 4,
