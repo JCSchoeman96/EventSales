@@ -15,6 +15,8 @@ defmodule EventSales.Sales.RefundUpserter do
   alias EventSales.Sales.Resources.{Order, OrderItem, Refund, RefundLine}
 
   @parent_order_not_found "parent_order_not_found"
+  @malformed_detail "malformed_refund_detail"
+  @source_detail_conflict "source_detail_conflict"
 
   @type result :: {:ok, Refund.t()} | {:error, term()}
 
@@ -94,26 +96,76 @@ defmodule EventSales.Sales.RefundUpserter do
       with {:ok, parent_order} <- lock_parent_order(source_system_id, woo_order_id),
            {:ok, existing} <-
              lock_refund(source_system_id, woo_order_id, woo_refund_id),
+           {:ok, existing_lines} <- existing_lines_for(existing),
+           conflict? <-
+             source_detail_conflict?(existing, normalized_refund, existing_lines),
            {:ok, refund} <-
-             persist_normalized_refund(
+             persist_normalized_transaction(
+               conflict?,
                source_system_id,
                woo_order_id,
                woo_refund_id,
                normalized_refund,
                parent_order,
-               existing
-             ),
-           {:ok, order_items} <-
-             lock_order_items(parent_order, normalized_refund.line_items),
-           {:ok, resolved_lines} <-
-             resolve_line_bindings(parent_order, normalized_refund.line_items, order_items),
-           {:ok, _persisted_lines} <- persist_refund_lines(refund, resolved_lines) do
+               existing,
+               existing_lines
+             ) do
         refund
       else
         {:error, reason} -> Repo.rollback(reason)
       end
     end)
     |> normalize_transaction_result()
+  end
+
+  defp persist_normalized_transaction(
+         true,
+         _source_system_id,
+         _woo_order_id,
+         _woo_refund_id,
+         _normalized_refund,
+         parent_order,
+         %Refund{} = existing,
+         _existing_lines
+       ) do
+    ash_update(
+      existing,
+      %{
+        order_id: parent_id(parent_order),
+        currency: parent_currency(parent_order),
+        detail_status: :unresolved,
+        unresolved_reason: @source_detail_conflict
+      },
+      :sync_normalized
+    )
+  end
+
+  defp persist_normalized_transaction(
+         false,
+         source_system_id,
+         woo_order_id,
+         woo_refund_id,
+         normalized_refund,
+         parent_order,
+         existing,
+         _existing_lines
+       ) do
+    with {:ok, refund} <-
+           persist_normalized_refund(
+             source_system_id,
+             woo_order_id,
+             woo_refund_id,
+             normalized_refund,
+             parent_order,
+             existing
+           ),
+         {:ok, order_items} <-
+           lock_order_items(parent_order, normalized_refund.line_items),
+         {:ok, resolved_lines} <-
+           resolve_line_bindings(parent_order, normalized_refund.line_items, order_items),
+         {:ok, _persisted_lines} <- persist_refund_lines(refund, resolved_lines) do
+      {:ok, refund}
+    end
   end
 
   defp persist_normalized_refund(
@@ -145,17 +197,17 @@ defmodule EventSales.Sales.RefundUpserter do
          parent_order,
          %Refund{} = existing
        ) do
-    attrs =
-      normalized_refund
-      |> normalized_source_attrs()
-      |> Map.merge(%{
-        order_id: parent_id(parent_order),
-        currency: parent_currency(parent_order),
-        detail_status: :complete,
-        unresolved_reason: merged_unresolved_reason(existing, parent_order)
-      })
+    with {:ok, source_attrs} <- merge_refund_source_attrs(existing, normalized_refund) do
+      attrs =
+        Map.merge(source_attrs, %{
+          order_id: parent_id(parent_order),
+          currency: parent_currency(parent_order),
+          detail_status: :complete,
+          unresolved_reason: merged_unresolved_reason(existing, parent_order)
+        })
 
-    ash_update(existing, attrs, :sync_normalized)
+      ash_update(existing, attrs, :sync_normalized)
+    end
   end
 
   defp normalized_refund_attrs(
@@ -341,6 +393,100 @@ defmodule EventSales.Sales.RefundUpserter do
     |> Ash.read(domain: Sales)
   end
 
+  defp existing_lines_for(nil), do: {:ok, []}
+  defp existing_lines_for(%Refund{id: refund_id}), do: existing_refund_lines(refund_id)
+
+  defp merge_refund_source_attrs(existing, normalized_refund) do
+    normalized_source_attrs(normalized_refund)
+    |> Enum.reduce_while({:ok, %{}}, fn {field, incoming}, {:ok, attrs} ->
+      case merge_source_field(Map.get(existing, field), incoming) do
+        {:ok, value} -> {:cont, {:ok, Map.put(attrs, field, value)}}
+        {:conflict, _existing_value} -> {:halt, {:error, @source_detail_conflict}}
+      end
+    end)
+  end
+
+  defp source_detail_conflict?(nil, _normalized_refund, _existing_lines), do: false
+
+  defp source_detail_conflict?(
+         %Refund{unresolved_reason: @source_detail_conflict},
+         _normalized_refund,
+         _existing_lines
+       ),
+       do: true
+
+  defp source_detail_conflict?(existing, normalized_refund, existing_lines) do
+    exact_detail_established? =
+      existing.detail_status == :complete or existing_lines != []
+
+    line_set_changed? =
+      exact_detail_established? and
+        line_identity_set(existing_lines) != line_identity_set(normalized_refund.line_items)
+
+    refund_source_changed? =
+      normalized_source_attrs(normalized_refund)
+      |> Enum.any?(fn {field, incoming} ->
+        match?({:conflict, _}, merge_source_field(Map.get(existing, field), incoming))
+      end)
+
+    line_source_changed? =
+      existing_lines
+      |> Map.new(&{&1.woo_refund_line_item_id, &1})
+      |> then(&incoming_line_source_conflict?(&1, normalized_refund.line_items))
+
+    line_set_changed? or refund_source_changed? or line_source_changed?
+  end
+
+  defp incoming_line_source_conflict?(existing_by_id, incoming_lines) do
+    Enum.any?(incoming_lines, fn incoming ->
+      case Map.get(existing_by_id, Map.get(incoming, :woo_refund_line_item_id)) do
+        nil ->
+          false
+
+        existing ->
+          [
+            :woo_refunded_item_id,
+            :woo_product_id,
+            :woo_variation_id,
+            :refunded_quantity,
+            :refund_subtotal_amount,
+            :refund_total_amount,
+            :refund_total_tax
+          ]
+          |> Enum.any?(fn field ->
+            Map.has_key?(incoming, field) and
+              match?(
+                {:conflict, _},
+                merge_source_field(Map.get(existing, field), Map.get(incoming, field))
+              )
+          end)
+      end
+    end)
+  end
+
+  defp line_identity_set(lines) do
+    lines
+    |> Enum.map(&Map.get(&1, :woo_refund_line_item_id))
+    |> MapSet.new()
+  end
+
+  defp merge_source_field(existing, incoming) do
+    cond do
+      is_nil(existing) -> {:ok, incoming}
+      is_nil(incoming) -> {:conflict, existing}
+      source_values_equal?(existing, incoming) -> {:ok, existing}
+      true -> {:conflict, existing}
+    end
+  end
+
+  defp source_values_equal?(%Decimal{} = left, %Decimal{} = right),
+    do: Decimal.equal?(left, right)
+
+  defp source_values_equal?(%DateTime{} = left, %DateTime{} = right),
+    do: DateTime.compare(left, right) == :eq
+
+  defp source_values_equal?(left, right), do: left == right
+
   defp persist_malformed(
          source_system_id,
          woo_order_id,
@@ -364,7 +510,10 @@ defmodule EventSales.Sales.RefundUpserter do
 
         case existing do
           nil -> ash_create(Refund, attrs, :create_normalized)
-          %Refund{} = refund -> ash_update(refund, attrs, :sync_normalized)
+          %Refund{} = refund ->
+            attrs
+            |> Map.take([:order_id, :currency, :detail_status, :unresolved_reason])
+            |> then(&ash_update(refund, &1, :sync_normalized))
         end
       else
         {:error, reason} -> Repo.rollback(reason)
@@ -530,6 +679,12 @@ defmodule EventSales.Sales.RefundUpserter do
     do: @parent_order_not_found
 
   defp merged_unresolved_reason(%Refund{unresolved_reason: @parent_order_not_found}, _parent_order),
+    do: nil
+
+  defp merged_unresolved_reason(%Refund{unresolved_reason: @malformed_detail}, nil),
+    do: @parent_order_not_found
+
+  defp merged_unresolved_reason(%Refund{unresolved_reason: @malformed_detail}, _parent_order),
     do: nil
 
   defp merged_unresolved_reason(%Refund{unresolved_reason: reason}, _parent_order), do: reason

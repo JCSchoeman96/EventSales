@@ -163,6 +163,161 @@ defmodule EventSales.Sales.RefundUpserterTest do
     assert refund_lines(refund.id) == []
   end
 
+  test "does not downgrade complete detail when a reference replays", %{source: source} do
+    normalized = normalized_refund(93_001, [])
+
+    assert {:ok, complete} =
+             RefundUpserter.upsert_normalized_refund(source.id, 10_001, normalized)
+
+    assert {:ok, replayed} =
+             RefundUpserter.upsert_reference(source.id, 10_001, %{
+               woo_refund_id: 93_001,
+               summary_total_amount: Decimal.new("45.00"),
+               reason: "customer request"
+             })
+
+    assert replayed.id == complete.id
+    assert replayed.detail_status == :complete
+    assert replayed.header_amount == Decimal.new("45.00")
+  end
+
+  test "hydrates a missing reference summary without replacing known summary", %{source: source} do
+    assert {:ok, first} =
+             RefundUpserter.upsert_reference(source.id, 10_001, %{
+               woo_refund_id: 93_002,
+               summary_total_amount: nil
+             })
+
+    assert {:ok, hydrated} =
+             RefundUpserter.upsert_reference(source.id, 10_001, %{
+               woo_refund_id: 93_002,
+               summary_total_amount: Decimal.new("12.00")
+             })
+
+    assert hydrated.id == first.id
+    assert hydrated.summary_total_amount == Decimal.new("12.00")
+
+    assert {:ok, unchanged} =
+             RefundUpserter.upsert_reference(source.id, 10_001, %{
+               woo_refund_id: 93_002,
+               summary_total_amount: Decimal.new("99.00")
+             })
+
+    assert unchanged.summary_total_amount == Decimal.new("12.00")
+  end
+
+  test "preserves exact financial facts and marks a changed source detail as a conflict", %{
+    source: source
+  } do
+    first_line = refund_line(88_201, nil, %{refund_total_amount: Decimal.new("10.00")})
+    first = normalized_refund(93_003, [first_line])
+    assert {:ok, persisted} = RefundUpserter.upsert_normalized_refund(source.id, 10_001, first)
+
+    changed =
+      normalized_refund(93_003, [
+        refund_line(88_201, nil, %{refund_total_amount: Decimal.new("11.00")})
+      ])
+      |> Map.put(:header_amount, Decimal.new("46.00"))
+
+    assert {:ok, conflicted} =
+             RefundUpserter.upsert_normalized_refund(source.id, 10_001, changed)
+
+    assert conflicted.id == persisted.id
+    assert conflicted.detail_status == :unresolved
+    assert conflicted.unresolved_reason == "source_detail_conflict"
+    assert conflicted.header_amount == Decimal.new("45.00")
+    assert [%RefundLine{refund_total_amount: amount}] = refund_lines(conflicted.id)
+    assert amount == Decimal.new("10.00")
+  end
+
+  test "does not replace an established refund line set", %{source: source} do
+    first =
+      normalized_refund(93_004, [
+        refund_line(88_301, nil)
+      ])
+
+    assert {:ok, persisted} =
+             RefundUpserter.upsert_normalized_refund(source.id, 10_001, first)
+
+    changed =
+      normalized_refund(93_004, [
+        refund_line(88_302, nil)
+      ])
+
+    assert {:ok, conflicted} =
+             RefundUpserter.upsert_normalized_refund(source.id, 10_001, changed)
+
+    assert conflicted.detail_status == :unresolved
+    assert conflicted.unresolved_reason == "source_detail_conflict"
+    assert [%RefundLine{woo_refund_line_item_id: 88_301}] = refund_lines(persisted.id)
+  end
+
+  test "stores malformed detail with a valid refund id and no partial lines", %{source: source} do
+    malformed = %{
+      "id" => 93_005,
+      "amount" => "45.00",
+      "line_items" => "not-a-list"
+    }
+
+    assert {:ok, refund} = RefundUpserter.upsert_refund(source.id, 10_001, malformed)
+    assert refund.detail_status == :unresolved
+    assert refund.unresolved_reason == "malformed_refund_detail"
+    assert refund_lines(refund.id) == []
+  end
+
+  test "hydrates a malformed refund when valid detail arrives later", %{source: source} do
+    malformed = %{"id" => 93_006, "amount" => "45.00", "line_items" => "not-a-list"}
+    assert {:ok, unresolved} = RefundUpserter.upsert_refund(source.id, 10_001, malformed)
+    order = SalesHelpers.create_order_from_fixture!(:order_completed, source)
+
+    assert {:ok, complete} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               order.woo_order_id,
+               normalized_refund(93_006, [])
+             )
+
+    assert complete.id == unresolved.id
+    assert complete.detail_status == :complete
+    assert complete.unresolved_reason == nil
+    assert complete.header_amount == Decimal.new("45.00")
+  end
+
+  test "never reactivates a voided refund during reference or detail replay", %{source: source} do
+    assert {:ok, refund} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               10_001,
+               normalized_refund(93_007, [])
+             )
+
+    voided =
+      Ash.update!(
+        refund,
+        %{void_reason: "source_absent", voided_at: ~U[2026-05-01 11:00:00Z]},
+        action: :mark_voided,
+        domain: Sales
+      )
+
+    assert {:ok, replayed_reference} =
+             RefundUpserter.upsert_reference(source.id, 10_001, %{
+               woo_refund_id: 93_007,
+               summary_total_amount: Decimal.new("45.00")
+             })
+
+    assert replayed_reference.source_state == :voided
+
+    assert {:ok, replayed_detail} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               10_001,
+               normalized_refund(93_007, [])
+             )
+
+    assert replayed_detail.id == voided.id
+    assert replayed_detail.source_state == :voided
+  end
+
   defp normalized_refund(refund_id, line_items) do
     %{
       woo_refund_id: refund_id,
