@@ -3,6 +3,8 @@ defmodule EventSales.Sales.RefundUpserterTest do
 
   require Ash.Query
 
+  alias Ecto.Adapters.SQL.Sandbox
+  alias EventSales.Repo
   alias EventSales.Sales
   alias EventSales.Sales.RefundUpserter
   alias EventSales.Sales.Resources.{Refund, RefundLine}
@@ -27,9 +29,30 @@ defmodule EventSales.Sales.RefundUpserterTest do
     assert Ash.count!(Refund, domain: Sales) == 1
   end
 
+  test "scopes the refund identity by source system", %{source: source} do
+    other_source = SalesHelpers.create_source_system!()
+    reference = %{woo_refund_id: 91_003, summary_total_amount: Decimal.new("45.00")}
+
+    assert {:ok, first} = RefundUpserter.upsert_reference(source.id, 10_001, reference)
+    assert {:ok, second} = RefundUpserter.upsert_reference(other_source.id, 10_001, reference)
+
+    refute first.id == second.id
+    assert Ash.count!(Refund, domain: Sales) == 2
+  end
+
   test "rejects a reference without a positive refund identity", %{source: source} do
     assert {:error, {:invalid_refund_identity, :woo_refund_id}} =
              RefundUpserter.upsert_reference(source.id, 10_001, %{})
+
+    assert Ash.count!(Refund, domain: Sales) == 0
+  end
+
+  test "rolls back an invalid reference financial value", %{source: source} do
+    assert {:error, _reason} =
+             RefundUpserter.upsert_reference(source.id, 10_001, %{
+               woo_refund_id: 91_002,
+               summary_total_amount: Decimal.new("-1.00")
+             })
 
     assert Ash.count!(Refund, domain: Sales) == 0
   end
@@ -283,6 +306,42 @@ defmodule EventSales.Sales.RefundUpserterTest do
     assert complete.header_amount == Decimal.new("45.00")
   end
 
+  test "does not clear malformed detail evidence on a reference replay", %{source: source} do
+    order = SalesHelpers.create_order_from_fixture!(:order_completed, source)
+    malformed = %{"id" => 93_013, "amount" => "45.00", "line_items" => "not-a-list"}
+
+    assert {:ok, unresolved} =
+             RefundUpserter.upsert_refund(source.id, order.woo_order_id, malformed)
+
+    assert {:ok, replayed} =
+             RefundUpserter.upsert_reference(source.id, order.woo_order_id, %{
+               woo_refund_id: 93_013,
+               summary_total_amount: Decimal.new("45.00")
+             })
+
+    assert replayed.id == unresolved.id
+    assert replayed.detail_status == :unresolved
+    assert replayed.unresolved_reason == "malformed_refund_detail"
+  end
+
+  test "keeps complete detail parent-unresolved after malformed evidence", %{source: source} do
+    malformed = %{"id" => 93_015, "amount" => "45.00", "line_items" => "not-a-list"}
+    assert {:ok, unresolved} = RefundUpserter.upsert_refund(source.id, 10_001, malformed)
+
+    assert {:ok, complete} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               10_001,
+               normalized_refund(93_015, [])
+             )
+
+    assert complete.id == unresolved.id
+    assert complete.detail_status == :complete
+    assert complete.order_id == nil
+    assert complete.currency == nil
+    assert complete.unresolved_reason == "parent_order_not_found"
+  end
+
   test "never reactivates a voided refund during reference or detail replay", %{source: source} do
     assert {:ok, refund} =
              RefundUpserter.upsert_normalized_refund(
@@ -316,6 +375,174 @@ defmodule EventSales.Sales.RefundUpserterTest do
 
     assert replayed_detail.id == voided.id
     assert replayed_detail.source_state == :voided
+  end
+
+  test "parses raw exact Woo detail before persisting normalized facts", %{source: source} do
+    raw = %{
+      "id" => 93_008,
+      "amount" => "-45.00",
+      "reason" => "customer request",
+      "date_created_gmt" => "2026-05-01T10:00:00",
+      "line_items" => [
+        %{
+          "id" => 88_401,
+          "product_id" => "501",
+          "variation_id" => "601",
+          "quantity" => "-1",
+          "subtotal" => "-40.00",
+          "total" => "-40.00",
+          "total_tax" => "-5.00",
+          "meta_data" => [
+            %{"key" => "_refunded_item_id", "value" => "71_001"}
+          ]
+        }
+      ],
+      "shipping_lines" => [],
+      "fee_lines" => [],
+      "tax_lines" => []
+    }
+
+    assert {:ok, refund} = RefundUpserter.upsert_refund(source.id, 10_001, raw)
+    assert refund.header_amount == Decimal.new("45.00")
+    assert refund.detail_status == :complete
+    assert [%RefundLine{refunded_quantity: 1, refund_total_tax: tax}] = refund_lines(refund.id)
+    assert tax == Decimal.new("5.00")
+  end
+
+  test "does not bind a refund to an order from another source", %{source: source} do
+    other_source = SalesHelpers.create_source_system!()
+    _other_order = SalesHelpers.create_order_from_fixture!(:order_completed, other_source)
+
+    assert {:ok, refund} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               10_001,
+               normalized_refund(93_009, [
+                 refund_line(88_402, 71_001)
+               ])
+             )
+
+    assert refund.order_id == nil
+    assert refund.currency == nil
+    assert refund.unresolved_reason == "parent_order_not_found"
+    assert [%RefundLine{order_item_id: nil}] = refund_lines(refund.id)
+  end
+
+  test "hydrates nil line source facts to known values on replay", %{source: source} do
+    initial_line =
+      refund_line(88_403, nil, %{
+        woo_product_id: nil,
+        woo_variation_id: nil,
+        refunded_quantity: nil,
+        refund_subtotal_amount: nil,
+        refund_total_amount: nil,
+        refund_total_tax: nil
+      })
+
+    assert {:ok, first} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               10_001,
+               normalized_refund(93_010, [initial_line])
+             )
+
+    hydrated_line = refund_line(88_403, nil)
+
+    assert {:ok, second} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               10_001,
+               normalized_refund(93_010, [hydrated_line])
+             )
+
+    assert second.id == first.id
+    assert [%RefundLine{} = line] = refund_lines(second.id)
+    assert line.refunded_quantity == 1
+    assert line.refund_total_amount == Decimal.new("45.00")
+  end
+
+  test "marks a known line source fact cleared on replay as a conflict", %{source: source} do
+    assert {:ok, first} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               10_001,
+               normalized_refund(93_011, [refund_line(88_404, nil)])
+             )
+
+    cleared_line =
+      refund_line(88_404, nil, %{
+        woo_product_id: nil,
+        woo_variation_id: nil,
+        refunded_quantity: nil,
+        refund_subtotal_amount: nil,
+        refund_total_amount: nil,
+        refund_total_tax: nil
+      })
+
+    assert {:ok, conflicted} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               10_001,
+               normalized_refund(93_011, [cleared_line])
+             )
+
+    assert conflicted.id == first.id
+    assert conflicted.detail_status == :unresolved
+    assert conflicted.unresolved_reason == "source_detail_conflict"
+    assert [%RefundLine{refunded_quantity: 1}] = refund_lines(first.id)
+  end
+
+  test "hydrates and then protects the exact refunded item binder", %{source: source} do
+    order = SalesHelpers.create_order_from_fixture!(:order_completed, source)
+    order_item = SalesHelpers.create_order_item_from_line!(order, order_line_fixture())
+
+    assert {:ok, first} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               order.woo_order_id,
+               normalized_refund(93_014, [refund_line(88_405, nil)])
+             )
+
+    assert {:ok, hydrated} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               order.woo_order_id,
+               normalized_refund(93_014, [
+                 refund_line(88_405, order_item.woo_line_item_id)
+               ])
+             )
+
+    assert hydrated.id == first.id
+    assert [%RefundLine{order_item_id: order_item_id}] = refund_lines(hydrated.id)
+    assert order_item_id == order_item.id
+
+    assert {:ok, conflicted} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               order.woo_order_id,
+               normalized_refund(93_014, [refund_line(88_405, nil)])
+             )
+
+    assert conflicted.detail_status == :unresolved
+    assert conflicted.unresolved_reason == "source_detail_conflict"
+    assert [%RefundLine{order_item_id: ^order_item_id}] = refund_lines(conflicted.id)
+  end
+
+  test "marks malformed replay against complete detail as a source conflict", %{source: source} do
+    assert {:ok, complete} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               10_001,
+               normalized_refund(93_012, [])
+             )
+
+    malformed = %{"id" => 93_012, "amount" => "45.00", "line_items" => "not-a-list"}
+    assert {:ok, conflicted} = RefundUpserter.upsert_refund(source.id, 10_001, malformed)
+
+    assert conflicted.id == complete.id
+    assert conflicted.detail_status == :unresolved
+    assert conflicted.unresolved_reason == "source_detail_conflict"
+    assert conflicted.header_amount == Decimal.new("45.00")
   end
 
   test "allows partial refunds while cumulative ticket quantity stays within the original", %{
@@ -409,6 +636,37 @@ defmodule EventSales.Sales.RefundUpserterTest do
     assert Ash.get!(EventSales.Sales.Resources.OrderItem, item.id, domain: Sales).quantity == 2
   end
 
+  test "combines product, variation and quantity warnings deterministically", %{source: source} do
+    %{order: order, item: item} = create_ticket_order_fixture!(source, 1)
+
+    assert {:ok, _prior} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               order.woo_order_id,
+               normalized_refund(94_013, [
+                 refund_line(89_013, item.woo_line_item_id, %{refunded_quantity: 1})
+               ])
+             )
+
+    assert {:ok, refund} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               order.woo_order_id,
+               normalized_refund(94_014, [
+                 refund_line(89_014, item.woo_line_item_id, %{
+                   woo_product_id: 999_001,
+                   woo_variation_id: 999_002,
+                   refunded_quantity: 1
+                 })
+               ])
+             )
+
+    assert [%RefundLine{validation_reason: reason}] = refund_lines(refund.id)
+
+    assert reason ==
+             "product_id_mismatch|variation_id_mismatch|refunded_quantity_exceeds_original"
+  end
+
   test "keeps money independent from ticket quantity validation", %{source: source} do
     %{order: order, item: item} = create_ticket_order_fixture!(source, 1)
 
@@ -485,6 +743,97 @@ defmodule EventSales.Sales.RefundUpserterTest do
 
       assert [%RefundLine{validation_reason: nil}] = refund_lines(refund.id)
     end
+  end
+
+  test "concurrent duplicate writes converge to one refund and one line set", %{
+    source: source
+  } do
+    parent = self()
+
+    normalized =
+      normalized_refund(95_001, [
+        refund_line(90_001, 71_001, %{refunded_quantity: 1})
+      ])
+
+    results =
+      1..2
+      |> Task.async_stream(
+        fn _ ->
+          Sandbox.allow(Repo, parent, self())
+          RefundUpserter.upsert_normalized_refund(source.id, 10_001, normalized)
+        end,
+        max_concurrency: 2,
+        timeout: 15_000,
+        ordered: false
+      )
+      |> Enum.to_list()
+
+    assert Enum.all?(results, &match?({:ok, {:ok, %Refund{}}}, &1))
+    assert Ash.count!(Refund, domain: Sales) == 1
+    assert [refund] = Ash.read!(Refund, domain: Sales)
+    assert [%RefundLine{refunded_quantity: 1}] = refund_lines(refund.id)
+  end
+
+  test "concurrent distinct refunds serialize quantity safety on one ticket", %{source: source} do
+    %{order: order, item: item} = create_ticket_order_fixture!(source, 1)
+    parent = self()
+
+    inputs = [
+      {95_002, 90_002},
+      {95_003, 90_003}
+    ]
+
+    results =
+      inputs
+      |> Task.async_stream(
+        fn {refund_id, line_id} ->
+          Sandbox.allow(Repo, parent, self())
+
+          RefundUpserter.upsert_normalized_refund(
+            source.id,
+            order.woo_order_id,
+            normalized_refund(refund_id, [
+              refund_line(line_id, item.woo_line_item_id, %{refunded_quantity: 1})
+            ])
+          )
+        end,
+        max_concurrency: 2,
+        timeout: 15_000,
+        ordered: false
+      )
+      |> Enum.to_list()
+
+    assert Enum.all?(results, &match?({:ok, {:ok, %Refund{}}}, &1))
+    assert length(Ash.read!(Refund, domain: Sales)) == 2
+
+    lines = refund_lines_for_order_item(item.id)
+    assert length(lines) == 2
+    assert Enum.any?(lines, &(&1.validation_reason == "refunded_quantity_exceeds_original"))
+    assert Enum.all?(lines, &(&1.refunded_quantity == 1))
+  end
+
+  test "rolls back the refund when a line write fails", %{source: source} do
+    invalid =
+      normalized_refund(95_004, [
+        refund_line(90_004, nil, %{refunded_quantity: -1})
+      ])
+
+    assert {:error, _reason} =
+             RefundUpserter.upsert_normalized_refund(source.id, 10_001, invalid)
+
+    assert Ash.read!(Refund, domain: Sales) == []
+    assert Ash.read!(RefundLine, domain: Sales) == []
+  end
+
+  test "rejects an invalid normalized refund identity without writing", %{source: source} do
+    assert {:error, {:invalid_refund_identity, :woo_refund_id}} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               10_001,
+               normalized_refund(nil, [])
+             )
+
+    assert Ash.read!(Refund, domain: Sales) == []
   end
 
   defp normalized_refund(refund_id, line_items) do
