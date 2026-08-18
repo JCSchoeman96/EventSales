@@ -22,6 +22,7 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
   }
 
   alias EventSales.Ingestion.HistoricalManifestEvidence
+  alias EventSales.Ingestion.OrderRefundSync
   alias EventSales.Ingestion.Resources.{SyncCursor, SyncRun}
   alias EventSales.Repo
   alias EventSales.Sales.OrderUpserter
@@ -34,6 +35,7 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
   @manifest_client WooOrderIndexClient
   @woocommerce_client WooCommerceClient
   @order_upserter OrderUpserter
+  @order_refund_sync OrderRefundSync
 
   @doc "Processes exactly one manifest page and checkpoints it after resolution."
   @spec run_step(SyncRun.t(), SyncCursor.t(), keyword()) :: result()
@@ -48,23 +50,29 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
          {:ok, source} <- load_source_system(run, opts),
          :ok <- validate_source_system(source, run),
          :ok <- validate_client_bindings(source, opts) do
-      execute_state(run, cursor, evidence, opts)
+      execute_state(run, cursor, evidence, source, opts)
     end
   end
 
   def run_step(%SyncRun{}, nil, _opts), do: {:error, :historical_cursor_required}
   def run_step(_run, _cursor, _opts), do: {:error, :invalid_historical_execution_input}
 
-  defp execute_state(run, cursor, %HistoricalManifestEvidence{state: "manifest_terminal"}, _opts),
-    do: {:manifest_terminal, run, cursor}
+  defp execute_state(
+         run,
+         cursor,
+         %HistoricalManifestEvidence{state: "manifest_terminal"},
+         _source,
+         _opts
+       ),
+       do: {:manifest_terminal, run, cursor}
 
-  defp execute_state(run, cursor, evidence, opts) do
+  defp execute_state(run, cursor, evidence, source, opts) do
     with :ok <- HistoricalManifestEvidence.validate_unexpired(evidence, now(opts)),
          {:ok, page} <- fetch_one_page(evidence, opts),
          :ok <- HistoricalManifestEvidence.validate_continuity(evidence, page),
          :ok <- HistoricalManifestEvidence.validate_unexpired(evidence, now(opts)),
          {:ok, mappings} <- load_mappings(run, opts),
-         {:ok, counts} <- resolve_page(run, page, mappings, opts),
+         {:ok, counts} <- resolve_page(run, page, mappings, source, opts),
          :ok <- before_checkpoint(opts),
          {:ok, result} <- checkpoint_page(run, cursor, evidence, page, counts, opts) do
       result
@@ -275,31 +283,34 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
 
   defp active_mapping_for_run?(_mapping, _run), do: false
 
-  defp resolve_page(run, page, mappings, opts) do
+  defp resolve_page(run, page, mappings, source, opts) do
     page
     |> page_value(:items, "items")
     |> Enum.reduce_while({:ok, zero_counts()}, fn item, result ->
-      resolve_item(run, item, result, mappings, opts)
+      resolve_item(run, item, result, mappings, source, opts)
     end)
   end
 
-  defp resolve_item(run, item, {:ok, counts}, mappings, opts) do
+  defp resolve_item(run, item, {:ok, counts}, mappings, source, opts) do
     source_order_id = page_value(item, :source_order_id, "source_order_id")
 
     case fetch_order(source_order_id, opts) do
-      {:ok, order} -> resolve_fetched_order(run, source_order_id, order, counts, mappings, opts)
-      {:error, reason} -> {:halt, {:error, normalize_order_fetch_error(reason)}}
+      {:ok, order} ->
+        resolve_fetched_order(run, source_order_id, order, counts, mappings, source, opts)
+
+      {:error, reason} ->
+        {:halt, {:error, normalize_order_fetch_error(reason)}}
     end
   end
 
-  defp resolve_item(_run, _item, result, _mappings, _opts), do: {:halt, result}
+  defp resolve_item(_run, _item, result, _mappings, _source, _opts), do: {:halt, result}
 
-  defp resolve_fetched_order(run, source_order_id, order, counts, mappings, opts) do
+  defp resolve_fetched_order(run, source_order_id, order, counts, mappings, source, opts) do
     case validate_returned_order_id(source_order_id, order) do
       :ok ->
         case matching_line_items(order, mappings) do
           {:ok, line_items} ->
-            resolve_line_items(run, order, line_items, counts, opts)
+            resolve_line_items(run, source, source_order_id, order, line_items, counts, opts)
 
           {:error, reason} ->
             {:halt, {:error, reason}}
@@ -310,26 +321,50 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
     end
   end
 
-  defp resolve_line_items(_run, _order, [], counts, _opts) do
-    {:cont, {:ok, Map.update!(counts, :orders_seen_count, &(&1 + 1))}}
+  defp resolve_line_items(run, source, source_order_id, _order, [], counts, opts) do
+    counts = Map.update!(counts, :orders_seen_count, &(&1 + 1))
+
+    case sync_refunds(run, source, source_order_id, opts) do
+      :ok -> {:cont, {:ok, counts}}
+      {:error, reason} -> {:halt, {:error, reason}}
+    end
   end
 
-  defp resolve_line_items(run, order, line_items, counts, opts) do
+  defp resolve_line_items(run, source, source_order_id, order, line_items, counts, opts) do
     counts = Map.update!(counts, :orders_seen_count, &(&1 + 1))
     filtered_order = put_line_items(order, line_items)
 
     case upsert_order(run.source_system_id, filtered_order, opts) do
       {:ok, :stale_noop} ->
-        {:cont, {:ok, increment_match_counts(counts, :orders_stale_count)}}
+        continue_after_order(
+          run,
+          source,
+          source_order_id,
+          increment_match_counts(counts, :orders_stale_count),
+          opts
+        )
 
       {:ok, _persisted_order} ->
-        {:cont, {:ok, increment_match_counts(counts, :orders_upserted_count)}}
+        continue_after_order(
+          run,
+          source,
+          source_order_id,
+          increment_match_counts(counts, :orders_upserted_count),
+          opts
+        )
 
       {:error, _reason} ->
         {:halt, {:error, :order_upsert_failed}}
 
       _other ->
         {:halt, {:error, :order_upsert_failed}}
+    end
+  end
+
+  defp continue_after_order(run, source, source_order_id, counts, opts) do
+    case sync_refunds(run, source, source_order_id, opts) do
+      :ok -> {:cont, {:ok, counts}}
+      {:error, reason} -> {:halt, {:error, reason}}
     end
   end
 
@@ -392,6 +427,36 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
   defp upsert_order(source_system_id, payload, opts) do
     upserter = Keyword.get(opts, :order_upserter, @order_upserter)
     upserter.upsert_order(source_system_id, payload, Keyword.get(opts, :order_upserter_opts, []))
+  end
+
+  defp sync_refunds(run, source, source_order_id, opts) do
+    refund_sync = Keyword.get(opts, :order_refund_sync, @order_refund_sync)
+
+    refund_sync.sync_order(
+      run.source_system_id,
+      source_order_id,
+      refund_sync_opts(run, source, opts)
+    )
+  end
+
+  defp refund_sync_opts(run, source, opts) do
+    refund_opts = Keyword.get(opts, :order_refund_sync_opts, [])
+
+    Keyword.merge(refund_opts,
+      woocommerce_client: Keyword.get(opts, :woocommerce_client, @woocommerce_client),
+      woocommerce_client_opts: woocommerce_client_opts(opts),
+      source_system_loader: source_system_loader(run, source)
+    )
+  end
+
+  defp source_system_loader(run, source) do
+    fn source_system_id ->
+      if source_system_id == run.source_system_id do
+        {:ok, source}
+      else
+        {:error, :source_system_mismatch}
+      end
+    end
   end
 
   defp zero_counts do

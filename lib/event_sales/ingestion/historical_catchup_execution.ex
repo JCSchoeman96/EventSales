@@ -25,6 +25,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
   alias EventSales.Ingestion.HistoricalCatchupEvidence
   alias EventSales.Ingestion.HistoricalEventLineSelector
   alias EventSales.Ingestion.HistoricalManifestEvidence
+  alias EventSales.Ingestion.OrderRefundSync
   alias EventSales.Ingestion.Resources.{SyncCursor, SyncRun}
   alias EventSales.Repo
   alias EventSales.Sales.OrderUpserter
@@ -33,6 +34,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
   @catchup_client WooOrderIndexClient
   @woocommerce_client WooCommerceClient
   @order_upserter OrderUpserter
+  @order_refund_sync OrderRefundSync
   @line_selector HistoricalEventLineSelector
 
   @type result ::
@@ -341,8 +343,10 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
   defp resolve_order(run, event, source, source_order_id, order, opts) do
     with :ok <- validate_returned_order_id(source_order_id, order),
          {:ok, raw_lines} <- select_event_lines(event, source, order, opts),
-         result <- reconcile_order(run, event, source_order_id, order, raw_lines, opts) do
-      normalize_reconcile_result(result)
+         result <- reconcile_order(run, event, source_order_id, order, raw_lines, opts),
+         :ok <- normalize_reconcile_result(result),
+         :ok <- sync_refunds(run, source, source_order_id, opts) do
+      :ok
     else
       {:error, reason} -> {:error, reason}
     end
@@ -408,6 +412,36 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
 
       true ->
         {:error, {:order_reconcile_failed, source_order_id}}
+    end
+  end
+
+  defp sync_refunds(run, source, source_order_id, opts) do
+    refund_sync = Keyword.get(opts, :order_refund_sync, @order_refund_sync)
+
+    refund_sync.sync_order(
+      run.source_system_id,
+      source_order_id,
+      refund_sync_opts(run, source, opts)
+    )
+  end
+
+  defp refund_sync_opts(run, source, opts) do
+    refund_opts = Keyword.get(opts, :order_refund_sync_opts, [])
+
+    Keyword.merge(refund_opts,
+      woocommerce_client: Keyword.get(opts, :woocommerce_client, @woocommerce_client),
+      woocommerce_client_opts: woocommerce_client_opts(opts),
+      source_system_loader: source_system_loader(run, source)
+    )
+  end
+
+  defp source_system_loader(run, source) do
+    fn source_system_id ->
+      if source_system_id == run.source_system_id do
+        {:ok, source}
+      else
+        {:error, :source_system_mismatch}
+      end
     end
   end
 

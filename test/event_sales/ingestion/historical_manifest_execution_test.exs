@@ -134,13 +134,50 @@ defmodule EventSales.Ingestion.HistoricalManifestExecutionTest do
     defp durable_after_result(durable, _id, _payload, _result), do: durable
   end
 
+  defmodule RefundSync do
+    def child_spec(opts) do
+      %{
+        id: __MODULE__,
+        start: {__MODULE__, :start_link, [opts]}
+      }
+    end
+
+    def start_link(_opts),
+      do: Agent.start_link(fn -> %{responses: [], calls: []} end, name: __MODULE__)
+
+    def reset!, do: Agent.update(__MODULE__, fn _ -> %{responses: [], calls: []} end)
+
+    def enqueue!(response),
+      do: Agent.update(__MODULE__, &Map.update!(&1, :responses, fn xs -> xs ++ [response] end))
+
+    def calls, do: Agent.get(__MODULE__, &Enum.reverse(&1.calls))
+
+    def sync_order(source_system_id, woo_order_id, opts) do
+      Agent.get_and_update(__MODULE__, fn state ->
+        response = List.first(state.responses) || :ok
+        responses = if state.responses == [], do: [], else: tl(state.responses)
+
+        call = %{
+          source_system_id: source_system_id,
+          woo_order_id: woo_order_id,
+          opts: opts,
+          order_calls_at_sync: length(Upserter.calls())
+        }
+
+        {response, %{state | responses: responses, calls: [call | state.calls]}}
+      end)
+    end
+  end
+
   setup do
     start_supervised!(ManifestClient)
     start_supervised!(WooClient)
     start_supervised!(Upserter)
+    start_supervised!(RefundSync)
     ManifestClient.reset!()
     WooClient.reset!()
     Upserter.reset!()
+    RefundSync.reset!()
 
     source = SalesHelpers.create_source_system!(%{base_url: @source_url})
 
@@ -341,6 +378,124 @@ defmodule EventSales.Ingestion.HistoricalManifestExecutionTest do
     assert run_counts(run) == %{seen: 1, matched: 1, upserted: 1, stale: 0}
   end
 
+  test "a matching M Order is written before refund synchronization", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    mapping = mapping(source, event, 42, 7)
+    enqueue_page(page())
+
+    WooClient.put_order!(
+      42,
+      {:ok, order_payload(42, [%{"product_id" => 42, "variation_id" => 7}])}
+    )
+
+    assert {:continue, _run, _cursor} = run_step(run, cursor, mappings: [mapping])
+
+    assert [
+             %{
+               source_system_id: source_id,
+               woo_order_id: "42",
+               order_calls_at_sync: 1,
+               opts: opts
+             }
+           ] =
+             RefundSync.calls()
+
+    assert source_id == source.id
+    assert Keyword.get(opts, :woocommerce_client) == WooClient
+    loader = Keyword.fetch!(opts, :source_system_loader)
+    assert {:ok, loaded_source} = loader.(source.id)
+    assert loaded_source.id == source.id
+    assert loaded_source.base_url == source.base_url
+    assert loaded_source.kind == source.kind
+    assert {:error, :source_system_mismatch} = loader.(Ecto.UUID.generate())
+  end
+
+  test "a stale M Order still runs refund synchronization", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    mapping = mapping(source, event, 42, 7)
+    enqueue_page(page())
+
+    WooClient.put_order!(
+      42,
+      {:ok, order_payload(42, [%{"product_id" => 42, "variation_id" => 7}])}
+    )
+
+    Upserter.put_response!(42, {:ok, :stale_noop})
+
+    assert {:continue, _run, _cursor} = run_step(run, cursor, mappings: [mapping])
+    assert [%{woo_order_id: "42", order_calls_at_sync: 1}] = RefundSync.calls()
+    assert run_counts(run) == %{seen: 1, matched: 1, upserted: 0, stale: 1}
+  end
+
+  test "an empty M Event subset still runs refund synchronization without an Order write", %{
+    run: run,
+    cursor: cursor
+  } do
+    enqueue_page(page())
+
+    WooClient.put_order!(
+      42,
+      {:ok, order_payload(42, [%{"product_id" => 999, "variation_id" => nil}])}
+    )
+
+    assert {:continue, _run, _cursor} = run_step(run, cursor, mappings: [])
+    assert Upserter.calls() == []
+    assert [%{woo_order_id: "42", order_calls_at_sync: 0}] = RefundSync.calls()
+    assert run_counts(run) == %{seen: 1, matched: 0, upserted: 0, stale: 0}
+  end
+
+  test "a transient refund failure after an M Order write blocks the checkpoint", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    mapping = mapping(source, event, 42, 7)
+    enqueue_page(page())
+
+    WooClient.put_order!(
+      42,
+      {:ok, order_payload(42, [%{"product_id" => 42, "variation_id" => 7}])}
+    )
+
+    RefundSync.enqueue!({:error, :timeout})
+
+    assert {:error, :timeout} = run_step(run, cursor, mappings: [mapping])
+    assert length(Upserter.calls()) == 1
+    assert cursor_unchanged?(cursor)
+    assert run_counts(run) == %{seen: 0, matched: 0, upserted: 0, stale: 0}
+  end
+
+  test "a permanent refund failure after an M Order write propagates unchanged", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    mapping = mapping(source, event, 42, 7)
+    enqueue_page(page())
+
+    WooClient.put_order!(
+      42,
+      {:ok, order_payload(42, [%{"product_id" => 42, "variation_id" => 7}])}
+    )
+
+    RefundSync.enqueue!({:error, :invalid_refund_list_response})
+
+    assert {:error, :invalid_refund_list_response} =
+             run_step(run, cursor, mappings: [mapping])
+
+    assert cursor_unchanged?(cursor)
+  end
+
   test "upserter errors prevent the page checkpoint", %{
     source: source,
     event: event,
@@ -359,6 +514,35 @@ defmodule EventSales.Ingestion.HistoricalManifestExecutionTest do
 
     assert {:error, :order_upsert_failed} = run_step(run, cursor, mappings: [mapping])
     assert cursor_unchanged?(cursor)
+    assert RefundSync.calls() == []
+  end
+
+  test "a later M refund failure prevents the whole page checkpoint", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    mapping = mapping(source, event, 42, 7)
+    enqueue_page(page(%{source_order_id: "42"}, %{source_order_id: "43"}))
+
+    WooClient.put_order!(
+      42,
+      {:ok, order_payload(42, [%{"product_id" => 42, "variation_id" => 7}])}
+    )
+
+    WooClient.put_order!(
+      43,
+      {:ok, order_payload(43, [%{"product_id" => 42, "variation_id" => 7}])}
+    )
+
+    RefundSync.enqueue!(:ok)
+    RefundSync.enqueue!({:error, :refund_void_failed})
+
+    assert {:error, :refund_void_failed} = run_step(run, cursor, mappings: [mapping])
+    assert Enum.map(RefundSync.calls(), & &1.woo_order_id) == ["42", "43"]
+    assert cursor_unchanged?(cursor)
+    assert run_counts(run) == %{seen: 0, matched: 0, upserted: 0, stale: 0}
   end
 
   test "a pre-checkpoint failure replays the same page and checkpoints counts once", %{
@@ -532,6 +716,7 @@ defmodule EventSales.Ingestion.HistoricalManifestExecutionTest do
       manifest_client: ManifestClient,
       woocommerce_client: WooClient,
       order_upserter: Upserter,
+      order_refund_sync: RefundSync,
       now: fn -> @now end
     ]
   end
