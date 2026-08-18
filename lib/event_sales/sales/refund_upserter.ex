@@ -8,6 +8,7 @@ defmodule EventSales.Sales.RefundUpserter do
   """
 
   require Ash.Query
+  import Ecto.Query
 
   alias EventSales.Ingestion.Parsers.WoocommerceRefundParser
   alias EventSales.Repo
@@ -17,6 +18,11 @@ defmodule EventSales.Sales.RefundUpserter do
   @parent_order_not_found "parent_order_not_found"
   @malformed_detail "malformed_refund_detail"
   @source_detail_conflict "source_detail_conflict"
+  @validation_tokens [
+    "product_id_mismatch",
+    "variation_id_mismatch",
+    "refunded_quantity_exceeds_original"
+  ]
 
   @type result :: {:ok, Refund.t()} | {:error, term()}
 
@@ -163,7 +169,9 @@ defmodule EventSales.Sales.RefundUpserter do
            lock_order_items(parent_order, normalized_refund.line_items),
          {:ok, resolved_lines} <-
            resolve_line_bindings(parent_order, normalized_refund.line_items, order_items),
-         {:ok, _persisted_lines} <- persist_refund_lines(refund, resolved_lines) do
+         {:ok, validated_lines} <-
+           validate_refund_quantities(refund.id, resolved_lines, order_items),
+         {:ok, _persisted_lines} <- persist_refund_lines(refund, validated_lines) do
       {:ok, refund}
     end
   end
@@ -330,6 +338,113 @@ defmodule EventSales.Sales.RefundUpserter do
 
   defp source_value_differs?(nil, _historical), do: false
   defp source_value_differs?(source, historical), do: source != historical
+
+  defp validate_refund_quantities(_refund_id, lines, []), do: {:ok, lines}
+
+  defp validate_refund_quantities(refund_id, lines, order_items) do
+    bound_item_ids =
+      lines
+      |> Enum.map(&Map.get(&1, :order_item_id))
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+
+    if bound_item_ids == [] do
+      {:ok, lines}
+    else
+      historical_quantities =
+        active_refunded_quantities(refund_id, bound_item_ids)
+        |> Map.new(fn {order_item_id, quantity} ->
+          {normalize_uuid_key(order_item_id), normalize_quantity(quantity)}
+        end)
+
+      item_by_id = Map.new(order_items, &{&1.id, &1})
+
+      incoming_quantities =
+        Enum.reduce(lines, %{}, fn line, quantities ->
+          order_item_id = Map.get(line, :order_item_id)
+          quantity = Map.get(line, :refunded_quantity)
+
+          if is_nil(order_item_id) or not positive_integer?(quantity) do
+            quantities
+          else
+            Map.update(quantities, order_item_id, quantity, &(&1 + quantity))
+          end
+        end)
+
+      over_refunded_item_ids =
+        incoming_quantities
+        |> Enum.filter(fn {order_item_id, incoming_quantity} ->
+          case Map.get(item_by_id, order_item_id) do
+            %{item_kind: :ticket, quantity: original_quantity} ->
+              historical_quantity = Map.get(historical_quantities, order_item_id, 0)
+              historical_quantity + incoming_quantity > original_quantity
+
+            _other ->
+              false
+          end
+        end)
+        |> MapSet.new(fn {order_item_id, _quantity} -> order_item_id end)
+
+      {:ok,
+       Enum.map(lines, fn line ->
+         if MapSet.member?(over_refunded_item_ids, Map.get(line, :order_item_id)) do
+           Map.put(
+             line,
+             :validation_reason,
+             add_validation_token(
+               Map.get(line, :validation_reason),
+               "refunded_quantity_exceeds_original"
+             )
+           )
+         else
+           line
+         end
+       end)}
+    end
+  end
+
+  defp active_refunded_quantities(refund_id, order_item_ids) do
+    Repo.all(
+      from line in "sales_refund_lines",
+        join: refund in "sales_refunds",
+        on: refund.id == line.refund_id,
+        where:
+          line.order_item_id in type(^order_item_ids, {:array, :binary_id}) and
+            refund.source_state == "active" and
+              refund.id != type(^refund_id, :binary_id),
+        group_by: line.order_item_id,
+        select: {line.order_item_id, coalesce(sum(line.refunded_quantity), 0)}
+    )
+  end
+
+  defp normalize_uuid_key(value) when is_binary(value) do
+    case Ecto.UUID.load(value) do
+      {:ok, uuid} -> uuid
+      :error -> value
+    end
+  end
+
+  defp normalize_uuid_key(value), do: value
+
+  defp normalize_quantity(value) when is_integer(value), do: value
+  defp normalize_quantity(%Decimal{} = value), do: Decimal.to_integer(value)
+
+  defp add_validation_token(nil, token), do: token
+
+  defp add_validation_token(reason, token) do
+    reason
+    |> String.split("|", trim: true)
+    |> Kernel.++([token])
+    |> Enum.uniq()
+    |> sort_validation_tokens()
+    |> Enum.join("|")
+  end
+
+  defp sort_validation_tokens(tokens) do
+    Enum.sort_by(tokens, fn token ->
+      Enum.find_index(@validation_tokens, &(&1 == token)) || length(@validation_tokens)
+    end)
+  end
 
   defp persist_refund_lines(%Refund{} = refund, resolved_lines) do
     with {:ok, existing_lines} <- existing_refund_lines(refund.id) do

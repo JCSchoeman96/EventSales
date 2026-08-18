@@ -318,6 +318,175 @@ defmodule EventSales.Sales.RefundUpserterTest do
     assert replayed_detail.source_state == :voided
   end
 
+  test "allows partial refunds while cumulative ticket quantity stays within the original", %{
+    source: source
+  } do
+    %{order: order, item: item} = create_ticket_order_fixture!(source, 3)
+
+    assert {:ok, first} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               order.woo_order_id,
+               normalized_refund(94_001, [
+                 refund_line(89_001, item.woo_line_item_id, %{refunded_quantity: 1})
+               ])
+             )
+
+    assert {:ok, second} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               order.woo_order_id,
+               normalized_refund(94_002, [
+                 refund_line(89_002, item.woo_line_item_id, %{refunded_quantity: 2})
+               ])
+             )
+
+    assert [%RefundLine{refunded_quantity: 1}] = refund_lines(first.id)
+    assert [%RefundLine{refunded_quantity: 2}] = refund_lines(second.id)
+    assert Ash.get!(EventSales.Sales.Resources.OrderItem, item.id, domain: Sales).quantity == 3
+  end
+
+  test "does not double-count the current refund on exact replay", %{source: source} do
+    %{order: order, item: item} = create_ticket_order_fixture!(source, 2)
+
+    normalized =
+      normalized_refund(94_003, [
+        refund_line(89_003, item.woo_line_item_id, %{refunded_quantity: 2})
+      ])
+
+    assert {:ok, first} =
+             RefundUpserter.upsert_normalized_refund(source.id, order.woo_order_id, normalized)
+
+    assert {:ok, second} =
+             RefundUpserter.upsert_normalized_refund(source.id, order.woo_order_id, normalized)
+
+    assert first.id == second.id
+    assert [%RefundLine{refunded_quantity: 2, validation_reason: nil}] = refund_lines(first.id)
+  end
+
+  test "permits cumulative quantity exactly equal to the original", %{source: source} do
+    %{order: order, item: item} = create_ticket_order_fixture!(source, 2)
+
+    for {refund_id, line_id} <- [{94_004, 89_004}, {94_005, 89_005}] do
+      assert {:ok, _refund} =
+               RefundUpserter.upsert_normalized_refund(
+                 source.id,
+                 order.woo_order_id,
+                 normalized_refund(refund_id, [
+                   refund_line(line_id, item.woo_line_item_id, %{refunded_quantity: 1})
+                 ])
+               )
+    end
+
+    assert Enum.all?(refund_lines_for_order_item(item.id), &is_nil(&1.validation_reason))
+  end
+
+  test "preserves a full over-refund quantity and records review evidence", %{source: source} do
+    %{order: order, item: item} = create_ticket_order_fixture!(source, 2)
+
+    assert {:ok, _prior} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               order.woo_order_id,
+               normalized_refund(94_006, [
+                 refund_line(89_006, item.woo_line_item_id, %{refunded_quantity: 2})
+               ])
+             )
+
+    assert {:ok, over_refund} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               order.woo_order_id,
+               normalized_refund(94_007, [
+                 refund_line(89_007, item.woo_line_item_id, %{refunded_quantity: 1})
+               ])
+             )
+
+    assert [%RefundLine{} = line] = refund_lines(over_refund.id)
+    assert line.refunded_quantity == 1
+    assert line.order_item_id == item.id
+    assert line.validation_reason == "refunded_quantity_exceeds_original"
+    assert Ash.get!(EventSales.Sales.Resources.OrderItem, item.id, domain: Sales).quantity == 2
+  end
+
+  test "keeps money independent from ticket quantity validation", %{source: source} do
+    %{order: order, item: item} = create_ticket_order_fixture!(source, 1)
+
+    line =
+      refund_line(89_008, item.woo_line_item_id, %{
+        refunded_quantity: 1,
+        refund_total_amount: Decimal.new("999.99")
+      })
+
+    assert {:ok, refund} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               order.woo_order_id,
+               normalized_refund(94_008, [line])
+             )
+
+    assert [%RefundLine{refunded_quantity: 1, refund_total_amount: amount}] =
+             refund_lines(refund.id)
+
+    assert amount == Decimal.new("999.99")
+  end
+
+  test "excludes quantities belonging to voided refunds from the active total", %{
+    source: source
+  } do
+    %{order: order, item: item} = create_ticket_order_fixture!(source, 2)
+
+    assert {:ok, prior} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               order.woo_order_id,
+               normalized_refund(94_009, [
+                 refund_line(89_009, item.woo_line_item_id, %{refunded_quantity: 2})
+               ])
+             )
+
+    Ash.update!(
+      prior,
+      %{void_reason: "source_absent", voided_at: ~U[2026-05-01 12:00:00Z]},
+      action: :mark_voided,
+      domain: Sales
+    )
+
+    assert {:ok, current} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               order.woo_order_id,
+               normalized_refund(94_010, [
+                 refund_line(89_010, item.woo_line_item_id, %{refunded_quantity: 2})
+               ])
+             )
+
+    assert [%RefundLine{validation_reason: nil}] = refund_lines(current.id)
+  end
+
+  test "does not apply ticket quantity safety to a non-ticket order item", %{source: source} do
+    order = SalesHelpers.create_order_from_fixture!(:order_completed, source)
+
+    item =
+      SalesHelpers.create_order_item_from_line!(order, order_line_fixture(), %{
+        item_kind: :non_ticket,
+        quantity: 1
+      })
+
+    for {refund_id, line_id} <- [{94_011, 89_011}, {94_012, 89_012}] do
+      assert {:ok, refund} =
+               RefundUpserter.upsert_normalized_refund(
+                 source.id,
+                 order.woo_order_id,
+                 normalized_refund(refund_id, [
+                   refund_line(line_id, item.woo_line_item_id, %{refunded_quantity: 1})
+                 ])
+               )
+
+      assert [%RefundLine{validation_reason: nil}] = refund_lines(refund.id)
+    end
+  end
+
   defp normalized_refund(refund_id, line_items) do
     %{
       woo_refund_id: refund_id,
@@ -364,10 +533,33 @@ defmodule EventSales.Sales.RefundUpserterTest do
     }
   end
 
+  defp create_ticket_order_fixture!(source, quantity) do
+    order = SalesHelpers.create_order_from_fixture!(:order_completed, source)
+    event = SalesHelpers.create_event!(source, %{name: "Refund Event"})
+    ticket = SalesHelpers.create_variation_ticket_type!(event, 501, 601)
+
+    item =
+      SalesHelpers.create_order_item_from_line!(order, order_line_fixture(), %{
+        event_id: event.id,
+        ticket_type_id: ticket.id,
+        item_kind: :ticket,
+        mapping_status: :mapped,
+        quantity: quantity
+      })
+
+    %{order: order, item: item}
+  end
+
   defp refund_lines(refund_id) do
     RefundLine
     |> Ash.Query.filter(refund_id == ^refund_id)
     |> Ash.Query.sort(woo_refund_line_item_id: :asc)
+    |> Ash.read!(domain: Sales)
+  end
+
+  defp refund_lines_for_order_item(order_item_id) do
+    RefundLine
+    |> Ash.Query.filter(order_item_id == ^order_item_id)
     |> Ash.read!(domain: Sales)
   end
 end
