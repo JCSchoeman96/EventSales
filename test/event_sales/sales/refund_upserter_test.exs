@@ -204,6 +204,129 @@ defmodule EventSales.Sales.RefundUpserterTest do
     assert replayed.header_amount == Decimal.new("45.00")
   end
 
+  test "lets the first exact reason supersede a conflicting reference reason", %{
+    source: source
+  } do
+    assert {:ok, reference} =
+             RefundUpserter.upsert_reference(source.id, 10_001, %{
+               woo_refund_id: 96_001,
+               summary_total_amount: Decimal.new("45.00"),
+               reason: "summary reason"
+             })
+
+    assert {:ok, exact} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               10_001,
+               normalized_refund(96_001, []) |> Map.put(:reason, "exact reason")
+             )
+
+    assert exact.id == reference.id
+    assert exact.detail_status == :complete
+    assert exact.unresolved_reason != "source_detail_conflict"
+    assert exact.reason == "exact reason"
+  end
+
+  test "lets the first exact nil reason clear a reference reason", %{source: source} do
+    assert {:ok, reference} =
+             RefundUpserter.upsert_reference(source.id, 10_001, %{
+               woo_refund_id: 96_002,
+               reason: "summary reason"
+             })
+
+    assert {:ok, exact} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               10_001,
+               normalized_refund(96_002, []) |> Map.put(:reason, nil)
+             )
+
+    assert exact.id == reference.id
+    assert exact.detail_status == :complete
+    assert exact.unresolved_reason != "source_detail_conflict"
+    assert exact.reason == nil
+  end
+
+  test "does not hydrate an exact nil reason from a later reference", %{source: source} do
+    assert {:ok, exact} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               10_001,
+               normalized_refund(96_003, []) |> Map.put(:reason, nil)
+             )
+
+    assert {:ok, replayed} =
+             RefundUpserter.upsert_reference(source.id, 10_001, %{
+               woo_refund_id: 96_003,
+               reason: "summary reason"
+             })
+
+    assert replayed.id == exact.id
+    assert replayed.reason == nil
+  end
+
+  test "preserves an exact reason when a later reference reason differs", %{source: source} do
+    assert {:ok, exact} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               10_001,
+               normalized_refund(96_004, []) |> Map.put(:reason, "exact reason")
+             )
+
+    assert {:ok, replayed} =
+             RefundUpserter.upsert_reference(source.id, 10_001, %{
+               woo_refund_id: 96_004,
+               reason: "different summary reason"
+             })
+
+    assert replayed.id == exact.id
+    assert replayed.detail_status == :complete
+    assert replayed.unresolved_reason != "source_detail_conflict"
+    assert replayed.reason == "exact reason"
+  end
+
+  test "marks different exact reasons as a source detail conflict", %{source: source} do
+    assert {:ok, exact} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               10_001,
+               normalized_refund(96_005, []) |> Map.put(:reason, "exact reason")
+             )
+
+    assert {:ok, conflicted} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               10_001,
+               normalized_refund(96_005, []) |> Map.put(:reason, "different exact reason")
+             )
+
+    assert conflicted.id == exact.id
+    assert conflicted.detail_status == :unresolved
+    assert conflicted.unresolved_reason == "source_detail_conflict"
+    assert conflicted.reason == "exact reason"
+  end
+
+  test "hydrates a nil exact reason from later exact detail", %{source: source} do
+    assert {:ok, first} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               10_001,
+               normalized_refund(96_006, []) |> Map.put(:reason, nil)
+             )
+
+    assert {:ok, hydrated} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               10_001,
+               normalized_refund(96_006, []) |> Map.put(:reason, "exact reason")
+             )
+
+    assert hydrated.id == first.id
+    assert hydrated.detail_status == :complete
+    assert hydrated.unresolved_reason != "source_detail_conflict"
+    assert hydrated.reason == "exact reason"
+  end
+
   test "hydrates a missing reference summary without replacing known summary", %{source: source} do
     assert {:ok, first} =
              RefundUpserter.upsert_reference(source.id, 10_001, %{

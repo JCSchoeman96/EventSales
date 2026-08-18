@@ -186,7 +186,7 @@ defmodule EventSales.Sales.RefundUpserter do
          normalized_refund,
          parent_order,
          existing,
-         _existing_lines
+         existing_lines
        ) do
     with {:ok, refund} <-
            persist_normalized_refund(
@@ -195,7 +195,8 @@ defmodule EventSales.Sales.RefundUpserter do
              woo_refund_id,
              normalized_refund,
              parent_order,
-             existing
+             existing,
+             existing_lines
            ),
          {:ok, order_items} <-
            lock_order_items(parent_order, normalized_refund.line_items),
@@ -214,7 +215,8 @@ defmodule EventSales.Sales.RefundUpserter do
          woo_refund_id,
          normalized_refund,
          parent_order,
-         nil
+         nil,
+         _existing_lines
        ) do
     ash_create(
       Refund,
@@ -235,9 +237,17 @@ defmodule EventSales.Sales.RefundUpserter do
          _woo_refund_id,
          normalized_refund,
          parent_order,
-         %Refund{} = existing
+         %Refund{} = existing,
+         existing_lines
        ) do
-    with {:ok, source_attrs} <- merge_refund_source_attrs(existing, normalized_refund) do
+    exact_detail_established? = exact_detail_established?(existing, existing_lines)
+
+    with {:ok, source_attrs} <-
+           merge_refund_source_attrs(
+             existing,
+             normalized_refund,
+             exact_detail_established?
+           ) do
       attrs =
         Map.merge(source_attrs, %{
           order_id: parent_id(parent_order),
@@ -554,14 +564,20 @@ defmodule EventSales.Sales.RefundUpserter do
   defp existing_lines_for(nil), do: {:ok, []}
   defp existing_lines_for(%Refund{id: refund_id}), do: existing_refund_lines(refund_id)
 
-  defp merge_refund_source_attrs(existing, normalized_refund) do
+  defp merge_refund_source_attrs(existing, normalized_refund, exact_detail_established?) do
     normalized_source_attrs(normalized_refund)
     |> Enum.reduce_while({:ok, %{}}, fn {field, incoming}, {:ok, attrs} ->
-      case merge_source_field(Map.get(existing, field), incoming) do
+      case merge_refund_source_field(existing, field, incoming, exact_detail_established?) do
         {:ok, value} -> {:cont, {:ok, Map.put(attrs, field, value)}}
         {:conflict, _existing_value} -> {:halt, {:error, @source_detail_conflict}}
       end
     end)
+  end
+
+  defp merge_refund_source_field(_existing, :reason, incoming, false), do: {:ok, incoming}
+
+  defp merge_refund_source_field(existing, field, incoming, _exact_detail_established?) do
+    merge_source_field(Map.get(existing, field), incoming)
   end
 
   defp source_detail_conflict?(nil, _normalized_refund, _existing_lines), do: false
@@ -574,8 +590,7 @@ defmodule EventSales.Sales.RefundUpserter do
        do: true
 
   defp source_detail_conflict?(existing, normalized_refund, existing_lines) do
-    exact_detail_established? =
-      existing.detail_status == :complete or existing_lines != []
+    exact_detail_established? = exact_detail_established?(existing, existing_lines)
 
     line_set_changed? =
       exact_detail_established? and
@@ -584,7 +599,12 @@ defmodule EventSales.Sales.RefundUpserter do
     refund_source_changed? =
       normalized_source_attrs(normalized_refund)
       |> Enum.any?(fn {field, incoming} ->
-        match?({:conflict, _}, merge_source_field(Map.get(existing, field), incoming))
+        refund_source_field_conflict?(
+          existing,
+          field,
+          incoming,
+          exact_detail_established?
+        )
       end)
 
     line_source_changed? =
@@ -593,6 +613,18 @@ defmodule EventSales.Sales.RefundUpserter do
       |> then(&incoming_lines_source_conflict?(&1, normalized_refund.line_items))
 
     line_set_changed? or refund_source_changed? or line_source_changed?
+  end
+
+  defp refund_source_field_conflict?(_existing, :reason, _incoming, false), do: false
+
+  defp refund_source_field_conflict?(existing, field, incoming, _exact_detail_established?) do
+    match?({:conflict, _}, merge_source_field(Map.get(existing, field), incoming))
+  end
+
+  defp exact_detail_established?(%Refund{} = existing, existing_lines) do
+    existing.detail_status == :complete or
+      existing.unresolved_reason == @source_detail_conflict or
+      existing_lines != []
   end
 
   defp incoming_lines_source_conflict?(existing_by_id, incoming_lines) do
@@ -761,6 +793,7 @@ defmodule EventSales.Sales.RefundUpserter do
         with {:ok, parent_order} <- lock_parent_order(source_system_id, woo_order_id),
              {:ok, existing} <-
                lock_refund(source_system_id, woo_order_id, woo_refund_id),
+             {:ok, existing_lines} <- existing_lines_for(existing),
              {:ok, refund} <-
                persist_reference_transaction(
                  source_system_id,
@@ -768,7 +801,8 @@ defmodule EventSales.Sales.RefundUpserter do
                  woo_refund_id,
                  normalized_reference,
                  parent_order,
-                 existing
+                 existing,
+                 existing_lines
                ) do
           refund
         else
@@ -803,7 +837,8 @@ defmodule EventSales.Sales.RefundUpserter do
          woo_refund_id,
          normalized_reference,
          parent_order,
-         nil
+         nil,
+         _existing_lines
        ) do
     ash_create(
       Refund,
@@ -827,7 +862,8 @@ defmodule EventSales.Sales.RefundUpserter do
          _woo_refund_id,
          normalized_reference,
          parent_order,
-         %Refund{} = existing
+         %Refund{} = existing,
+         existing_lines
        ) do
     attrs =
       %{
@@ -836,7 +872,13 @@ defmodule EventSales.Sales.RefundUpserter do
         unresolved_reason: merged_unresolved_reason(existing, parent_order)
       }
       |> maybe_hydrate(existing, :summary_total_amount, normalized_reference)
-      |> maybe_hydrate(existing, :reason, normalized_reference)
+
+    attrs =
+      if exact_detail_established?(existing, existing_lines) do
+        attrs
+      else
+        maybe_hydrate(attrs, existing, :reason, normalized_reference)
+      end
 
     ash_update(existing, attrs, :sync_normalized)
   end
