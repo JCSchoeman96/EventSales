@@ -17,7 +17,11 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
     source = SalesHelpers.create_source_system!()
     original_upserter = Application.get_env(:event_sales, :order_upserter)
     original_notifier = Application.get_env(:event_sales, :order_processed_notifier)
+    original_refund_sync = Application.get_env(:event_sales, :order_refund_sync)
     Application.put_env(:event_sales, :webhook_processor_test_pid, self())
+    Application.put_env(:event_sales, :order_refund_sync, __MODULE__.RefundSync)
+    Process.put(:webhook_processor_refund_sync_responses, [:ok])
+    Process.delete(:webhook_processor_order_upserter_responses)
 
     on_exit(fn ->
       if original_upserter do
@@ -32,13 +36,21 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
         Application.delete_env(:event_sales, :order_processed_notifier)
       end
 
+      if original_refund_sync do
+        Application.put_env(:event_sales, :order_refund_sync, original_refund_sync)
+      else
+        Application.delete_env(:event_sales, :order_refund_sync)
+      end
+
       Application.delete_env(:event_sales, :webhook_processor_test_pid)
+      Process.delete(:webhook_processor_refund_sync_responses)
+      Process.delete(:webhook_processor_order_upserter_responses)
     end)
 
     {:ok, source: source}
   end
 
-  test "default handler normalizes a queued supported order event", %{source: source} do
+  test "default handler normalizes an order.updated event and syncs refunds", %{source: source} do
     {:ok, event} =
       create_event(source, %{
         topic: "order.updated",
@@ -48,6 +60,9 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
       })
 
     assert :ok = WebhookProcessor.process(event.id)
+
+    assert_receive {:webhook_step, {:refund_sync, source_id, "10001"}}, 500
+    assert source_id == source.id
 
     processed = reload!(event.id)
     assert processed.status == :processed
@@ -61,6 +76,23 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
     assert Ash.count!(Order, domain: Sales) == 1
     assert Ash.count!(OrderItem, domain: Sales) == 1
     assert Ash.count!(CouponSnapshot, domain: Sales) == 1
+  end
+
+  test "default handler normalizes an order.created event and syncs refunds", %{
+    source: source
+  } do
+    {:ok, event} =
+      create_event(source, %{
+        topic: "order.created",
+        resource_id: "10001",
+        payload: FixtureHelpers.decode_json_fixture!(:woocommerce, :order_completed),
+        source_updated_at: ~U[2026-05-01 08:05:00Z]
+      })
+
+    assert :ok = WebhookProcessor.process(event.id)
+    assert_receive {:webhook_step, {:refund_sync, source_id, "10001"}}, 500
+    assert source_id == source.id
+    assert reload!(event.id).status == :processed
   end
 
   test "processing a terminal event again is a no-op", %{source: source} do
@@ -92,6 +124,7 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
     assert ignored.status == :ignored
     assert ignored.ignore_reason == :unsupported_topic
     assert ignored.processed_at
+    refute_receive {:webhook_step, {:refund_sync, _, _}}, 100
   end
 
   test "product.updated dispatches to metadata handler and marks processed", %{source: source} do
@@ -161,6 +194,7 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
     ignored = reload!(second.id)
     assert ignored.status == :ignored
     assert ignored.ignore_reason == :duplicate_resource_hash
+    refute_receive {:webhook_step, {:refund_sync, _, _}}, 100
   end
 
   test "queued or failed source resource hash matches do not cause duplicate ignore", %{
@@ -217,6 +251,7 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
     ignored = reload!(older.id)
     assert ignored.status == :ignored
     assert ignored.ignore_reason == :stale_source_version
+    refute_receive {:webhook_step, {:refund_sync, _, _}}, 100
   end
 
   test "queued newer source version does not make an older event stale", %{source: source} do
@@ -313,10 +348,12 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
     assert queued.processing_attempt_count == 1
     refute queued.failed_at
     assert queued.error_message
+    refute_receive {:webhook_step, {:refund_sync, _, _}}, 100
   end
 
   test "default handler calls notifier after successful durable order upsert", %{source: source} do
     order = create_order!(source)
+    source_id = source.id
     Application.put_env(:event_sales, :order_upserter, __MODULE__.SuccessfulUpserter)
     Application.put_env(:event_sales, :order_processed_notifier, __MODULE__.Notifier)
     Application.put_env(:event_sales, :webhook_processor_test_order, order)
@@ -325,6 +362,9 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
 
     assert :ok = WebhookProcessor.process(event.id)
 
+    assert_receive {:webhook_step, :order_upsert}, 500
+    assert_receive {:webhook_step, {:refund_sync, ^source_id, "10001"}}, 500
+    assert_receive {:webhook_step, :notifier}, 500
     assert_receive {:notified, notified_order_id, notified_event_id}, 500
     assert notified_order_id == order.id
     assert notified_event_id == event.id
@@ -341,6 +381,9 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
 
     assert :ok = WebhookProcessor.process(event.id)
 
+    assert_receive {:webhook_step, :order_upsert}, 500
+    assert_receive {:webhook_step, {:refund_sync, source_id, "10001"}}, 500
+    assert source_id == source.id
     refute_receive {:notified, _order_id, _event_id}, 100
 
     processed = reload!(event.id)
@@ -387,8 +430,122 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
                    500
   end
 
+  test "transient refund failure retries a stale order without notifying", %{source: source} do
+    order = create_order!(source)
+    Application.put_env(:event_sales, :order_upserter, __MODULE__.SequenceUpserter)
+    Application.put_env(:event_sales, :order_processed_notifier, __MODULE__.Notifier)
+    Application.put_env(:event_sales, :webhook_processor_test_order, order)
+
+    Process.put(:webhook_processor_order_upserter_responses, [
+      {:ok, order},
+      {:ok, :stale_noop}
+    ])
+
+    Process.put(:webhook_processor_refund_sync_responses, [{:error, :timeout}, :ok])
+    {:ok, event} = create_event(source, %{topic: "order.updated"})
+
+    assert {:error, {:transient, :timeout}} = WebhookProcessor.process(event.id)
+
+    queued = reload!(event.id)
+    assert queued.status == :queued
+    assert queued.processing_attempt_count == 1
+    refute queued.processed_at
+    refute_receive {:webhook_step, :notifier}, 100
+
+    assert :ok = WebhookProcessor.process(event.id)
+
+    assert_receive {:webhook_step, :order_upsert}, 500
+    assert_receive {:webhook_step, {:refund_sync, source_id, "10001"}}, 500
+    assert source_id == source.id
+    assert_receive {:webhook_step, :order_upsert}, 500
+    assert_receive {:webhook_step, {:refund_sync, ^source_id, "10001"}}, 500
+    refute_receive {:webhook_step, :notifier}, 100
+    refute_receive {:notified, _order_id, _event_id}, 100
+
+    processed = reload!(event.id)
+    assert processed.status == :processed
+    assert processed.processing_attempt_count == 2
+  end
+
+  test "all OrderRefundSync transient reasons remain retryable", %{source: source} do
+    order = create_order!(source)
+    Application.put_env(:event_sales, :order_upserter, __MODULE__.SuccessfulUpserter)
+    Application.put_env(:event_sales, :order_processed_notifier, __MODULE__.Notifier)
+    Application.put_env(:event_sales, :webhook_processor_test_order, order)
+
+    for reason <- [
+          :rate_limited,
+          :timeout,
+          :server_error,
+          :queue_timeout,
+          :circuit_open,
+          :transport_error
+        ] do
+      Process.put(:webhook_processor_refund_sync_responses, [{:error, reason}])
+      {:ok, event} = create_event(source, %{topic: "order.updated"})
+
+      assert {:error, {:transient, ^reason}} = WebhookProcessor.process(event.id)
+
+      queued = reload!(event.id)
+      assert queued.status == :queued
+      refute queued.failed_at
+      refute queued.processed_at
+      refute_receive {:webhook_step, :notifier}, 100
+    end
+  end
+
+  test "non-transient OrderRefundSync reasons fail closed", %{source: source} do
+    order = create_order!(source)
+    Application.put_env(:event_sales, :order_upserter, __MODULE__.SuccessfulUpserter)
+    Application.put_env(:event_sales, :order_processed_notifier, __MODULE__.Notifier)
+    Application.put_env(:event_sales, :webhook_processor_test_order, order)
+
+    for reason <- [
+          :invalid_refund_list_response,
+          :duplicate_refund_id,
+          :invalid_refund_detail_response,
+          :refund_upsert_failed,
+          :refund_void_failed,
+          :voided_refund_reappeared,
+          :unauthorized,
+          :forbidden,
+          :client_error,
+          :source_endpoint_mismatch
+        ] do
+      Process.put(:webhook_processor_refund_sync_responses, [{:error, reason}])
+      {:ok, event} = create_event(source, %{topic: "order.updated"})
+
+      assert :ok = WebhookProcessor.process(event.id)
+
+      failed = reload!(event.id)
+      assert failed.status == :failed
+      assert failed.failed_at
+      assert failed.error_message =~ Atom.to_string(reason)
+      refute_receive {:webhook_step, :notifier}, 100
+    end
+  end
+
   test "missing event is discarded" do
     assert {:discard, :not_found} = WebhookProcessor.process(Ecto.UUID.generate())
+  end
+
+  defmodule RefundSync do
+    @moduledoc false
+
+    def sync_order(source_system_id, woo_order_id) do
+      test_pid = Application.fetch_env!(:event_sales, :webhook_processor_test_pid)
+
+      send(test_pid, {:webhook_step, {:refund_sync, source_system_id, woo_order_id}})
+
+      case Process.get(:webhook_processor_refund_sync_responses, [:ok]) do
+        [response | rest] ->
+          Process.put(:webhook_processor_refund_sync_responses, rest)
+          response
+
+        [] ->
+          :ok
+      end
+    end
   end
 
   defmodule InvalidUpserter do
@@ -419,6 +576,10 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
     @moduledoc false
 
     def upsert_from_webhook_event(_event) do
+      :event_sales
+      |> Application.fetch_env!(:webhook_processor_test_pid)
+      |> send({:webhook_step, :order_upsert})
+
       {:ok, Application.fetch_env!(:event_sales, :webhook_processor_test_order)}
     end
   end
@@ -426,16 +587,41 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
   defmodule StaleNoopUpserter do
     @moduledoc false
 
-    def upsert_from_webhook_event(_event), do: {:ok, :stale_noop}
+    def upsert_from_webhook_event(_event) do
+      :event_sales
+      |> Application.fetch_env!(:webhook_processor_test_pid)
+      |> send({:webhook_step, :order_upsert})
+
+      {:ok, :stale_noop}
+    end
+  end
+
+  defmodule SequenceUpserter do
+    @moduledoc false
+
+    def upsert_from_webhook_event(_event) do
+      :event_sales
+      |> Application.fetch_env!(:webhook_processor_test_pid)
+      |> send({:webhook_step, :order_upsert})
+
+      case Process.get(:webhook_processor_order_upserter_responses, []) do
+        [response | rest] ->
+          Process.put(:webhook_processor_order_upserter_responses, rest)
+          response
+
+        [] ->
+          {:error, :missing_order_upserter_response}
+      end
+    end
   end
 
   defmodule Notifier do
     @moduledoc false
 
     def notify_order_processed(order, event) do
-      :event_sales
-      |> Application.fetch_env!(:webhook_processor_test_pid)
-      |> send({:notified, order.id, event.id})
+      test_pid = Application.fetch_env!(:event_sales, :webhook_processor_test_pid)
+      send(test_pid, {:webhook_step, :notifier})
+      send(test_pid, {:notified, order.id, event.id})
 
       :ok
     end

@@ -37,11 +37,19 @@ defmodule EventSalesWeb.FullWebhookToDashboardAcceptanceTest do
     HotStateAggregator.reset_for_test!()
     StubWebhookEventStore.clear!()
     delete_process_webhook_jobs!()
+    original_refund_sync = Application.get_env(:event_sales, :order_refund_sync)
+    Application.put_env(:event_sales, :order_refund_sync, __MODULE__.RefundSync)
 
     on_exit(fn ->
       HotStateAggregator.reset_for_test!()
       StubWebhookEventStore.clear!()
       delete_process_webhook_jobs!()
+
+      if original_refund_sync do
+        Application.put_env(:event_sales, :order_refund_sync, original_refund_sync)
+      else
+        Application.delete_env(:event_sales, :order_refund_sync)
+      end
     end)
 
     source = SalesHelpers.create_source_system!()
@@ -60,6 +68,12 @@ defmodule EventSalesWeb.FullWebhookToDashboardAcceptanceTest do
     create_product_mapping!(source, event, ticket)
 
     {:ok, source: source, event: event, ticket: ticket}
+  end
+
+  defmodule RefundSync do
+    @moduledoc false
+
+    def sync_order(_source_system_id, _woo_order_id), do: :ok
   end
 
   test "completed webhook reaches normalized order, aggregate, and dashboard", %{

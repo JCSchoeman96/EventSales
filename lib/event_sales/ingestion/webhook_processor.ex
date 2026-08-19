@@ -10,6 +10,7 @@ defmodule EventSales.Ingestion.WebhookProcessor do
 
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Handlers.ProductUpdatedHandler
+  alias EventSales.Ingestion.OrderRefundSync
   alias EventSales.Ingestion.Resources.WebhookEvent
   alias EventSales.Sales.OrderUpserter
   alias EventSales.Sales.Resources.Order
@@ -17,6 +18,14 @@ defmodule EventSales.Ingestion.WebhookProcessor do
 
   @terminal_statuses [:processed, :failed, :ignored]
   @supported_topics ~w(order.created order.updated product.updated)
+  @transient_refund_reasons [
+    :rate_limited,
+    :timeout,
+    :server_error,
+    :queue_timeout,
+    :circuit_open,
+    :transport_error
+  ]
   @max_error_message_length 512
 
   @type process_result ::
@@ -89,14 +98,32 @@ defmodule EventSales.Ingestion.WebhookProcessor do
   defp handle_order_event(%WebhookEvent{} = event) do
     case order_upserter().upsert_from_webhook_event(event) do
       {:ok, %Order{} = order} ->
-        notify_order_processed(order, event)
-        :ok
+        with :ok <- sync_order_refunds(event) do
+          notify_order_processed(order, event)
+          :ok
+        end
 
       {:ok, :stale_noop} ->
-        :ok
+        sync_order_refunds(event)
 
       {:error, reason} ->
         classify_upsert_error(reason)
+    end
+  end
+
+  defp sync_order_refunds(%WebhookEvent{} = event) do
+    case order_refund_sync().sync_order(event.source_system_id, event.resource_id) do
+      :ok ->
+        :ok
+
+      {:error, reason} when reason in @transient_refund_reasons ->
+        {:error, {:transient, reason}}
+
+      {:error, reason} ->
+        {:error, {:permanent, reason}}
+
+      other ->
+        {:error, {:permanent, other}}
     end
   end
 
@@ -131,6 +158,10 @@ defmodule EventSales.Ingestion.WebhookProcessor do
 
   defp order_upserter do
     Application.get_env(:event_sales, :order_upserter, OrderUpserter)
+  end
+
+  defp order_refund_sync do
+    Application.get_env(:event_sales, :order_refund_sync, OrderRefundSync)
   end
 
   defp order_processed_notifier do
