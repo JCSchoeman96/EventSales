@@ -3732,6 +3732,22 @@
         {
           "arity": 2,
           "name": "set_finished_at"
+        },
+        {
+          "arity": 2,
+          "name": "validate_coverage_certification"
+        },
+        {
+          "arity": 2,
+          "name": "record_coverage_certification"
+        },
+        {
+          "arity": 2,
+          "name": "invalidate_order_coverage"
+        },
+        {
+          "arity": 2,
+          "name": "invalidate_refund_coverage"
         }
       ],
       "specs?": false,

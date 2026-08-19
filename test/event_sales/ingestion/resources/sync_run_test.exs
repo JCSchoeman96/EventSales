@@ -8,6 +8,9 @@ defmodule EventSales.Ingestion.Resources.SyncRunTest do
 
   @peak_monday ~U[2026-05-18 12:00:00.000000Z]
   @off_peak_saturday ~U[2026-05-16 12:00:00.000000Z]
+  @coverage_start ~U[2026-05-01 00:00:00.000000Z]
+  @sales_covered_through ~U[2026-05-08 12:00:00.000000Z]
+  @refunds_covered_through ~U[2026-05-08 12:00:00.000000Z]
 
   describe "queue_manual_scoped scope validation" do
     test "rejects missing event_id" do
@@ -215,6 +218,250 @@ defmodule EventSales.Ingestion.Resources.SyncRunTest do
     end
   end
 
+  describe "coverage watermark" do
+    test "new historical SyncRun has incomplete defaults and no coverage audit fields" do
+      run = create_historical_run!()
+      persisted = Ash.get!(SyncRun, run.id, domain: Ingestion)
+
+      assert persisted.order_coverage_status == :incomplete
+      assert persisted.refund_coverage_status == :not_started
+
+      for field <- [
+            :coverage_start,
+            :sales_covered_through,
+            :refunds_covered_through,
+            :coverage_certified_at,
+            :coverage_invalidated_at,
+            :coverage_invalidation_reason
+          ] do
+        assert Map.get(persisted, field) == nil
+      end
+    end
+
+    test "record_coverage_certification stores exact boundaries and completes both coverages" do
+      run = create_historical_run!()
+      attrs = coverage_attrs()
+
+      assert {:ok, certified} =
+               Ash.update(run, attrs,
+                 action: :record_coverage_certification,
+                 domain: Ingestion
+               )
+
+      assert certified.coverage_start == attrs.coverage_start
+      assert certified.sales_covered_through == attrs.sales_covered_through
+      assert certified.refunds_covered_through == attrs.refunds_covered_through
+      assert certified.order_coverage_status == :complete
+      assert certified.refund_coverage_status == :complete
+      assert %DateTime{} = certified.coverage_certified_at
+    end
+
+    test "rejects coverage certification when coverage_start is later than sales_covered_through" do
+      run = create_historical_run!()
+
+      assert {:error, %Ash.Error.Invalid{}} =
+               Ash.update(
+                 run,
+                 %{
+                   coverage_attrs()
+                   | coverage_start: DateTime.add(@sales_covered_through, 1, :second)
+                 },
+                 action: :record_coverage_certification,
+                 domain: Ingestion
+               )
+    end
+
+    test "accepts a refund coverage boundary later than sales coverage" do
+      run = create_historical_run!()
+      refunds_covered_through = DateTime.add(@sales_covered_through, 1, :day)
+
+      assert {:ok, certified} =
+               Ash.update(
+                 run,
+                 %{coverage_attrs() | refunds_covered_through: refunds_covered_through},
+                 action: :record_coverage_certification,
+                 domain: Ingestion
+               )
+
+      assert certified.refunds_covered_through == refunds_covered_through
+      assert certified.order_coverage_status == :complete
+      assert certified.refund_coverage_status == :complete
+    end
+
+    test "rejects coverage certification for a non-historical SyncRun" do
+      run = create_manual_run!()
+
+      assert {:error, %Ash.Error.Invalid{}} =
+               Ash.update(run, coverage_attrs(),
+                 action: :record_coverage_certification,
+                 domain: Ingestion
+               )
+    end
+
+    test "rejects a second coverage certification on the same SyncRun" do
+      run = create_historical_run!()
+      certified = record_certification!(run)
+
+      assert {:error, %Ash.Error.Invalid{}} =
+               Ash.update(certified, coverage_attrs(),
+                 action: :record_coverage_certification,
+                 domain: Ingestion
+               )
+    end
+
+    test "rejects certification from a stale record after another certification" do
+      run = create_historical_run!()
+      stale = Ash.get!(SyncRun, run.id, domain: Ingestion)
+      certified = record_certification!(run)
+
+      assert {:error, %Ash.Error.Invalid{}} =
+               Ash.update(
+                 stale,
+                 %{
+                   coverage_attrs()
+                   | sales_covered_through: DateTime.add(@sales_covered_through, 1, :day)
+                 },
+                 action: :record_coverage_certification,
+                 domain: Ingestion
+               )
+
+      persisted = Ash.get!(SyncRun, certified.id, domain: Ingestion)
+      assert persisted.sales_covered_through == certified.sales_covered_through
+      assert persisted.coverage_certified_at == certified.coverage_certified_at
+    end
+
+    test "certification clears prior invalidation markers" do
+      run = create_historical_run!()
+
+      assert {:ok, invalidated} =
+               Ash.update(
+                 run,
+                 %{coverage_invalidation_reason: :source_range_gap},
+                 action: :invalidate_refund_coverage,
+                 domain: Ingestion
+               )
+
+      assert %DateTime{} = invalidated.coverage_invalidated_at
+      assert invalidated.coverage_invalidation_reason == :source_range_gap
+
+      assert {:ok, certified} =
+               Ash.update(invalidated, coverage_attrs(),
+                 action: :record_coverage_certification,
+                 domain: Ingestion
+               )
+
+      assert is_nil(certified.coverage_invalidated_at)
+      assert is_nil(certified.coverage_invalidation_reason)
+    end
+
+    test "invalidate_order_coverage invalidates both statuses and preserves certification audit" do
+      run = create_historical_run!()
+      certified = record_certification!(run)
+      reason = :historical_order_changed
+
+      assert {:ok, invalidated} =
+               Ash.update(
+                 certified,
+                 %{coverage_invalidation_reason: reason},
+                 action: :invalidate_order_coverage,
+                 domain: Ingestion
+               )
+
+      assert invalidated.order_coverage_status == :incomplete
+      assert invalidated.refund_coverage_status == :incomplete
+      assert invalidated.coverage_invalidation_reason == reason
+      assert %DateTime{} = invalidated.coverage_invalidated_at
+      assert invalidated.coverage_start == certified.coverage_start
+      assert invalidated.sales_covered_through == certified.sales_covered_through
+      assert invalidated.refunds_covered_through == certified.refunds_covered_through
+      assert invalidated.coverage_certified_at == certified.coverage_certified_at
+    end
+
+    test "invalidate_refund_coverage leaves order coverage complete and preserves certification audit" do
+      run = create_historical_run!()
+      certified = record_certification!(run)
+      reason = :historical_refund_changed
+
+      assert {:ok, invalidated} =
+               Ash.update(
+                 certified,
+                 %{coverage_invalidation_reason: reason},
+                 action: :invalidate_refund_coverage,
+                 domain: Ingestion
+               )
+
+      assert invalidated.order_coverage_status == :complete
+      assert invalidated.refund_coverage_status == :incomplete
+      assert invalidated.coverage_invalidation_reason == reason
+      assert %DateTime{} = invalidated.coverage_invalidated_at
+      assert invalidated.coverage_start == certified.coverage_start
+      assert invalidated.sales_covered_through == certified.sales_covered_through
+      assert invalidated.refunds_covered_through == certified.refunds_covered_through
+      assert invalidated.coverage_certified_at == certified.coverage_certified_at
+    end
+
+    test "rejects an invalid coverage invalidation reason" do
+      run = create_historical_run!()
+
+      assert {:error, %Ash.Error.Invalid{}} =
+               Ash.update(
+                 run,
+                 %{coverage_invalidation_reason: :invalid_reason},
+                 action: :invalidate_order_coverage,
+                 domain: Ingestion
+               )
+    end
+
+    test "ordinary SyncRun remains uncertified without a certification action" do
+      run = create_manual_run!()
+      persisted = Ash.get!(SyncRun, run.id, domain: Ingestion)
+
+      assert persisted.order_coverage_status == :incomplete
+      assert persisted.refund_coverage_status == :not_started
+      assert is_nil(persisted.coverage_certified_at)
+      assert is_nil(persisted.coverage_invalidated_at)
+      assert is_nil(persisted.coverage_invalidation_reason)
+    end
+
+    test "completed historical SyncRun remains uncertified without coverage evidence" do
+      run = create_historical_run!() |> start_run!()
+      completed = Ash.update!(run, %{}, action: :complete, domain: Ingestion)
+      persisted = Ash.get!(SyncRun, completed.id, domain: Ingestion)
+
+      assert persisted.status == :completed
+      assert persisted.order_coverage_status == :incomplete
+      assert persisted.refund_coverage_status == :not_started
+      assert is_nil(persisted.coverage_certified_at)
+    end
+
+    test "database defaults keep a pre-existing completed historical run uncertified" do
+      source = SalesHelpers.create_source_system!()
+
+      event =
+        SalesHelpers.create_event!(source, %{
+          name: "Migrated Historical Run",
+          slug: "migrated-historical-run-#{System.unique_integer([:positive])}"
+        })
+
+      %{rows: [[id]]} =
+        EventSales.Repo.query!(
+          """
+          INSERT INTO ingestion_sync_runs
+            (requested_via, sync_type, sync_mode, status, source_system_id, event_id)
+          VALUES ('manual', 'historical_backfill', 'deep', 'completed', $1, $2)
+          RETURNING id
+          """,
+          [Ecto.UUID.dump!(source.id), Ecto.UUID.dump!(event.id)]
+        )
+
+      persisted = Ash.get!(SyncRun, id, domain: Ingestion)
+      assert persisted.status == :completed
+      assert persisted.order_coverage_status == :incomplete
+      assert persisted.refund_coverage_status == :not_started
+      assert is_nil(persisted.coverage_certified_at)
+    end
+  end
+
   defp queue_manual(attrs, opts \\ []) do
     now = Keyword.get(opts, :now, @off_peak_saturday)
 
@@ -250,6 +497,37 @@ defmodule EventSales.Ingestion.Resources.SyncRunTest do
       })
 
     run
+  end
+
+  defp create_historical_run! do
+    source = SalesHelpers.create_source_system!()
+
+    event =
+      SalesHelpers.create_event!(source, %{
+        name: "Historical Run",
+        slug: "historical-run-#{System.unique_integer([:positive])}"
+      })
+
+    SyncRun
+    |> Ash.Changeset.for_create(:queue_historical_backfill, %{
+      event_id: event.id,
+      date_to: ~U[2026-05-10 00:00:00.000000Z]
+    })
+    |> Ash.Changeset.force_change_attribute(:source_system_id, source.id)
+    |> Ash.Changeset.force_change_attribute(:date_from, @coverage_start)
+    |> Ash.create!(domain: Ingestion)
+  end
+
+  defp coverage_attrs do
+    %{
+      coverage_start: @coverage_start,
+      sales_covered_through: @sales_covered_through,
+      refunds_covered_through: @refunds_covered_through
+    }
+  end
+
+  defp record_certification!(run, attrs \\ coverage_attrs()) do
+    Ash.update!(run, attrs, action: :record_coverage_certification, domain: Ingestion)
   end
 
   defp start_run!(run) do

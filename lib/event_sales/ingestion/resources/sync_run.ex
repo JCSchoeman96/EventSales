@@ -16,6 +16,20 @@ defmodule EventSales.Ingestion.Resources.SyncRun do
   @sync_modes [:shallow, :deep]
   @statuses [:queued, :running, :paused, :completed, :failed, :cancelled]
   @pause_reasons [:rate_limited, :timeout, :server_error, :circuit_open]
+  @order_coverage_statuses [:incomplete, :complete, :failed]
+  @refund_coverage_statuses [:not_started, :incomplete, :complete, :failed]
+
+  @coverage_invalidation_reasons [
+    :source_identity_conflict,
+    :historical_attribution_changed,
+    :source_range_gap,
+    :historical_order_changed,
+    :historical_refund_changed,
+    :historical_fact_corrected,
+    :currency_conflict,
+    :financial_reconciliation_failed
+  ]
+
   @active_historical_index_name "ingestion_sync_runs_active_historical_event_idx"
 
   @queue_manual_accept [
@@ -130,6 +144,35 @@ defmodule EventSales.Ingestion.Resources.SyncRun do
         :errors_count
       ]
     end
+
+    update :record_coverage_certification do
+      public? false
+      require_atomic? false
+
+      accept [:coverage_start, :sales_covered_through, :refunds_covered_through]
+      validate &__MODULE__.validate_coverage_certification/2
+      change get_and_lock_for_update()
+      change filter(expr(is_nil(coverage_certified_at)))
+      change &__MODULE__.record_coverage_certification/2
+    end
+
+    update :invalidate_order_coverage do
+      public? false
+      require_atomic? false
+
+      accept [:coverage_invalidation_reason]
+      validate present(:coverage_invalidation_reason)
+      change &__MODULE__.invalidate_order_coverage/2
+    end
+
+    update :invalidate_refund_coverage do
+      public? false
+      require_atomic? false
+
+      accept [:coverage_invalidation_reason]
+      validate present(:coverage_invalidation_reason)
+      change &__MODULE__.invalidate_refund_coverage/2
+    end
   end
 
   attributes do
@@ -183,6 +226,45 @@ defmodule EventSales.Ingestion.Resources.SyncRun do
     end
 
     attribute :date_to, :utc_datetime_usec do
+      public? true
+    end
+
+    attribute :coverage_start, :utc_datetime_usec do
+      public? true
+    end
+
+    attribute :sales_covered_through, :utc_datetime_usec do
+      public? true
+    end
+
+    attribute :refunds_covered_through, :utc_datetime_usec do
+      public? true
+    end
+
+    attribute :order_coverage_status, :atom do
+      allow_nil? false
+      default :incomplete
+      constraints one_of: @order_coverage_statuses
+      public? true
+    end
+
+    attribute :refund_coverage_status, :atom do
+      allow_nil? false
+      default :not_started
+      constraints one_of: @refund_coverage_statuses
+      public? true
+    end
+
+    attribute :coverage_certified_at, :utc_datetime_usec do
+      public? true
+    end
+
+    attribute :coverage_invalidated_at, :utc_datetime_usec do
+      public? true
+    end
+
+    attribute :coverage_invalidation_reason, :atom do
+      constraints one_of: @coverage_invalidation_reasons
       public? true
     end
 
@@ -270,5 +352,67 @@ defmodule EventSales.Ingestion.Resources.SyncRun do
 
   def set_finished_at(changeset, _context) do
     Ash.Changeset.force_change_attribute(changeset, :finished_at, DateTime.utc_now())
+  end
+
+  def validate_coverage_certification(changeset, _context) do
+    sync_type = Ash.Changeset.get_attribute(changeset, :sync_type)
+    coverage_start = Ash.Changeset.get_attribute(changeset, :coverage_start)
+    sales_covered_through = Ash.Changeset.get_attribute(changeset, :sales_covered_through)
+    refunds_covered_through = Ash.Changeset.get_attribute(changeset, :refunds_covered_through)
+    coverage_certified_at = Ash.Changeset.get_attribute(changeset, :coverage_certified_at)
+
+    cond do
+      sync_type != :historical_backfill ->
+        {:error, field: :sync_type, message: "must be a historical backfill"}
+
+      is_nil(coverage_start) ->
+        {:error, field: :coverage_start, message: "must be present"}
+
+      is_nil(sales_covered_through) ->
+        {:error, field: :sales_covered_through, message: "must be present"}
+
+      is_nil(refunds_covered_through) ->
+        {:error, field: :refunds_covered_through, message: "must be present"}
+
+      invalid_sales_coverage_range?(coverage_start, sales_covered_through) ->
+        {:error, field: :sales_covered_through, message: "must be on or after coverage_start"}
+
+      not is_nil(coverage_certified_at) ->
+        {:error, field: :coverage_certified_at, message: "coverage has already been certified"}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp invalid_sales_coverage_range?(
+         %DateTime{} = coverage_start,
+         %DateTime{} = sales_covered_through
+       ) do
+    DateTime.compare(coverage_start, sales_covered_through) == :gt
+  end
+
+  defp invalid_sales_coverage_range?(_coverage_start, _sales_covered_through), do: false
+
+  def record_coverage_certification(changeset, _context) do
+    changeset
+    |> Ash.Changeset.force_change_attribute(:order_coverage_status, :complete)
+    |> Ash.Changeset.force_change_attribute(:refund_coverage_status, :complete)
+    |> Ash.Changeset.force_change_attribute(:coverage_certified_at, DateTime.utc_now())
+    |> Ash.Changeset.force_change_attribute(:coverage_invalidated_at, nil)
+    |> Ash.Changeset.force_change_attribute(:coverage_invalidation_reason, nil)
+  end
+
+  def invalidate_order_coverage(changeset, _context) do
+    changeset
+    |> Ash.Changeset.force_change_attribute(:order_coverage_status, :incomplete)
+    |> Ash.Changeset.force_change_attribute(:refund_coverage_status, :incomplete)
+    |> Ash.Changeset.force_change_attribute(:coverage_invalidated_at, DateTime.utc_now())
+  end
+
+  def invalidate_refund_coverage(changeset, _context) do
+    changeset
+    |> Ash.Changeset.force_change_attribute(:refund_coverage_status, :incomplete)
+    |> Ash.Changeset.force_change_attribute(:coverage_invalidated_at, DateTime.utc_now())
   end
 end
