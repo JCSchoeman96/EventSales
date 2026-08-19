@@ -225,7 +225,7 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorkerTest do
     assert ExecutionFake.calls() == []
   end
 
-  test "recovered transient catch-up failure retains its diagnostic after resume", %{
+  test "recovered rate-limited refund failure retains its diagnostic after resume", %{
     run: run,
     cursor: cursor
   } do
@@ -268,6 +268,47 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorkerTest do
     assert paused.status == :paused
     assert paused.pause_reason == :rate_limited
     assert %DateTime{} = paused.paused_until
+  end
+
+  test "refund timeout uses the existing pause and snooze behavior", %{
+    run: run,
+    cursor: cursor
+  } do
+    replace_cursor!(cursor, pending_catchup_metadata())
+    BootstrapFake.put_response!({:ok, :evidence})
+    CatchupExecutionFake.put_response!({:error, :timeout})
+
+    assert {:snooze, seconds} = perform(run.id)
+    assert seconds > 0
+
+    paused = Ash.get!(SyncRun, run.id, domain: Ingestion)
+    assert paused.status == :paused
+    assert paused.pause_reason == :timeout
+    assert paused.last_error == "timeout"
+  end
+
+  test "invalid refund list response fails the run and cursor closed", %{
+    run: run,
+    cursor: cursor
+  } do
+    replace_cursor!(cursor, pending_catchup_metadata())
+    BootstrapFake.put_response!({:ok, :evidence})
+    CatchupExecutionFake.put_response!({:error, :invalid_refund_list_response})
+
+    assert {:discard, :invalid_refund_list_response} = perform(run.id)
+    assert failed_refund_state(run, cursor, "invalid_refund_list_response")
+  end
+
+  test "voided refund reappearance fails the run and cursor closed", %{
+    run: run,
+    cursor: cursor
+  } do
+    replace_cursor!(cursor, pending_catchup_metadata())
+    BootstrapFake.put_response!({:ok, :evidence})
+    CatchupExecutionFake.put_response!({:error, :voided_refund_reappeared})
+
+    assert {:discard, :voided_refund_reappeared} = perform(run.id)
+    assert failed_refund_state(run, cursor, "voided_refund_reappeared")
   end
 
   test "final invariant failure marks run and cursor failed while preserving manifest evidence",
@@ -440,4 +481,13 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorkerTest do
   defp restore_env(key, nil), do: Application.delete_env(:event_sales, key)
   defp restore_env(key, value), do: Application.put_env(:event_sales, key, value)
   defp unique_slug(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
+
+  defp failed_refund_state(run, cursor, reason) do
+    failed_run = Ash.get!(SyncRun, run.id, domain: Ingestion)
+    failed_cursor = Ash.get!(SyncCursor, cursor.id, domain: Ingestion)
+
+    failed_run.status == :failed and
+      failed_cursor.status == :failed and
+      failed_cursor.metadata["failure"] == reason
+  end
 end

@@ -108,15 +108,47 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     end
   end
 
+  defmodule RefundSync do
+    def child_spec(opts), do: %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}}
+
+    def start_link(_opts),
+      do: Agent.start_link(fn -> %{responses: [], calls: []} end, name: __MODULE__)
+
+    def reset!, do: Agent.update(__MODULE__, fn _ -> %{responses: [], calls: []} end)
+
+    def enqueue!(response),
+      do: Agent.update(__MODULE__, &Map.update!(&1, :responses, fn xs -> xs ++ [response] end))
+
+    def calls, do: Agent.get(__MODULE__, &Enum.reverse(&1.calls))
+
+    def sync_order(source_system_id, woo_order_id, opts) do
+      Agent.get_and_update(__MODULE__, fn state ->
+        response = List.first(state.responses) || :ok
+        responses = if state.responses == [], do: [], else: tl(state.responses)
+
+        call = %{
+          source_system_id: source_system_id,
+          woo_order_id: woo_order_id,
+          opts: opts,
+          order_calls_at_sync: length(Upserter.calls())
+        }
+
+        {response, %{state | responses: responses, calls: [call | state.calls]}}
+      end)
+    end
+  end
+
   setup do
     start_supervised!(CatchupClient)
     start_supervised!(WooClient)
     start_supervised!(Selector)
     start_supervised!(Upserter)
+    start_supervised!(RefundSync)
     CatchupClient.reset!()
     WooClient.reset!()
     Selector.reset!()
     Upserter.reset!()
+    RefundSync.reset!()
 
     source = SalesHelpers.create_source_system!(%{base_url: @source_url})
 
@@ -164,6 +196,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     assert CatchupClient.calls() == [{"catchup-token", nil}]
     assert WooClient.calls() == [{:fetch_order, "42"}]
     assert length(Upserter.calls()) == 1
+    assert [%{woo_order_id: "42", order_calls_at_sync: 1}] = RefundSync.calls()
     assert updated_cursor.page == 2
     assert updated_cursor.status == :active
     assert updated_cursor.metadata["historical_catchup"]["state"] == "catchup_in_progress"
@@ -180,6 +213,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     assert :ok = run_step(run, current_cursor(cursor))
     assert CatchupClient.calls() == [{"catchup-token", "u-next.cursor"}]
     assert WooClient.calls() == [{:fetch_order, "43"}]
+    assert [%{woo_order_id: "43", order_calls_at_sync: 1}] = RefundSync.calls()
     assert current_cursor(cursor).status == :done
     assert current_run(run).status == :completed
   end
@@ -262,6 +296,60 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
 
     assert :ok = run_step(run, cursor)
     assert [{_source_id, _event_id, %{"id" => 44}, []}] = Upserter.calls()
+    assert [%{woo_order_id: "44", order_calls_at_sync: 1}] = RefundSync.calls()
+  end
+
+  test "a persisted F4C1 Order is reconciled before refund synchronization", %{
+    run: run,
+    cursor: cursor
+  } do
+    CatchupClient.enqueue!(page(["46"], has_more: false, terminal_evidence: "u-order-proof"))
+    WooClient.put_order!(46, {:ok, order_payload(46)})
+    Upserter.response!({:ok, %Order{}})
+
+    assert :ok = run_step(run, cursor)
+    assert [%{woo_order_id: "46", order_calls_at_sync: 1}] = RefundSync.calls()
+  end
+
+  test "an F4C1 failure prevents refund synchronization", %{run: run, cursor: cursor} do
+    CatchupClient.enqueue!(page(["47"], has_more: false, terminal_evidence: "u-order-error"))
+    WooClient.put_order!(47, {:ok, order_payload(47)})
+    Upserter.response!({:error, :order_writer_failed})
+
+    assert {:error, :order_writer_failed} = run_step(run, cursor)
+    assert RefundSync.calls() == []
+    assert current_cursor(cursor).page == 1
+  end
+
+  test "terminal U refund failure blocks completion and checkpointing", %{
+    run: run,
+    cursor: cursor
+  } do
+    CatchupClient.enqueue!(page(["48"], has_more: false, terminal_evidence: "u-refund-error"))
+    WooClient.put_order!(48, {:ok, order_payload(48)})
+    RefundSync.enqueue!({:error, :timeout})
+
+    assert {:error, :timeout} = run_step(run, cursor)
+    assert current_cursor(cursor).status == :active
+    assert current_cursor(cursor).page == 1
+    assert current_run(run).status == :running
+    assert [%{woo_order_id: "48", order_calls_at_sync: 1}] = RefundSync.calls()
+  end
+
+  test "a later U refund failure prevents the whole page checkpoint", %{run: run, cursor: cursor} do
+    CatchupClient.enqueue!(
+      page(["49", "50"], has_more: false, terminal_evidence: "u-page-refund-error")
+    )
+
+    WooClient.put_order!(49, {:ok, order_payload(49)})
+    WooClient.put_order!(50, {:ok, order_payload(50)})
+    RefundSync.enqueue!(:ok)
+    RefundSync.enqueue!({:error, :refund_void_failed})
+
+    assert {:error, :refund_void_failed} = run_step(run, cursor)
+    assert Enum.map(RefundSync.calls(), & &1.woo_order_id) == ["49", "50"]
+    assert current_cursor(cursor).page == 1
+    assert current_run(run).status == :running
   end
 
   test "sales write before checkpoint failure replays the same U page safely", %{
@@ -291,6 +379,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
 
     assert :ok = run_step(current_run(run), current_cursor(cursor))
     assert length(Upserter.calls()) == 2
+    assert length(RefundSync.calls()) == 2
     assert current_cursor(cursor).status == :done
     assert current_run(run).status == :completed
   end
@@ -495,6 +584,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
       woocommerce_client: WooClient,
       event_line_selector: Selector,
       order_upserter: Upserter,
+      order_refund_sync: RefundSync,
       now: fn -> @now end
     ]
   end
