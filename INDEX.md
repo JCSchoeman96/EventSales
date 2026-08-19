@@ -1305,7 +1305,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: `set_started_at/2`, `set_finished_at/2`
+  - public_funs: `set_started_at/2`, `set_finished_at/2`, `validate_coverage_certification/2`, `record_coverage_certification/2`, `invalidate_order_coverage/2`, `invalidate_refund_coverage/2`
   - uses: `Ash.Resource`
 - `EventSales.Ingestion.Resources.TickeraAttendeeSnapshot` - `lib/event_sales/ingestion/resources/tickera_attendee_snapshot.ex`
   - moduledoc?: true

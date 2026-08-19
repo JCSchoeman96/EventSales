@@ -377,6 +377,17 @@ defmodule EventSales.Ingestion.Resources.SyncRunTest do
       assert is_nil(persisted.coverage_invalidated_at)
       assert is_nil(persisted.coverage_invalidation_reason)
     end
+
+    test "completed historical SyncRun remains uncertified without coverage evidence" do
+      run = create_historical_run!() |> start_run!()
+      completed = Ash.update!(run, %{}, action: :complete, domain: Ingestion)
+      persisted = Ash.get!(SyncRun, completed.id, domain: Ingestion)
+
+      assert persisted.status == :completed
+      assert persisted.order_coverage_status == :incomplete
+      assert persisted.refund_coverage_status == :not_started
+      assert is_nil(persisted.coverage_certified_at)
+    end
   end
 
   defp queue_manual(attrs, opts \\ []) do
