@@ -9,9 +9,12 @@ before it notifies downstream hot state or marks the webhook processed.
 
 ## Scope and boundaries
 
-Only `EventSales.Ingestion.WebhookProcessor` and its focused tests change.
-`ProcessWebhookWorker`, `WebhookEvent`, `OrderRefundSync`, `RefundUpserter`,
-Ash resources, migrations, queues, and webhook topics remain unchanged.
+The production change is limited to `EventSales.Ingestion.WebhookProcessor` and
+its focused tests. The existing full webhook-to-dashboard acceptance harness
+also injects a no-op refund-sync fake so its synthetic source URL does not
+trigger C1's intentional source-endpoint mismatch. `ProcessWebhookWorker`,
+`WebhookEvent`, `OrderRefundSync`, `RefundUpserter`, Ash resources, migrations,
+queues, and webhook topics remain unchanged.
 
 The existing classification gates run first and remain authoritative:
 unsupported topics, duplicate processed resource hashes, stale events against a
@@ -95,6 +98,11 @@ The tests cover:
 
 No worker test or worker production change is required because the existing
 worker already forwards the processor's transient contract unchanged.
+
+The full dashboard acceptance test keeps its existing synthetic behavior by
+using the same application seam with a no-op C1 fake; it still exercises the
+real webhook intake, processor lifecycle, notifier, and dashboard path without
+performing source HTTP.
 
 ## Verification
 

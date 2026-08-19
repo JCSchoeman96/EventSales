@@ -13,6 +13,7 @@
 ## File map
 
 - Modify: `test/event_sales/ingestion/webhook_processor_test.exs` — configure the application refund-sync seam, add a recording fake and sequence fake, and prove accepted ordering, source identity, stale-noop behavior, retry classification, permanent failure, and ignored-event protection.
+- Modify: `test/event_sales_web/full_webhook_to_dashboard_acceptance_test.exs` — inject a no-op C1 fake for synthetic dashboard fixtures whose source URL intentionally differs from the configured test WooCommerce URL.
 - Modify: `lib/event_sales/ingestion/webhook_processor.ex` — call C1 after accepted OrderUpserter results, classify C1 errors, and expose the existing `:order_refund_sync` application seam.
 - Create: `docs/superpowers/specs/2026-08-19-m3-05c3-webhook-refund-integration-design.md` — approved design, committed in `ad3b9dd`.
 - Create: `docs/superpowers/plans/2026-08-19-m3-05c3-webhook-refund-integration.md` — this plan.
@@ -182,15 +183,17 @@ Expected: both commands exit 0 with no new warnings. If formatting changes test 
 **Files:**
 - Inspect: `lib/event_sales/ingestion/webhook_processor.ex`
 - Inspect: `test/event_sales/ingestion/webhook_processor_test.exs`
+- Inspect: `test/event_sales_web/full_webhook_to_dashboard_acceptance_test.exs`
 - Inspect: `lib/event_sales/ingestion/workers/process_webhook_worker.ex`
 
 - [ ] **Step 1: Run the focused regression set.**
 
 Run:
 
-    mix test test/event_sales/ingestion/webhook_processor_test.exs \
-      test/event_sales/ingestion/process_webhook_worker_test.exs \
-      test/event_sales/ingestion/order_refund_sync_test.exs
+mix test test/event_sales/ingestion/webhook_processor_test.exs \
+  test/event_sales/ingestion/process_webhook_worker_test.exs \
+  test/event_sales/ingestion/order_refund_sync_test.exs \
+  test/event_sales_web/full_webhook_to_dashboard_acceptance_test.exs
 
 Expected: all tests pass and the worker suite remains unchanged.
 
@@ -217,9 +220,8 @@ Confirm only the approved C3 implementation/test files plus the committed design
 
 After the fresh verification commands pass, commit the production and focused test changes with:
 
-    git add lib/event_sales/ingestion/webhook_processor.ex test/event_sales/ingestion/webhook_processor_test.exs
+    git add lib/event_sales/ingestion/webhook_processor.ex test/event_sales/ingestion/webhook_processor_test.exs test/event_sales_web/full_webhook_to_dashboard_acceptance_test.exs
     git commit -m "feat: sync refunds from order webhooks"
 
 Do not push or merge this branch unless the user explicitly requests that separate integration step.
-
 
