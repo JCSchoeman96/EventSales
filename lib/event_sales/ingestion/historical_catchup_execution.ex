@@ -23,6 +23,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
   }
 
   alias EventSales.Ingestion.HistoricalCatchupEvidence
+  alias EventSales.Ingestion.HistoricalCoverageCertifier
   alias EventSales.Ingestion.HistoricalEventLineSelector
   alias EventSales.Ingestion.HistoricalManifestEvidence
   alias EventSales.Ingestion.OrderRefundSync
@@ -557,11 +558,34 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
              current_cursor,
              opts
            ),
+         terminal_cursor = %{current_cursor | metadata: metadata},
+         {:ok, coverage} <- HistoricalCoverageCertifier.evaluate(current_run, terminal_cursor),
+         {:ok, certified_run, certification_notifications} <-
+           record_coverage_certification(current_run, coverage),
          {:ok, updated_cursor, cursor_notifications} <- complete_cursor(current_cursor, metadata),
-         {:ok, updated_run, run_notifications} <- complete_run(current_run) do
-      {:completed, updated_run, updated_cursor, cursor_notifications ++ run_notifications}
+         {:ok, updated_run, run_notifications} <- complete_run(certified_run) do
+      {:completed, updated_run, updated_cursor,
+       certification_notifications ++ cursor_notifications ++ run_notifications}
     else
       {:error, reason} -> Repo.rollback(reason)
+    end
+  end
+
+  defp record_coverage_certification(run, coverage) do
+    attrs = %{
+      coverage_start: coverage.coverage_start,
+      sales_covered_through: coverage.sales_covered_through,
+      refunds_covered_through: coverage.refunds_covered_through
+    }
+
+    case Ash.update(run, attrs,
+           action: :record_coverage_certification,
+           domain: EventSales.Ingestion,
+           return_notifications?: true
+         ) do
+      {:ok, %SyncRun{} = updated, notifications} -> {:ok, updated, notifications}
+      {:ok, %SyncRun{} = updated} -> {:ok, updated, []}
+      {:error, _reason} -> {:error, :coverage_certification_failed}
     end
   end
 

@@ -203,6 +203,12 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     assert updated_cursor.metadata["historical_catchup"]["next_cursor"] == "u-next.cursor"
     assert updated_cursor.metadata["historical_manifest"]["state"] == "manifest_terminal"
     assert counts(run) == %{seen: 0, matched: 0, upserted: 0, stale: 0}
+
+    persisted_run = current_run(run)
+    assert persisted_run.status == :running
+    assert persisted_run.order_coverage_status == :incomplete
+    assert persisted_run.refund_coverage_status == :not_started
+    assert is_nil(persisted_run.coverage_certified_at)
   end
 
   test "in-progress U uses the exact opaque cursor", %{run: run, cursor: cursor} do
@@ -219,6 +225,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
   end
 
   test "empty explicit terminal page completes without a Woo order GET", %{
+    event: event,
     run: run,
     cursor: cursor
   } do
@@ -232,6 +239,72 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     assert current_run(run).status == :completed
     assert current_run(run).finished_at
     assert current_cursor(cursor).metadata["historical_catchup"]["state"] == "catchup_terminal"
+
+    completed_run = current_run(run)
+    assert completed_run.order_coverage_status == :complete
+    assert completed_run.refund_coverage_status == :complete
+    assert completed_run.coverage_start == event.source_created_at
+    assert completed_run.sales_covered_through == run.date_to
+    assert completed_run.refunds_covered_through == @catchup_observed_at
+    assert DateTime.compare(completed_run.refunds_covered_through, run.date_to) == :gt
+    assert %DateTime{} = completed_run.coverage_certified_at
+
+    terminal_cursor = current_cursor(cursor)
+    assert terminal_cursor.metadata["historical_manifest"]["state"] == "manifest_terminal"
+
+    assert terminal_cursor.metadata["historical_manifest"]["terminal_evidence"] ==
+             "m-terminal-proof"
+
+    assert terminal_cursor.metadata["historical_catchup"]["state"] == "catchup_terminal"
+    assert terminal_cursor.metadata["historical_catchup"]["terminal_evidence"] == "u-empty-proof"
+  end
+
+  test "terminal coverage certification is not repeated by a stale terminal replay", %{
+    run: run,
+    cursor: cursor
+  } do
+    CatchupClient.enqueue!(page([], has_more: false, terminal_evidence: "u-replay-proof"))
+
+    assert :ok = run_step(run, cursor)
+
+    certified = current_run(run)
+    certificate = certified.coverage_certified_at
+
+    assert {:error, :sync_run_not_running} = run_step(run, cursor)
+
+    persisted = current_run(run)
+    assert persisted.status == :completed
+    assert persisted.coverage_certified_at == certificate
+    assert persisted.sales_covered_through == run.date_to
+    assert current_cursor(cursor).status == :done
+  end
+
+  test "certifier failure is propagated and prevents terminal completion", %{
+    run: run,
+    cursor: cursor
+  } do
+    certified =
+      Ash.update!(
+        run,
+        %{
+          coverage_start: @date_from,
+          sales_covered_through: @date_to,
+          refunds_covered_through: @catchup_observed_at
+        },
+        action: :record_coverage_certification,
+        domain: Ingestion
+      )
+
+    CatchupClient.enqueue!(page([], has_more: false, terminal_evidence: "u-certifier-failure"))
+
+    assert {:error, :coverage_already_certified} =
+             run_step(certified, current_cursor(cursor))
+
+    persisted = current_run(run)
+    assert persisted.status == :running
+    assert persisted.coverage_certified_at == certified.coverage_certified_at
+    assert current_cursor(cursor).status == :active
+    assert current_cursor(cursor).page == 1
   end
 
   test "recovered transient diagnostic does not block terminal completion", %{
@@ -714,6 +787,9 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
 
     assert current_cursor(cursor).status == :active
     assert current_run(run).status == :running
+    assert current_run(run).order_coverage_status == :incomplete
+    assert current_run(run).refund_coverage_status == :not_started
+    assert is_nil(current_run(run).coverage_certified_at)
   end
 
   defp seed_m_counters!(run) do
