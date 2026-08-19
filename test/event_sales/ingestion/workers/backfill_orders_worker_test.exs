@@ -348,6 +348,30 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorkerTest do
     assert failed_cursor.metadata["failure"] == "historical_event_source_mismatch"
   end
 
+  test "coverage certification authority failure is permanent and fail-closed", %{
+    run: run,
+    cursor: cursor
+  } do
+    replace_cursor!(cursor, pending_catchup_metadata())
+    BootstrapFake.put_response!({:ok, :evidence})
+    CatchupExecutionFake.put_response!({:error, :coverage_already_certified})
+
+    assert {:discard, :coverage_already_certified} = perform(run.id)
+    assert failed_refund_state(run, cursor, "coverage_already_certified")
+  end
+
+  test "historical completion authority failure is permanent and fail-closed", %{
+    run: run,
+    cursor: cursor
+  } do
+    replace_cursor!(cursor, pending_catchup_metadata())
+    BootstrapFake.put_response!({:ok, :evidence})
+    CatchupExecutionFake.put_response!({:error, :historical_completion_authority_invalid})
+
+    assert {:discard, :historical_completion_authority_invalid} = perform(run.id)
+    assert failed_refund_state(run, cursor, "historical_completion_authority_invalid")
+  end
+
   test "future paused runs snooze without bootstrap or execution", %{run: run} do
     paused_until = DateTime.add(DateTime.utc_now(), 120, :second)
     running = Ash.update!(run, %{}, action: :start, domain: Ingestion)
