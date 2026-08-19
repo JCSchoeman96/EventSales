@@ -151,6 +151,8 @@ defmodule EventSales.Ingestion.Resources.SyncRun do
 
       accept [:coverage_start, :sales_covered_through, :refunds_covered_through]
       validate &__MODULE__.validate_coverage_certification/2
+      change get_and_lock_for_update()
+      change filter(expr(is_nil(coverage_certified_at)))
       change &__MODULE__.record_coverage_certification/2
     end
 

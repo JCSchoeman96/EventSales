@@ -309,6 +309,51 @@ defmodule EventSales.Ingestion.Resources.SyncRunTest do
                )
     end
 
+    test "rejects certification from a stale record after another certification" do
+      run = create_historical_run!()
+      stale = Ash.get!(SyncRun, run.id, domain: Ingestion)
+      certified = record_certification!(run)
+
+      assert {:error, %Ash.Error.Invalid{}} =
+               Ash.update(
+                 stale,
+                 %{
+                   coverage_attrs()
+                   | sales_covered_through: DateTime.add(@sales_covered_through, 1, :day)
+                 },
+                 action: :record_coverage_certification,
+                 domain: Ingestion
+               )
+
+      persisted = Ash.get!(SyncRun, certified.id, domain: Ingestion)
+      assert persisted.sales_covered_through == certified.sales_covered_through
+      assert persisted.coverage_certified_at == certified.coverage_certified_at
+    end
+
+    test "certification clears prior invalidation markers" do
+      run = create_historical_run!()
+
+      assert {:ok, invalidated} =
+               Ash.update(
+                 run,
+                 %{coverage_invalidation_reason: :source_range_gap},
+                 action: :invalidate_refund_coverage,
+                 domain: Ingestion
+               )
+
+      assert %DateTime{} = invalidated.coverage_invalidated_at
+      assert invalidated.coverage_invalidation_reason == :source_range_gap
+
+      assert {:ok, certified} =
+               Ash.update(invalidated, coverage_attrs(),
+                 action: :record_coverage_certification,
+                 domain: Ingestion
+               )
+
+      assert is_nil(certified.coverage_invalidated_at)
+      assert is_nil(certified.coverage_invalidation_reason)
+    end
+
     test "invalidate_order_coverage invalidates both statuses and preserves certification audit" do
       run = create_historical_run!()
       certified = record_certification!(run)
@@ -383,6 +428,33 @@ defmodule EventSales.Ingestion.Resources.SyncRunTest do
       completed = Ash.update!(run, %{}, action: :complete, domain: Ingestion)
       persisted = Ash.get!(SyncRun, completed.id, domain: Ingestion)
 
+      assert persisted.status == :completed
+      assert persisted.order_coverage_status == :incomplete
+      assert persisted.refund_coverage_status == :not_started
+      assert is_nil(persisted.coverage_certified_at)
+    end
+
+    test "database defaults keep a pre-existing completed historical run uncertified" do
+      source = SalesHelpers.create_source_system!()
+
+      event =
+        SalesHelpers.create_event!(source, %{
+          name: "Migrated Historical Run",
+          slug: "migrated-historical-run-#{System.unique_integer([:positive])}"
+        })
+
+      %{rows: [[id]]} =
+        EventSales.Repo.query!(
+          """
+          INSERT INTO ingestion_sync_runs
+            (requested_via, sync_type, sync_mode, status, source_system_id, event_id)
+          VALUES ('manual', 'historical_backfill', 'deep', 'completed', $1, $2)
+          RETURNING id
+          """,
+          [Ecto.UUID.dump!(source.id), Ecto.UUID.dump!(event.id)]
+        )
+
+      persisted = Ash.get!(SyncRun, id, domain: Ingestion)
       assert persisted.status == :completed
       assert persisted.order_coverage_status == :incomplete
       assert persisted.refund_coverage_status == :not_started
