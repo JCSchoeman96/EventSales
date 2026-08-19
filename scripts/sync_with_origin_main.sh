@@ -125,7 +125,7 @@ if [[ "$MODE" == "--check" ]]; then
     CHECK_ACTION="stopped"
     problem \
       "branch has unresolved conflicts" \
-      "rebases and pulls must not continue while conflicts are unresolved" \
+      "rebases and merges must not continue while conflicts are unresolved" \
       "resolve or abort the current Git operation before running --sync"
   fi
 
