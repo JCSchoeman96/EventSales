@@ -204,11 +204,11 @@ if [[ "$CURRENT_BRANCH" == "main" ]]; then
   fi
 
   if [[ "$ORIGIN_MAIN_STATE" == "behind" ]]; then
-    echo "|> action: git pull --ff-only"
+    echo "|> action: git merge --ff-only origin/main"
 
-    if ! git pull --ff-only origin main; then
+    if ! git merge --ff-only origin/main; then
       problem \
-        "fast-forward pull failed" \
+        "fast-forward merge failed" \
         "main can only be updated safely when Git can fast-forward without rewriting history" \
         "inspect main manually before trying to sync again"
       exit 1
