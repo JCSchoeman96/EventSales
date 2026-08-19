@@ -134,6 +134,7 @@
     "lib/event_sales/ingestion/historical_catchup_bootstrap.ex",
     "lib/event_sales/ingestion/historical_catchup_evidence.ex",
     "lib/event_sales/ingestion/historical_catchup_execution.ex",
+    "lib/event_sales/ingestion/historical_coverage_certifier.ex",
     "lib/event_sales/ingestion/historical_event_line_selector.ex",
     "lib/event_sales/ingestion/historical_manifest_bootstrap.ex",
     "lib/event_sales/ingestion/historical_manifest_evidence.ex",
@@ -3225,6 +3226,21 @@
         {
           "arity": 3,
           "name": "run_step"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.HistoricalCoverageCertifier",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/historical_coverage_certifier.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "evaluate"
         }
       ],
       "specs?": true,

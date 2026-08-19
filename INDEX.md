@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-362
+363
 
 ## Files
 
@@ -146,6 +146,7 @@ Project root: `.`
 - `lib/event_sales/ingestion/historical_catchup_bootstrap.ex`
 - `lib/event_sales/ingestion/historical_catchup_evidence.ex`
 - `lib/event_sales/ingestion/historical_catchup_execution.ex`
+- `lib/event_sales/ingestion/historical_coverage_certifier.ex`
 - `lib/event_sales/ingestion/historical_event_line_selector.ex`
 - `lib/event_sales/ingestion/historical_manifest_bootstrap.ex`
 - `lib/event_sales/ingestion/historical_manifest_evidence.ex`
@@ -1162,6 +1163,12 @@ Project root: `.`
   - specs?: true
   - docs_count: 1
   - public_funs: `run_step/3`
+  - uses: _none_
+- `EventSales.Ingestion.HistoricalCoverageCertifier` - `lib/event_sales/ingestion/historical_coverage_certifier.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `evaluate/3`
   - uses: _none_
 - `EventSales.Ingestion.HistoricalEventLineSelector` - `lib/event_sales/ingestion/historical_event_line_selector.ex`
   - moduledoc?: true
