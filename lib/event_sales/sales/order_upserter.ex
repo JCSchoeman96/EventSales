@@ -5,8 +5,11 @@ defmodule EventSales.Sales.OrderUpserter do
 
   require Ash.Query
 
+  alias EventSales.Ingestion.HistoricalCoverageInvalidator
+  alias EventSales.Ingestion.HistoricalOrderMutationDetector
   alias EventSales.Ingestion.Parsers.WoocommerceOrderParser
   alias EventSales.Ingestion.Resources.WebhookEvent
+  alias EventSales.Repo
   alias EventSales.Sales
   alias EventSales.Sales.OrderItemMapper
   alias EventSales.Sales.Resources.{CouponSnapshot, Order, OrderItem}
@@ -57,22 +60,16 @@ defmodule EventSales.Sales.OrderUpserter do
         |> Keyword.put(:event_reconciliation?, true)
         |> Keyword.put(:map_pending_items?, false)
 
-      case upsert_normalized_order(source_system_id, normalized, reconciliation_opts) do
-        {:ok, :stale_noop} = stale ->
-          stale
-
-        {:ok, %Order{} = order} ->
-          reconcile_accepted_order(
-            order,
-            event_id,
-            current_event_line_ids,
-            normalized.coupons,
-            opts
-          )
-
-        {:error, _reason} = error ->
-          error
-      end
+      run_transaction(fn ->
+        reconcile_order_transaction(
+          source_system_id,
+          normalized,
+          current_event_line_ids,
+          event_id,
+          reconciliation_opts,
+          opts
+        )
+      end)
     end
   end
 
@@ -83,16 +80,18 @@ defmodule EventSales.Sales.OrderUpserter do
   @spec upsert_normalized_order(Ecto.UUID.t(), map(), keyword()) :: upsert_result()
   def upsert_normalized_order(source_system_id, normalized, opts \\ [])
       when is_binary(source_system_id) and is_map(normalized) do
-    case find_order(source_system_id, normalized.woo_order_id) do
-      {:ok, nil} ->
-        create_order_with_children(source_system_id, normalized, opts)
+    run_transaction(fn ->
+      case do_upsert_normalized_order(source_system_id, normalized, opts) do
+        {:ok, :stale_noop} = stale ->
+          stale
 
-      {:ok, %Order{} = existing} ->
-        update_order_with_children(existing, source_system_id, normalized, opts)
+        {:ok, mutation} ->
+          finalize_mutation(mutation, nil, opts)
 
-      {:error, reason} ->
-        {:error, reason}
-    end
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end)
   end
 
   @doc """
@@ -104,6 +103,212 @@ defmodule EventSales.Sales.OrderUpserter do
         payload: payload
       }) do
     upsert_order(source_system_id, payload)
+  end
+
+  defp do_upsert_normalized_order(source_system_id, normalized, opts) do
+    case lock_order(source_system_id, normalized.woo_order_id) do
+      {:ok, nil} ->
+        with {:ok, order} <- create_order_with_children(source_system_id, normalized, opts) do
+          {:ok,
+           %{
+             order: order,
+             before_order: nil,
+             before_snapshot: nil,
+             created?: true
+           }}
+        end
+
+      {:ok, %Order{} = existing} ->
+        update_existing_order(existing, source_system_id, normalized, opts)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp reconcile_order_transaction(
+         source_system_id,
+         normalized,
+         current_event_line_ids,
+         event_id,
+         reconciliation_opts,
+         opts
+       ) do
+    case do_upsert_normalized_order(source_system_id, normalized, reconciliation_opts) do
+      {:ok, :stale_noop} = stale ->
+        stale
+
+      {:ok, mutation} ->
+        reconcile_mutation(mutation, event_id, current_event_line_ids, normalized.coupons, opts)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp reconcile_mutation(mutation, event_id, current_event_line_ids, coupons, opts) do
+    with {:ok, _reconciled_order} <-
+           reconcile_accepted_order(
+             mutation.order,
+             event_id,
+             current_event_line_ids,
+             coupons,
+             opts
+           ),
+         {:ok, _finalized_order} <- finalize_mutation(mutation, event_id, opts) do
+      {:ok, mutation.order}
+    end
+  end
+
+  defp update_existing_order(existing, source_system_id, normalized, opts) do
+    with {:ok, before_snapshot} <- HistoricalOrderMutationDetector.capture(existing),
+         {:ok, %Order{} = order} <-
+           update_order_with_children(existing, source_system_id, normalized, opts) do
+      {:ok,
+       %{
+         order: order,
+         before_order: existing,
+         before_snapshot: before_snapshot,
+         created?: false
+       }}
+    else
+      {:ok, :stale_noop} = stale -> stale
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp finalize_mutation(
+         %{order: %Order{} = order, created?: created?} = mutation,
+         reconciliation_event_id,
+         opts
+       ) do
+    with {:ok, after_snapshot} <- HistoricalOrderMutationDetector.capture(order) do
+      finalize_captured_mutation(
+        mutation,
+        after_snapshot,
+        reconciliation_event_id,
+        opts,
+        created?
+      )
+    end
+  end
+
+  defp finalize_captured_mutation(
+         %{order: %Order{} = order},
+         after_snapshot,
+         reconciliation_event_id,
+         opts,
+         true
+       ) do
+    candidates =
+      after_snapshot
+      |> persisted_event_ids()
+      |> maybe_add_reconciliation_event(reconciliation_event_id, true)
+
+    with :ok <- invalidate_new_order(order, candidates, opts) do
+      {:ok, order}
+    end
+  end
+
+  defp finalize_captured_mutation(
+         %{order: %Order{} = order, before_order: before_order, before_snapshot: before_snapshot},
+         after_snapshot,
+         reconciliation_event_id,
+         opts,
+         false
+       ) do
+    comparison = HistoricalOrderMutationDetector.compare(before_snapshot, after_snapshot)
+
+    candidates =
+      comparison.candidate_event_ids
+      |> maybe_add_reconciliation_event(reconciliation_event_id, comparison.changed?)
+
+    with :ok <-
+           invalidate_existing_order(
+             before_order,
+             order,
+             comparison.changed?,
+             candidates,
+             opts
+           ) do
+      {:ok, order}
+    end
+  end
+
+  defp persisted_event_ids(%{order_items: order_items}) do
+    order_items
+    |> Enum.map(& &1.event_id)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  defp maybe_add_reconciliation_event(event_ids, _event_id, false), do: event_ids
+  defp maybe_add_reconciliation_event(event_ids, nil, true), do: event_ids
+
+  defp maybe_add_reconciliation_event(event_ids, event_id, true) do
+    [canonical_event_id(event_id) | event_ids]
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  defp canonical_event_id(event_id) do
+    case Ecto.UUID.cast(event_id) do
+      {:ok, canonical} -> canonical
+      :error -> event_id
+    end
+  end
+
+  defp invalidate_new_order(_order, [], _opts), do: :ok
+
+  defp invalidate_new_order(%Order{} = order, event_ids, opts) do
+    call_invalidator(order, event_ids, opts)
+  end
+
+  defp invalidate_existing_order(_before_order, _after_order, false, _event_ids, _opts),
+    do: :ok
+
+  defp invalidate_existing_order(
+         %Order{} = before_order,
+         %Order{} = after_order,
+         true,
+         event_ids,
+         opts
+       ) do
+    with :ok <- call_invalidator(before_order, event_ids, opts) do
+      call_invalidator(after_order, event_ids, opts)
+    end
+  end
+
+  defp call_invalidator(%Order{} = order, event_ids, opts) do
+    invalidator =
+      Keyword.get(
+        opts,
+        :historical_coverage_invalidator,
+        &HistoricalCoverageInvalidator.invalidate_order_change/2
+      )
+
+    case invalidator.(order, event_ids) do
+      {:ok, _result} -> :ok
+      {:error, reason} -> {:error, reason}
+      other -> {:error, {:invalid_historical_coverage_invalidator_result, other}}
+    end
+  end
+
+  defp run_transaction(fun) when is_function(fun, 0) do
+    Repo.transaction(fn ->
+      case fun.() do
+        {:ok, _result} = result ->
+          result
+
+        {:error, reason} ->
+          Repo.rollback(reason)
+      end
+    end)
+    |> case do
+      {:ok, result} -> result
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   defp create_order_with_children(source_system_id, normalized, opts) do
@@ -651,6 +856,14 @@ defmodule EventSales.Sales.OrderUpserter do
     else
       ash_destroy(coupon, :destroy_source_absent, opts)
     end
+  end
+
+  defp lock_order(source_system_id, woo_order_id) do
+    Order
+    |> Ash.Query.filter(source_system_id == ^source_system_id and woo_order_id == ^woo_order_id)
+    |> Ash.Query.limit(1)
+    |> Ash.Query.lock(:for_update)
+    |> Ash.read_one(domain: Sales)
   end
 
   defp ash_opts(opts, action) do

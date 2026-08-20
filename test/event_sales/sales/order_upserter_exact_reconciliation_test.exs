@@ -380,14 +380,7 @@ defmodule EventSales.Sales.OrderUpserterExactReconciliationTest do
     assert {:error, {:event_line_attribution_mismatch, 70_001, :invalid_source_tickera_event_id}} =
              OrderUpserter.reconcile_event_order(source.id, event.id, payload, [line])
 
-    assert [
-             %OrderItem{
-               event_id: nil,
-               ticket_type_id: nil,
-               mapping_status: :pending_mapping_resolution,
-               attribution_status_reason: :invalid_source_tickera_event_id
-             }
-           ] = order_items_by_source_id(70_001)
+    assert [] = order_items_by_source_id(70_001)
   end
 
   test "deferred order status preserves automatic mapping policy", %{
@@ -711,7 +704,7 @@ defmodule EventSales.Sales.OrderUpserterExactReconciliationTest do
     assert [%CouponSnapshot{code: "SYNTHETIC100"}] = coupons(order_b.id)
   end
 
-  test "returns cleanup errors and a retry converges after partial cleanup", %{
+  test "rolls back cleanup errors and a retry converges", %{
     source: source,
     event_a: event
   } do
@@ -760,7 +753,7 @@ defmodule EventSales.Sales.OrderUpserterExactReconciliationTest do
     assert_receive {:destroy_called, 70_006}
     assert result == {:error, :synthetic_cleanup_failure}
 
-    assert [%OrderItem{woo_line_item_id: 70_006}] = order_items(order.id)
+    assert Enum.map(order_items(order.id), & &1.woo_line_item_id) == [70_001, 70_006]
 
     assert {:ok, _updated} =
              OrderUpserter.reconcile_event_order(source.id, event.id, current_payload, [])
