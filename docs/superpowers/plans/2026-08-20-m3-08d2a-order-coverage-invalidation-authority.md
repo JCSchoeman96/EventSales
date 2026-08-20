@@ -241,7 +241,10 @@ defmodule EventSales.Ingestion.HistoricalCoverageInvalidatorTest do
     |> Ash.update!(%{}, action: :complete, domain: Ingestion)
   end
 
-  defp create_order!(source, created_at_source, updated_at_source \\ created_at_source) do
+  defp create_order!(source, created_at_source),
+    do: create_order!(source, created_at_source, created_at_source)
+
+  defp create_order!(source, created_at_source, updated_at_source) do
     Ash.create!(
       Order,
       %{
@@ -531,4 +534,3 @@ Expected: a new local implementation commit contains only D2A production code an
 - The plan has no new schema, index, resource, dependency, HTTP, cache, Oban, PubSub, refund, mutation-detection, or D2B work.
 - All code names and paths are consistent between the tests and implementation.
 - The only expected implementation error paths not directly induced by the durable fixture tests are resolver database failures and unexpected Ash write failures; the production module maps both to the frozen stable error vocabulary without adding test-only injection options.
-
