@@ -14,10 +14,10 @@ defmodule EventSales.Ingestion.HistoricalRefundMutationDetector do
   alias EventSales.Sales.Resources.{Order, OrderItem, Refund, RefundLine}
 
   @type snapshot :: %{
-          refund: map(),
-          refund_lines: [map()],
-          parent_order: map() | nil,
-          parent_order_items: [map()]
+          refund_truth: map(),
+          refund_line_truth: [map()],
+          parent_order_evidence: map() | nil,
+          parent_order_item_evidence: [map()]
         }
 
   @type comparison :: %{changed?: boolean(), candidate_event_ids: [String.t()]}
@@ -35,10 +35,10 @@ defmodule EventSales.Ingestion.HistoricalRefundMutationDetector do
          {:ok, parent_order} <- read_parent_order(refund) do
       {:ok,
        %{
-         refund: refund_snapshot(refund),
-         refund_lines: refund_line_snapshots(refund.id),
-         parent_order: parent_order_snapshot(parent_order),
-         parent_order_items: parent_order_item_snapshots(parent_order)
+         refund_truth: refund_snapshot(refund),
+         refund_line_truth: refund_line_snapshots(refund.id),
+         parent_order_evidence: parent_order_snapshot(parent_order),
+         parent_order_item_evidence: parent_order_item_snapshots(parent_order)
        }}
     end
   end
@@ -65,19 +65,23 @@ defmodule EventSales.Ingestion.HistoricalRefundMutationDetector do
   end
 
   defp certificate_truth(snapshot) do
-    Map.take(snapshot, [:refund, :refund_lines, :parent_order, :parent_order_items])
+    Map.take(snapshot, [:refund_truth, :refund_line_truth])
   end
 
   defp validate_refund(%Refund{
          id: id,
          source_system_id: source_system_id,
+         order_id: order_id,
          woo_order_id: woo_order_id,
-         woo_refund_id: woo_refund_id
+         woo_refund_id: woo_refund_id,
+         source_created_at: source_created_at
        }) do
     with true <- valid_uuid?(id),
          true <- valid_uuid?(source_system_id),
+         true <- optional_uuid?(order_id),
          true <- positive_integer?(woo_order_id),
-         true <- positive_integer?(woo_refund_id) do
+         true <- positive_integer?(woo_refund_id),
+         true <- optional_utc_datetime?(source_created_at) do
       :ok
     else
       _error -> {:error, :invalid_refund}
@@ -87,6 +91,30 @@ defmodule EventSales.Ingestion.HistoricalRefundMutationDetector do
   defp validate_refund(_refund), do: {:error, :invalid_refund}
 
   defp read_parent_order(%Refund{order_id: nil} = refund) do
+    with {:ok, parent_order} <- read_source_scoped_parent(refund),
+         :ok <- validate_parent_order(parent_order) do
+      {:ok, parent_order}
+    end
+  end
+
+  defp read_parent_order(%Refund{order_id: order_id} = refund) do
+    case Ecto.UUID.cast(order_id) do
+      {:ok, canonical_order_id} ->
+        with {:ok, parent_order} <- read_source_scoped_parent(refund),
+             true <- parent_matches?(parent_order, canonical_order_id),
+             :ok <- validate_parent_order(parent_order) do
+          {:ok, parent_order}
+        else
+          {:error, _reason} -> {:error, :invalid_refund}
+          false -> {:error, :invalid_refund}
+        end
+
+      :error ->
+        {:error, :invalid_refund}
+    end
+  end
+
+  defp read_source_scoped_parent(%Refund{} = refund) do
     Order
     |> Ash.Query.filter(
       source_system_id == ^refund.source_system_id and woo_order_id == ^refund.woo_order_id
@@ -95,21 +123,15 @@ defmodule EventSales.Ingestion.HistoricalRefundMutationDetector do
     |> Ash.read_one(domain: Sales)
   end
 
-  defp read_parent_order(%Refund{order_id: order_id} = refund) do
-    case Ecto.UUID.cast(order_id) do
-      {:ok, canonical_order_id} ->
-        Order
-        |> Ash.Query.filter(
-          id == ^canonical_order_id and
-            source_system_id == ^refund.source_system_id and
-            woo_order_id == ^refund.woo_order_id
-        )
-        |> Ash.Query.limit(1)
-        |> Ash.read_one(domain: Sales)
+  defp parent_matches?(%Order{id: parent_id}, canonical_order_id),
+    do: parent_id == canonical_order_id
 
-      :error ->
-        {:ok, nil}
-    end
+  defp parent_matches?(nil, _canonical_order_id), do: false
+
+  defp validate_parent_order(nil), do: :ok
+
+  defp validate_parent_order(%Order{created_at_source: created_at_source}) do
+    if utc_datetime?(created_at_source), do: :ok, else: {:error, :invalid_refund}
   end
 
   defp refund_snapshot(%Refund{} = refund) do
@@ -123,7 +145,6 @@ defmodule EventSales.Ingestion.HistoricalRefundMutationDetector do
       :source_state,
       :detail_status,
       :unresolved_reason,
-      :summary_total_amount,
       :header_amount,
       :shipping_refund_amount,
       :shipping_refund_tax,
@@ -147,8 +168,6 @@ defmodule EventSales.Ingestion.HistoricalRefundMutationDetector do
       :order_item_id,
       :woo_refund_line_item_id,
       :woo_refunded_item_id,
-      :woo_product_id,
-      :woo_variation_id,
       :refunded_quantity,
       :refund_subtotal_amount,
       :refund_total_amount,
@@ -161,7 +180,7 @@ defmodule EventSales.Ingestion.HistoricalRefundMutationDetector do
   defp parent_order_snapshot(nil), do: nil
 
   defp parent_order_snapshot(%Order{} = order) do
-    Map.take(order, [:id, :source_system_id, :woo_order_id, :currency])
+    Map.take(order, [:id, :source_system_id, :woo_order_id, :currency, :created_at_source])
   end
 
   defp parent_order_item_snapshots(nil), do: []
@@ -196,16 +215,43 @@ defmodule EventSales.Ingestion.HistoricalRefundMutationDetector do
   end
 
   defp exact_event_ids(snapshot) do
-    refund = Map.get(snapshot, :refund, %{})
-    refund_lines = Map.get(snapshot, :refund_lines, [])
-    order_items = Map.get(snapshot, :parent_order_items, [])
+    refund = Map.get(snapshot, :refund_truth, %{})
+    refund_lines = Map.get(snapshot, :refund_line_truth, [])
+    order_items = Map.get(snapshot, :parent_order_item_evidence, [])
 
-    if Map.get(refund, :detail_status) != :complete or refund_lines == [] do
+    if Map.get(refund, :detail_status) != :complete or
+         refund_lines == [] or
+         parent_wide_financial_ambiguity?(refund) do
       :fallback
     else
       exact_event_ids_for_lines(refund_lines, order_items)
     end
   end
+
+  defp parent_wide_financial_ambiguity?(refund) do
+    component_ambiguous?(
+      Map.get(refund, :shipping_refund_amount),
+      Map.get(refund, :shipping_refund_tax)
+    ) or
+      component_ambiguous?(
+        Map.get(refund, :fee_refund_amount),
+        Map.get(refund, :fee_refund_tax)
+      ) or
+      residual_ambiguous?(Map.get(refund, :unallocated_header_amount))
+  end
+
+  defp component_ambiguous?(nil, nil), do: false
+
+  defp component_ambiguous?(%Decimal{} = amount, %Decimal{} = tax) do
+    not (zero_decimal?(amount) and zero_decimal?(tax))
+  end
+
+  defp component_ambiguous?(_amount, _tax), do: true
+
+  defp residual_ambiguous?(%Decimal{} = residual), do: not zero_decimal?(residual)
+  defp residual_ambiguous?(_residual), do: true
+
+  defp zero_decimal?(%Decimal{} = value), do: Decimal.equal?(value, Decimal.new(0))
 
   defp exact_event_ids_for_lines(refund_lines, order_items) do
     order_items_by_id = Map.new(order_items, &{Map.get(&1, :id), &1})
@@ -228,50 +274,77 @@ defmodule EventSales.Ingestion.HistoricalRefundMutationDetector do
     end
   end
 
-  defp exact_line_event_id(line, order_items_by_id) do
-    order_item_id = Map.get(line, :order_item_id)
+  defp exact_line_event_id(%{binding_reason: binding_reason}, _order_items_by_id)
+       when not is_nil(binding_reason),
+       do: :fallback
 
-    case Map.get(order_items_by_id, order_item_id) do
-      nil ->
-        :fallback
+  defp exact_line_event_id(%{order_item_id: order_item_id}, order_items_by_id) do
+    order_items_by_id
+    |> Map.get(order_item_id)
+    |> exact_order_item_event_id()
+  end
 
-      %{binding_reason: binding_reason} when not is_nil(binding_reason) ->
-        :fallback
+  defp exact_line_event_id(_line, _order_items_by_id), do: :fallback
 
-      %{mapping_status: status} when status in [:pending_mapping_resolution, :unmapped] ->
-        :fallback
+  defp exact_order_item_event_id(nil), do: :fallback
 
-      %{item_kind: :unknown} ->
-        :fallback
+  defp exact_order_item_event_id(%{mapping_status: status})
+       when status in [:non_ticket, :ignored],
+       do: {:ok, nil}
 
-      %{event_id: event_id} when is_binary(event_id) ->
-        {:ok, event_id}
+  defp exact_order_item_event_id(%{mapping_status: status})
+       when status in [:pending_mapping_resolution, :unmapped],
+       do: :fallback
 
-      %{item_kind: :non_ticket} ->
-        {:ok, nil}
+  defp exact_order_item_event_id(%{item_kind: :unknown}), do: :fallback
+  defp exact_order_item_event_id(%{item_kind: :non_ticket}), do: {:ok, nil}
 
-      %{mapping_status: status} when status in [:non_ticket, :ignored] ->
-        {:ok, nil}
-
-      _unresolved ->
-        :fallback
+  defp exact_order_item_event_id(%{event_id: event_id}) do
+    case canonical_event_id(event_id) do
+      {:ok, canonical_id} -> {:ok, canonical_id}
+      :error -> :fallback
     end
   end
 
+  defp exact_order_item_event_id(_unresolved), do: :fallback
+
   defp parent_event_ids(snapshot) do
     snapshot
-    |> Map.get(:parent_order_items, [])
+    |> Map.get(:parent_order_item_evidence, [])
     |> Enum.map(&Map.get(&1, :event_id))
-    |> Enum.reject(&is_nil/1)
+    |> Enum.flat_map(fn event_id ->
+      case canonical_event_id(event_id) do
+        {:ok, canonical_id} -> [canonical_id]
+        :error -> []
+      end
+    end)
     |> Enum.uniq()
     |> Enum.sort()
   end
+
+  defp canonical_event_id(event_id) when is_binary(event_id) do
+    case Ecto.UUID.cast(event_id) do
+      {:ok, canonical_id} -> {:ok, canonical_id}
+      :error -> :error
+    end
+  end
+
+  defp canonical_event_id(_event_id), do: :error
 
   defp valid_uuid?(value) when is_binary(value) do
     match?({:ok, _uuid}, Ecto.UUID.cast(value))
   end
 
   defp valid_uuid?(_value), do: false
+
+  defp optional_uuid?(nil), do: true
+  defp optional_uuid?(value), do: valid_uuid?(value)
+
+  defp optional_utc_datetime?(nil), do: true
+  defp optional_utc_datetime?(value), do: utc_datetime?(value)
+
+  defp utc_datetime?(%DateTime{time_zone: "Etc/UTC", utc_offset: 0, std_offset: 0}), do: true
+  defp utc_datetime?(_value), do: false
 
   defp positive_integer?(value) when is_integer(value), do: value > 0
   defp positive_integer?(_value), do: false
