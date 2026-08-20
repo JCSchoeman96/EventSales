@@ -15,6 +15,12 @@ defmodule EventSales.Ingestion.HistoricalOrderMutationDetectorTest do
     {:ok, source: source}
   end
 
+  test "rejects an Order without a persisted id" do
+    assert_raise ArgumentError, "Order must have a persisted id", fn ->
+      HistoricalOrderMutationDetector.capture(%Order{})
+    end
+  end
+
   test "captures only selected header, item, and coupon truth in deterministic order", %{
     source: source
   } do
@@ -143,6 +149,30 @@ defmodule EventSales.Ingestion.HistoricalOrderMutationDetectorTest do
 
     assert %{changed?: false, candidate_event_ids: []} =
              HistoricalOrderMutationDetector.compare(before, after_source_version)
+
+    cosmetic =
+      Ash.update!(
+        updated,
+        %{
+          status: updated.status,
+          updated_at_source: DateTime.add(@updated_at_source, 2, :hour),
+          completed_at: updated.completed_at,
+          customer_name: "Changed Customer",
+          customer_email: "changed@example.test",
+          payment_method: "cash",
+          payment_method_title: "Cash",
+          payment_gateway_transaction_id: "changed-transaction"
+        },
+        action: :sync_from_normalized,
+        domain: Sales
+      )
+
+    after_cosmetic = HistoricalOrderMutationDetector.capture(cosmetic)
+
+    assert before == after_cosmetic
+
+    assert %{changed?: false, candidate_event_ids: []} =
+             HistoricalOrderMutationDetector.compare(before, after_cosmetic)
   end
 
   test "included header fields are certificate-relevant mutations", %{source: source} do
@@ -191,6 +221,22 @@ defmodule EventSales.Ingestion.HistoricalOrderMutationDetectorTest do
     assert Enum.map(after_snapshot.order_items, & &1.woo_line_item_id) == [20]
   end
 
+  test "line addition changes truth and duplicate Event IDs are deduplicated", %{source: source} do
+    order = create_order!(source)
+    event = SalesHelpers.create_event!(source, %{name: "Added Event"})
+    ticket = SalesHelpers.create_ticket_type!(event, %{name: "Added Ticket"})
+    before = HistoricalOrderMutationDetector.capture(order)
+
+    create_item!(order, event, ticket, %{woo_line_item_id: 10})
+    create_item!(order, event, ticket, %{woo_line_item_id: 20})
+    after_snapshot = HistoricalOrderMutationDetector.capture(order)
+
+    assert %{changed?: true, candidate_event_ids: [candidate_event_id]} =
+             HistoricalOrderMutationDetector.compare(before, after_snapshot)
+
+    assert candidate_event_id == event.id
+  end
+
   test "event attribution correction reports both old and new Event IDs", %{source: source} do
     order = create_order!(source)
     event_a = SalesHelpers.create_event!(source, %{name: "Event A"})
@@ -230,8 +276,12 @@ defmodule EventSales.Ingestion.HistoricalOrderMutationDetectorTest do
 
   test "coupon removal and value correction are historical truth mutations", %{source: source} do
     order = create_order!(source)
-    coupon = create_coupon!(order, "SAVE", "5.00", "0.50")
     before = HistoricalOrderMutationDetector.capture(order)
+    coupon = create_coupon!(order, "SAVE", "5.00", "0.50")
+    added = HistoricalOrderMutationDetector.capture(order)
+
+    assert %{changed?: true, candidate_event_ids: []} =
+             HistoricalOrderMutationDetector.compare(before, added)
 
     Ash.update!(
       coupon,
@@ -264,17 +314,59 @@ defmodule EventSales.Ingestion.HistoricalOrderMutationDetectorTest do
 
     before = HistoricalOrderMutationDetector.capture(order)
 
-    Ash.update!(
-      item,
-      %{quantity: 2, line_total: Decimal.new("200.00")},
-      action: :sync_from_order,
-      domain: Sales
-    )
+    name_only =
+      Ash.update!(
+        item,
+        %{name: "Renamed Only"},
+        action: :sync_from_order,
+        domain: Sales
+      )
+
+    name_only_snapshot = HistoricalOrderMutationDetector.capture(order)
+
+    assert name_only.name == "Renamed Only"
+    assert before == name_only_snapshot
+
+    assert %{changed?: false, candidate_event_ids: []} =
+             HistoricalOrderMutationDetector.compare(before, name_only_snapshot)
+
+    changed_item =
+      Ash.update!(
+        name_only,
+        %{
+          woo_product_id: 999,
+          woo_variation_id: 9_999,
+          quantity: 2,
+          line_subtotal: Decimal.new("220.00"),
+          line_total: Decimal.new("200.00"),
+          line_total_tax: Decimal.new("20.00")
+        },
+        action: :sync_from_order,
+        domain: Sales
+      )
 
     after_snapshot = HistoricalOrderMutationDetector.capture(order)
 
+    assert changed_item.woo_product_id == 999
+    assert changed_item.woo_variation_id == 9_999
+
     assert %{changed?: true, candidate_event_ids: []} =
-             HistoricalOrderMutationDetector.compare(before, after_snapshot)
+             HistoricalOrderMutationDetector.compare(name_only_snapshot, after_snapshot)
+
+    marked_non_ticket =
+      Ash.update!(
+        changed_item,
+        %{},
+        action: :mark_non_ticket,
+        domain: Sales
+      )
+
+    marked_snapshot = HistoricalOrderMutationDetector.capture(order)
+
+    assert marked_non_ticket.mapping_status == :non_ticket
+
+    assert %{changed?: true, candidate_event_ids: []} =
+             HistoricalOrderMutationDetector.compare(after_snapshot, marked_snapshot)
   end
 
   defp create_order!(source, attrs \\ %{}) do
