@@ -14,6 +14,7 @@ Tech Stack: Elixir 1.19, Ash 3.x, AshPostgres, PostgreSQL-backed EventSales.Data
 
 - Create test/event_sales/ingestion/historical_coverage_invalidator_test.exs with durable Ash/Postgres fixtures proving the result contract, source guard, inclusive boundaries, deterministic dedupe, audit preservation, and replay behavior.
 - Create lib/event_sales/ingestion/historical_coverage_invalidator.ex with the public API, UUID normalization, sequential resolver-driven decision loop, inclusive B→C predicate, and exact SyncRun invalidation action.
+- Regenerate the repository's deterministic project-index documentation after adding the module; this is documentation only and does not add a database index.
 - Do not modify Order, OrderItem, SyncRun, HistoricalCoverageResolver, OrderUpserter, WebhookProcessor, migrations, resource snapshots, or dependency declarations.
 
 The worktree has no private dependency checkout, so commands below reuse the verified root dependency/build caches with MIX_DEPS_PATH and MIX_BUILD_PATH; this does not change tracked source or dependency declarations.
@@ -24,7 +25,7 @@ Files:
 
 - Create: test/event_sales/ingestion/historical_coverage_invalidator_test.exs
 
-- [ ] Step 1: Add the complete contract test module before production code.
+- [x] Step 1: Add the complete contract test module before production code.
 
 Create the test file with the following tests and local durable fixture helpers:
 
@@ -263,7 +264,7 @@ defmodule EventSales.Ingestion.HistoricalCoverageInvalidatorTest do
 end
 ~~~
 
-- [ ] Step 2: Run the focused test and verify the red failure is the missing service.
+- [x] Step 2: Run the focused test and verify the red failure is the missing service.
 
 Run:
 
@@ -281,7 +282,7 @@ Files:
 
 - Create: lib/event_sales/ingestion/historical_coverage_invalidator.ex
 
-- [ ] Step 1: Add the minimal production implementation.
+- [x] Step 1: Add the minimal production implementation.
 
 Create the module with the exact result/error vocabulary and no optional adapters, callbacks, caches, transactions, or external calls:
 
@@ -339,13 +340,10 @@ defmodule EventSales.Ingestion.HistoricalCoverageInvalidator do
                                                          {:ok, {seen, normalized}} ->
       case Ecto.UUID.cast(event_id) do
         {:ok, canonical_event_id} ->
-          if MapSet.member?(seen, canonical_event_id) do
-            {:cont, {:ok, {seen, normalized}}}
-          else
-            {:cont,
-             {:ok,
-              {MapSet.put(seen, canonical_event_id), [canonical_event_id | normalized]}}}
-          end
+          {next_seen, next_normalized} =
+            deduplicate_event_id(seen, normalized, canonical_event_id)
+
+          {:cont, {:ok, {next_seen, next_normalized}}}
 
         :error ->
           {:halt, {:error, :invalid_event_id}}
@@ -358,6 +356,16 @@ defmodule EventSales.Ingestion.HistoricalCoverageInvalidator do
   end
 
   defp normalize_event_ids(_event_ids), do: {:error, :invalid_event_id}
+
+  defp deduplicate_event_id(seen, normalized, canonical_event_id) do
+    case MapSet.member?(seen, canonical_event_id) do
+      true ->
+        {seen, normalized}
+
+      false ->
+        {MapSet.put(seen, canonical_event_id), [canonical_event_id | normalized]}
+    end
+  end
 
   defp process_candidates(order, event_ids) do
     case Enum.reduce_while(event_ids, {:ok, {[], []}}, fn event_id,
@@ -388,9 +396,6 @@ defmodule EventSales.Ingestion.HistoricalCoverageInvalidator do
 
       {:ok, %SyncRun{} = certificate} ->
         process_current_certificate(order, event_id, certificate, invalidated, skipped)
-
-      _unexpected ->
-        {:halt, {:error, :historical_coverage_lookup_failed}}
     end
   end
 
@@ -451,7 +456,7 @@ defmodule EventSales.Ingestion.HistoricalCoverageInvalidator do
 end
 ~~~
 
-- [ ] Step 2: Run the focused tests and verify the green result.
+- [x] Step 2: Run the focused tests and verify the green result.
 
 Run:
 
@@ -463,7 +468,7 @@ mix test test/event_sales/ingestion/historical_coverage_invalidator_test.exs
 
 Expected: all D2A tests pass with zero failures. If a test fails, inspect the actual failure and adjust the implementation, not the contract test.
 
-- [ ] Step 3: Format the new files and rerun the focused suite.
+- [x] Step 3: Format the new files and rerun the focused suite.
 
 Run:
 
@@ -487,7 +492,7 @@ Files:
 - Verify: test/event_sales/ingestion/historical_coverage_invalidator_test.exs
 - Verify: no migration, resource snapshot, or unrelated file changes
 
-- [ ] Step 1: Inspect the diff and structural scope.
+- [x] Step 1: Inspect the diff and structural scope.
 
 Run:
 
@@ -499,9 +504,9 @@ git diff -- lib/event_sales/ingestion/historical_coverage_invalidator.ex \
   test/event_sales/ingestion/historical_coverage_invalidator_test.exs
 ~~~
 
-Expected: only the new service and focused test are uncommitted after the design commit; no OrderUpserter, OrderItem, Refund, SyncRun, migration, or resource snapshot changes appear.
+Expected: only the new service, focused test, and generated project-index documentation are uncommitted after the design commit; no OrderUpserter, OrderItem, Refund, SyncRun, migration, or resource snapshot changes appear.
 
-- [ ] Step 2: Run focused compilation and the full fast quality gate.
+- [x] Step 2: Run focused compilation and the full fast quality gate.
 
 Run:
 
@@ -516,7 +521,7 @@ mix quality.fast
 
 Expected: compilation succeeds without warnings, the focused tests and all quality.fast checks pass, and the architecture boundary script reports no new WooCommerce references.
 
-- [ ] Step 3: Commit the implementation as one coherent checkpoint.
+- [x] Step 3: Commit the implementation as one coherent checkpoint.
 
 Run:
 
@@ -531,6 +536,6 @@ Expected: a new local implementation commit contains only D2A production code an
 ## Plan self-review
 
 - The exact module/API, two skip reasons, five stable errors, UUID normalization/deduplication, sequential resolver authority, exact source check, inclusive B→C predicate, and exact invalidation action are covered.
-- The plan has no new schema, index, resource, dependency, HTTP, cache, Oban, PubSub, refund, mutation-detection, or D2B work.
+- The plan has no new database index, schema, resource, dependency, HTTP, cache, Oban, PubSub, refund, mutation-detection, or D2B work; the project-index refresh is generated documentation only.
 - All code names and paths are consistent between the tests and implementation.
 - The only expected implementation error paths not directly induced by the durable fixture tests are resolver database failures and unexpected Ash write failures; the production module maps both to the frozen stable error vocabulary without adding test-only injection options.

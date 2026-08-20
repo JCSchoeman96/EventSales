@@ -135,6 +135,7 @@
     "lib/event_sales/ingestion/historical_catchup_evidence.ex",
     "lib/event_sales/ingestion/historical_catchup_execution.ex",
     "lib/event_sales/ingestion/historical_coverage_certifier.ex",
+    "lib/event_sales/ingestion/historical_coverage_invalidator.ex",
     "lib/event_sales/ingestion/historical_coverage_resolver.ex",
     "lib/event_sales/ingestion/historical_event_line_selector.ex",
     "lib/event_sales/ingestion/historical_manifest_bootstrap.ex",
@@ -3242,6 +3243,21 @@
         {
           "arity": 3,
           "name": "evaluate"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.HistoricalCoverageInvalidator",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/historical_coverage_invalidator.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "invalidate_order_change"
         }
       ],
       "specs?": true,
