@@ -35,22 +35,22 @@ defmodule EventSales.Ingestion.HistoricalOrderMutationDetector do
   certificate-truth snapshot.
 
   The child reads are bounded by the Order's primary key and use the existing
-  `order_id` relationships/indexes. The returned snapshot contains no source
+  `order_id` relationships/indexes. A successful snapshot contains no source
   version, customer, payment metadata, item name, or persistence timestamps.
   """
-  @spec capture(Order.t()) :: snapshot()
-  def capture(%Order{id: order_id}) when is_binary(order_id) do
-    order = Ash.get!(Order, order_id, domain: Sales)
-
-    %{
-      header: header_snapshot(order),
-      order_items: order_item_snapshots(order_id),
-      coupon_snapshots: coupon_snapshots(order_id)
-    }
+  @spec capture(Order.t()) :: {:ok, snapshot()} | {:error, :invalid_order}
+  def capture(%Order{} = order) do
+    with :ok <- validate_order(order) do
+      {:ok,
+       %{
+         header: header_snapshot(order),
+         order_items: order_item_snapshots(order.id),
+         coupon_snapshots: coupon_snapshots(order.id)
+       }}
+    end
   end
 
-  def capture(%Order{}), do: raise(ArgumentError, "Order must have a persisted id")
-  def capture(_order), do: raise(ArgumentError, "expected a persisted Order")
+  def capture(_order), do: {:error, :invalid_order}
 
   @doc """
   Compares two captured snapshots and returns the exact candidate Events that
@@ -78,6 +78,33 @@ defmodule EventSales.Ingestion.HistoricalOrderMutationDetector do
       raw_tax_total: order.raw_tax_total
     }
   end
+
+  defp validate_order(%Order{
+         id: id,
+         source_system_id: source_system_id,
+         created_at_source: %DateTime{} = created_at_source
+       }) do
+    with true <- valid_uuid?(id),
+         true <- valid_uuid?(source_system_id),
+         true <- utc_datetime?(created_at_source) do
+      :ok
+    else
+      _error -> {:error, :invalid_order}
+    end
+  end
+
+  defp validate_order(_order), do: {:error, :invalid_order}
+
+  defp valid_uuid?(value) when is_binary(value) do
+    match?({:ok, _uuid}, Ecto.UUID.cast(value))
+  end
+
+  defp valid_uuid?(_value), do: false
+
+  defp utc_datetime?(%DateTime{time_zone: "Etc/UTC", utc_offset: 0, std_offset: 0}),
+    do: true
+
+  defp utc_datetime?(_datetime), do: false
 
   defp order_item_snapshots(order_id) do
     OrderItem
