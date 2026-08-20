@@ -29,6 +29,61 @@ defmodule EventSales.Ingestion.HistoricalCoverageInvalidatorTest do
     assert {:ok, _current} = HistoricalCoverageResolver.resolve_current(event.id)
   end
 
+  test "rejects an Order without a durable id before invalidation", %{source: source} do
+    event = SalesHelpers.create_event!(source, %{name: "Missing Order ID Event"})
+    run = certified_run!(event)
+
+    invalid_order = %Order{
+      id: nil,
+      source_system_id: source.id,
+      created_at_source: @within_sales_scope
+    }
+
+    assert_invalid_order_without_write(invalid_order, event, run)
+  end
+
+  test "rejects an Order with a malformed id before invalidation", %{source: source} do
+    event = SalesHelpers.create_event!(source, %{name: "Malformed Order ID Event"})
+    run = certified_run!(event)
+
+    invalid_order = %Order{
+      id: "not-a-uuid",
+      source_system_id: source.id,
+      created_at_source: @within_sales_scope
+    }
+
+    assert_invalid_order_without_write(invalid_order, event, run)
+  end
+
+  test "rejects an Order with a malformed source id before invalidation", %{source: source} do
+    event = SalesHelpers.create_event!(source, %{name: "Malformed Order Source Event"})
+    run = certified_run!(event)
+
+    invalid_order = %Order{
+      id: Ecto.UUID.generate(),
+      source_system_id: "not-a-uuid",
+      created_at_source: @within_sales_scope
+    }
+
+    assert_invalid_order_without_write(invalid_order, event, run)
+  end
+
+  test "rejects an Order with a non-UTC creation time before invalidation", %{
+    source: source
+  } do
+    event = SalesHelpers.create_event!(source, %{name: "Non-UTC Order Event"})
+    run = certified_run!(event)
+
+    invalid_order = %Order{
+      id: Ecto.UUID.generate(),
+      source_system_id: source.id,
+      created_at_source:
+        struct(@within_sales_scope, time_zone: "Africa/Johannesburg", utc_offset: 7200)
+    }
+
+    assert_invalid_order_without_write(invalid_order, event, run)
+  end
+
   test "rejects malformed Event IDs before making any invalidation write", %{
     source: source
   } do
@@ -236,5 +291,13 @@ defmodule EventSales.Ingestion.HistoricalCoverageInvalidatorTest do
       action: :create_normalized,
       domain: Sales
     )
+  end
+
+  defp assert_invalid_order_without_write(order, event, run) do
+    assert {:error, :invalid_order} =
+             HistoricalCoverageInvalidator.invalidate_order_change(order, [event.id])
+
+    assert {:ok, current} = HistoricalCoverageResolver.resolve_current(event.id)
+    assert current.id == run.id
   end
 end

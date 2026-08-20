@@ -34,16 +34,25 @@ defmodule EventSales.Ingestion.HistoricalCoverageInvalidator do
   end
 
   defp validate_order(%Order{
+         id: id,
          source_system_id: source_system_id,
-         created_at_source: %DateTime{}
+         created_at_source: %DateTime{} = created_at_source
        }) do
-    case Ecto.UUID.cast(source_system_id) do
-      {:ok, _canonical_source_system_id} -> :ok
-      :error -> {:error, :invalid_order}
+    with {:ok, _canonical_id} <- Ecto.UUID.cast(id),
+         {:ok, _canonical_source_system_id} <- Ecto.UUID.cast(source_system_id),
+         true <- utc_datetime?(created_at_source) do
+      :ok
+    else
+      _error -> {:error, :invalid_order}
     end
   end
 
   defp validate_order(_order), do: {:error, :invalid_order}
+
+  defp utc_datetime?(%DateTime{time_zone: "Etc/UTC", utc_offset: 0, std_offset: 0}),
+    do: true
+
+  defp utc_datetime?(_datetime), do: false
 
   defp normalize_event_ids(event_ids) when is_list(event_ids) do
     event_ids
