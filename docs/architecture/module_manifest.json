@@ -142,6 +142,7 @@
     "lib/event_sales/ingestion/historical_manifest_evidence.ex",
     "lib/event_sales/ingestion/historical_manifest_execution.ex",
     "lib/event_sales/ingestion/historical_order_mutation_detector.ex",
+    "lib/event_sales/ingestion/historical_refund_mutation_detector.ex",
     "lib/event_sales/ingestion/intake_backpressure.ex",
     "lib/event_sales/ingestion/manual_sync.ex",
     "lib/event_sales/ingestion/order_reconciliation.ex",
@@ -3401,6 +3402,25 @@
       "name": "EventSales.Ingestion.HistoricalOrderMutationDetector",
       "parse_error": null,
       "path": "lib/event_sales/ingestion/historical_order_mutation_detector.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "capture"
+        },
+        {
+          "arity": 2,
+          "name": "compare"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 2,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.HistoricalRefundMutationDetector",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/historical_refund_mutation_detector.ex",
       "public_funs": [
         {
           "arity": 1,
