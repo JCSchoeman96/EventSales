@@ -46,7 +46,12 @@ defmodule EventSales.Ingestion.HistoricalRefundMutationDetector do
   def capture(_refund), do: {:error, :invalid_refund}
 
   @doc """
-  Compares two captured snapshots and returns potentially affected Events.
+  Compares a new or existing captured snapshot and returns potentially
+  affected Events.
+
+  A `nil` before snapshot represents a newly created durable Refund. It is
+  always a certificate-relevant mutation and derives candidates from the
+  after snapshot only.
 
   Exact line attribution is used only when every durable refund line is bound
   to a parent OrderItem with persisted attribution. Any unresolved line,
@@ -54,7 +59,14 @@ defmodule EventSales.Ingestion.HistoricalRefundMutationDetector do
   parent `OrderItem.event_id`. Candidate IDs are the sorted union of the
   before and after bounded sets.
   """
-  @spec compare(snapshot(), snapshot()) :: comparison()
+  @spec compare(nil | snapshot(), snapshot()) :: comparison()
+  def compare(nil, after_snapshot) when is_map(after_snapshot) do
+    %{
+      changed?: true,
+      candidate_event_ids: affected_event_ids(after_snapshot)
+    }
+  end
+
   def compare(before, after_snapshot) when is_map(before) and is_map(after_snapshot) do
     changed? = certificate_truth(before) != certificate_truth(after_snapshot)
 
@@ -209,7 +221,7 @@ defmodule EventSales.Ingestion.HistoricalRefundMutationDetector do
     parent_event_ids = parent_event_ids(snapshot)
 
     case exact_event_ids(snapshot) do
-      {:ok, event_ids} -> event_ids
+      {:ok, event_ids} -> Enum.sort(event_ids)
       :fallback -> parent_event_ids
     end
   end
