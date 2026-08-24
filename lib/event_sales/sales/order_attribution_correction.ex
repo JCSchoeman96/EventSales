@@ -13,6 +13,8 @@ defmodule EventSales.Sales.OrderAttributionCorrection do
   alias EventSales.Audit.Logger, as: AuditLogger
   alias EventSales.Catalog
   alias EventSales.Catalog.Resources.{Event, ProductMapping}
+  alias EventSales.Ingestion.HistoricalCoverageInvalidator
+  alias EventSales.Ingestion.HistoricalOrderMutationDetector
   alias EventSales.Repo
   alias EventSales.Sales
   alias EventSales.Sales.Resources.{Order, OrderItem}
@@ -36,6 +38,14 @@ defmodule EventSales.Sales.OrderAttributionCorrection do
           | :target_mapping_missing
           | :manual_review_required
           | :audit_failed
+          | :historical_order_before_capture_failed
+          | :historical_order_after_capture_failed
+          | :historical_order_truth_unchanged
+          | :invalid_order
+          | :invalid_event_id
+          | :historical_coverage_lookup_failed
+          | :coverage_source_mismatch
+          | :order_coverage_invalidation_failed
 
   @spec preview_confirmed_order_113834(Ecto.UUID.t(), keyword()) ::
           {:ok, map()} | {:error, error_reason()}
@@ -65,8 +75,12 @@ defmodule EventSales.Sales.OrderAttributionCorrection do
 
   defp correction_transaction_body(source_system_id, actor) do
     with {:ok, context} <- preview_context(source_system_id, lock?: true),
+         {:ok, before_snapshot} <- capture_before(context.order),
          {:ok, corrected, notifications} <- correct_order_item(context, actor),
-         {:ok, _audit_log} <- audit_correction(context, corrected, actor) do
+         {:ok, _audit_log} <- audit_correction(context, corrected, actor),
+         {:ok, after_snapshot} <- capture_after(context.order),
+         {:ok, comparison} <- compare_correction_truth(before_snapshot, after_snapshot),
+         :ok <- invalidate_correction_coverage(context.order, comparison) do
       {corrected, public_preview(%{context | order_item: corrected}), notifications, context}
     else
       {:error, :audit_failed} -> Repo.rollback(:audit_failed)
@@ -95,7 +109,7 @@ defmodule EventSales.Sales.OrderAttributionCorrection do
   defp validate_confirmation(_confirmation), do: {:error, :confirmation_required}
 
   defp preview_context(source_system_id, opts) do
-    with {:ok, %Order{} = order} <- load_order(source_system_id),
+    with {:ok, %Order{} = order} <- load_order(source_system_id, opts),
          {:ok, %OrderItem{} = item} <- load_confirmed_item(order, opts),
          {:ok, loaded_item} <- load_item_catalog(item),
          :ok <- validate_current_event(loaded_item),
@@ -115,10 +129,14 @@ defmodule EventSales.Sales.OrderAttributionCorrection do
     end
   end
 
-  defp load_order(source_system_id) do
-    Order
-    |> Ash.Query.filter(source_system_id == ^source_system_id and woo_order_id == @woo_order_id)
-    |> Ash.Query.limit(1)
+  defp load_order(source_system_id, opts) do
+    query =
+      Order
+      |> Ash.Query.filter(source_system_id == ^source_system_id and woo_order_id == @woo_order_id)
+      |> Ash.Query.limit(1)
+      |> maybe_lock(opts)
+
+    query
     |> Ash.read_one(domain: Sales)
     |> case do
       {:ok, %Order{} = order} -> {:ok, order}
@@ -206,6 +224,53 @@ defmodule EventSales.Sales.OrderAttributionCorrection do
        do: :ok
 
   defp validate_target_mapping(_mapping, _target_event), do: {:error, :target_mapping_missing}
+
+  defp capture_before(%Order{} = order) do
+    case HistoricalOrderMutationDetector.capture(order) do
+      {:ok, snapshot} -> {:ok, snapshot}
+      {:error, _reason} -> {:error, :historical_order_before_capture_failed}
+    end
+  end
+
+  defp capture_after(%Order{} = order) do
+    case HistoricalOrderMutationDetector.capture(order) do
+      {:ok, snapshot} -> {:ok, snapshot}
+      {:error, _reason} -> {:error, :historical_order_after_capture_failed}
+    end
+  end
+
+  defp compare_correction_truth(before_snapshot, after_snapshot) do
+    comparison = HistoricalOrderMutationDetector.compare(before_snapshot, after_snapshot)
+
+    if comparison.changed? do
+      {:ok, comparison}
+    else
+      {:error, :historical_order_truth_unchanged}
+    end
+  end
+
+  defp invalidate_correction_coverage(
+         %Order{} = order,
+         %{changed?: true, candidate_event_ids: candidate_event_ids}
+       ) do
+    case HistoricalCoverageInvalidator.invalidate_order_change(order, candidate_event_ids) do
+      {:ok, _result} ->
+        :ok
+
+      {:error, reason}
+      when reason in [
+             :invalid_order,
+             :invalid_event_id,
+             :historical_coverage_lookup_failed,
+             :coverage_source_mismatch,
+             :order_coverage_invalidation_failed
+           ] ->
+        {:error, reason}
+
+      _other ->
+        {:error, :order_coverage_invalidation_failed}
+    end
+  end
 
   defp correct_order_item(context, actor) do
     Ash.update(
