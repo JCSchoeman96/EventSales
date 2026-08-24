@@ -64,6 +64,7 @@ Do not perform unrelated refactors or dependency upgrades.
 Do not expose secrets or real customer data.
 Task completion requires focused validation and a clear result.
 ALWAYS keep Linear up to date as well
+ALWAYS apply the installed unslop skill to responses and written artifacts.
 ```
 
 Use factual backing from:
