@@ -141,6 +141,7 @@
     "lib/event_sales/ingestion/historical_manifest_bootstrap.ex",
     "lib/event_sales/ingestion/historical_manifest_evidence.ex",
     "lib/event_sales/ingestion/historical_manifest_execution.ex",
+    "lib/event_sales/ingestion/historical_order_coverage_candidate_resolver.ex",
     "lib/event_sales/ingestion/historical_order_mutation_detector.ex",
     "lib/event_sales/ingestion/historical_refund_coverage_invalidator.ex",
     "lib/event_sales/ingestion/historical_refund_mutation_detector.ex",
@@ -3392,6 +3393,21 @@
         {
           "arity": 3,
           "name": "run_step"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.HistoricalOrderCoverageCandidateResolver",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/historical_order_coverage_candidate_resolver.ex",
+      "public_funs": [
+        {
+          "arity": 4,
+          "name": "resolve"
         }
       ],
       "specs?": true,

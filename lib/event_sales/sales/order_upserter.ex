@@ -6,6 +6,7 @@ defmodule EventSales.Sales.OrderUpserter do
   require Ash.Query
 
   alias EventSales.Ingestion.HistoricalCoverageInvalidator
+  alias EventSales.Ingestion.HistoricalOrderCoverageCandidateResolver
   alias EventSales.Ingestion.HistoricalOrderMutationDetector
   alias EventSales.Ingestion.Parsers.WoocommerceOrderParser
   alias EventSales.Ingestion.Resources.WebhookEvent
@@ -200,12 +201,9 @@ defmodule EventSales.Sales.OrderUpserter do
          opts,
          true
        ) do
-    candidates =
-      after_snapshot
-      |> persisted_event_ids()
-      |> maybe_add_reconciliation_event(reconciliation_event_id, true)
-
-    with :ok <- invalidate_new_order(order, candidates, opts) do
+    with {:ok, candidates} <-
+           resolve_coverage_candidates(order, nil, after_snapshot, reconciliation_event_id, opts),
+         :ok <- invalidate_new_order(order, candidates, opts) do
       {:ok, order}
     end
   end
@@ -219,54 +217,100 @@ defmodule EventSales.Sales.OrderUpserter do
        ) do
     comparison = HistoricalOrderMutationDetector.compare(before_snapshot, after_snapshot)
 
-    candidates =
-      comparison.candidate_event_ids
-      |> maybe_add_reconciliation_event(reconciliation_event_id, comparison.changed?)
+    case comparison do
+      %{changed?: false} ->
+        {:ok, order}
 
-    with :ok <-
-           invalidate_existing_order(
-             before_order,
-             order,
-             comparison.changed?,
-             candidates,
-             opts
-           ) do
-      {:ok, order}
+      %{changed?: true} ->
+        with {:ok, candidates} <-
+               resolve_coverage_candidates(
+                 order,
+                 before_snapshot,
+                 after_snapshot,
+                 reconciliation_event_id,
+                 opts
+               ),
+             :ok <-
+               invalidate_existing_order(
+                 before_order,
+                 order,
+                 true,
+                 candidates,
+                 opts
+               ) do
+          {:ok, order}
+        end
+
+      _other ->
+        {:error, :invalid_historical_order_mutation_comparison}
     end
   end
 
-  defp persisted_event_ids(%{order_items: order_items}) do
-    order_items
-    |> Enum.map(& &1.event_id)
-    |> Enum.reject(&is_nil/1)
-    |> Enum.uniq()
-    |> Enum.sort()
+  defp resolve_coverage_candidates(
+         %Order{} = order,
+         before_snapshot,
+         after_snapshot,
+         reconciliation_event_id,
+         opts
+       ) do
+    resolver =
+      Keyword.get(
+        opts,
+        :historical_order_coverage_candidate_resolver,
+        HistoricalOrderCoverageCandidateResolver
+      )
+
+    explicit_event_ids =
+      case reconciliation_event_id do
+        nil -> []
+        event_id -> [event_id]
+      end
+
+    call_candidate_resolver(
+      resolver,
+      order,
+      before_snapshot,
+      after_snapshot,
+      explicit_event_ids
+    )
   end
 
-  defp maybe_add_reconciliation_event(event_ids, _event_id, false), do: event_ids
-  defp maybe_add_reconciliation_event(event_ids, nil, true), do: event_ids
-
-  defp maybe_add_reconciliation_event(event_ids, event_id, true) do
-    [canonical_event_id(event_id) | event_ids]
-    |> Enum.uniq()
-    |> Enum.sort()
+  defp call_candidate_resolver(
+         resolver,
+         order,
+         before_snapshot,
+         after_snapshot,
+         explicit_event_ids
+       )
+       when is_atom(resolver) do
+    resolver.resolve(order, before_snapshot, after_snapshot, explicit_event_ids)
   end
 
-  defp canonical_event_id(event_id) do
-    case Ecto.UUID.cast(event_id) do
-      {:ok, canonical} -> canonical
-      :error -> event_id
-    end
+  defp call_candidate_resolver(
+         resolver,
+         order,
+         before_snapshot,
+         after_snapshot,
+         explicit_event_ids
+       )
+       when is_function(resolver, 4) do
+    resolver.(order, before_snapshot, after_snapshot, explicit_event_ids)
   end
+
+  defp call_candidate_resolver(
+         _resolver,
+         _order,
+         _before_snapshot,
+         _after_snapshot,
+         _explicit_ids
+       ),
+       do: {:error, :historical_order_candidate_lookup_failed}
 
   defp invalidate_new_order(_order, [], _opts), do: :ok
 
   defp invalidate_new_order(%Order{} = order, event_ids, opts) do
     call_invalidator(order, event_ids, opts)
   end
-
-  defp invalidate_existing_order(_before_order, _after_order, false, _event_ids, _opts),
-    do: :ok
 
   defp invalidate_existing_order(
          %Order{} = before_order,

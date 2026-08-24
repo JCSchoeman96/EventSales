@@ -12,6 +12,7 @@ defmodule EventSales.Catalog.MissingCatalogResolver do
   require Ash.Query
 
   alias EventSales.Ingestion.HistoricalCoverageInvalidator
+  alias EventSales.Ingestion.HistoricalOrderCoverageCandidateResolver
   alias EventSales.Ingestion.HistoricalOrderMutationDetector
   alias EventSales.Repo
   alias EventSales.Sales
@@ -212,19 +213,44 @@ defmodule EventSales.Catalog.MissingCatalogResolver do
       Keyword.get(opts, :historical_order_mutation_detector, HistoricalOrderMutationDetector)
 
     case detector.compare(before_snapshot, after_snapshot) do
-      %{changed?: false, candidate_event_ids: []} ->
+      %{changed?: false} ->
         :ok
 
-      %{changed?: true, candidate_event_ids: []} ->
-        :ok
-
-      %{changed?: true, candidate_event_ids: candidate_event_ids}
-      when is_list(candidate_event_ids) ->
-        call_coverage_invalidator(order, candidate_event_ids, opts)
+      %{changed?: true} ->
+        with {:ok, candidate_event_ids} <-
+               resolve_coverage_candidates(order, before_snapshot, after_snapshot, opts) do
+          invalidate_resolved_candidates(order, candidate_event_ids, opts)
+        end
 
       _other ->
         {:error, :invalid_historical_order_mutation_comparison}
     end
+  end
+
+  defp resolve_coverage_candidates(order, before_snapshot, after_snapshot, opts) do
+    resolver =
+      Keyword.get(
+        opts,
+        :historical_order_coverage_candidate_resolver,
+        HistoricalOrderCoverageCandidateResolver
+      )
+
+    case resolver do
+      resolver when is_atom(resolver) ->
+        resolver.resolve(order, before_snapshot, after_snapshot, [])
+
+      resolver when is_function(resolver, 4) ->
+        resolver.(order, before_snapshot, after_snapshot, [])
+
+      _other ->
+        {:error, :historical_order_candidate_lookup_failed}
+    end
+  end
+
+  defp invalidate_resolved_candidates(_order, [], _opts), do: :ok
+
+  defp invalidate_resolved_candidates(order, candidate_event_ids, opts) do
+    call_coverage_invalidator(order, candidate_event_ids, opts)
   end
 
   defp call_coverage_invalidator(order, event_ids, opts) do
