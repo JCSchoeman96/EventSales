@@ -5,14 +5,22 @@ defmodule EventSales.Sales.OrderAttributionCorrectionTest do
 
   alias EventSales.Accounts
   alias EventSales.Accounts.Resources.{Role, User, UserRole}
+  alias EventSales.Analytics.DashboardCache
   alias EventSales.Audit
   alias EventSales.Audit.Resources.AuditLog
   alias EventSales.Catalog
   alias EventSales.Catalog.Resources.{Event, ProductMapping, TicketType}
+  alias EventSales.Ingestion
+  alias EventSales.Ingestion.HistoricalCoverageResolver
+  alias EventSales.Ingestion.Resources.SyncRun
+  alias EventSales.Repo
   alias EventSales.Sales
   alias EventSales.Sales.OrderAttributionCorrection
-  alias EventSales.Sales.Resources.Order
+  alias EventSales.Sales.Resources.{Order, OrderItem}
   alias EventSales.TestSupport.SalesHelpers
+
+  @coverage_start ~U[2026-04-01 00:00:00.000000Z]
+  @sales_covered_through ~U[2026-06-01 00:00:00.000000Z]
 
   setup do
     admin = create_user!("order-correction-admin@example.com")
@@ -62,6 +70,12 @@ defmodule EventSales.Sales.OrderAttributionCorrectionTest do
     assert preview.target_ticket_type_name == wr_ticket.name
     assert preview.order_item_id == order_item.id
 
+    assert {:error, :historical_coverage_not_current} =
+             HistoricalCoverageResolver.resolve_current(mp_event.id)
+
+    assert {:error, :historical_coverage_not_current} =
+             HistoricalCoverageResolver.resolve_current(wr_event.id)
+
     assert {:error, :confirmation_required} =
              OrderAttributionCorrection.correct_confirmed_order_113834(
                source.id,
@@ -108,6 +122,116 @@ defmodule EventSales.Sales.OrderAttributionCorrectionTest do
     assert audit.metadata["from_event_external_id"] == 108_658
     assert audit.metadata["to_event_external_id"] == 109_120
     refute Map.has_key?(audit.metadata, "confirmation")
+  end
+
+  test "successful correction invalidates both exact current Event certificates", %{
+    admin: admin,
+    source: source,
+    order_item: order_item,
+    mp_event: mp_event,
+    wr_event: wr_event
+  } do
+    current_run = certified_run!(mp_event)
+    target_run = certified_run!(wr_event)
+    DashboardCache.ensure_table!()
+    DashboardCache.put_event_summary(mp_event.id, %{total_sold: 5})
+    DashboardCache.put_event_summary(wr_event.id, %{total_sold: 0})
+
+    assert {:ok, %{order_item: corrected, preview: preview}} =
+             OrderAttributionCorrection.correct_confirmed_order_113834(
+               source.id,
+               "CORRECT ORDER 113834 109132/109167 FROM 108658 TO 109120",
+               actor: admin
+             )
+
+    assert corrected.id == order_item.id
+    assert corrected.event_id == wr_event.id
+    assert preview.current_event_external_id == 108_658
+    assert preview.target_event_external_id == 109_120
+
+    assert {:error, :historical_coverage_not_current} =
+             HistoricalCoverageResolver.resolve_current(mp_event.id)
+
+    assert {:error, :historical_coverage_not_current} =
+             HistoricalCoverageResolver.resolve_current(wr_event.id)
+
+    assert Ash.get!(SyncRun, current_run.id, domain: Ingestion).order_coverage_status ==
+             :incomplete
+
+    assert Ash.get!(SyncRun, target_run.id, domain: Ingestion).order_coverage_status ==
+             :incomplete
+
+    assert :miss = DashboardCache.get_event_summary(mp_event.id)
+    assert :miss = DashboardCache.get_event_summary(wr_event.id)
+  end
+
+  test "correction preserves certificates outside the Order sales scope", %{
+    admin: admin,
+    source: source,
+    mp_event: mp_event,
+    wr_event: wr_event
+  } do
+    current_run =
+      certified_run!(mp_event,
+        coverage_start: ~U[2026-06-01 00:00:00.000000Z],
+        sales_covered_through: ~U[2026-07-01 00:00:00.000000Z]
+      )
+
+    target_run =
+      certified_run!(wr_event,
+        coverage_start: ~U[2026-06-01 00:00:00.000000Z],
+        sales_covered_through: ~U[2026-07-01 00:00:00.000000Z]
+      )
+
+    assert {:ok, _result} =
+             OrderAttributionCorrection.correct_confirmed_order_113834(
+               source.id,
+               "CORRECT ORDER 113834 109132/109167 FROM 108658 TO 109120",
+               actor: admin
+             )
+
+    assert {:ok, current} = HistoricalCoverageResolver.resolve_current(mp_event.id)
+    assert current.id == current_run.id
+    assert {:ok, target} = HistoricalCoverageResolver.resolve_current(wr_event.id)
+    assert target.id == target_run.id
+  end
+
+  test "rolls back correction, audit, and first invalidation when the second fails", %{
+    admin: admin,
+    source: source,
+    order_item: order_item,
+    mp_event: mp_event,
+    wr_event: wr_event
+  } do
+    current_run = certified_run!(mp_event)
+    target_run = certified_run!(wr_event)
+    before_order_item = Ash.get!(OrderItem, order_item.id, domain: Sales)
+    before_current = Ash.get!(SyncRun, current_run.id, domain: Ingestion)
+    before_target = Ash.get!(SyncRun, target_run.id, domain: Ingestion)
+    before_audit_count = audit_count()
+
+    DashboardCache.ensure_table!()
+    DashboardCache.put_event_summary(mp_event.id, %{total_sold: 5})
+    DashboardCache.put_event_summary(wr_event.id, %{total_sold: 0})
+    install_second_invalidation_failure_trigger!()
+
+    assert {:error, :order_coverage_invalidation_failed} =
+             OrderAttributionCorrection.correct_confirmed_order_113834(
+               source.id,
+               "CORRECT ORDER 113834 109132/109167 FROM 108658 TO 109120",
+               actor: admin
+             )
+
+    assert Ash.get!(OrderItem, order_item.id, domain: Sales) == before_order_item
+    assert Ash.get!(SyncRun, current_run.id, domain: Ingestion) == before_current
+    assert Ash.get!(SyncRun, target_run.id, domain: Ingestion) == before_target
+    assert audit_count() == before_audit_count
+    assert {:ok, current} = HistoricalCoverageResolver.resolve_current(mp_event.id)
+    assert current.id == current_run.id
+    assert {:ok, target} = HistoricalCoverageResolver.resolve_current(wr_event.id)
+    assert target.id == target_run.id
+    assert {:ok, %{total_sold: 5}} = DashboardCache.get_event_summary(mp_event.id)
+    assert {:ok, %{total_sold: 0}} = DashboardCache.get_event_summary(wr_event.id)
   end
 
   test "blocks when current event no longer matches confirmed tuple", %{
@@ -250,6 +374,76 @@ defmodule EventSales.Sales.OrderAttributionCorrectionTest do
     assert reloaded.external_ticket_type_id == ticket.external_ticket_type_id
     assert reloaded.external_ticket_type_kind == ticket.external_ticket_type_kind
     assert reloaded.updated_at == ticket.updated_at
+  end
+
+  defp certified_run!(event, opts \\ []) do
+    coverage_start = Keyword.get(opts, :coverage_start, @coverage_start)
+    sales_covered_through = Keyword.get(opts, :sales_covered_through, @sales_covered_through)
+
+    SyncRun
+    |> Ash.Changeset.for_create(:queue_historical_backfill, %{
+      event_id: event.id,
+      date_to: sales_covered_through
+    })
+    |> Ash.Changeset.force_change_attribute(:source_system_id, event.source_system_id)
+    |> Ash.Changeset.force_change_attribute(:date_from, coverage_start)
+    |> Ash.create!(domain: Ingestion)
+    |> Ash.update!(%{}, action: :start, domain: Ingestion)
+    |> Ash.update!(
+      %{
+        coverage_start: coverage_start,
+        sales_covered_through: sales_covered_through,
+        refunds_covered_through: sales_covered_through
+      },
+      action: :record_coverage_certification,
+      domain: Ingestion
+    )
+    |> Ash.update!(%{}, action: :complete, domain: Ingestion)
+  end
+
+  defp audit_count do
+    AuditLog
+    |> Ash.Query.filter(event_type == :order_attribution_corrected)
+    |> Ash.read!(domain: Audit)
+    |> length()
+  end
+
+  defp install_second_invalidation_failure_trigger! do
+    Repo.query!("""
+    CREATE TEMP TABLE eventsales_test_order_invalidation_attempts (
+      attempt integer NOT NULL
+    ) ON COMMIT DROP
+    """)
+
+    Repo.query!("""
+    CREATE OR REPLACE FUNCTION eventsales_test_fail_second_order_invalidation()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+    DECLARE
+      attempt_count integer;
+    BEGIN
+      IF NEW.coverage_invalidation_reason = 'historical_order_changed' THEN
+        INSERT INTO eventsales_test_order_invalidation_attempts (attempt) VALUES (1);
+        SELECT count(*) INTO attempt_count
+        FROM eventsales_test_order_invalidation_attempts;
+
+        IF attempt_count = 2 THEN
+          RAISE EXCEPTION 'forced second order invalidation failure';
+        END IF;
+      END IF;
+
+      RETURN NEW;
+    END;
+    $$;
+    """)
+
+    Repo.query!("""
+    CREATE TRIGGER eventsales_test_fail_second_order_invalidation
+    BEFORE UPDATE ON ingestion_sync_runs
+    FOR EACH ROW
+    EXECUTE FUNCTION eventsales_test_fail_second_order_invalidation()
+    """)
   end
 
   defp create_user!(email, password \\ "valid-pass-123") do
