@@ -182,6 +182,144 @@ defmodule EventSales.Ingestion.HistoricalRefundMutationDetectorTest do
              HistoricalRefundMutationDetector.compare(before, capture!(updated))
   end
 
+  test "a new exact refund reports its single persisted Event", %{source: source} do
+    {_order, event_a, _event_b, _item_a, _item_b, refund, _line} =
+      create_multi_event_refund!(source, 91_014)
+
+    assert %{changed?: true, candidate_event_ids: [event_id]} =
+             HistoricalRefundMutationDetector.compare(nil, capture!(refund))
+
+    assert event_id == event_a.id
+  end
+
+  test "a new multi-Event refund reports a deterministic exact Event union", %{source: source} do
+    {_order, event_a, event_b, _item_a, item_b, refund, _line} =
+      create_multi_event_refund!(source, 91_015)
+
+    create_refund_line!(refund, item_b, %{woo_refund_line_item_id: 171_115})
+    expected_event_ids = Enum.sort([event_a.id, event_b.id])
+
+    assert %{changed?: true, candidate_event_ids: ^expected_event_ids} =
+             HistoricalRefundMutationDetector.compare(nil, capture!(refund))
+
+    assert %{changed?: true, candidate_event_ids: ^expected_event_ids} =
+             HistoricalRefundMutationDetector.compare(nil, capture!(refund))
+  end
+
+  test "a new unresolved header-only refund uses bounded parent-wide candidates", %{
+    source: source
+  } do
+    order = create_distinct_order!(source)
+    event_a = SalesHelpers.create_event!(source, %{name: "Event A"})
+    event_b = SalesHelpers.create_event!(source, %{name: "Event B"})
+    ticket_a = SalesHelpers.create_ticket_type!(event_a, %{name: "Ticket A"})
+    ticket_b = SalesHelpers.create_ticket_type!(event_b, %{name: "Ticket B"})
+
+    _item_a =
+      SalesHelpers.create_order_item_from_line!(
+        order,
+        order_line(10_601),
+        %{
+          event_id: event_a.id,
+          ticket_type_id: ticket_a.id,
+          item_kind: :ticket,
+          mapping_status: :mapped
+        }
+      )
+
+    _item_b =
+      SalesHelpers.create_order_item_from_line!(
+        order,
+        order_line(10_602),
+        %{
+          event_id: event_b.id,
+          ticket_type_id: ticket_b.id,
+          item_kind: :ticket,
+          mapping_status: :mapped
+        }
+      )
+
+    refund =
+      create_refund!(source, order, %{
+        woo_refund_id: 91_016,
+        detail_status: :unresolved,
+        unresolved_reason: "source_detail_conflict"
+      })
+
+    assert %{changed?: true, candidate_event_ids: candidate_event_ids} =
+             HistoricalRefundMutationDetector.compare(nil, capture!(refund))
+
+    assert candidate_event_ids == Enum.sort([event_a.id, event_b.id])
+  end
+
+  test "a new refund with nonzero order-level components uses parent-wide candidates", %{
+    source: source
+  } do
+    {_order, event_a, event_b, _item_a, _item_b, refund, _line} =
+      create_multi_event_refund!(source, 91_017)
+
+    ambiguous_refund =
+      Ash.update!(
+        refund,
+        %{
+          shipping_refund_amount: Decimal.new("2.00"),
+          shipping_refund_tax: Decimal.new("0.00"),
+          fee_refund_amount: Decimal.new("1.00"),
+          fee_refund_tax: Decimal.new("0.00"),
+          unallocated_header_amount: Decimal.new("3.00")
+        },
+        action: :sync_normalized,
+        domain: Sales
+      )
+
+    assert %{changed?: true, candidate_event_ids: candidate_event_ids} =
+             HistoricalRefundMutationDetector.compare(nil, capture!(ambiguous_refund))
+
+    assert candidate_event_ids == Enum.sort([event_a.id, event_b.id])
+  end
+
+  test "a new refund with known-zero components retains exact allocation", %{source: source} do
+    {_order, event_a, _event_b, _item_a, _item_b, refund, _line} =
+      create_multi_event_refund!(source, 91_018)
+
+    exact_refund =
+      Ash.update!(
+        refund,
+        %{
+          shipping_refund_amount: Decimal.new("0.00"),
+          shipping_refund_tax: Decimal.new("0.00"),
+          fee_refund_amount: Decimal.new("0.00"),
+          fee_refund_tax: Decimal.new("0.00"),
+          unallocated_header_amount: Decimal.new("0.00")
+        },
+        action: :sync_normalized,
+        domain: Sales
+      )
+
+    assert %{changed?: true, candidate_event_ids: [event_id]} =
+             HistoricalRefundMutationDetector.compare(nil, capture!(exact_refund))
+
+    assert event_id == event_a.id
+  end
+
+  test "a new valid refund without parent Event evidence returns no candidates", %{source: source} do
+    refund =
+      create_refund!(
+        source,
+        nil,
+        %{
+          woo_order_id: System.unique_integer([:positive]),
+          woo_refund_id: 91_019,
+          currency: "ZAR",
+          order_id: nil,
+          unallocated_header_amount: Decimal.new("0.00")
+        }
+      )
+
+    assert %{changed?: true, candidate_event_ids: []} =
+             HistoricalRefundMutationDetector.compare(nil, capture!(refund))
+  end
+
   test "financial and source-state changes report exact persisted Event IDs", %{source: source} do
     order = SalesHelpers.create_order_from_fixture!(:order_completed, source)
     event_a = SalesHelpers.create_event!(source, %{name: "Event A"})
