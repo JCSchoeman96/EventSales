@@ -142,6 +142,7 @@
     "lib/event_sales/ingestion/historical_manifest_evidence.ex",
     "lib/event_sales/ingestion/historical_manifest_execution.ex",
     "lib/event_sales/ingestion/historical_order_mutation_detector.ex",
+    "lib/event_sales/ingestion/historical_refund_coverage_invalidator.ex",
     "lib/event_sales/ingestion/historical_refund_mutation_detector.ex",
     "lib/event_sales/ingestion/intake_backpressure.ex",
     "lib/event_sales/ingestion/manual_sync.ex",
@@ -3410,6 +3411,21 @@
         {
           "arity": 2,
           "name": "compare"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.HistoricalRefundCoverageInvalidator",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/historical_refund_coverage_invalidator.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "invalidate_refund_change"
         }
       ],
       "specs?": true,
