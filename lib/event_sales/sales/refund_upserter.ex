@@ -10,6 +10,8 @@ defmodule EventSales.Sales.RefundUpserter do
   require Ash.Query
   import Ecto.Query
 
+  alias EventSales.Ingestion.HistoricalRefundCoverageInvalidator
+  alias EventSales.Ingestion.HistoricalRefundMutationDetector
   alias EventSales.Ingestion.Parsers.WoocommerceRefundParser
   alias EventSales.Repo
   alias EventSales.Sales
@@ -19,6 +21,7 @@ defmodule EventSales.Sales.RefundUpserter do
   @malformed_detail "malformed_refund_detail"
   @source_detail_conflict "source_detail_conflict"
   @refund_identity_constraint "sales_refunds_unique_source_order_refund_index"
+  @invalid_refund_coverage_invalidator_result :invalid_refund_coverage_invalidator_result
   @validation_tokens [
     "product_id_mismatch",
     "variation_id_mismatch",
@@ -138,6 +141,8 @@ defmodule EventSales.Sales.RefundUpserter do
              {:ok, existing} <-
                lock_refund(source_system_id, woo_order_id, woo_refund_id),
              {:ok, existing_lines} <- existing_lines_for(existing),
+             {:ok, order_items} <- lock_parent_order_items(parent_order),
+             {:ok, before_snapshot} <- capture_before(existing),
              conflict? <-
                source_detail_conflict?(existing, normalized_refund, existing_lines),
              {:ok, refund} <-
@@ -149,8 +154,9 @@ defmodule EventSales.Sales.RefundUpserter do
                  normalized_refund,
                  parent_order,
                  existing,
-                 existing_lines
-               ) do
+                 %{existing_lines: existing_lines, order_items: order_items}
+               ),
+             {:ok, refund} <- finalize_refund_mutation(before_snapshot, refund) do
           refund
         else
           {:error, reason} -> Repo.rollback(reason)
@@ -186,7 +192,7 @@ defmodule EventSales.Sales.RefundUpserter do
          _normalized_refund,
          parent_order,
          %Refund{} = existing,
-         _existing_lines
+         _locked_children
        ) do
     ash_update(
       existing,
@@ -208,7 +214,7 @@ defmodule EventSales.Sales.RefundUpserter do
          normalized_refund,
          parent_order,
          existing,
-         existing_lines
+         %{existing_lines: existing_lines, order_items: order_items}
        ) do
     with {:ok, refund} <-
            persist_normalized_refund(
@@ -220,8 +226,6 @@ defmodule EventSales.Sales.RefundUpserter do
              existing,
              existing_lines
            ),
-         {:ok, order_items} <-
-           lock_order_items(parent_order, normalized_refund.line_items),
          {:ok, resolved_lines} <-
            resolve_line_bindings(parent_order, normalized_refund.line_items, order_items),
          {:ok, validated_lines} <-
@@ -318,24 +322,14 @@ defmodule EventSales.Sales.RefundUpserter do
     ])
   end
 
-  defp lock_order_items(nil, _line_items), do: {:ok, []}
+  defp lock_parent_order_items(nil), do: {:ok, []}
 
-  defp lock_order_items(parent_order, line_items) do
-    line_ids =
-      line_items
-      |> Enum.map(&Map.get(&1, :woo_refunded_item_id))
-      |> Enum.filter(&positive_integer?/1)
-      |> Enum.uniq()
-
-    if line_ids == [] do
-      {:ok, []}
-    else
-      OrderItem
-      |> Ash.Query.filter(order_id == ^parent_order.id and woo_line_item_id in ^line_ids)
-      |> Ash.Query.sort(woo_line_item_id: :asc)
-      |> Ash.Query.lock(:for_update)
-      |> Ash.read(domain: Sales)
-    end
+  defp lock_parent_order_items(%Order{} = parent_order) do
+    OrderItem
+    |> Ash.Query.filter(order_id == ^parent_order.id)
+    |> Ash.Query.sort(woo_line_item_id: :asc, id: :asc)
+    |> Ash.Query.lock(:for_update)
+    |> Ash.read(domain: Sales)
   end
 
   defp resolve_line_bindings(parent_order, line_items, order_items) do
@@ -580,6 +574,8 @@ defmodule EventSales.Sales.RefundUpserter do
   defp existing_refund_lines(refund_id) do
     RefundLine
     |> Ash.Query.filter(refund_id == ^refund_id)
+    |> Ash.Query.sort(woo_refund_line_item_id: :asc, id: :asc)
+    |> Ash.Query.lock(:for_update)
     |> Ash.read(domain: Sales)
   end
 
@@ -719,6 +715,8 @@ defmodule EventSales.Sales.RefundUpserter do
              {:ok, existing} <-
                lock_refund(source_system_id, woo_order_id, woo_refund_id),
              {:ok, existing_lines} <- existing_lines_for(existing),
+             {:ok, _order_items} <- lock_parent_order_items(parent_order),
+             {:ok, before_snapshot} <- capture_before(existing),
              {:ok, refund} <-
                persist_malformed_transaction(
                  source_system_id,
@@ -727,7 +725,8 @@ defmodule EventSales.Sales.RefundUpserter do
                  parent_order,
                  existing,
                  existing_lines
-               ) do
+               ),
+             {:ok, refund} <- finalize_refund_mutation(before_snapshot, refund) do
           refund
         else
           {:error, reason} -> Repo.rollback(reason)
@@ -816,6 +815,8 @@ defmodule EventSales.Sales.RefundUpserter do
              {:ok, existing} <-
                lock_refund(source_system_id, woo_order_id, woo_refund_id),
              {:ok, existing_lines} <- existing_lines_for(existing),
+             {:ok, _order_items} <- lock_parent_order_items(parent_order),
+             {:ok, before_snapshot} <- capture_before(existing),
              {:ok, refund} <-
                persist_reference_transaction(
                  source_system_id,
@@ -825,7 +826,8 @@ defmodule EventSales.Sales.RefundUpserter do
                  parent_order,
                  existing,
                  existing_lines
-               ) do
+               ),
+             {:ok, refund} <- finalize_refund_mutation(before_snapshot, refund) do
           refund
         else
           {:error, reason} -> Repo.rollback(reason)
@@ -927,18 +929,52 @@ defmodule EventSales.Sales.RefundUpserter do
 
   defp persist_source_deleted(source_system_id, woo_order_id, woo_refund_id, observed_at) do
     Repo.transaction(fn ->
-      case lock_refund(source_system_id, woo_order_id, woo_refund_id) do
-        {:ok, %Refund{} = refund} ->
-          mark_locked_refund(refund, observed_at)
-
-        {:ok, nil} ->
-          Repo.rollback(:refund_not_found)
+      case lock_parent_order(source_system_id, woo_order_id) do
+        {:ok, parent_order} ->
+          persist_source_deleted_with_parent(
+            parent_order,
+            source_system_id,
+            woo_order_id,
+            woo_refund_id,
+            observed_at
+          )
 
         {:error, _reason} ->
           Repo.rollback(:refund_void_failed)
       end
     end)
     |> normalize_transaction_result()
+  end
+
+  defp persist_source_deleted_with_parent(
+         parent_order,
+         source_system_id,
+         woo_order_id,
+         woo_refund_id,
+         observed_at
+       ) do
+    case lock_refund(source_system_id, woo_order_id, woo_refund_id) do
+      {:ok, %Refund{} = refund} ->
+        persist_locked_source_deleted(parent_order, refund, observed_at)
+
+      {:ok, nil} ->
+        Repo.rollback(:refund_not_found)
+
+      {:error, _reason} ->
+        Repo.rollback(:refund_void_failed)
+    end
+  end
+
+  defp persist_locked_source_deleted(parent_order, %Refund{} = refund, observed_at) do
+    with {:ok, _existing_lines} <- existing_lines_for(refund),
+         {:ok, _order_items} <- lock_parent_order_items(parent_order),
+         {:ok, before_snapshot} <- capture_before(refund),
+         %Refund{} = voided <- mark_locked_refund(refund, observed_at),
+         {:ok, voided} <- finalize_refund_mutation(before_snapshot, voided) do
+      voided
+    else
+      {:error, reason} -> Repo.rollback(reason)
+    end
   end
 
   defp mark_locked_refund(%Refund{source_state: :active} = refund, observed_at) do
@@ -954,6 +990,44 @@ defmodule EventSales.Sales.RefundUpserter do
 
   defp mark_locked_refund(%Refund{source_state: :voided} = refund, _observed_at),
     do: refund
+
+  defp capture_before(nil), do: {:ok, nil}
+  defp capture_before(%Refund{} = refund), do: HistoricalRefundMutationDetector.capture(refund)
+
+  defp finalize_refund_mutation(before_snapshot, %Refund{} = refund) do
+    with {:ok, after_snapshot} <- HistoricalRefundMutationDetector.capture(refund) do
+      comparison = HistoricalRefundMutationDetector.compare(before_snapshot, after_snapshot)
+      finalize_refund_comparison(before_snapshot, after_snapshot, refund, comparison)
+    end
+  end
+
+  defp finalize_refund_comparison(
+         _before_snapshot,
+         _after_snapshot,
+         %Refund{} = refund,
+         %{changed?: false}
+       ),
+       do: {:ok, refund}
+
+  defp finalize_refund_comparison(
+         before_snapshot,
+         after_snapshot,
+         %Refund{} = refund,
+         %{changed?: true, candidate_event_ids: candidate_event_ids}
+       ) do
+    result =
+      :erlang.apply(
+        HistoricalRefundCoverageInvalidator,
+        :invalidate_refund_change,
+        [before_snapshot, after_snapshot, candidate_event_ids]
+      )
+
+    case result do
+      {:ok, _result} -> {:ok, refund}
+      {:error, reason} -> {:error, reason}
+      _other -> {:error, @invalid_refund_coverage_invalidator_result}
+    end
+  end
 
   defp validate_identity(source_system_id, woo_order_id) do
     cond do
