@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-367
+368
 
 ## Files
 
@@ -154,6 +154,7 @@ Project root: `.`
 - `lib/event_sales/ingestion/historical_manifest_evidence.ex`
 - `lib/event_sales/ingestion/historical_manifest_execution.ex`
 - `lib/event_sales/ingestion/historical_order_mutation_detector.ex`
+- `lib/event_sales/ingestion/historical_refund_coverage_invalidator.ex`
 - `lib/event_sales/ingestion/historical_refund_mutation_detector.ex`
 - `lib/event_sales/ingestion/intake_backpressure.ex`
 - `lib/event_sales/ingestion/manual_sync.ex`
@@ -1215,6 +1216,12 @@ Project root: `.`
   - specs?: true
   - docs_count: 2
   - public_funs: `capture/1`, `compare/2`
+  - uses: _none_
+- `EventSales.Ingestion.HistoricalRefundCoverageInvalidator` - `lib/event_sales/ingestion/historical_refund_coverage_invalidator.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `invalidate_refund_change/3`
   - uses: _none_
 - `EventSales.Ingestion.HistoricalRefundMutationDetector` - `lib/event_sales/ingestion/historical_refund_mutation_detector.ex`
   - moduledoc?: true
