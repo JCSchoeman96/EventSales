@@ -5,7 +5,7 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
 
   alias EventSales.Catalog
   alias EventSales.Catalog.MissingCatalogResolver
-  alias EventSales.Catalog.Resources.ProductMapping
+  alias EventSales.Catalog.Resources.{Event, ProductMapping}
   alias EventSales.Ingestion
   alias EventSales.Ingestion.HistoricalCoverageInvalidator
   alias EventSales.Ingestion.HistoricalCoverageResolver
@@ -47,6 +47,134 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
              HistoricalCoverageResolver.resolve_current(event_b.id)
 
     assert Ash.get!(SyncRun, run.id, domain: Ingestion).coverage_invalidation_reason ==
+             :historical_order_changed
+  end
+
+  test "marks a pending item with a latent exact source Event unmapped and invalidates it", %{
+    source: source
+  } do
+    order = create_coverage_order!(source)
+
+    event =
+      SalesHelpers.create_event!(source, %{
+        external_event_id: 109_130,
+        external_event_kind: :tickera_event
+      })
+
+    item =
+      create_item!(order, %{
+        woo_product_id: 501,
+        woo_variation_id: 601,
+        source_tickera_event_id: 109_130,
+        attribution_status_reason: :source_ticket_type_not_found
+      })
+
+    run = certified_run!(event)
+
+    assert {:ok, %{mapped: 0, marked_unmapped: 1, unchanged: 0}} =
+             MissingCatalogResolver.recover_product(source.id, 501, 601)
+
+    assert Ash.get!(OrderItem, item.id, domain: Sales).mapping_status == :unmapped
+
+    assert {:error, :historical_coverage_not_current} =
+             HistoricalCoverageResolver.resolve_current(event.id)
+
+    assert Ash.get!(SyncRun, run.id, domain: Ingestion).coverage_invalidation_reason ==
+             :historical_order_changed
+  end
+
+  test "marks an unresolved source item without guessing or calling D2A", %{source: source} do
+    order = create_coverage_order!(source)
+    unrelated_event = SalesHelpers.create_event!(source, %{name: "Unrelated Source Event"})
+    run = certified_run!(unrelated_event)
+    test_pid = self()
+
+    create_item!(order, %{
+      woo_product_id: 501,
+      woo_variation_id: 601,
+      source_tickera_event_id: 109_131,
+      attribution_status_reason: :source_event_not_found
+    })
+
+    invalidator = fn _order, _event_ids -> send(test_pid, :unexpected_d2a_call) end
+
+    assert {:ok, %{mapped: 0, marked_unmapped: 1, unchanged: 0}} =
+             MissingCatalogResolver.recover_product(source.id, 501, 601,
+               historical_coverage_invalidator: invalidator
+             )
+
+    refute_receive :unexpected_d2a_call
+    assert {:ok, current} = HistoricalCoverageResolver.resolve_current(unrelated_event.id)
+    assert current.id == run.id
+  end
+
+  test "does not guess a candidate from an invalid source identity", %{source: source} do
+    order = create_coverage_order!(source)
+
+    event =
+      SalesHelpers.create_event!(source, %{
+        external_event_id: 109_132,
+        external_event_kind: :tickera_event
+      })
+
+    run = certified_run!(event)
+    test_pid = self()
+
+    create_item!(order, %{
+      woo_product_id: 501,
+      woo_variation_id: 601,
+      source_tickera_event_id: 109_132,
+      attribution_status_reason: :invalid_source_tickera_event_id
+    })
+
+    invalidator = fn _order, _event_ids -> send(test_pid, :unexpected_d2a_call) end
+
+    assert {:ok, %{mapped: 0, marked_unmapped: 1, unchanged: 0}} =
+             MissingCatalogResolver.recover_product(source.id, 501, 601,
+               historical_coverage_invalidator: invalidator
+             )
+
+    refute_receive :unexpected_d2a_call
+    assert {:ok, current} = HistoricalCoverageResolver.resolve_current(event.id)
+    assert current.id == run.id
+  end
+
+  test "invalidates mapped and latent source Events together", %{source: source} do
+    order = create_coverage_order!(source)
+    mapped = mapped_item!(source, order, %{woo_product_id: 701, woo_variation_id: 702})
+
+    latent_event =
+      SalesHelpers.create_event!(source, %{
+        external_event_id: 109_133,
+        external_event_kind: :tickera_event
+      })
+
+    latent =
+      create_item!(order, %{
+        woo_product_id: 501,
+        woo_variation_id: 601,
+        source_tickera_event_id: 109_133,
+        attribution_status_reason: :source_ticket_type_not_found
+      })
+
+    mapped_run = certified_run!(Ash.get!(Event, mapped.event_id, domain: Catalog))
+    latent_run = certified_run!(latent_event)
+
+    assert {:ok, %{mapped: 0, marked_unmapped: 1, unchanged: 0}} =
+             MissingCatalogResolver.recover_product(source.id, 501, 601)
+
+    assert Ash.get!(OrderItem, latent.id, domain: Sales).mapping_status == :unmapped
+
+    assert {:error, :historical_coverage_not_current} =
+             HistoricalCoverageResolver.resolve_current(mapped.event_id)
+
+    assert {:error, :historical_coverage_not_current} =
+             HistoricalCoverageResolver.resolve_current(latent_event.id)
+
+    assert Ash.get!(SyncRun, mapped_run.id, domain: Ingestion).coverage_invalidation_reason ==
+             :historical_order_changed
+
+    assert Ash.get!(SyncRun, latent_run.id, domain: Ingestion).coverage_invalidation_reason ==
              :historical_order_changed
   end
 

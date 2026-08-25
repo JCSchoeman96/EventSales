@@ -55,6 +55,312 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
     assert invalidated.coverage_invalidation_reason == :historical_order_changed
   end
 
+  test "new historical Order with a latent exact source Event invalidates its certificate", %{
+    source: source
+  } do
+    event =
+      SalesHelpers.create_event!(source, %{
+        external_event_id: 109_124,
+        external_event_kind: :tickera_event
+      })
+
+    run = certified_run!(event)
+
+    latent_payload =
+      payload(@historical_created_at)
+      |> put_in(["line_items", Access.at(0), "meta_data"], tickera_event_meta(109_124))
+
+    assert {:ok, order} = OrderUpserter.upsert_order(source.id, latent_payload)
+
+    assert [%OrderItem{event_id: nil, attribution_status_reason: :source_ticket_type_not_found}] =
+             order_items(order.id)
+
+    assert {:error, :historical_coverage_not_current} =
+             HistoricalCoverageResolver.resolve_current(event.id)
+
+    assert Ash.get!(SyncRun, run.id, domain: Ingestion).coverage_invalidation_reason ==
+             :historical_order_changed
+  end
+
+  test "a later financial mutation resolves the now-existing latent source Event", %{
+    source: source
+  } do
+    latent_payload =
+      payload(@historical_created_at)
+      |> put_in(["line_items", Access.at(0), "meta_data"], tickera_event_meta(109_125))
+
+    assert {:ok, order} = OrderUpserter.upsert_order(source.id, latent_payload)
+
+    event =
+      SalesHelpers.create_event!(source, %{
+        external_event_id: 109_125,
+        external_event_kind: :tickera_event
+      })
+
+    run = certified_run!(event)
+
+    changed_payload =
+      latent_payload
+      |> Map.put("date_modified_gmt", woo_datetime(~U[2026-08-05 13:00:00.000000Z]))
+      |> Map.put("total", "901.00")
+
+    assert {:ok, changed} = OrderUpserter.upsert_order(source.id, changed_payload)
+    assert changed.id == order.id
+
+    assert {:error, :historical_coverage_not_current} =
+             HistoricalCoverageResolver.resolve_current(event.id)
+
+    assert Ash.get!(SyncRun, run.id, domain: Ingestion).coverage_invalidation_reason ==
+             :historical_order_changed
+  end
+
+  test "a changed mixed Order invalidates mapped and latent exact Events", %{
+    source: source,
+    event: event_a
+  } do
+    latent_payload =
+      mixed_payload(@historical_created_at)
+      |> put_in(["line_items", Access.at(1), "meta_data"], tickera_event_meta(109_126))
+
+    assert {:ok, order} = OrderUpserter.upsert_order(source.id, latent_payload)
+
+    event_b =
+      SalesHelpers.create_event!(source, %{
+        external_event_id: 109_126,
+        external_event_kind: :tickera_event
+      })
+
+    run_a = certified_run!(event_a)
+    run_b = certified_run!(event_b)
+
+    changed_payload =
+      latent_payload
+      |> Map.put("date_modified_gmt", woo_datetime(~U[2026-08-05 13:00:00.000000Z]))
+      |> Map.put("total", "1301.00")
+
+    assert {:ok, changed} = OrderUpserter.upsert_order(source.id, changed_payload)
+    assert changed.id == order.id
+
+    assert {:error, :historical_coverage_not_current} =
+             HistoricalCoverageResolver.resolve_current(event_a.id)
+
+    assert {:error, :historical_coverage_not_current} =
+             HistoricalCoverageResolver.resolve_current(event_b.id)
+
+    assert Ash.get!(SyncRun, run_a.id, domain: Ingestion).coverage_invalidation_reason ==
+             :historical_order_changed
+
+    assert Ash.get!(SyncRun, run_b.id, domain: Ingestion).coverage_invalidation_reason ==
+             :historical_order_changed
+  end
+
+  test "a removed source identity retains the BEFORE exact Event candidate", %{
+    source: source
+  } do
+    source_event_id = 109_127
+
+    initial_payload =
+      payload(@historical_created_at)
+      |> put_in(["line_items", Access.at(0), "product_id"], 901)
+      |> put_in(["line_items", Access.at(0), "variation_id"], 902)
+      |> put_in(
+        ["line_items", Access.at(0), "meta_data"],
+        tickera_event_meta(source_event_id)
+      )
+
+    assert {:ok, order} = OrderUpserter.upsert_order(source.id, initial_payload)
+
+    event =
+      SalesHelpers.create_event!(source, %{
+        external_event_id: source_event_id,
+        external_event_kind: :tickera_event
+      })
+
+    run = certified_run!(event)
+
+    removed_payload =
+      initial_payload
+      |> Map.put("date_modified_gmt", woo_datetime(~U[2026-08-05 13:00:00.000000Z]))
+      |> put_in(["line_items", Access.at(0), "meta_data"], [])
+
+    assert {:ok, changed} = OrderUpserter.upsert_order(source.id, removed_payload)
+    assert changed.id == order.id
+
+    assert [%OrderItem{event_id: nil, source_tickera_event_id: nil}] = order_items(order.id)
+
+    assert {:error, :historical_coverage_not_current} =
+             HistoricalCoverageResolver.resolve_current(event.id)
+
+    assert Ash.get!(SyncRun, run.id, domain: Ingestion).coverage_invalidation_reason ==
+             :historical_order_changed
+  end
+
+  test "a changed Order invalidates multiple latent exact source Events", %{source: source} do
+    source_event_ids = [109_128, 109_129]
+
+    initial_payload =
+      mixed_payload(@historical_created_at)
+      |> put_in(
+        ["line_items", Access.at(0), "meta_data"],
+        tickera_event_meta(Enum.at(source_event_ids, 0))
+      )
+      |> put_in(
+        ["line_items", Access.at(1), "meta_data"],
+        tickera_event_meta(Enum.at(source_event_ids, 1))
+      )
+
+    assert {:ok, order} = OrderUpserter.upsert_order(source.id, initial_payload)
+
+    events =
+      Enum.map(source_event_ids, fn external_event_id ->
+        SalesHelpers.create_event!(source, %{
+          external_event_id: external_event_id,
+          external_event_kind: :tickera_event
+        })
+      end)
+
+    runs = Enum.map(events, &certified_run!/1)
+
+    changed_payload =
+      initial_payload
+      |> Map.put("date_modified_gmt", woo_datetime(~U[2026-08-05 13:00:00.000000Z]))
+      |> Map.put("total", "1301.00")
+
+    assert {:ok, changed} = OrderUpserter.upsert_order(source.id, changed_payload)
+    assert changed.id == order.id
+
+    Enum.zip(events, runs)
+    |> Enum.each(fn {event, run} ->
+      assert {:error, :historical_coverage_not_current} =
+               HistoricalCoverageResolver.resolve_current(event.id)
+
+      assert Ash.get!(SyncRun, run.id, domain: Ingestion).coverage_invalidation_reason ==
+               :historical_order_changed
+    end)
+  end
+
+  test "explicit reconciliation Event is unioned with latent source Events", %{
+    source: source
+  } do
+    source_event_ids = [109_130, 109_131]
+    reconciliation_event_id = 109_132
+
+    initial_payload =
+      mixed_payload(@historical_created_at)
+      |> put_in(
+        ["line_items", Access.at(0), "meta_data"],
+        tickera_event_meta(Enum.at(source_event_ids, 0))
+      )
+      |> put_in(
+        ["line_items", Access.at(1), "meta_data"],
+        tickera_event_meta(Enum.at(source_event_ids, 1))
+      )
+
+    assert {:ok, order} = OrderUpserter.upsert_order(source.id, initial_payload)
+
+    source_events =
+      Enum.map(source_event_ids, fn external_event_id ->
+        SalesHelpers.create_event!(source, %{
+          external_event_id: external_event_id,
+          external_event_kind: :tickera_event
+        })
+      end)
+
+    reconciliation_event =
+      SalesHelpers.create_event!(source, %{
+        external_event_id: reconciliation_event_id,
+        external_event_kind: :tickera_event
+      })
+
+    events = source_events ++ [reconciliation_event]
+    runs = Enum.map(events, &certified_run!/1)
+    test_pid = self()
+
+    invalidator = fn invalidation_order, event_ids ->
+      send(test_pid, {:candidate_event_ids, event_ids})
+      HistoricalCoverageInvalidator.invalidate_order_change(invalidation_order, event_ids)
+    end
+
+    changed_payload =
+      initial_payload
+      |> Map.put("date_modified_gmt", woo_datetime(~U[2026-08-05 13:00:00.000000Z]))
+      |> Map.put("total", "1301.00")
+
+    assert {:ok, reconciled} =
+             OrderUpserter.reconcile_event_order(
+               source.id,
+               reconciliation_event.id,
+               changed_payload,
+               [],
+               historical_coverage_invalidator: invalidator
+             )
+
+    assert reconciled.id == order.id
+
+    expected_event_ids = Enum.sort(Enum.map(events, & &1.id))
+    assert_receive {:candidate_event_ids, ^expected_event_ids}
+    assert_receive {:candidate_event_ids, ^expected_event_ids}
+
+    Enum.zip(events, runs)
+    |> Enum.each(fn {event, run} ->
+      assert {:error, :historical_coverage_not_current} =
+               HistoricalCoverageResolver.resolve_current(event.id)
+
+      assert Ash.get!(SyncRun, run.id, domain: Ingestion).coverage_invalidation_reason ==
+               :historical_order_changed
+    end)
+  end
+
+  test "a new invalid source identity does not guess an Event candidate", %{
+    source: source,
+    event: event
+  } do
+    run = certified_run!(event)
+
+    invalid_payload =
+      payload(@historical_created_at)
+      |> put_in(
+        ["line_items", Access.at(0), "meta_data"],
+        tickera_event_meta(109_133) ++ tickera_event_meta(109_134)
+      )
+
+    assert {:ok, order} = OrderUpserter.upsert_order(source.id, invalid_payload)
+
+    assert [
+             %OrderItem{
+               event_id: nil,
+               attribution_status_reason: :invalid_source_tickera_event_id
+             }
+           ] =
+             order_items(order.id)
+
+    assert {:ok, current} = HistoricalCoverageResolver.resolve_current(event.id)
+    assert current.id == run.id
+  end
+
+  test "a new missing source Event does not guess a candidate", %{
+    source: source,
+    event: event
+  } do
+    run = certified_run!(event)
+    missing_source_event_id = 109_135
+
+    missing_payload =
+      payload(@historical_created_at)
+      |> put_in(
+        ["line_items", Access.at(0), "meta_data"],
+        tickera_event_meta(missing_source_event_id)
+      )
+
+    assert {:ok, order} = OrderUpserter.upsert_order(source.id, missing_payload)
+
+    assert [%OrderItem{event_id: nil, attribution_status_reason: :source_event_not_found}] =
+             order_items(order.id)
+
+    assert {:ok, current} = HistoricalCoverageResolver.resolve_current(event.id)
+    assert current.id == run.id
+  end
+
   test "new post-coverage Order leaves its current certificate unchanged", %{
     source: source,
     event: event
@@ -75,16 +381,35 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
     initial_payload = payload(@historical_created_at)
     assert {:ok, order} = OrderUpserter.upsert_order(source.id, initial_payload)
     run = certified_run!(event)
+    test_pid = self()
 
-    assert {:ok, replayed} = OrderUpserter.upsert_order(source.id, initial_payload)
+    candidate_resolver = fn _order, _before_snapshot, _after_snapshot, _explicit_event_ids ->
+      send(test_pid, :unexpected_candidate_resolver_call)
+      {:error, :unexpected_candidate_resolver_call}
+    end
+
+    assert {:ok, replayed} =
+             OrderUpserter.upsert_order(
+               source.id,
+               initial_payload,
+               historical_order_coverage_candidate_resolver: candidate_resolver
+             )
+
     assert replayed.id == order.id
 
     version_only_payload =
       initial_payload
       |> Map.put("date_modified_gmt", woo_datetime(~U[2026-08-05 13:00:00.000000Z]))
 
-    assert {:ok, advanced} = OrderUpserter.upsert_order(source.id, version_only_payload)
+    assert {:ok, advanced} =
+             OrderUpserter.upsert_order(
+               source.id,
+               version_only_payload,
+               historical_order_coverage_candidate_resolver: candidate_resolver
+             )
+
     assert advanced.id == order.id
+    refute_receive :unexpected_candidate_resolver_call
 
     assert {:ok, current} = HistoricalCoverageResolver.resolve_current(event.id)
     assert current.id == run.id
@@ -346,6 +671,15 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
     updated_at_source = updated_at_source || DateTime.add(created_at_source, 5, :minute)
 
     fixture(:order_completed)
+    |> Map.put("date_created_gmt", woo_datetime(created_at_source))
+    |> Map.put("date_modified_gmt", woo_datetime(updated_at_source))
+    |> Map.put("date_completed_gmt", woo_datetime(updated_at_source))
+  end
+
+  defp mixed_payload(created_at_source, updated_at_source \\ nil) do
+    updated_at_source = updated_at_source || DateTime.add(created_at_source, 5, :minute)
+
+    fixture(:order_mixed_event)
     |> Map.put("date_created_gmt", woo_datetime(created_at_source))
     |> Map.put("date_modified_gmt", woo_datetime(updated_at_source))
     |> Map.put("date_completed_gmt", woo_datetime(updated_at_source))
