@@ -240,9 +240,6 @@ defmodule EventSales.Sales.OrderUpserter do
                ) do
           {:ok, order}
         end
-
-      _other ->
-        {:error, :invalid_historical_order_mutation_comparison}
     end
   end
 
