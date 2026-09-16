@@ -150,7 +150,8 @@ mix quality.fast
 git diff --check
 git status --short
 git diff --stat
-git commit -am "feat: complete Path 1 M3 historical coverage"
+git add lib priv test docs
+git commit -m "feat: complete Path 1 M3 historical coverage"
 ~~~
 
 Expected result: quality.fast passes, local diagnostics report only the known localhost WordPress availability issue if it remains, the diff is focused, and a coherent local commit exists.
