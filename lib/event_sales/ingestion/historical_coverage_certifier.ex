@@ -281,6 +281,7 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifier do
   end
 
   defp refund_facts(run, event, coverage_start, sales_covered_through, repo) do
+    source_event_id = event.external_event_id || 0
     source_system_id = Ecto.UUID.dump!(run.source_system_id)
     event_id = Ecto.UUID.dump!(event.id)
 
@@ -298,7 +299,13 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifier do
           r.source_system_id == ^source_system_id and
             o.created_at_source >= ^coverage_start and
             o.created_at_source <= ^sales_covered_through and
-            o.source_system_id == ^source_system_id,
+            o.source_system_id == ^source_system_id and
+            fragment(
+              "EXISTS (SELECT 1 FROM sales_order_items AS target_oi WHERE target_oi.order_id = ? AND (target_oi.event_id = ? OR target_oi.source_tickera_event_id = ?))",
+              o.id,
+              ^event_id,
+              ^source_event_id
+            ),
         select: %{
           references_seen: fragment("COUNT(DISTINCT ?)", r.id),
           details_complete:
@@ -340,10 +347,21 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifier do
             ),
           line_binding_incomplete:
             fragment(
-              "COUNT(DISTINCT ?) FILTER (WHERE ? = ? AND (? IS NULL OR ? IS NULL OR ? IS DISTINCT FROM ? OR ? IS DISTINCT FROM ? OR ? IS DISTINCT FROM ? OR ? IS DISTINCT FROM ? OR ? IS DISTINCT FROM ?))",
+              "COUNT(DISTINCT ?) FILTER (WHERE ? = ? AND ? IS NOT NULL AND NOT (? IS NOT NULL AND (? IN (?, ?) OR ? = ? OR (? IS DISTINCT FROM ? AND ? IS DISTINCT FROM ?))) AND (? IS NULL OR ? IS NULL OR ? IS DISTINCT FROM ? OR ? IS DISTINCT FROM ? OR ? IS DISTINCT FROM ? OR ? IS DISTINCT FROM ? OR ? IS DISTINCT FROM ?))",
               r.id,
               r.source_state,
               ^"active",
+              rl.id,
+              oi.id,
+              oi.mapping_status,
+              ^"non_ticket",
+              ^"ignored",
+              oi.item_kind,
+              ^"non_ticket",
+              oi.event_id,
+              ^event_id,
+              oi.source_tickera_event_id,
+              ^source_event_id,
               rl.woo_refunded_item_id,
               rl.order_item_id,
               oi.order_id,
@@ -359,10 +377,19 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifier do
             ),
           line_validation_conflict:
             fragment(
-              "COUNT(DISTINCT ?) FILTER (WHERE ? = ? AND (? IS NOT NULL OR ? IS NOT NULL OR (? IS NOT NULL AND ? IS DISTINCT FROM ?) OR (? IS NOT NULL AND ? IS DISTINCT FROM ?)))",
+              "COUNT(DISTINCT ?) FILTER (WHERE ? = ? AND ? IS NOT NULL AND (? = ? OR ? = ?) AND ? = ? AND ? = ? AND (? IS NOT NULL OR ? IS NOT NULL OR (? IS NOT NULL AND ? IS DISTINCT FROM ?) OR (? IS NOT NULL AND ? IS DISTINCT FROM ?)))",
               rl.id,
               r.source_state,
               ^"active",
+              oi.id,
+              oi.event_id,
+              ^event_id,
+              oi.source_tickera_event_id,
+              ^source_event_id,
+              oi.mapping_status,
+              ^"mapped",
+              oi.item_kind,
+              ^"ticket",
               rl.binding_reason,
               rl.validation_reason,
               rl.woo_product_id,
