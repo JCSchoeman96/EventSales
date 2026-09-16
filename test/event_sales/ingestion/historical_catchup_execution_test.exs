@@ -11,7 +11,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
   alias EventSales.Ingestion.Resources.{SyncCursor, SyncRun}
   alias EventSales.Sales.OrderUpserter
   alias EventSales.Sales.Resources.{Order, OrderItem}
-  alias EventSales.TestSupport.{FixtureHelpers, SalesHelpers}
+  alias EventSales.TestSupport.{FixtureHelpers, HistoricalCoverageHelpers, SalesHelpers}
 
   require Ash.Query
 
@@ -138,6 +138,30 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     end
   end
 
+  defmodule CoverageCertifierFake do
+    def evaluate(_run, _cursor, _opts), do: {:retry, :coverage_evidence_read_failed}
+  end
+
+  defmodule CoverageCertifierPass do
+    alias EventSales.TestSupport.HistoricalCoverageHelpers
+
+    def evaluate(run, _cursor, _opts) do
+      {:ok,
+       %{
+         coverage_start: run.date_from,
+         sales_covered_through: run.date_to,
+         refunds_covered_through: ~U[2026-08-13 12:00:00.000000Z],
+         coverage_evidence:
+           HistoricalCoverageHelpers.certified_evidence(%{
+             orders: %{
+               manifest_members_seen: run.orders_seen_count,
+               orders_durable: run.orders_matched_count
+             }
+           })
+       }}
+    end
+  end
+
   setup do
     start_supervised!(CatchupClient)
     start_supervised!(WooClient)
@@ -259,6 +283,44 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     assert terminal_cursor.metadata["historical_catchup"]["terminal_evidence"] == "u-empty-proof"
   end
 
+  test "blocked coverage fails the terminal run and cursor atomically", %{
+    run: run,
+    cursor: cursor
+  } do
+    run =
+      Ash.update!(
+        run,
+        %{orders_seen_count: 1, orders_matched_count: 1, orders_upserted_count: 1},
+        action: :record_counts,
+        domain: Ingestion
+      )
+
+    CatchupClient.enqueue!(page([], has_more: false, terminal_evidence: "u-blocked-proof"))
+
+    assert {:blocked, :historical_coverage_blocked} = run_step(run, cursor)
+    assert current_run(run).status == :failed
+    assert current_run(run).order_coverage_status == :failed
+    assert current_run(run).refund_coverage_status == :failed
+    assert current_run(run).coverage_evidence["result"] == "blocked"
+    assert current_cursor(cursor).status == :failed
+    assert current_cursor(cursor).metadata["failure"] == "historical_coverage_blocked"
+  end
+
+  test "retryable coverage evidence reads leave terminal cursor and run unchanged", %{
+    run: run,
+    cursor: cursor
+  } do
+    CatchupClient.enqueue!(page([], has_more: false, terminal_evidence: "u-retry-proof"))
+
+    assert {:retry, :coverage_evidence_read_failed} =
+             run_step(run, cursor, coverage_certifier: CoverageCertifierFake)
+
+    assert current_run(run).status == :running
+    assert current_cursor(cursor).status == :active
+    assert current_cursor(cursor).page == cursor.page
+    assert current_cursor(cursor).metadata["historical_catchup"]["state"] == "pending_first_page"
+  end
+
   test "terminal coverage certification is not repeated by a stale terminal replay", %{
     run: run,
     cursor: cursor
@@ -289,7 +351,8 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
         %{
           coverage_start: @date_from,
           sales_covered_through: @date_to,
-          refunds_covered_through: @catchup_observed_at
+          refunds_covered_through: @catchup_observed_at,
+          coverage_evidence: HistoricalCoverageHelpers.certified_evidence()
         },
         action: :record_coverage_certification,
         domain: Ingestion
@@ -622,7 +685,13 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     assert cursor_a.page == 2
     assert {:continue, _, cursor_b} = run_step(current_run(run), current_cursor(cursor))
     assert cursor_b.page == 3
-    assert :ok = run_step(current_run(run), current_cursor(cursor))
+
+    assert :ok =
+             run_step(
+               current_run(run),
+               current_cursor(cursor),
+               coverage_certifier: CoverageCertifierPass
+             )
 
     assert length(WooClient.calls()) == 205
     assert current_cursor(cursor).status == :done

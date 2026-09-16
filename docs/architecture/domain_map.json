@@ -548,7 +548,15 @@
           },
           {
             "arity": 2,
+            "name": "validate_coverage_failure"
+          },
+          {
+            "arity": 2,
             "name": "record_coverage_certification"
+          },
+          {
+            "arity": 2,
+            "name": "record_coverage_failure"
           },
           {
             "arity": 2,

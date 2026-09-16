@@ -8,7 +8,15 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifierTest do
   alias EventSales.Ingestion.HistoricalCoverageCertifier
   alias EventSales.Ingestion.HistoricalManifestEvidence
   alias EventSales.Ingestion.Resources.{SyncCursor, SyncRun}
+  alias EventSales.Repo
+  alias EventSales.Sales
+  alias EventSales.Sales.Resources.{Order, OrderItem, Refund, RefundLine}
+  alias EventSales.TestSupport.HistoricalCoverageHelpers
   alias EventSales.TestSupport.SalesHelpers
+
+  defmodule CoverageRepoFailure do
+    def transaction(_fun), do: {:error, :coverage_database_unavailable}
+  end
 
   @date_from ~U[2026-08-01 08:00:00.123456Z]
   @date_to ~U[2026-08-09 23:59:59.999999Z]
@@ -42,6 +50,402 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifierTest do
     assert {:ok, result} = HistoricalCoverageCertifier.evaluate(run, cursor)
 
     assert DateTime.compare(result.refunds_covered_through, result.sales_covered_through) == :gt
+  end
+
+  test "includes durable order facts at the inclusive sales boundary", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    {_order, _item, _refund, _refund_line} =
+      create_complete_facts!(source, event, created_at_source: @date_to)
+
+    run =
+      record_counts!(run, %{
+        orders_seen_count: 1,
+        orders_matched_count: 1,
+        orders_upserted_count: 1
+      })
+
+    assert {:ok, result} = HistoricalCoverageCertifier.evaluate(run, cursor)
+    assert result.coverage_evidence["orders"]["orders_durable"] == 1
+  end
+
+  test "certifies durable order, ticket, refund, and effective-time evidence", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    {_order, _item, _refund, _refund_line} = create_complete_facts!(source, event)
+
+    run =
+      record_counts!(run, %{
+        orders_seen_count: 1,
+        orders_matched_count: 1,
+        orders_upserted_count: 1
+      })
+
+    assert {:ok, result} = HistoricalCoverageCertifier.evaluate(run, cursor)
+
+    assert result.coverage_evidence["result"] == "certified"
+
+    assert result.coverage_evidence["orders"] == %{
+             "manifest_members_seen" => 1,
+             "orders_durable" => 1,
+             "order_items_durable" => 1,
+             "blocking_unresolved_count" => 0,
+             "blocking_reasons" => %{}
+           }
+
+    assert result.coverage_evidence["refunds"] == %{
+             "references_seen" => 1,
+             "details_complete" => 1,
+             "refund_lines_durable" => 1,
+             "blocking_unresolved_count" => 0,
+             "blocking_reasons" => %{}
+           }
+  end
+
+  test "blocks when a matched manifest order has no durable event history", %{
+    run: run,
+    cursor: cursor
+  } do
+    run =
+      record_counts!(run, %{
+        orders_seen_count: 1,
+        orders_matched_count: 1,
+        orders_upserted_count: 1
+      })
+
+    assert {:blocked, result} = HistoricalCoverageCertifier.evaluate(run, cursor)
+    assert result.coverage_evidence["result"] == "blocked"
+    assert result.coverage_evidence["orders"]["blocking_reasons"]["order_history_incomplete"] == 1
+  end
+
+  test "blocks a mapped ticket line without its tax-inclusive primitive", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    {_order, item, _refund, _refund_line} = create_complete_facts!(source, event)
+    clear_column!("sales_order_items", "line_total_tax", item.id)
+
+    run =
+      record_counts!(run, %{
+        orders_seen_count: 1,
+        orders_matched_count: 1,
+        orders_upserted_count: 1
+      })
+
+    assert {:blocked, result} = HistoricalCoverageCertifier.evaluate(run, cursor)
+    assert_reason(result, "orders", "financial_primitive_incomplete")
+  end
+
+  test "blocks a recognised sale without an authoritative effective timestamp", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    {order, _item, _refund, _refund_line} = create_complete_facts!(source, event)
+    clear_column!("sales_orders", "paid_at", order.id)
+    clear_column!("sales_orders", "completed_at", order.id)
+
+    run =
+      record_counts!(run, %{
+        orders_seen_count: 1,
+        orders_matched_count: 1,
+        orders_upserted_count: 1
+      })
+
+    assert {:blocked, result} = HistoricalCoverageCertifier.evaluate(run, cursor)
+    assert_reason(result, "orders", "effective_time_incomplete")
+  end
+
+  test "blocks pending event attribution", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    {_order, item, _refund, _refund_line} = create_complete_facts!(source, event)
+    Ash.update!(item, %{}, action: :remap, domain: Sales)
+
+    run =
+      record_counts!(run, %{
+        orders_seen_count: 1,
+        orders_matched_count: 1,
+        orders_upserted_count: 1
+      })
+
+    assert {:blocked, result} = HistoricalCoverageCertifier.evaluate(run, cursor)
+    assert_reason(result, "orders", "attribution_incomplete")
+  end
+
+  test "blocks a source event identity conflict", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    {_order, item, _refund, _refund_line} = create_complete_facts!(source, event)
+    other_event = historical_event!(source, @date_from)
+    other_ticket = SalesHelpers.create_ticket_type!(other_event, %{name: "Other Ticket"})
+
+    Ash.update!(
+      item,
+      %{event_id: other_event.id, ticket_type_id: other_ticket.id},
+      action: :correct_event_attribution,
+      domain: Sales
+    )
+
+    run =
+      record_counts!(run, %{
+        orders_seen_count: 1,
+        orders_matched_count: 1,
+        orders_upserted_count: 1
+      })
+
+    assert {:blocked, result} = HistoricalCoverageCertifier.evaluate(run, cursor)
+    assert_reason(result, "orders", "source_event_identity_conflict")
+  end
+
+  test "blocks an incomplete refund detail record", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    {_order, _item, refund, _refund_line} = create_complete_facts!(source, event)
+
+    Ash.update!(refund, %{detail_status: :reference_only},
+      action: :sync_normalized,
+      domain: Sales
+    )
+
+    run =
+      record_counts!(run, %{
+        orders_seen_count: 1,
+        orders_matched_count: 1,
+        orders_upserted_count: 1
+      })
+
+    assert {:blocked, result} = HistoricalCoverageCertifier.evaluate(run, cursor)
+    assert_reason(result, "refunds", "refund_detail_incomplete")
+  end
+
+  test "blocks an active refund without an effective timestamp", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    {_order, _item, refund, _refund_line} = create_complete_facts!(source, event)
+    Ash.update!(refund, %{source_created_at: nil}, action: :sync_normalized, domain: Sales)
+
+    run =
+      record_counts!(run, %{
+        orders_seen_count: 1,
+        orders_matched_count: 1,
+        orders_upserted_count: 1
+      })
+
+    assert {:blocked, result} = HistoricalCoverageCertifier.evaluate(run, cursor)
+    assert_reason(result, "refunds", "refund_effective_time_incomplete")
+  end
+
+  test "blocks a refund bound to the wrong parent order", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    {_order, _item, refund, _refund_line} = create_complete_facts!(source, event)
+
+    other_order =
+      Ash.create!(
+        Order,
+        %{
+          source_system_id: source.id,
+          woo_order_id: 12_002,
+          order_number: "12002",
+          status: :completed,
+          currency: "ZAR",
+          completed_at: DateTime.add(@date_from, 5, :hour),
+          created_at_source: DateTime.add(@date_from, 5, :hour),
+          updated_at_source: DateTime.add(@date_from, 6, :hour),
+          raw_total: Decimal.new("10"),
+          raw_discount_total: Decimal.new("0"),
+          raw_tax_total: Decimal.new("0")
+        },
+        action: :create_normalized,
+        domain: Sales
+      )
+
+    Ash.update!(refund, %{order_id: other_order.id}, action: :sync_normalized, domain: Sales)
+
+    run =
+      record_counts!(run, %{
+        orders_seen_count: 1,
+        orders_matched_count: 1,
+        orders_upserted_count: 1
+      })
+
+    assert {:blocked, result} = HistoricalCoverageCertifier.evaluate(run, cursor)
+    assert_reason(result, "refunds", "refund_parent_binding_incomplete")
+  end
+
+  test "blocks a refund line without an exact original-line binding", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    {_order, _item, _refund, refund_line} = create_complete_facts!(source, event)
+
+    Ash.update!(
+      refund_line,
+      %{order_item_id: nil},
+      action: :sync_normalized,
+      domain: Sales
+    )
+
+    run =
+      record_counts!(run, %{
+        orders_seen_count: 1,
+        orders_matched_count: 1,
+        orders_upserted_count: 1
+      })
+
+    assert {:blocked, result} = HistoricalCoverageCertifier.evaluate(run, cursor)
+    assert_reason(result, "refunds", "refund_line_binding_incomplete")
+  end
+
+  test "blocks a complete refund with no durable refund lines", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    {_order, _item, _refund, refund_line} = create_complete_facts!(source, event)
+
+    Repo.query!("DELETE FROM sales_refund_lines WHERE id = $1", [Ecto.UUID.dump!(refund_line.id)])
+
+    run =
+      record_counts!(run, %{
+        orders_seen_count: 1,
+        orders_matched_count: 1,
+        orders_upserted_count: 1
+      })
+
+    assert {:blocked, result} = HistoricalCoverageCertifier.evaluate(run, cursor)
+    assert_reason(result, "refunds", "refund_line_binding_incomplete")
+  end
+
+  test "blocks a refund line whose source line ID disagrees with its bound line", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    {_order, item, _refund, refund_line} = create_complete_facts!(source, event)
+
+    Repo.query!(
+      "UPDATE sales_refund_lines SET woo_refunded_item_id = $2 WHERE id = $1",
+      [Ecto.UUID.dump!(refund_line.id), item.woo_line_item_id + 1]
+    )
+
+    run =
+      record_counts!(run, %{
+        orders_seen_count: 1,
+        orders_matched_count: 1,
+        orders_upserted_count: 1
+      })
+
+    assert {:blocked, result} = HistoricalCoverageCertifier.evaluate(run, cursor)
+    assert_reason(result, "refunds", "refund_line_binding_incomplete")
+  end
+
+  test "blocks a refund line with a validation conflict", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    {_order, _item, _refund, refund_line} = create_complete_facts!(source, event)
+
+    Ash.update!(
+      refund_line,
+      %{validation_reason: "refunded_quantity_exceeds_original"},
+      action: :sync_normalized,
+      domain: Sales
+    )
+
+    run =
+      record_counts!(run, %{
+        orders_seen_count: 1,
+        orders_matched_count: 1,
+        orders_upserted_count: 1
+      })
+
+    assert {:blocked, result} = HistoricalCoverageCertifier.evaluate(run, cursor)
+    assert_reason(result, "refunds", "refund_line_validation_conflict")
+  end
+
+  test "blocks a refund with no durable financial primitive", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    {_order, _item, refund, refund_line} = create_complete_facts!(source, event)
+    clear_column!("sales_refunds", "header_amount", refund.id)
+    clear_column!("sales_refund_lines", "refund_total_amount", refund_line.id)
+    clear_column!("sales_refund_lines", "refund_total_tax", refund_line.id)
+
+    run =
+      record_counts!(run, %{
+        orders_seen_count: 1,
+        orders_matched_count: 1,
+        orders_upserted_count: 1
+      })
+
+    assert {:blocked, result} = HistoricalCoverageCertifier.evaluate(run, cursor)
+    assert_reason(result, "refunds", "refund_financial_primitive_incomplete")
+  end
+
+  test "does not treat a voided refund's retained line diagnostics as active blockers", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    {_order, _item, refund, refund_line} = create_complete_facts!(source, event)
+
+    Repo.query!(
+      "UPDATE sales_refunds SET source_state = 'voided', voided_at = $2 WHERE id = $1",
+      [Ecto.UUID.dump!(refund.id), @catchup_observed_at]
+    )
+
+    Ash.update!(
+      refund_line,
+      %{validation_reason: "retained_source_diagnostic"},
+      action: :sync_normalized,
+      domain: Sales
+    )
+
+    run =
+      record_counts!(run, %{
+        orders_seen_count: 1,
+        orders_matched_count: 1,
+        orders_upserted_count: 1
+      })
+
+    assert {:ok, result} = HistoricalCoverageCertifier.evaluate(run, cursor)
+    assert result.coverage_evidence["refunds"]["blocking_reasons"] == %{}
   end
 
   test "rejects a non-historical run", %{source: source, event: event, cursor: cursor} do
@@ -89,7 +493,8 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifierTest do
         %{
           coverage_start: @date_from,
           sales_covered_through: @date_to,
-          refunds_covered_through: @catchup_observed_at
+          refunds_covered_through: @catchup_observed_at,
+          coverage_evidence: HistoricalCoverageHelpers.certified_evidence()
         },
         action: :record_coverage_certification,
         domain: Ingestion
@@ -302,6 +707,11 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifierTest do
     assert after_evaluation == before
   end
 
+  test "returns a retry outcome when local coverage reads fail", %{run: run, cursor: cursor} do
+    assert {:retry, :coverage_evidence_read_failed} =
+             HistoricalCoverageCertifier.evaluate(run, cursor, coverage_repo: CoverageRepoFailure)
+  end
+
   defp historical_event!(source, source_created_at) do
     external_event_id = 800_000 + System.unique_integer([:positive])
 
@@ -406,5 +816,112 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifierTest do
       "has_more" => false,
       "terminal_evidence" => "u-page-terminal-proof"
     }
+  end
+
+  defp record_counts!(run, attrs) do
+    Ash.update!(run, attrs, action: :record_counts, domain: Ingestion)
+  end
+
+  defp create_complete_facts!(source, event, opts \\ []) do
+    ticket = SalesHelpers.create_ticket_type!(event, %{name: "Complete Ticket"})
+    created_at_source = Keyword.get(opts, :created_at_source, DateTime.add(@date_from, 3, :hour))
+
+    order =
+      Ash.create!(
+        Order,
+        %{
+          source_system_id: source.id,
+          woo_order_id: 12_001,
+          order_number: "12001",
+          status: :completed,
+          currency: "ZAR",
+          completed_at: DateTime.add(@date_from, 2, :hour),
+          paid_at: DateTime.add(@date_from, 1, :hour),
+          created_at_source: created_at_source,
+          updated_at_source: DateTime.add(@date_from, 4, :hour),
+          raw_total: Decimal.new("207"),
+          raw_discount_total: Decimal.new("20"),
+          raw_tax_total: Decimal.new("27")
+        },
+        action: :create_normalized,
+        domain: Sales
+      )
+
+    item =
+      Ash.create!(
+        OrderItem,
+        %{
+          order_id: order.id,
+          event_id: event.id,
+          ticket_type_id: ticket.id,
+          woo_line_item_id: 1,
+          woo_product_id: 501,
+          woo_variation_id: 601,
+          name: "Complete Ticket",
+          quantity: 2,
+          line_subtotal: Decimal.new("200"),
+          line_total: Decimal.new("180"),
+          line_total_tax: Decimal.new("27"),
+          discount_total: Decimal.new("20"),
+          item_kind: :ticket,
+          mapping_status: :mapped,
+          source_tickera_event_id: event.external_event_id
+        },
+        action: :create_normalized,
+        domain: Sales
+      )
+
+    refund =
+      Ash.create!(
+        Refund,
+        %{
+          source_system_id: source.id,
+          order_id: order.id,
+          woo_order_id: order.woo_order_id,
+          woo_refund_id: 701,
+          currency: "ZAR",
+          source_state: :active,
+          detail_status: :complete,
+          summary_total_amount: Decimal.new("90"),
+          header_amount: Decimal.new("90"),
+          shipping_refund_amount: Decimal.new("0"),
+          shipping_refund_tax: Decimal.new("0"),
+          fee_refund_amount: Decimal.new("0"),
+          fee_refund_tax: Decimal.new("0"),
+          unallocated_header_amount: Decimal.new("0"),
+          source_created_at: DateTime.add(@date_from, 2, :day)
+        },
+        action: :create_normalized,
+        domain: Sales
+      )
+
+    refund_line =
+      Ash.create!(
+        RefundLine,
+        %{
+          refund_id: refund.id,
+          order_item_id: item.id,
+          woo_refund_line_item_id: 1,
+          woo_refunded_item_id: item.woo_line_item_id,
+          woo_product_id: item.woo_product_id,
+          woo_variation_id: item.woo_variation_id,
+          refunded_quantity: 1,
+          refund_subtotal_amount: Decimal.new("100"),
+          refund_total_amount: Decimal.new("90"),
+          refund_total_tax: Decimal.new("13.5")
+        },
+        action: :create_normalized,
+        domain: Sales
+      )
+
+    {order, item, refund, refund_line}
+  end
+
+  defp assert_reason(result, section, reason) do
+    assert result.coverage_evidence[section]["blocking_reasons"][reason] > 0
+  end
+
+  defp clear_column!(table, column, id) do
+    Repo.query!("UPDATE #{table} SET #{column} = NULL WHERE id = $1", [Ecto.UUID.dump!(id)])
   end
 end

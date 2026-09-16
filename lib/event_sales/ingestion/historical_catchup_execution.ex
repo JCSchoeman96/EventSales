@@ -41,6 +41,8 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
   @type result ::
           {:continue, SyncRun.t(), SyncCursor.t()}
           | :ok
+          | {:blocked, :historical_coverage_blocked}
+          | {:retry, atom()}
           | {:error, atom() | tuple()}
 
   @doc "Processes exactly one U page and checkpoints it after all F4C1 writes."
@@ -557,15 +559,46 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
              current_run,
              current_cursor,
              opts
-           ),
-         terminal_cursor = %{current_cursor | metadata: metadata},
-         {:ok, coverage} <- HistoricalCoverageCertifier.evaluate(current_run, terminal_cursor),
-         {:ok, certified_run, certification_notifications} <-
-           record_coverage_certification(current_run, coverage),
-         {:ok, updated_cursor, cursor_notifications} <- complete_cursor(current_cursor, metadata),
+           ) do
+      terminal_cursor = %{current_cursor | metadata: metadata}
+
+      case coverage_certifier(opts).evaluate(current_run, terminal_cursor, opts) do
+        {:ok, coverage} ->
+          complete_certified_transaction(current_run, current_cursor, metadata, coverage)
+
+        {:blocked, coverage} ->
+          fail_blocked_transaction(current_run, current_cursor, metadata, coverage)
+
+        {:retry, reason} ->
+          {:retry, reason}
+
+        {:error, reason} ->
+          Repo.rollback(reason)
+      end
+    else
+      {:error, reason} -> Repo.rollback(reason)
+    end
+  end
+
+  defp complete_certified_transaction(run, cursor, metadata, coverage) do
+    with {:ok, certified_run, certification_notifications} <-
+           record_coverage_certification(run, coverage),
+         {:ok, updated_cursor, cursor_notifications} <- complete_cursor(cursor, metadata),
          {:ok, updated_run, run_notifications} <- complete_run(certified_run) do
       {:completed, updated_run, updated_cursor,
        certification_notifications ++ cursor_notifications ++ run_notifications}
+    else
+      {:error, reason} -> Repo.rollback(reason)
+    end
+  end
+
+  defp fail_blocked_transaction(run, cursor, metadata, coverage) do
+    with {:ok, failed_metadata} <-
+           HistoricalManifestEvidence.with_failure(metadata, "historical_coverage_blocked"),
+         {:ok, failed_cursor, cursor_notifications} <-
+           fail_cursor(cursor, failed_metadata),
+         {:ok, failed_run, run_notifications} <- fail_coverage(run, coverage) do
+      {:blocked, failed_run, failed_cursor, cursor_notifications ++ run_notifications}
     else
       {:error, reason} -> Repo.rollback(reason)
     end
@@ -575,7 +608,8 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
     attrs = %{
       coverage_start: coverage.coverage_start,
       sales_covered_through: coverage.sales_covered_through,
-      refunds_covered_through: coverage.refunds_covered_through
+      refunds_covered_through: coverage.refunds_covered_through,
+      coverage_evidence: coverage.coverage_evidence
     }
 
     case Ash.update(run, attrs,
@@ -586,6 +620,40 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
       {:ok, %SyncRun{} = updated, notifications} -> {:ok, updated, notifications}
       {:ok, %SyncRun{} = updated} -> {:ok, updated, []}
       {:error, _reason} -> {:error, :coverage_certification_failed}
+    end
+  end
+
+  defp fail_cursor(cursor, metadata) do
+    case Ash.update(
+           cursor,
+           %{metadata: metadata},
+           action: :mark_failed,
+           domain: EventSales.Ingestion,
+           return_notifications?: true
+         ) do
+      {:ok, %SyncCursor{} = updated, notifications} -> {:ok, updated, notifications}
+      {:ok, %SyncCursor{} = updated} -> {:ok, updated, []}
+      {:error, _reason} -> {:error, :coverage_failure_checkpoint_failed}
+    end
+  end
+
+  defp fail_coverage(run, coverage) do
+    attrs = %{
+      coverage_start: coverage.coverage_start,
+      sales_covered_through: coverage.sales_covered_through,
+      refunds_covered_through: coverage.refunds_covered_through,
+      coverage_evidence: coverage.coverage_evidence,
+      last_error: "historical_coverage_blocked"
+    }
+
+    case Ash.update(run, attrs,
+           action: :fail_coverage,
+           domain: EventSales.Ingestion,
+           return_notifications?: true
+         ) do
+      {:ok, %SyncRun{} = updated, notifications} -> {:ok, updated, notifications}
+      {:ok, %SyncRun{} = updated} -> {:ok, updated, []}
+      {:error, _reason} -> {:error, :coverage_failure_run_update_failed}
     end
   end
 
@@ -663,6 +731,16 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
     Ash.Notifier.notify(notifications)
     :ok
   end
+
+  defp notify_checkpoint({:blocked, _updated_run, _updated_cursor, []}),
+    do: {:blocked, :historical_coverage_blocked}
+
+  defp notify_checkpoint({:blocked, _updated_run, _updated_cursor, notifications}) do
+    Ash.Notifier.notify(notifications)
+    {:blocked, :historical_coverage_blocked}
+  end
+
+  defp notify_checkpoint({:retry, reason}), do: {:retry, reason}
 
   defp locked_current_cursor(%SyncCursor{id: cursor_id}) do
     query =
@@ -744,6 +822,9 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
 
   defp current_cursor(%SyncCursor{id: cursor_id}),
     do: Ash.get(SyncCursor, cursor_id, domain: EventSales.Ingestion)
+
+  defp coverage_certifier(opts),
+    do: Keyword.get(opts, :coverage_certifier, HistoricalCoverageCertifier)
 
   defp locked_current_run(%SyncRun{id: run_id}) do
     query =

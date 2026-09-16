@@ -2,20 +2,26 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifier do
   @moduledoc """
   Evaluates durable authority for one historical SyncRun without performing writes.
 
-  The evaluator certifies transport and refund coverage boundaries only. It does
-  not inspect financial primitives, refund rows, or analytics readiness.
+  The evaluator combines terminal source evidence with aggregate local facts.
+  It certifies the bounded M3 evidence contract only. It does not perform
+  source HTTP, reconcile financial totals, or claim analytics readiness.
   """
+
+  import Ecto.Query
 
   alias EventSales.Catalog
   alias EventSales.Catalog.Resources.Event
   alias EventSales.Ingestion.HistoricalCatchupEvidence
+  alias EventSales.Ingestion.HistoricalCoverageEvidence
   alias EventSales.Ingestion.HistoricalManifestEvidence
   alias EventSales.Ingestion.Resources.{SyncCursor, SyncRun}
+  alias EventSales.Repo
 
-  @type coverage :: %{
+  @type summary :: %{
           required(:coverage_start) => DateTime.t(),
           required(:sales_covered_through) => DateTime.t(),
-          required(:refunds_covered_through) => DateTime.t()
+          required(:refunds_covered_through) => DateTime.t(),
+          required(:coverage_evidence) => HistoricalCoverageEvidence.t()
         }
 
   @type reason ::
@@ -50,12 +56,16 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifier do
           | :catchup_parent_binding_mismatch
           | :catchup_before_manifest
           | :invalid_coverage_range
+          | :coverage_evidence_invalid
 
   @spec evaluate(SyncRun.t(), SyncCursor.t(), keyword()) ::
-          {:ok, coverage()} | {:error, reason()}
+          {:ok, summary()}
+          | {:blocked, summary()}
+          | {:retry, :coverage_evidence_read_failed}
+          | {:error, reason()}
   def evaluate(run, cursor, opts \\ [])
 
-  def evaluate(%SyncRun{} = run, %SyncCursor{} = cursor, _opts) do
+  def evaluate(%SyncRun{} = run, %SyncCursor{} = cursor, opts) do
     with :ok <- validate_run(run),
          {:ok, event} <- load_event(run.event_id),
          :ok <- validate_event(event, run),
@@ -64,16 +74,388 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifier do
          {:ok, catchup} <- terminal_catchup(cursor.metadata),
          :ok <- validate_parent_binding(catchup, manifest),
          :ok <- validate_coverage_range(event.source_created_at, run.date_to) do
-      {:ok,
-       %{
-         coverage_start: event.source_created_at,
-         sales_covered_through: run.date_to,
-         refunds_covered_through: catchup.source_observed_at
-       }}
+      evaluate_durable_facts(run, event, manifest, catchup, opts)
     end
   end
 
   def evaluate(_run, _cursor, _opts), do: {:error, :invalid_input}
+
+  defp evaluate_durable_facts(run, event, manifest, catchup, opts) do
+    coverage_repo = Keyword.get(opts, :coverage_repo, Repo)
+
+    try do
+      case coverage_repo.transaction(fn ->
+             order_facts =
+               order_facts(run, event, event.source_created_at, run.date_to, coverage_repo)
+
+             refund_facts =
+               refund_facts(run, event, event.source_created_at, run.date_to, coverage_repo)
+
+             build_summary(run, manifest, catchup, order_facts, refund_facts, opts)
+           end) do
+        {:ok, outcome} -> outcome
+        {:error, _reason} -> {:retry, :coverage_evidence_read_failed}
+      end
+    rescue
+      _error -> {:retry, :coverage_evidence_read_failed}
+    catch
+      :exit, _reason -> {:retry, :coverage_evidence_read_failed}
+      :throw, _value -> {:retry, :coverage_evidence_read_failed}
+    end
+  end
+
+  defp build_summary(run, manifest, catchup, order_facts, refund_facts, opts) do
+    order_reasons = order_reason_counts(run, order_facts)
+    refund_reasons = refund_reason_counts(refund_facts)
+
+    result =
+      if map_size(order_reasons) == 0 and map_size(refund_reasons) == 0,
+        do: "certified",
+        else: "blocked"
+
+    evidence_attrs = %{
+      manifest_hash: manifest.manifest_hash,
+      manifest_terminal_evidence: manifest.terminal_evidence,
+      catchup_hash: catchup.manifest_hash,
+      catchup_terminal_evidence: catchup.terminal_evidence,
+      orders: %{
+        manifest_members_seen: run.orders_seen_count,
+        orders_durable: order_facts.orders_durable,
+        order_items_durable: order_facts.order_items_durable,
+        blocking_unresolved_count: Enum.sum(Map.values(order_reasons)),
+        blocking_reasons: order_reasons
+      },
+      refunds: %{
+        references_seen: refund_facts.references_seen,
+        details_complete: refund_facts.details_complete,
+        refund_lines_durable: refund_facts.refund_lines_durable,
+        blocking_unresolved_count: Enum.sum(Map.values(refund_reasons)),
+        blocking_reasons: refund_reasons
+      },
+      result: result,
+      evaluated_at: evaluation_now(opts)
+    }
+
+    case HistoricalCoverageEvidence.build(evidence_attrs) do
+      {:ok, coverage_evidence} ->
+        summary = %{
+          coverage_start: event_source_created_at(manifest, run),
+          sales_covered_through: run.date_to,
+          refunds_covered_through: catchup.source_observed_at,
+          coverage_evidence: coverage_evidence
+        }
+
+        if result == "certified", do: {:ok, summary}, else: {:blocked, summary}
+
+      {:error, reason} ->
+        {:error, {:coverage_evidence_invalid, reason}}
+    end
+  end
+
+  defp event_source_created_at(_manifest, %SyncRun{date_from: date_from}), do: date_from
+
+  defp evaluation_now(opts) do
+    case Keyword.get(opts, :now) do
+      now when is_function(now, 0) -> now.()
+      %DateTime{} = now -> now
+      _other -> DateTime.utc_now()
+    end
+  end
+
+  defp order_facts(run, event, coverage_start, sales_covered_through, repo) do
+    source_event_id = event.external_event_id || 0
+    source_system_id = Ecto.UUID.dump!(run.source_system_id)
+    event_id = Ecto.UUID.dump!(event.id)
+
+    query =
+      from oi in "sales_order_items",
+        join: o in "sales_orders",
+        on: o.id == oi.order_id,
+        where:
+          o.source_system_id == ^source_system_id and
+            o.created_at_source >= ^coverage_start and
+            o.created_at_source <= ^sales_covered_through and
+            (oi.event_id == ^event_id or oi.source_tickera_event_id == ^source_event_id),
+        select: %{
+          orders_durable: fragment("COUNT(DISTINCT ?)", oi.order_id),
+          order_items_durable: count(oi.id),
+          pending_or_unmapped:
+            fragment(
+              "COUNT(*) FILTER (WHERE ? IN (?, ?))",
+              oi.mapping_status,
+              ^"pending_mapping_resolution",
+              ^"unmapped"
+            ),
+          mapped_invalid:
+            fragment(
+              "COUNT(*) FILTER (WHERE ? = ? AND (? IS DISTINCT FROM ? OR ? IS NULL OR ? IS DISTINCT FROM ?))",
+              oi.mapping_status,
+              ^"mapped",
+              oi.event_id,
+              ^event_id,
+              oi.ticket_type_id,
+              oi.item_kind,
+              ^"ticket"
+            ),
+          source_event_identity_conflict:
+            fragment(
+              "COUNT(*) FILTER (WHERE (? = ? AND ? IS NOT NULL AND ? IS DISTINCT FROM ?) OR (? = ? AND ? IS NOT NULL AND ? IS DISTINCT FROM ?))",
+              oi.source_tickera_event_id,
+              ^source_event_id,
+              oi.event_id,
+              oi.event_id,
+              ^event_id,
+              oi.event_id,
+              ^event_id,
+              oi.source_tickera_event_id,
+              oi.source_tickera_event_id,
+              ^source_event_id
+            ),
+          ticket_tax_missing:
+            fragment(
+              "COUNT(*) FILTER (WHERE ? = ? AND ? = ? AND ? = ? AND ? IS NULL)",
+              oi.mapping_status,
+              ^"mapped",
+              oi.item_kind,
+              ^"ticket",
+              oi.event_id,
+              ^event_id,
+              oi.line_total_tax
+            ),
+          currency_missing:
+            fragment(
+              "COUNT(DISTINCT ?) FILTER (WHERE ? IS NULL OR btrim(?) = '')",
+              o.id,
+              o.currency,
+              o.currency
+            ),
+          effective_time_missing:
+            fragment(
+              "COUNT(DISTINCT ?) FILTER (WHERE ? IN (?, ?) AND ? IS NULL AND ? IS NULL)",
+              o.id,
+              o.status,
+              ^"completed",
+              ^"refunded",
+              o.paid_at,
+              o.completed_at
+            )
+        }
+
+    repo.one!(query)
+  end
+
+  defp order_reason_counts(run, facts) do
+    facts
+    |> Map.take([
+      :pending_or_unmapped,
+      :mapped_invalid,
+      :source_event_identity_conflict,
+      :ticket_tax_missing,
+      :currency_missing,
+      :effective_time_missing
+    ])
+    |> Map.merge(%{
+      order_history_incomplete: max(run.orders_matched_count - facts.orders_durable, 0),
+      order_counter_inconsistent: if(counter_inconsistent?(run), do: 1, else: 0)
+    })
+    |> rename_order_reasons()
+    |> nonzero_counts()
+  end
+
+  defp rename_order_reasons(counts) do
+    %{
+      "attribution_incomplete" => Map.get(counts, :pending_or_unmapped, 0),
+      "mapped_line_invalid" => Map.get(counts, :mapped_invalid, 0),
+      "source_event_identity_conflict" => Map.get(counts, :source_event_identity_conflict, 0),
+      "financial_primitive_incomplete" => Map.get(counts, :ticket_tax_missing, 0),
+      "currency_incomplete" => Map.get(counts, :currency_missing, 0),
+      "effective_time_incomplete" => Map.get(counts, :effective_time_missing, 0),
+      "order_history_incomplete" => Map.get(counts, :order_history_incomplete, 0),
+      "order_counter_inconsistent" => Map.get(counts, :order_counter_inconsistent, 0)
+    }
+  end
+
+  defp counter_inconsistent?(run) do
+    run.orders_matched_count > run.orders_seen_count or
+      run.orders_matched_count != run.orders_upserted_count + run.orders_stale_count
+  end
+
+  defp refund_facts(run, event, coverage_start, sales_covered_through, repo) do
+    source_system_id = Ecto.UUID.dump!(run.source_system_id)
+    event_id = Ecto.UUID.dump!(event.id)
+
+    query =
+      from r in "sales_refunds",
+        join: o in "sales_orders",
+        on:
+          o.source_system_id == r.source_system_id and
+            o.woo_order_id == r.woo_order_id,
+        left_join: rl in "sales_refund_lines",
+        on: rl.refund_id == r.id,
+        left_join: oi in "sales_order_items",
+        on: oi.id == rl.order_item_id,
+        where:
+          r.source_system_id == ^source_system_id and
+            o.created_at_source >= ^coverage_start and
+            o.created_at_source <= ^sales_covered_through and
+            o.source_system_id == ^source_system_id,
+        select: %{
+          references_seen: fragment("COUNT(DISTINCT ?)", r.id),
+          details_complete:
+            fragment(
+              "COUNT(DISTINCT ?) FILTER (WHERE ? = ? OR ? = ?)",
+              r.id,
+              r.source_state,
+              ^"voided",
+              r.detail_status,
+              ^"complete"
+            ),
+          refund_lines_durable: fragment("COUNT(DISTINCT ?)", rl.id),
+          detail_incomplete:
+            fragment(
+              "COUNT(DISTINCT ?) FILTER (WHERE ? = ? AND ? IS DISTINCT FROM ?)",
+              r.id,
+              r.source_state,
+              ^"active",
+              r.detail_status,
+              ^"complete"
+            ),
+          effective_time_missing:
+            fragment(
+              "COUNT(DISTINCT ?) FILTER (WHERE ? = ? AND ? IS NULL)",
+              r.id,
+              r.source_state,
+              ^"active",
+              r.source_created_at
+            ),
+          parent_binding_incomplete:
+            fragment(
+              "COUNT(DISTINCT ?) FILTER (WHERE ? = ? AND (? IS NULL OR ? IS DISTINCT FROM ?))",
+              r.id,
+              r.source_state,
+              ^"active",
+              r.order_id,
+              r.order_id,
+              o.id
+            ),
+          line_binding_incomplete:
+            fragment(
+              "COUNT(DISTINCT ?) FILTER (WHERE ? = ? AND (? IS NULL OR ? IS NULL OR ? IS DISTINCT FROM ? OR ? IS DISTINCT FROM ? OR ? IS DISTINCT FROM ? OR ? IS DISTINCT FROM ? OR ? IS DISTINCT FROM ?))",
+              r.id,
+              r.source_state,
+              ^"active",
+              rl.woo_refunded_item_id,
+              rl.order_item_id,
+              oi.order_id,
+              o.id,
+              oi.event_id,
+              ^event_id,
+              oi.mapping_status,
+              ^"mapped",
+              oi.item_kind,
+              ^"ticket",
+              oi.woo_line_item_id,
+              rl.woo_refunded_item_id
+            ),
+          line_validation_conflict:
+            fragment(
+              "COUNT(DISTINCT ?) FILTER (WHERE ? = ? AND (? IS NOT NULL OR ? IS NOT NULL OR (? IS NOT NULL AND ? IS DISTINCT FROM ?) OR (? IS NOT NULL AND ? IS DISTINCT FROM ?)))",
+              rl.id,
+              r.source_state,
+              ^"active",
+              rl.binding_reason,
+              rl.validation_reason,
+              rl.woo_product_id,
+              rl.woo_product_id,
+              oi.woo_product_id,
+              rl.woo_variation_id,
+              rl.woo_variation_id,
+              oi.woo_variation_id
+            ),
+          header_financial_missing:
+            fragment(
+              "COUNT(DISTINCT ?) FILTER (WHERE ? = ? AND ? = ? AND ? IS NULL)",
+              r.id,
+              r.source_state,
+              ^"active",
+              r.detail_status,
+              ^"complete",
+              r.header_amount
+            ),
+          currency_incomplete:
+            fragment(
+              "COUNT(DISTINCT ?) FILTER (WHERE ? IS NULL OR btrim(?) = '' OR ? IS DISTINCT FROM ?)",
+              r.id,
+              r.currency,
+              r.currency,
+              r.currency,
+              o.currency
+            )
+        }
+
+    base = repo.one!(query)
+
+    line_financial_missing =
+      refund_ticket_line_financial_count(
+        run,
+        event,
+        coverage_start,
+        sales_covered_through,
+        repo
+      )
+
+    Map.put(base, :ticket_line_financial_missing, line_financial_missing)
+  end
+
+  defp refund_ticket_line_financial_count(
+         run,
+         event,
+         coverage_start,
+         sales_covered_through,
+         repo
+       ) do
+    source_system_id = Ecto.UUID.dump!(run.source_system_id)
+    event_id = Ecto.UUID.dump!(event.id)
+
+    query =
+      from r in "sales_refunds",
+        join: o in "sales_orders",
+        on: o.source_system_id == r.source_system_id and o.woo_order_id == r.woo_order_id,
+        join: rl in "sales_refund_lines",
+        on: rl.refund_id == r.id,
+        join: oi in "sales_order_items",
+        on: oi.id == rl.order_item_id,
+        where:
+          r.source_system_id == ^source_system_id and
+            o.created_at_source >= ^coverage_start and
+            o.created_at_source <= ^sales_covered_through and
+            r.source_state == ^"active" and
+            r.detail_status == ^"complete" and
+            oi.event_id == ^event_id and
+            oi.item_kind == ^"ticket" and
+            fragment("? IS NULL OR ? IS NULL", rl.refund_total_amount, rl.refund_total_tax),
+        select: count(rl.id)
+
+    repo.one!(query)
+  end
+
+  defp refund_reason_counts(facts) do
+    %{
+      "refund_detail_incomplete" => facts.detail_incomplete,
+      "refund_effective_time_incomplete" => facts.effective_time_missing,
+      "refund_parent_binding_incomplete" => facts.parent_binding_incomplete,
+      "refund_line_binding_incomplete" => facts.line_binding_incomplete,
+      "refund_line_validation_conflict" => facts.line_validation_conflict,
+      "refund_financial_primitive_incomplete" =>
+        facts.header_financial_missing + facts.ticket_line_financial_missing,
+      "refund_currency_incomplete" => facts.currency_incomplete
+    }
+    |> nonzero_counts()
+  end
+
+  defp nonzero_counts(counts) do
+    Map.reject(counts, fn {_key, count} -> count == 0 end)
+  end
 
   defp validate_run(%SyncRun{sync_type: :historical_backfill, status: :running} = run) do
     with :ok <- validate_run_identity(run),

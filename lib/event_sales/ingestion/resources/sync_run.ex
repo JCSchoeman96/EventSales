@@ -9,6 +9,7 @@ defmodule EventSales.Ingestion.Resources.SyncRun do
     domain: EventSales.Ingestion,
     extensions: [AshStateMachine]
 
+  alias EventSales.Ingestion.HistoricalCoverageEvidence
   alias EventSales.Ingestion.Validations.ScopedManualSync
 
   @requested_via_values [:manual, :scheduled, :system]
@@ -149,11 +150,37 @@ defmodule EventSales.Ingestion.Resources.SyncRun do
       public? false
       require_atomic? false
 
-      accept [:coverage_start, :sales_covered_through, :refunds_covered_through]
+      accept [
+        :coverage_start,
+        :sales_covered_through,
+        :refunds_covered_through,
+        :coverage_evidence
+      ]
+
       validate &__MODULE__.validate_coverage_certification/2
       change get_and_lock_for_update()
       change filter(expr(is_nil(coverage_certified_at)))
       change &__MODULE__.record_coverage_certification/2
+    end
+
+    update :fail_coverage do
+      public? false
+      require_atomic? false
+
+      accept [
+        :coverage_start,
+        :sales_covered_through,
+        :refunds_covered_through,
+        :coverage_evidence,
+        :last_error
+      ]
+
+      validate present(:last_error)
+      validate &__MODULE__.validate_coverage_failure/2
+      change get_and_lock_for_update()
+      change filter(expr(status == :running and is_nil(coverage_certified_at)))
+      change transition_state(:failed)
+      change &__MODULE__.record_coverage_failure/2
     end
 
     update :invalidate_order_coverage do
@@ -259,6 +286,12 @@ defmodule EventSales.Ingestion.Resources.SyncRun do
       public? true
     end
 
+    attribute :coverage_evidence, :map do
+      allow_nil? false
+      default %{}
+      public? true
+    end
+
     attribute :coverage_invalidated_at, :utc_datetime_usec do
       public? true
     end
@@ -341,6 +374,7 @@ defmodule EventSales.Ingestion.Resources.SyncRun do
       transition :pause, from: :running, to: :paused
       transition :complete, from: :running, to: :completed
       transition :fail, from: :running, to: :failed
+      transition :fail_coverage, from: :running, to: :failed
       transition :fail_paused, from: :paused, to: :failed
       transition :cancel, from: [:queued, :running], to: :cancelled
     end
@@ -355,6 +389,24 @@ defmodule EventSales.Ingestion.Resources.SyncRun do
   end
 
   def validate_coverage_certification(changeset, _context) do
+    with :ok <- validate_coverage_boundaries(changeset),
+         :ok <- validate_certified_evidence(changeset) do
+      :ok
+    else
+      {:error, error} -> {:error, error}
+    end
+  end
+
+  def validate_coverage_failure(changeset, _context) do
+    with :ok <- validate_coverage_boundaries(changeset),
+         :ok <- validate_blocked_evidence(changeset) do
+      :ok
+    else
+      {:error, error} -> {:error, error}
+    end
+  end
+
+  defp validate_coverage_boundaries(changeset) do
     sync_type = Ash.Changeset.get_attribute(changeset, :sync_type)
     coverage_start = Ash.Changeset.get_attribute(changeset, :coverage_start)
     sales_covered_through = Ash.Changeset.get_attribute(changeset, :sales_covered_through)
@@ -385,6 +437,36 @@ defmodule EventSales.Ingestion.Resources.SyncRun do
     end
   end
 
+  defp validate_certified_evidence(changeset) do
+    case HistoricalCoverageEvidence.validate(
+           Ash.Changeset.get_attribute(changeset, :coverage_evidence)
+         ) do
+      {:ok, %{"result" => "certified"}} ->
+        :ok
+
+      {:ok, _evidence} ->
+        {:error, field: :coverage_evidence, message: "must contain certified evidence"}
+
+      {:error, reason} ->
+        {:error, field: :coverage_evidence, message: "is invalid: #{inspect(reason)}"}
+    end
+  end
+
+  defp validate_blocked_evidence(changeset) do
+    case HistoricalCoverageEvidence.validate(
+           Ash.Changeset.get_attribute(changeset, :coverage_evidence)
+         ) do
+      {:ok, %{"result" => "blocked"}} ->
+        :ok
+
+      {:ok, _evidence} ->
+        {:error, field: :coverage_evidence, message: "must contain blocked evidence"}
+
+      {:error, reason} ->
+        {:error, field: :coverage_evidence, message: "is invalid: #{inspect(reason)}"}
+    end
+  end
+
   defp invalid_sales_coverage_range?(
          %DateTime{} = coverage_start,
          %DateTime{} = sales_covered_through
@@ -401,6 +483,14 @@ defmodule EventSales.Ingestion.Resources.SyncRun do
     |> Ash.Changeset.force_change_attribute(:coverage_certified_at, DateTime.utc_now())
     |> Ash.Changeset.force_change_attribute(:coverage_invalidated_at, nil)
     |> Ash.Changeset.force_change_attribute(:coverage_invalidation_reason, nil)
+  end
+
+  def record_coverage_failure(changeset, _context) do
+    changeset
+    |> Ash.Changeset.force_change_attribute(:order_coverage_status, :failed)
+    |> Ash.Changeset.force_change_attribute(:refund_coverage_status, :failed)
+    |> Ash.Changeset.force_change_attribute(:coverage_certified_at, nil)
+    |> Ash.Changeset.force_change_attribute(:finished_at, DateTime.utc_now())
   end
 
   def invalidate_order_coverage(changeset, _context) do

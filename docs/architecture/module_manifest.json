@@ -135,6 +135,7 @@
     "lib/event_sales/ingestion/historical_catchup_evidence.ex",
     "lib/event_sales/ingestion/historical_catchup_execution.ex",
     "lib/event_sales/ingestion/historical_coverage_certifier.ex",
+    "lib/event_sales/ingestion/historical_coverage_evidence.ex",
     "lib/event_sales/ingestion/historical_coverage_invalidator.ex",
     "lib/event_sales/ingestion/historical_coverage_resolver.ex",
     "lib/event_sales/ingestion/historical_event_line_selector.ex",
@@ -359,6 +360,7 @@
     "test/support/fakes/fake_tickera_attendee_client.ex",
     "test/support/fixture_helpers.ex",
     "test/support/fixture_verification_helpers.ex",
+    "test/support/historical_coverage_helpers.ex",
     "test/support/ingestion/memory_rate_limiter_adapter.ex",
     "test/support/ingestion/memory_webhook_buffer_adapter.ex",
     "test/support/ingestion/stub_webhook_event_store.ex",
@@ -3253,6 +3255,45 @@
       "uses": []
     },
     {
+      "docs_count": 7,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.HistoricalCoverageEvidence",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/historical_coverage_evidence.ex",
+      "public_funs": [
+        {
+          "arity": 0,
+          "name": "schema_version"
+        },
+        {
+          "arity": 0,
+          "name": "metadata_max_bytes"
+        },
+        {
+          "arity": 1,
+          "name": "build"
+        },
+        {
+          "arity": 1,
+          "name": "validate"
+        },
+        {
+          "arity": 1,
+          "name": "certified?"
+        },
+        {
+          "arity": 1,
+          "name": "blocked?"
+        },
+        {
+          "arity": 1,
+          "name": "proof_hash"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
       "docs_count": 0,
       "moduledoc?": true,
       "name": "EventSales.Ingestion.HistoricalCoverageInvalidator",
@@ -3859,7 +3900,15 @@
         },
         {
           "arity": 2,
+          "name": "validate_coverage_failure"
+        },
+        {
+          "arity": 2,
           "name": "record_coverage_certification"
+        },
+        {
+          "arity": 2,
+          "name": "record_coverage_failure"
         },
         {
           "arity": 2,
@@ -8164,6 +8213,25 @@
         }
       ],
       "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.HistoricalCoverageHelpers",
+      "parse_error": null,
+      "path": "test/support/historical_coverage_helpers.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "certified_evidence"
+        },
+        {
+          "arity": 1,
+          "name": "blocked_evidence"
+        }
+      ],
+      "specs?": false,
       "uses": []
     },
     {

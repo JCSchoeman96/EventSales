@@ -12,7 +12,7 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
   alias EventSales.Sales
   alias EventSales.Sales.OrderUpserter
   alias EventSales.Sales.Resources.{CouponSnapshot, Order, OrderItem}
-  alias EventSales.TestSupport.{FixtureHelpers, SalesHelpers}
+  alias EventSales.TestSupport.{FixtureHelpers, HistoricalCoverageHelpers, SalesHelpers}
 
   @coverage_start ~U[2026-08-01 00:00:00.000000Z]
   @sales_covered_through ~U[2026-08-09 23:59:59.999999Z]
@@ -699,7 +699,8 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
       %{
         coverage_start: @coverage_start,
         sales_covered_through: @sales_covered_through,
-        refunds_covered_through: @sales_covered_through
+        refunds_covered_through: @sales_covered_through,
+        coverage_evidence: HistoricalCoverageHelpers.certified_evidence()
       },
       action: :record_coverage_certification,
       domain: Ingestion

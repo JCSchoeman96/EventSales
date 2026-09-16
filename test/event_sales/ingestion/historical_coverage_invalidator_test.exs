@@ -7,6 +7,7 @@ defmodule EventSales.Ingestion.HistoricalCoverageInvalidatorTest do
   alias EventSales.Ingestion.Resources.SyncRun
   alias EventSales.Sales
   alias EventSales.Sales.Resources.Order
+  alias EventSales.TestSupport.HistoricalCoverageHelpers
   alias EventSales.TestSupport.SalesHelpers
 
   @coverage_start ~U[2026-08-01 08:00:00.000000Z]
@@ -255,7 +256,8 @@ defmodule EventSales.Ingestion.HistoricalCoverageInvalidatorTest do
         %{
           coverage_start: @coverage_start,
           sales_covered_through: @sales_covered_through,
-          refunds_covered_through: @sales_covered_through
+          refunds_covered_through: @sales_covered_through,
+          coverage_evidence: HistoricalCoverageHelpers.certified_evidence()
         },
         attrs
       )

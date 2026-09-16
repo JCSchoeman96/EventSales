@@ -17,7 +17,7 @@ defmodule EventSales.Sales.OrderAttributionCorrectionTest do
   alias EventSales.Sales
   alias EventSales.Sales.OrderAttributionCorrection
   alias EventSales.Sales.Resources.{Order, OrderItem}
-  alias EventSales.TestSupport.SalesHelpers
+  alias EventSales.TestSupport.{HistoricalCoverageHelpers, SalesHelpers}
 
   @coverage_start ~U[2026-04-01 00:00:00.000000Z]
   @sales_covered_through ~U[2026-06-01 00:00:00.000000Z]
@@ -393,7 +393,8 @@ defmodule EventSales.Sales.OrderAttributionCorrectionTest do
       %{
         coverage_start: coverage_start,
         sales_covered_through: sales_covered_through,
-        refunds_covered_through: sales_covered_through
+        refunds_covered_through: sales_covered_through,
+        coverage_evidence: HistoricalCoverageHelpers.certified_evidence()
       },
       action: :record_coverage_certification,
       domain: Ingestion

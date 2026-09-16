@@ -4,7 +4,7 @@
 | --- | --- |
 | Document | Canonical Path 1 execution roadmap |
 | Plan ID | `path-1-phase-breakdown` |
-| Plan version | `v19` |
+| Plan version | `v20` |
 | Status | ACTIVE — repository-native execution contract |
 | Scope | Path 1 M1–M7 gated implementation sequence |
 | Authority | This file wins for Path 1 task sequencing and physical ownership assumptions |
@@ -21,6 +21,7 @@
 | Historical planning source | Supplied `EVENTSALES_PATH_1_UPDATED_PHASE_BREAKDOWN.md` (v1 conceptual plan; superseded for physical assumptions) |
 | Path 2 / Phase 5E | PAUSED |
 | Prepared | 2026-08-09 |
+| Last updated | 2026-09-16 |
 | Audit base HEAD | `0bd0526a383a0d7faa1e61472f8551f779773223` |
 
 ### Revision log
@@ -44,6 +45,7 @@
 - `v17` — M2-06 closeout: COMPLETE (PASS); PR #178 ProductMapping variation-identity write protection; next = M2-07 (fresh agent; requires owner authorization)
 - `v18` — M2-07 closeout: COMPLETE (PASS); PR #180 durable Event analytics onboarding state machine; next = M2-08 Structural Certification (fresh agent)
 - `v19` — M2 closeout: M2-08 Structural Certification COMPLETE (PASS) via PR #184; M2 COMPLETE (PASS); next = M3 Historical Sales Backfill (fresh agent); M3 implementation NOT STARTED
+- `v20` — M3-01 through M3-08 COMPLETE (PASS); durable bounded coverage evidence, Postgres fact certification, and atomic certified/blocked/retry terminal handling implemented; next = M4 Financial Reconciliation
 
 ### Conflict rule
 
@@ -160,8 +162,10 @@ M2-07 evidence: PR #180; implementation commit e75570d4e95cc28b15ad236f0e2a71c8b
 M2: COMPLETE (PASS)
 M2-08: COMPLETE (PASS)
 M2-08 evidence: PR #184; initial implementation baedb7455fb4673c088ed9e8a3a749e56c198495; corrective/final reviewed head 25b83e053b4f7f259530498c47f91cbf70675e7f; merge 548cfce6e011b54824cb8787ef97cb3ec27e271b; CI #464: PASS
-Current Path 1 task: M3 — Historical Sales Backfill (fresh agent)
-M3: NOT STARTED
+Current Path 1 task: M4 — Financial Reconciliation
+M3: COMPLETE (PASS)
+M3 evidence: versioned `HistoricalCoverageEvidence` persisted on `SyncRun`; bounded Postgres certification covers orders, lines, refunds, attribution, tax-inclusive financial primitives, and effective timestamps; terminal certified, blocked, and retry outcomes are atomic.
+M4 and final `ANALYTICS_READY` remain pending.
 ```
 
 ---
@@ -713,14 +717,14 @@ Import durable historical orders for onboarded events using **existing parser + 
 
 | Task | Strategy | Existing foundation | Expected change | New resource | Migration | Performance |
 | --- | --- | --- | --- | --- | --- | --- |
-| M3-01 Bounded Historical Range | EXTEND | Product decisions (event creation date bound); SyncRun date_from/to | Operator-previewed bounds per event | NO | NO | Bounded Woo pages |
-| M3-02 Durable SalesImportRun | EXTEND / REMOVE_AS_ALREADY_PRESENT | **SyncRun + SyncCursor** already track source, event, dates, cursor, status, counts | Prefer extending SyncRun over new SalesImportRun unless M1-08 requires distinct semantics | TBD | TBD | One-active-run guard missing today — EXTEND |
-| M3-03 Idempotent Woo Order Import | REUSE | WoocommerceOrderParser, OrderUpserter, Order identity | Wire backfill pages through same writer | NO | NO | Oban unique per run; DB unique order |
-| M3-04 Order-Line Import | REUSE | OrderItem upsert in OrderUpserter | Preserve woo product/variation IDs, money, source_tickera_event_id | NO | NO | Line unique (order_id, woo_line_item_id) |
-| M3-05 Refund / Cancellation Import | NEW (after M1-05) | Status `:refunded` only | Implement **only** M1-05 authorized model | TBD | TBD | Idempotent; Decimal money |
-| M3-06 Deterministic Event Attribution | REUSE | OrderItemMapper pipeline post-upsert | Ensure backfill runs mapper; no parallel attribution writer | NO | NO | Local catalog lookups |
-| M3-07 Oban Backfill / Checkpoint / Retry | REUSE / EXTEND | ReconcileOrdersWorker, OrderReconciliation, ManualSync | Historical mode / watermark advancement | TBD | TBD | Paged; Oban unique sync_run_id |
-| M3-08 Backfill Completeness Certification | NEW | — | Completeness watermark for ANALYTICS_READY / targets | TBD | TBD | Durable watermark read |
+| M3-01 Bounded Historical Range | EXTEND | Product decisions; `SyncRun.date_from/date_to` | Validated bounded ranges with an inclusive terminal coverage boundary | NO | NO | Bounded Woo pages |
+| M3-02 Durable SalesImportRun | EXTEND / REMOVE_AS_ALREADY_PRESENT | **SyncRun + SyncCursor** track source, event, dates, cursor, status, and counts | Extend `SyncRun` with bounded versioned coverage evidence; no parallel run resource | NO | YES | One active run guard remains durable |
+| M3-03 Idempotent Woo Order Import | REUSE | `WoocommerceOrderParser`, `OrderUpserter`, order identity | Historical pages use the existing sole order writer | NO | NO | Oban uniqueness and DB identity |
+| M3-04 Order-Line Import | REUSE | `OrderItem` upsert in `OrderUpserter` | Preserve exact Woo product/variation IDs and tax-inclusive line primitives | NO | Existing line tax persistence | Line identity remains source-scoped |
+| M3-05 Refund / Cancellation Import | REUSE | M1-05 `RefundUpserter`, refund details, lines, and voids | Historical certification verifies the authorized refund model | NO | Existing refund persistence | Idempotent Decimal money |
+| M3-06 Deterministic Event Attribution | REUSE | `OrderItemMapper` pipeline post-upsert | Certification blocks pending, unmapped, invalid, or cross-event lines | NO | NO | Local catalog lookups |
+| M3-07 Oban Backfill / Checkpoint / Retry | REUSE / EXTEND | `BackfillOrdersWorker`, `HistoricalCatchupExecution`, `SyncCursor` | Atomic certified completion, bounded failure, and retryable evidence reads | NO | NO | Paged; no Woo calls under DB locks |
+| M3-08 Backfill Completeness Certification | EXTEND | `SyncRun` / `SyncCursor` | Versioned bounded evidence and Postgres aggregate certification | NO | YES | Durable evidence read |
 
 ### M3 Performance & Scaling Review
 
@@ -920,7 +924,9 @@ Namespaced keys (`CacheKeys`); targeted invalidation; single-flight rebuild; def
 
 ### M3 — Historical Sales
 
-Status: NOT STARTED
+Status: COMPLETE (PASS)
+
+Evidence: `HistoricalCoverageEvidence` is versioned, bounded, and persisted on `SyncRun`; certification covers durable order history, order lines, refunds, attribution, financial primitives, and effective timestamps. Focused M3 ingestion/sales regression and certification tests pass.
 
 | ID | Task |
 | --- | --- |
@@ -1016,8 +1022,8 @@ P1-00 COMPLETE
 → M2-06 COMPLETE (PASS; PR #178)
 → M2-07 COMPLETE (PASS; PR #180)
 → M2-08 COMPLETE (PASS; PR #184)
-→ M3 NEXT (fresh agent; NOT STARTED)
-→ M4
+→ M3 COMPLETE (PASS)
+→ M4 NEXT — Financial Reconciliation
 → M5
 → M6
 → M7
@@ -1114,7 +1120,13 @@ FINANCIAL RECONCILIATION CONTRACT:
 LOCKED (concept C; exact Decimal; ticket-scoped)
 
 Current Path 1 task:
-M3 — Historical Sales Backfill
+M4 — Financial Reconciliation
+
+M3:
+COMPLETE (PASS)
+
+M3 evidence:
+Versioned bounded coverage evidence; Postgres aggregate certification; atomic certified, blocked, and retry terminal outcomes; resolver and invalidator enforcement.
 
 M1-C:
 COMPLETE (PASS)
@@ -1177,7 +1189,7 @@ M2-08 evidence:
 PR #184; initial implementation baedb7455fb4673c088ed9e8a3a749e56c198495; corrective/final reviewed head 25b83e053b4f7f259530498c47f91cbf70675e7f; merge 548cfce6e011b54824cb8787ef97cb3ec27e271b; CI #464: PASS
 
 M3:
-NOT STARTED
+COMPLETE (PASS)
 
 Path 2:
 PAUSED
@@ -1212,8 +1224,9 @@ docs/path-1/m1-09-m1-certification-and-pre-m2-gate.md
 M2-07 COMPLETE (PASS); PR #180.
 M2 COMPLETE (PASS).
 M2-08 COMPLETE (PASS); PR #184.
-NEXT = M3 — Historical Sales Backfill (FRESH AGENT).
 M2-08 IMPLEMENTATION: COMPLETE (PASS).
-M3: NOT STARTED.
+M3 IMPLEMENTATION: COMPLETE (PASS).
+NEXT = M4 — Financial Reconciliation.
+M3: COMPLETE (PASS).
 DO NOT REOPEN M2-07 SCOPE.
 ```
