@@ -7,6 +7,8 @@
 # General application configuration
 import Config
 
+config :ash, default_string_length_count: :codepoints
+
 config :event_sales,
   env: config_env(),
   ash_domains: [
