@@ -136,6 +136,7 @@
     "lib/event_sales/ingestion/historical_catchup_execution.ex",
     "lib/event_sales/ingestion/historical_coverage_certifier.ex",
     "lib/event_sales/ingestion/historical_coverage_evidence.ex",
+    "lib/event_sales/ingestion/historical_coverage_fence.ex",
     "lib/event_sales/ingestion/historical_coverage_invalidator.ex",
     "lib/event_sales/ingestion/historical_coverage_resolver.ex",
     "lib/event_sales/ingestion/historical_event_line_selector.ex",
@@ -3288,6 +3289,21 @@
         {
           "arity": 1,
           "name": "proof_hash"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.HistoricalCoverageFence",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/historical_coverage_fence.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "acquire"
         }
       ],
       "specs?": true,

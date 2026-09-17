@@ -197,7 +197,6 @@ defmodule EventSales.Ingestion.HistoricalCoverageEvidence do
       :ok -> :ok
       {:error, {:missing_key, key}} -> {:error, {:missing_key, name <> "." <> key}}
       {:error, {:unexpected_key, key}} -> {:error, {:unexpected_key, name <> "." <> key}}
-      {:error, reason} -> {:error, reason}
     end
   end
 

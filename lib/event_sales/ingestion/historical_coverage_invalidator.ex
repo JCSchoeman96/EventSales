@@ -8,8 +8,10 @@ defmodule EventSales.Ingestion.HistoricalCoverageInvalidator do
   """
 
   alias EventSales.Ingestion
+  alias EventSales.Ingestion.HistoricalCoverageFence
   alias EventSales.Ingestion.HistoricalCoverageResolver
   alias EventSales.Ingestion.Resources.SyncRun
+  alias EventSales.Repo
   alias EventSales.Sales.Resources.Order
 
   @type skip_reason :: :no_current_coverage | :outside_sales_coverage
@@ -20,6 +22,8 @@ defmodule EventSales.Ingestion.HistoricalCoverageInvalidator do
   @type error_reason ::
           :invalid_order
           | :invalid_event_id
+          | :historical_coverage_fence_failed
+          | :historical_coverage_fence_transaction_required
           | :historical_coverage_lookup_failed
           | :coverage_source_mismatch
           | :order_coverage_invalidation_failed
@@ -87,6 +91,22 @@ defmodule EventSales.Ingestion.HistoricalCoverageInvalidator do
   end
 
   defp process_candidates(order, event_ids) do
+    case Repo.transaction(fn -> process_candidates_transaction(order, event_ids) end) do
+      {:ok, result} -> {:ok, result}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp process_candidates_transaction(order, event_ids) do
+    with :ok <- HistoricalCoverageFence.acquire(Enum.sort(event_ids)),
+         {:ok, result} <- process_candidates_locked(order, event_ids) do
+      result
+    else
+      {:error, reason} -> Repo.rollback(reason)
+    end
+  end
+
+  defp process_candidates_locked(order, event_ids) do
     case Enum.reduce_while(event_ids, {:ok, {[], []}}, fn event_id,
                                                           {:ok, {invalidated, skipped}} ->
            process_candidate(order, event_id, invalidated, skipped)

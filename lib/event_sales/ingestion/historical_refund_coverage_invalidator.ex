@@ -9,8 +9,10 @@ defmodule EventSales.Ingestion.HistoricalRefundCoverageInvalidator do
   """
 
   alias EventSales.Ingestion
+  alias EventSales.Ingestion.HistoricalCoverageFence
   alias EventSales.Ingestion.HistoricalCoverageResolver
   alias EventSales.Ingestion.Resources.SyncRun
+  alias EventSales.Repo
 
   @type snapshot :: %{
           required(:refund_truth) => map(),
@@ -30,6 +32,8 @@ defmodule EventSales.Ingestion.HistoricalRefundCoverageInvalidator do
   @type error_reason ::
           :invalid_refund_snapshot
           | :invalid_event_id
+          | :historical_coverage_fence_failed
+          | :historical_coverage_fence_transaction_required
           | :historical_coverage_lookup_failed
           | :coverage_source_mismatch
           | :refund_scope_indeterminate
@@ -116,6 +120,24 @@ defmodule EventSales.Ingestion.HistoricalRefundCoverageInvalidator do
   defp normalize_event_ids(_event_ids), do: {:error, :invalid_event_id}
 
   defp process_candidates(before_snapshot, after_snapshot, event_ids) do
+    case Repo.transaction(fn ->
+           process_candidates_transaction(before_snapshot, after_snapshot, event_ids)
+         end) do
+      {:ok, result} -> {:ok, result}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp process_candidates_transaction(before_snapshot, after_snapshot, event_ids) do
+    with :ok <- HistoricalCoverageFence.acquire(event_ids),
+         {:ok, result} <- process_candidates_locked(before_snapshot, after_snapshot, event_ids) do
+      result
+    else
+      {:error, reason} -> Repo.rollback(reason)
+    end
+  end
+
+  defp process_candidates_locked(before_snapshot, after_snapshot, event_ids) do
     case Enum.reduce_while(
            event_ids,
            {:ok, {[], []}},

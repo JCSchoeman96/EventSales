@@ -24,6 +24,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
 
   alias EventSales.Ingestion.HistoricalCatchupEvidence
   alias EventSales.Ingestion.HistoricalCoverageCertifier
+  alias EventSales.Ingestion.HistoricalCoverageFence
   alias EventSales.Ingestion.HistoricalEventLineSelector
   alias EventSales.Ingestion.HistoricalManifestEvidence
   alias EventSales.Ingestion.OrderRefundSync
@@ -539,7 +540,8 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
   end
 
   defp complete_transaction(run, cursor, parent, evidence, metadata, opts) do
-    with {:ok, current_cursor} <- locked_current_cursor(cursor),
+    with :ok <- HistoricalCoverageFence.acquire([run.event_id]),
+         {:ok, current_cursor} <- locked_current_cursor(cursor),
          :ok <- verify_cursor_authority(current_cursor, cursor),
          {:ok, current_run} <- locked_current_run(run),
          :ok <- verify_run_authority(current_run, run),
