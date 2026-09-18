@@ -826,7 +826,12 @@
         "name": "EventSales.Sales.Resources.RefundLine",
         "parse_error": null,
         "path": "lib/event_sales/sales/resources/refund_line.ex",
-        "public_funs": [],
+        "public_funs": [
+          {
+            "arity": 2,
+            "name": "validate_order_item_binding"
+          }
+        ],
         "specs?": false,
         "uses": [
           "Ash.Resource"

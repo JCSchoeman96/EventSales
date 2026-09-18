@@ -47,8 +47,11 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
     assert {:error, :historical_coverage_not_current} =
              HistoricalCoverageResolver.resolve_current(event_b.id)
 
-    assert Ash.get!(SyncRun, run.id, domain: Ingestion).coverage_invalidation_reason ==
-             :historical_order_changed
+    invalidated = Ash.get!(SyncRun, run.id, domain: Ingestion)
+    assert invalidated.coverage_invalidation_reason == :historical_order_changed
+    assert invalidated.order_coverage_status == :incomplete
+    assert invalidated.refund_coverage_status == :incomplete
+    assert %DateTime{} = invalidated.coverage_invalidated_at
   end
 
   test "marks a pending item with a latent exact source Event unmapped and invalidates it", %{
@@ -80,8 +83,11 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
     assert {:error, :historical_coverage_not_current} =
              HistoricalCoverageResolver.resolve_current(event.id)
 
-    assert Ash.get!(SyncRun, run.id, domain: Ingestion).coverage_invalidation_reason ==
-             :historical_order_changed
+    invalidated = Ash.get!(SyncRun, run.id, domain: Ingestion)
+    assert invalidated.coverage_invalidation_reason == :historical_order_changed
+    assert invalidated.order_coverage_status == :incomplete
+    assert invalidated.refund_coverage_status == :incomplete
+    assert %DateTime{} = invalidated.coverage_invalidated_at
   end
 
   test "marks an unresolved source item without guessing or calling D2A", %{source: source} do
@@ -306,8 +312,11 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
     assert {:error, :historical_coverage_not_current} =
              HistoricalCoverageResolver.resolve_current(event_a.id)
 
-    assert Ash.get!(SyncRun, run.id, domain: Ingestion).coverage_invalidation_reason ==
-             :historical_order_changed
+    invalidated = Ash.get!(SyncRun, run.id, domain: Ingestion)
+    assert invalidated.coverage_invalidation_reason == :historical_order_changed
+    assert invalidated.order_coverage_status == :incomplete
+    assert invalidated.refund_coverage_status == :incomplete
+    assert %DateTime{} = invalidated.coverage_invalidated_at
   end
 
   test "commits changed recovery with no candidates without guessing or calling D2A", %{

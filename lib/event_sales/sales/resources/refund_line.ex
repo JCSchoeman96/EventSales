@@ -68,6 +68,16 @@ defmodule EventSales.Sales.Resources.RefundLine do
 
       require_atomic? false
     end
+
+    update :mark_order_item_not_found do
+      public? false
+      accept []
+      require_atomic? false
+      validate &__MODULE__.validate_order_item_binding/2
+      change set_attribute(:order_item_id, nil)
+      change set_attribute(:binding_reason, "order_item_not_found")
+      change set_attribute(:validation_reason, nil)
+    end
   end
 
   attributes do
@@ -139,5 +149,16 @@ defmodule EventSales.Sales.Resources.RefundLine do
 
   identities do
     identity :unique_refund_line, [:refund_id, :woo_refund_line_item_id]
+  end
+
+  def validate_order_item_binding(changeset, _context) do
+    order_item_id = Ash.Changeset.get_data(changeset, :order_item_id)
+    binding_reason = Ash.Changeset.get_data(changeset, :binding_reason)
+
+    if is_binary(order_item_id) and is_nil(binding_reason) do
+      :ok
+    else
+      {:error, message: "only an exactly bound RefundLine can be marked order_item_not_found"}
+    end
   end
 end

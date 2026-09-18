@@ -161,6 +161,18 @@ defmodule EventSales.Sales.OrderAttributionCorrectionTest do
     assert Ash.get!(SyncRun, target_run.id, domain: Ingestion).order_coverage_status ==
              :incomplete
 
+    assert Ash.get!(SyncRun, current_run.id, domain: Ingestion).refund_coverage_status ==
+             :incomplete
+
+    assert Ash.get!(SyncRun, target_run.id, domain: Ingestion).refund_coverage_status ==
+             :incomplete
+
+    assert %DateTime{} =
+             Ash.get!(SyncRun, current_run.id, domain: Ingestion).coverage_invalidated_at
+
+    assert %DateTime{} =
+             Ash.get!(SyncRun, target_run.id, domain: Ingestion).coverage_invalidated_at
+
     assert :miss = DashboardCache.get_event_summary(mp_event.id)
     assert :miss = DashboardCache.get_event_summary(wr_event.id)
   end

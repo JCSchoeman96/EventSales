@@ -1903,7 +1903,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: _none_
+  - public_funs: `validate_order_item_binding/2`
   - uses: `Ash.Resource`
 - `EventSales.Sales.SourceVersionGuard` - `lib/event_sales/sales/source_version_guard.ex`
   - moduledoc?: true
