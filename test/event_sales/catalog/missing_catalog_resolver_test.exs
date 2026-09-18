@@ -12,7 +12,7 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
   alias EventSales.Ingestion.Resources.SyncRun
   alias EventSales.Repo
   alias EventSales.Sales
-  alias EventSales.Sales.Resources.{Order, OrderItem}
+  alias EventSales.Sales.Resources.{Order, OrderItem, Refund, RefundLine}
   alias EventSales.TestSupport.FixtureHelpers
   alias EventSales.TestSupport.HistoricalCoverageHelpers
   alias EventSales.TestSupport.SalesHelpers
@@ -49,6 +49,62 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
 
     assert Ash.get!(SyncRun, run.id, domain: Ingestion).coverage_invalidation_reason ==
              :historical_order_changed
+  end
+
+  test "maps a pending item and invalidates the bound Refund allocation", %{source: source} do
+    order = create_coverage_order!(source)
+    event_b = SalesHelpers.create_event!(source, %{name: "Refund Recovery Event"})
+    ticket_b = SalesHelpers.create_variation_ticket_type!(event_b, 501, 601)
+    create_mapping!(source, event_b, ticket_b, %{woo_product_id: 501, woo_variation_id: 601})
+    item = create_item!(order, %{woo_product_id: 501, woo_variation_id: 601})
+    refund = create_refund!(source, order, item)
+    test_pid = self()
+
+    d3b = fn _before_snapshot, _after_snapshot, event_ids ->
+      send(test_pid, {:refund_d3b, event_ids})
+      {:ok, %{}}
+    end
+
+    d2 = fn _order, _event_ids -> {:ok, %{}} end
+
+    assert {:ok, %{mapped: 1, marked_unmapped: 0, unchanged: 0}} =
+             MissingCatalogResolver.recover_product(
+               source.id,
+               501,
+               601,
+               historical_refund_coverage_invalidator: d3b,
+               historical_coverage_invalidator: d2
+             )
+
+    assert_receive {:refund_d3b, [event_id]}
+    assert event_id == event_b.id
+    assert Ash.get!(OrderItem, item.id, domain: Sales).event_id == event_b.id
+    assert [%RefundLine{order_item_id: item_id}] = refund_lines(refund.id)
+    assert item_id == item.id
+  end
+
+  test "rolls back mapping and Refund allocation when D3B fails", %{source: source} do
+    order = create_coverage_order!(source)
+    event_b = SalesHelpers.create_event!(source, %{name: "Refund Recovery Rollback Event"})
+    ticket_b = SalesHelpers.create_variation_ticket_type!(event_b, 501, 601)
+    create_mapping!(source, event_b, ticket_b, %{woo_product_id: 501, woo_variation_id: 601})
+    item = create_item!(order, %{woo_product_id: 501, woo_variation_id: 601})
+    refund = create_refund!(source, order, item)
+    before_item = item_projection(item)
+    d3b = fn _before_snapshot, _after_snapshot, _event_ids -> {:error, :test_d3b_failure} end
+
+    assert {:error, :test_d3b_failure} =
+             MissingCatalogResolver.recover_product(
+               source.id,
+               501,
+               601,
+               historical_refund_coverage_invalidator: d3b,
+               historical_coverage_invalidator: fn _order, _event_ids -> {:ok, %{}} end
+             )
+
+    assert item_projection(Ash.get!(OrderItem, item.id, domain: Sales)) == before_item
+    assert [%RefundLine{order_item_id: item_id}] = refund_lines(refund.id)
+    assert item_id == item.id
   end
 
   test "marks a pending item with a latent exact source Event unmapped and invalidates it", %{
@@ -726,6 +782,53 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
     }
 
     SalesHelpers.create_order_item_from_line!(order, line, Map.merge(defaults, attrs))
+  end
+
+  defp create_refund!(source, order, item) do
+    refund =
+      Ash.create!(
+        Refund,
+        %{
+          source_system_id: source.id,
+          order_id: order.id,
+          woo_order_id: order.woo_order_id,
+          woo_refund_id: System.unique_integer([:positive]),
+          currency: "ZAR",
+          source_state: :active,
+          detail_status: :complete,
+          summary_total_amount: Decimal.new("10.00"),
+          header_amount: Decimal.new("10.00"),
+          unallocated_header_amount: Decimal.new("0.00"),
+          source_created_at: @within_sales_scope
+        },
+        action: :create_normalized,
+        domain: Sales
+      )
+
+    Ash.create!(
+      RefundLine,
+      %{
+        refund_id: refund.id,
+        order_item_id: item.id,
+        woo_refund_line_item_id: System.unique_integer([:positive]),
+        woo_refunded_item_id: item.woo_line_item_id,
+        refunded_quantity: 1,
+        refund_total_amount: Decimal.new("10.00"),
+        refund_total_tax: Decimal.new("0.00"),
+        binding_reason: nil,
+        validation_reason: nil
+      },
+      action: :create_normalized,
+      domain: Sales
+    )
+
+    refund
+  end
+
+  defp refund_lines(refund_id) do
+    RefundLine
+    |> Ash.Query.filter(refund_id == ^refund_id)
+    |> Ash.read!(domain: Sales)
   end
 
   defp mapped_item!(source, order, attrs) do

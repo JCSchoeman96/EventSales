@@ -14,6 +14,7 @@ defmodule EventSales.Catalog.MissingCatalogResolver do
   alias EventSales.Ingestion.HistoricalCoverageInvalidator
   alias EventSales.Ingestion.HistoricalOrderCoverageCandidateResolver
   alias EventSales.Ingestion.HistoricalOrderMutationDetector
+  alias EventSales.Ingestion.HistoricalRefundOrderItemImpactCoordinator
   alias EventSales.Repo
   alias EventSales.Sales
   alias EventSales.Sales.OrderItemMapper
@@ -86,16 +87,32 @@ defmodule EventSales.Catalog.MissingCatalogResolver do
   defp recover_order(order_id, source_system_id, woo_product_id, woo_variation_id, opts) do
     Repo.transaction(fn ->
       with {:ok, order} <- lock_order(order_id, source_system_id),
+           {:ok, before_refund_allocations} <-
+             HistoricalRefundOrderItemImpactCoordinator.capture_for_order(order),
            {:ok, items} <- lock_pending_items(order.id, woo_product_id, woo_variation_id),
            {:ok, before_snapshot} <- capture_order(order, opts),
            {:ok, result} <- recover_items(items),
            {:ok, after_snapshot} <- capture_order(order, opts),
+           {:ok, after_refund_allocations} <-
+             HistoricalRefundOrderItemImpactCoordinator.capture_for_order(order),
+           :ok <-
+             invalidate_refund_allocation_changes(
+               before_refund_allocations,
+               after_refund_allocations,
+               opts
+             ),
            :ok <- invalidate_changed_order(order, before_snapshot, after_snapshot, opts) do
         result
       else
         {:error, reason} -> Repo.rollback(reason)
       end
     end)
+  end
+
+  defp invalidate_refund_allocation_changes(before_snapshots, after_snapshots, opts) do
+    before_snapshots
+    |> HistoricalRefundOrderItemImpactCoordinator.compare(after_snapshots)
+    |> HistoricalRefundOrderItemImpactCoordinator.invalidate_changes(opts)
   end
 
   defp lock_order(order_id, source_system_id) do
