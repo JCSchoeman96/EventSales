@@ -7,7 +7,7 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifierTest do
   alias EventSales.Ingestion.HistoricalCatchupEvidence
   alias EventSales.Ingestion.HistoricalCoverageCertifier
   alias EventSales.Ingestion.HistoricalManifestEvidence
-  alias EventSales.Ingestion.Resources.{SyncCursor, SyncRun}
+  alias EventSales.Ingestion.Resources.{HistoricalOrderMembership, SyncCursor, SyncRun}
   alias EventSales.Repo
   alias EventSales.Sales
   alias EventSales.Sales.Resources.{Order, OrderItem, Refund, RefundLine}
@@ -122,6 +122,122 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifierTest do
     assert {:blocked, result} = HistoricalCoverageCertifier.evaluate(run, cursor)
     assert result.coverage_evidence["result"] == "blocked"
     assert result.coverage_evidence["orders"]["blocking_reasons"]["order_history_incomplete"] == 1
+  end
+
+  test "does not substitute a non-member target Order for a missing manifest member", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    {_order, _item, _refund, _refund_line} =
+      create_complete_facts!(source, event, woo_order_id: 12_002)
+
+    run =
+      record_counts!(run, %{
+        orders_seen_count: 1,
+        orders_matched_count: 1,
+        orders_upserted_count: 1
+      })
+
+    assert {:blocked, result} = HistoricalCoverageCertifier.evaluate(run, cursor)
+    assert_reason(result, "orders", "historical_member_order_missing")
+    assert_reason(result, "orders", "nonmember_target_order_detected")
+    refute result.coverage_evidence["orders"]["orders_durable"] == 1
+  end
+
+  test "blocks when orders_seen_count has no corresponding membership proof", %{
+    run: run,
+    cursor: cursor
+  } do
+    run =
+      Ash.update!(
+        run,
+        %{orders_seen_count: 1, orders_matched_count: 0},
+        action: :record_counts,
+        domain: Ingestion
+      )
+
+    assert {:blocked, result} = HistoricalCoverageCertifier.evaluate(run, cursor)
+    assert_reason(result, "orders", "historical_membership_incomplete")
+  end
+
+  test "a non-target manifest member remains representable without a target Order", %{
+    source: source,
+    run: run,
+    cursor: cursor
+  } do
+    create_order_only!(source, 12_001)
+
+    Ash.create!(
+      HistoricalOrderMembership,
+      %{
+        sync_run_id: run.id,
+        source_order_id: 12_001,
+        manifest_source_created_at: @date_from,
+        manifest_source_modified_at: @date_from,
+        last_source_modified_at: @date_from,
+        event_match_state: :non_target
+      },
+      action: :resolve_manifest,
+      domain: Ingestion
+    )
+
+    run =
+      Ash.update!(
+        run,
+        %{orders_seen_count: 1, orders_matched_count: 0},
+        action: :record_counts,
+        domain: Ingestion
+      )
+
+    assert {:ok, result} = HistoricalCoverageCertifier.evaluate(run, cursor)
+    assert result.coverage_evidence["orders"]["orders_durable"] == 0
+  end
+
+  test "a mixed-event manifest member remains one membership row", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    {order, _item, _refund, _refund_line} = create_complete_facts!(source, event)
+    other_event = historical_event!(source, @date_from)
+    other_ticket = SalesHelpers.create_ticket_type!(other_event, %{name: "Other Event Ticket"})
+
+    Ash.create!(
+      OrderItem,
+      %{
+        order_id: order.id,
+        event_id: other_event.id,
+        ticket_type_id: other_ticket.id,
+        woo_line_item_id: 2,
+        woo_product_id: 502,
+        woo_variation_id: 602,
+        name: "Other Event Ticket",
+        quantity: 1,
+        line_subtotal: Decimal.new("10"),
+        line_total: Decimal.new("10"),
+        line_total_tax: Decimal.new("0"),
+        discount_total: Decimal.new("0"),
+        item_kind: :ticket,
+        mapping_status: :mapped,
+        source_tickera_event_id: other_event.external_event_id
+      },
+      action: :create_normalized,
+      domain: Sales
+    )
+
+    run =
+      record_counts!(run, %{
+        orders_seen_count: 1,
+        orders_matched_count: 1,
+        orders_upserted_count: 1
+      })
+
+    assert {:ok, result} = HistoricalCoverageCertifier.evaluate(run, cursor)
+    assert result.coverage_evidence["orders"]["orders_durable"] == 1
+    assert Ash.count!(HistoricalOrderMembership, domain: Ingestion) == 1
   end
 
   test "blocks a mapped ticket line without its tax-inclusive primitive", %{
@@ -968,20 +1084,37 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifierTest do
   end
 
   defp record_counts!(run, attrs) do
+    if Map.get(attrs, :orders_seen_count, 0) > 0 do
+      Ash.create!(
+        HistoricalOrderMembership,
+        %{
+          sync_run_id: run.id,
+          source_order_id: 12_001,
+          manifest_source_created_at: @date_from,
+          manifest_source_modified_at: @date_from,
+          last_source_modified_at: @date_from,
+          event_match_state: :target
+        },
+        action: :resolve_manifest,
+        domain: Ingestion
+      )
+    end
+
     Ash.update!(run, attrs, action: :record_counts, domain: Ingestion)
   end
 
   defp create_complete_facts!(source, event, opts \\ []) do
     ticket = SalesHelpers.create_ticket_type!(event, %{name: "Complete Ticket"})
     created_at_source = Keyword.get(opts, :created_at_source, DateTime.add(@date_from, 3, :hour))
+    woo_order_id = Keyword.get(opts, :woo_order_id, 12_001)
 
     order =
       Ash.create!(
         Order,
         %{
           source_system_id: source.id,
-          woo_order_id: 12_001,
-          order_number: "12001",
+          woo_order_id: woo_order_id,
+          order_number: to_string(woo_order_id),
           status: :completed,
           currency: "ZAR",
           completed_at: DateTime.add(@date_from, 2, :hour),
@@ -1064,6 +1197,28 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifierTest do
       )
 
     {order, item, refund, refund_line}
+  end
+
+  defp create_order_only!(source, woo_order_id) do
+    Ash.create!(
+      Order,
+      %{
+        source_system_id: source.id,
+        woo_order_id: woo_order_id,
+        order_number: to_string(woo_order_id),
+        status: :completed,
+        currency: "ZAR",
+        completed_at: DateTime.add(@date_from, 2, :hour),
+        paid_at: DateTime.add(@date_from, 1, :hour),
+        created_at_source: DateTime.add(@date_from, 3, :hour),
+        updated_at_source: DateTime.add(@date_from, 4, :hour),
+        raw_total: Decimal.new("10"),
+        raw_discount_total: Decimal.new("0"),
+        raw_tax_total: Decimal.new("0")
+      },
+      action: :create_normalized,
+      domain: Sales
+    )
   end
 
   defp assert_reason(result, section, reason) do

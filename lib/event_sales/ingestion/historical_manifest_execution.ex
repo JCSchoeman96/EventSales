@@ -23,7 +23,13 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
 
   alias EventSales.Ingestion.HistoricalManifestEvidence
   alias EventSales.Ingestion.OrderRefundSync
-  alias EventSales.Ingestion.Resources.{SyncCursor, SyncRun}
+
+  alias EventSales.Ingestion.Resources.{
+    HistoricalOrderMembership,
+    SyncCursor,
+    SyncRun
+  }
+
   alias EventSales.Repo
   alias EventSales.Sales.OrderUpserter
 
@@ -72,9 +78,10 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
          :ok <- HistoricalManifestEvidence.validate_continuity(evidence, page),
          :ok <- HistoricalManifestEvidence.validate_unexpired(evidence, now(opts)),
          {:ok, mappings} <- load_mappings(run, opts),
-         {:ok, counts} <- resolve_page(run, page, mappings, source, opts),
+         {:ok, counts, memberships} <- resolve_page(run, page, mappings, source, opts),
          :ok <- before_checkpoint(opts),
-         {:ok, result} <- checkpoint_page(run, cursor, evidence, page, counts, opts) do
+         {:ok, result} <-
+           checkpoint_page(run, cursor, evidence, page, counts, memberships, opts) do
       result
     end
   end
@@ -286,17 +293,33 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
   defp resolve_page(run, page, mappings, source, opts) do
     page
     |> page_value(:items, "items")
-    |> Enum.reduce_while({:ok, zero_counts()}, fn item, result ->
+    |> Enum.reduce_while({:ok, zero_counts(), []}, fn item, result ->
       resolve_item(run, item, result, mappings, source, opts)
     end)
+    |> case do
+      {:ok, counts, memberships} ->
+        {:ok, counts, Enum.sort_by(memberships, & &1.source_order_id)}
+
+      {:error, _reason} = error ->
+        error
+    end
   end
 
-  defp resolve_item(run, item, {:ok, counts}, mappings, source, opts) do
+  defp resolve_item(run, item, {:ok, counts, memberships}, mappings, source, opts) do
     source_order_id = page_value(item, :source_order_id, "source_order_id")
 
     case fetch_order(source_order_id, opts) do
       {:ok, order} ->
-        resolve_fetched_order(run, source_order_id, order, counts, mappings, source, opts)
+        resolve_fetched_order(
+          run,
+          item,
+          source_order_id,
+          order,
+          {counts, memberships},
+          mappings,
+          source,
+          opts
+        )
 
       {:error, reason} ->
         {:halt, {:error, normalize_order_fetch_error(reason)}}
@@ -305,12 +328,30 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
 
   defp resolve_item(_run, _item, result, _mappings, _source, _opts), do: {:halt, result}
 
-  defp resolve_fetched_order(run, source_order_id, order, counts, mappings, source, opts) do
+  defp resolve_fetched_order(
+         run,
+         item,
+         source_order_id,
+         order,
+         {counts, memberships},
+         mappings,
+         source,
+         opts
+       ) do
     case validate_returned_order_id(source_order_id, order) do
       :ok ->
         case matching_line_items(order, mappings) do
           {:ok, line_items} ->
-            resolve_line_items(run, source, source_order_id, order, line_items, counts, opts)
+            resolve_line_items(
+              run,
+              item,
+              source,
+              source_order_id,
+              order,
+              line_items,
+              {counts, memberships},
+              opts
+            )
 
           {:error, reason} ->
             {:halt, {:error, reason}}
@@ -321,16 +362,39 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
     end
   end
 
-  defp resolve_line_items(run, source, source_order_id, _order, [], counts, opts) do
+  defp resolve_line_items(
+         run,
+         item,
+         source,
+         source_order_id,
+         _order,
+         [],
+         {counts, memberships},
+         opts
+       ) do
     counts = Map.update!(counts, :orders_seen_count, &(&1 + 1))
 
     case sync_refunds(run, source, source_order_id, opts) do
-      :ok -> {:cont, {:ok, counts}}
-      {:error, reason} -> {:halt, {:error, reason}}
+      :ok ->
+        {:cont,
+         {:ok, counts,
+          [manifest_membership_attrs(item, source_order_id, :non_target) | memberships]}}
+
+      {:error, reason} ->
+        {:halt, {:error, reason}}
     end
   end
 
-  defp resolve_line_items(run, source, source_order_id, order, line_items, counts, opts) do
+  defp resolve_line_items(
+         run,
+         item,
+         source,
+         source_order_id,
+         order,
+         line_items,
+         {counts, memberships},
+         opts
+       ) do
     counts = Map.update!(counts, :orders_seen_count, &(&1 + 1))
     filtered_order = put_line_items(order, line_items)
 
@@ -341,6 +405,9 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
           source,
           source_order_id,
           increment_match_counts(counts, :orders_stale_count),
+          memberships,
+          item,
+          :target,
           opts
         )
 
@@ -350,6 +417,9 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
           source,
           source_order_id,
           increment_match_counts(counts, :orders_upserted_count),
+          memberships,
+          item,
+          :target,
           opts
         )
 
@@ -361,11 +431,40 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
     end
   end
 
-  defp continue_after_order(run, source, source_order_id, counts, opts) do
+  defp continue_after_order(
+         run,
+         source,
+         source_order_id,
+         counts,
+         memberships,
+         item,
+         event_match_state,
+         opts
+       ) do
     case sync_refunds(run, source, source_order_id, opts) do
-      :ok -> {:cont, {:ok, counts}}
-      {:error, reason} -> {:halt, {:error, reason}}
+      :ok ->
+        {:cont,
+         {:ok, counts,
+          [manifest_membership_attrs(item, source_order_id, event_match_state) | memberships]}}
+
+      {:error, reason} ->
+        {:halt, {:error, reason}}
     end
+  end
+
+  defp manifest_membership_attrs(item, source_order_id, event_match_state) do
+    %{
+      source_order_id: elem(positive_id(source_order_id), 1),
+      manifest_source_created_at: parse_source_datetime(item["source_created_at_gmt"]),
+      manifest_source_modified_at: parse_source_datetime(item["source_modified_at_gmt"]),
+      last_source_modified_at: parse_source_datetime(item["source_modified_at_gmt"]),
+      event_match_state: event_match_state
+    }
+  end
+
+  defp parse_source_datetime(value) do
+    {:ok, datetime, 0} = DateTime.from_iso8601(value)
+    datetime
   end
 
   defp increment_match_counts(counts, result_key) do
@@ -476,9 +575,17 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
     end
   end
 
-  defp checkpoint_page(run, cursor, evidence, page, counts, _opts) do
+  defp checkpoint_page(run, cursor, evidence, page, counts, memberships, opts) do
     with {:ok, next_metadata, result_kind} <- next_metadata(cursor.metadata, evidence, page) do
-      case checkpoint_transaction_result(run, cursor, next_metadata, counts, result_kind) do
+      case checkpoint_transaction_result(
+             run,
+             cursor,
+             next_metadata,
+             counts,
+             memberships,
+             result_kind,
+             opts
+           ) do
         {:ok, checkpoint} ->
           {:ok, notify_checkpoint(checkpoint)}
 
@@ -488,9 +595,17 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
     end
   end
 
-  defp checkpoint_transaction_result(run, cursor, next_metadata, counts, result_kind) do
+  defp checkpoint_transaction_result(
+         run,
+         cursor,
+         next_metadata,
+         counts,
+         memberships,
+         result_kind,
+         opts
+       ) do
     Repo.transaction(fn ->
-      checkpoint_transaction(run, cursor, next_metadata, counts, result_kind)
+      checkpoint_transaction(run, cursor, next_metadata, counts, memberships, result_kind, opts)
     end)
   end
 
@@ -502,19 +617,71 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
     {result_kind, updated_run, updated_cursor}
   end
 
-  defp checkpoint_transaction(run, cursor, next_metadata, counts, result_kind) do
+  defp checkpoint_transaction(
+         run,
+         cursor,
+         next_metadata,
+         counts,
+         memberships,
+         result_kind,
+         opts
+       ) do
     with {:ok, current_cursor} <- locked_current_cursor(cursor),
          :ok <- verify_cursor_authority(current_cursor, cursor),
          {:ok, current_run} <- current_run(run),
          :ok <- verify_run_authority(current_run, run),
          {:ok, current_event} <- current_event(current_run),
          :ok <- validate_event(current_event, current_run),
+         {:ok, membership_notifications} <-
+           persist_manifest_memberships(current_run.id, memberships, opts),
          {:ok, updated_run, run_notifications} <- record_counts(current_run, counts),
          {:ok, updated_cursor, cursor_notifications} <-
            record_progress(current_cursor, next_metadata) do
-      {result_kind, updated_run, updated_cursor, run_notifications ++ cursor_notifications}
+      {result_kind, updated_run, updated_cursor,
+       membership_notifications ++ run_notifications ++ cursor_notifications}
     else
       {:error, reason} -> Repo.rollback(reason)
+    end
+  end
+
+  defp persist_manifest_memberships(_sync_run_id, [], _opts), do: {:ok, []}
+
+  defp persist_manifest_memberships(sync_run_id, memberships, opts) do
+    upserter = Keyword.get(opts, :historical_membership_upserter, &upsert_manifest_membership/1)
+
+    Enum.reduce_while(memberships, {:ok, []}, fn attrs, {:ok, notifications} ->
+      attrs = Map.put(attrs, :sync_run_id, sync_run_id)
+
+      case upserter.(attrs) do
+        {:ok, %HistoricalOrderMembership{}, new_notifications} ->
+          {:cont, {:ok, notifications ++ new_notifications}}
+
+        {:ok, %HistoricalOrderMembership{}} ->
+          {:cont, {:ok, notifications}}
+
+        {:error, reason} ->
+          {:halt, {:error, reason}}
+
+        _other ->
+          {:halt, {:error, :membership_checkpoint_failed}}
+      end
+    end)
+  end
+
+  defp upsert_manifest_membership(attrs) do
+    case Ash.create(HistoricalOrderMembership, attrs,
+           action: :resolve_manifest,
+           domain: Ingestion,
+           return_notifications?: true
+         ) do
+      {:ok, %HistoricalOrderMembership{} = membership, notifications} ->
+        {:ok, membership, notifications}
+
+      {:ok, %HistoricalOrderMembership{} = membership} ->
+        {:ok, membership, []}
+
+      {:error, _reason} ->
+        {:error, :membership_checkpoint_failed}
     end
   end
 

@@ -28,7 +28,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
   alias EventSales.Ingestion.HistoricalEventLineSelector
   alias EventSales.Ingestion.HistoricalManifestEvidence
   alias EventSales.Ingestion.OrderRefundSync
-  alias EventSales.Ingestion.Resources.{SyncCursor, SyncRun}
+  alias EventSales.Ingestion.Resources.{HistoricalOrderMembership, SyncCursor, SyncRun}
   alias EventSales.Repo
   alias EventSales.Sales.OrderUpserter
   alias EventSales.Sales.Resources.Order
@@ -74,9 +74,9 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
          {:ok, page} <- fetch_one_page(evidence, opts),
          :ok <- HistoricalCatchupEvidence.validate_continuity(evidence, page),
          :ok <- HistoricalCatchupEvidence.validate_unexpired(evidence, now(opts)),
-         :ok <- resolve_page(run, event, source, page, opts),
+         {:ok, memberships} <- resolve_page(run, event, source, page, opts),
          :ok <- before_checkpoint(opts),
-         {:ok, result} <- checkpoint_page(run, cursor, parent, evidence, page, opts) do
+         {:ok, result} <- checkpoint_page(run, cursor, parent, evidence, page, memberships, opts) do
       result
     end
   end
@@ -305,19 +305,86 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
   end
 
   defp resolve_page(run, event, source, page, opts) do
-    with {:ok, orders} <- fetch_page_orders(page_value(page, :items, "items"), opts) do
+    with {:ok, items} <- page_items(page),
+         {:ok, normalized_items} <- validate_catchup_memberships(run.id, items),
+         {:ok, orders} <- fetch_page_orders(normalized_items, opts) do
       reconcile_page_orders(run, event, source, orders, opts)
     end
   end
 
-  defp fetch_page_orders(items, opts) do
-    Enum.reduce_while(items, {:ok, []}, fn item, {:ok, orders} ->
+  defp page_items(page) do
+    case page_value(page, :items, "items") do
+      items when is_list(items) -> {:ok, items}
+      _other -> {:error, :invalid_catchup_page}
+    end
+  end
+
+  defp validate_catchup_memberships(run_id, items) when is_list(items) do
+    with {:ok, normalized_items} <- normalize_catchup_items(items),
+         {:ok, found_ids} <- existing_membership_ids(run_id, normalized_items),
+         :ok <- all_memberships_present?(normalized_items, found_ids) do
+      {:ok, normalized_items}
+    end
+  end
+
+  defp validate_catchup_memberships(_run_id, _items),
+    do: {:error, :invalid_catchup_page}
+
+  defp normalize_catchup_items(items) do
+    Enum.reduce_while(items, {:ok, []}, fn item, {:ok, normalized} ->
       source_order_id = page_value(item, :source_order_id, "source_order_id")
 
-      case fetch_page_order(source_order_id, opts) do
-        {:ok, order} -> {:cont, {:ok, [{source_order_id, order} | orders]}}
-        {:error, reason} -> {:halt, {:error, reason}}
+      case positive_id(source_order_id) do
+        {:ok, source_order_id} ->
+          {:cont,
+           {:ok,
+            [
+              %{
+                item: item,
+                source_order_id: source_order_id,
+                fetch_source_order_id: page_value(item, :source_order_id, "source_order_id")
+              }
+              | normalized
+            ]}}
+
+        {:error, _reason} ->
+          {:halt, {:error, :catchup_member_not_in_manifest}}
       end
+    end)
+    |> reverse_result()
+  end
+
+  defp existing_membership_ids(run_id, normalized_items) do
+    source_order_ids = Enum.map(normalized_items, & &1.source_order_id)
+
+    query =
+      from membership in "ingestion_historical_order_memberships",
+        where:
+          membership.sync_run_id == type(^run_id, Ecto.UUID) and
+            membership.source_order_id in ^source_order_ids,
+        select: membership.source_order_id
+
+    {:ok, Repo.all(query) |> MapSet.new()}
+  rescue
+    _error -> {:error, :catchup_membership_lookup_failed}
+  end
+
+  defp all_memberships_present?(normalized_items, found_ids) do
+    if Enum.all?(normalized_items, &MapSet.member?(found_ids, &1.source_order_id)),
+      do: :ok,
+      else: {:error, :catchup_member_not_in_manifest}
+  end
+
+  defp fetch_page_orders(items, opts) do
+    Enum.reduce_while(items, {:ok, []}, fn
+      %{item: item, fetch_source_order_id: fetch_id}, {:ok, orders} ->
+        case fetch_page_order(fetch_id, opts) do
+          {:ok, order} ->
+            {:cont, {:ok, [{fetch_id, order, item} | orders]}}
+
+          {:error, reason} ->
+            {:halt, {:error, reason}}
+        end
     end)
     |> reverse_result()
   end
@@ -336,12 +403,70 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
   end
 
   defp reconcile_page_orders(run, event, source, orders, opts) do
-    Enum.reduce_while(orders, :ok, fn {source_order_id, order}, :ok ->
-      case resolve_order(run, event, source, source_order_id, order, opts) do
-        :ok -> {:cont, :ok}
-        {:error, reason} -> {:halt, {:error, reason}}
-      end
+    Enum.reduce_while(orders, {:ok, []}, fn {source_order_id, order, item}, {:ok, memberships} ->
+      reconcile_page_order(
+        run,
+        event,
+        source,
+        source_order_id,
+        order,
+        item,
+        memberships,
+        opts
+      )
     end)
+    |> case do
+      {:ok, memberships} -> {:ok, Enum.sort_by(memberships, & &1.source_order_id)}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp reconcile_page_order(
+         run,
+         event,
+         source,
+         source_order_id,
+         order,
+         item,
+         memberships,
+         opts
+       ) do
+    with :ok <- resolve_order(run, event, source, source_order_id, order, opts),
+         {:ok, attrs} <- catchup_membership_attrs(item, source_order_id) do
+      {:cont, {:ok, [attrs | memberships]}}
+    else
+      {:error, reason} -> {:halt, {:error, reason}}
+    end
+  end
+
+  defp catchup_membership_attrs(item, source_order_id) do
+    with {:ok, source_order_id} <- positive_id(source_order_id),
+         {:ok, latest_source_modified_at} <-
+           parse_source_datetime(item, :source_modified_at_gmt) do
+      {:ok,
+       %{
+         source_order_id: source_order_id,
+         latest_source_modified_at: latest_source_modified_at
+       }}
+    else
+      _error -> {:error, :invalid_catchup_page}
+    end
+  end
+
+  defp parse_source_datetime(item, key) do
+    value = page_value(item, key, Atom.to_string(key))
+
+    case value do
+      value when is_binary(value) -> parse_source_datetime_value(value)
+      _other -> {:error, :invalid_catchup_page}
+    end
+  end
+
+  defp parse_source_datetime_value(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, datetime, 0} -> {:ok, datetime}
+      _other -> {:error, :invalid_catchup_page}
+    end
   end
 
   defp resolve_order(run, event, source, source_order_id, order, opts) do
@@ -457,19 +582,27 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
     end
   end
 
-  defp checkpoint_page(run, cursor, parent, evidence, page, opts) do
-    with {:ok, next_metadata, result_kind} <- next_metadata(cursor.metadata, evidence, page),
-         {:ok, result} <-
-           checkpoint_transaction_result(
+  defp checkpoint_page(run, cursor, parent, evidence, page, memberships, opts) do
+    with {:ok, next_metadata, result_kind} <- next_metadata(cursor.metadata, evidence, page) do
+      case checkpoint_transaction_result(
              run,
              cursor,
              parent,
              evidence,
              next_metadata,
              result_kind,
+             memberships,
              opts
            ) do
-      {:ok, notify_checkpoint(result)}
+        {:ok, result} ->
+          {:ok, notify_checkpoint(result)}
+
+        {:error, {:coverage_retry, reason}} ->
+          {:ok, {:retry, reason}}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
     end
   end
 
@@ -507,19 +640,37 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
     end
   end
 
-  defp checkpoint_transaction_result(run, cursor, parent, evidence, metadata, :continue, opts) do
+  defp checkpoint_transaction_result(
+         run,
+         cursor,
+         parent,
+         evidence,
+         metadata,
+         :continue,
+         memberships,
+         opts
+       ) do
     Repo.transaction(fn ->
-      progress_transaction(run, cursor, parent, evidence, metadata, opts)
+      progress_transaction(run, cursor, parent, evidence, metadata, memberships, opts)
     end)
   end
 
-  defp checkpoint_transaction_result(run, cursor, parent, evidence, metadata, :complete, opts) do
+  defp checkpoint_transaction_result(
+         run,
+         cursor,
+         parent,
+         evidence,
+         metadata,
+         :complete,
+         memberships,
+         opts
+       ) do
     Repo.transaction(fn ->
-      complete_transaction(run, cursor, parent, evidence, metadata, opts)
+      complete_transaction(run, cursor, parent, evidence, metadata, memberships, opts)
     end)
   end
 
-  defp progress_transaction(run, cursor, parent, evidence, metadata, opts) do
+  defp progress_transaction(run, cursor, parent, evidence, metadata, memberships, opts) do
     with {:ok, current_cursor} <- locked_current_cursor(cursor),
          :ok <- verify_cursor_authority(current_cursor, cursor),
          {:ok, current_run} <- locked_current_run(run),
@@ -532,14 +683,16 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
          :ok <- same_parent_scope(parent, current_parent),
          {:ok, current_evidence} <- load_catchup(current_cursor, current_parent, opts),
          :ok <- same_child_scope(evidence, current_evidence),
+         {:ok, membership_notifications} <-
+           persist_catchup_memberships(current_run.id, memberships, opts),
          {:ok, updated_cursor, notifications} <- record_progress(current_cursor, metadata) do
-      {:continue, current_run, updated_cursor, notifications}
+      {:continue, current_run, updated_cursor, membership_notifications ++ notifications}
     else
       {:error, reason} -> Repo.rollback(reason)
     end
   end
 
-  defp complete_transaction(run, cursor, parent, evidence, metadata, opts) do
+  defp complete_transaction(run, cursor, parent, evidence, metadata, memberships, opts) do
     with :ok <- HistoricalCoverageFence.acquire([run.event_id]),
          {:ok, current_cursor} <- locked_current_cursor(cursor),
          :ok <- verify_cursor_authority(current_cursor, cursor),
@@ -562,17 +715,15 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
              current_cursor,
              opts
            ) do
-      terminal_cursor = %{current_cursor | metadata: metadata}
-
-      case coverage_certifier(opts).evaluate(current_run, terminal_cursor, opts) do
-        {:ok, coverage} ->
-          complete_certified_transaction(current_run, current_cursor, metadata, coverage)
-
-        {:blocked, coverage} ->
-          fail_blocked_transaction(current_run, current_cursor, metadata, coverage)
-
-        {:retry, reason} ->
-          {:retry, reason}
+      case persist_catchup_memberships(current_run.id, memberships, opts) do
+        {:ok, membership_notifications} ->
+          complete_transaction_after_memberships(
+            current_run,
+            current_cursor,
+            metadata,
+            membership_notifications,
+            opts
+          )
 
         {:error, reason} ->
           Repo.rollback(reason)
@@ -580,6 +731,106 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
     else
       {:error, reason} -> Repo.rollback(reason)
     end
+  end
+
+  defp complete_transaction_after_memberships(
+         run,
+         cursor,
+         metadata,
+         membership_notifications,
+         opts
+       ) do
+    terminal_cursor = %{cursor | metadata: metadata}
+
+    case coverage_certifier(opts).evaluate(run, terminal_cursor, opts) do
+      {:ok, coverage} ->
+        {:completed, updated_run, updated_cursor, notifications} =
+          complete_certified_transaction(run, cursor, metadata, coverage)
+
+        {:completed, updated_run, updated_cursor, membership_notifications ++ notifications}
+
+      {:blocked, coverage} ->
+        {:blocked, failed_run, failed_cursor, notifications} =
+          fail_blocked_transaction(run, cursor, metadata, coverage)
+
+        {:blocked, failed_run, failed_cursor, membership_notifications ++ notifications}
+
+      {:retry, reason} ->
+        Repo.rollback({:coverage_retry, reason})
+
+      {:error, reason} ->
+        Repo.rollback(reason)
+    end
+  end
+
+  defp persist_catchup_memberships(_sync_run_id, [], _opts), do: {:ok, []}
+
+  defp persist_catchup_memberships(sync_run_id, memberships, opts) do
+    updater =
+      Keyword.get(opts, :historical_membership_updater, &update_catchup_membership/1)
+
+    Enum.reduce_while(memberships, {:ok, []}, fn attrs, {:ok, notifications} ->
+      attrs = Map.put(attrs, :sync_run_id, sync_run_id)
+
+      case updater.(attrs) do
+        {:ok, %HistoricalOrderMembership{}, new_notifications} ->
+          {:cont, {:ok, notifications ++ new_notifications}}
+
+        {:ok, %HistoricalOrderMembership{}} ->
+          {:cont, {:ok, notifications}}
+
+        {:error, reason} ->
+          {:halt, {:error, reason}}
+
+        _other ->
+          {:halt, {:error, :catchup_membership_checkpoint_failed}}
+      end
+    end)
+  end
+
+  defp update_catchup_membership(%{
+         sync_run_id: sync_run_id,
+         source_order_id: source_order_id,
+         latest_source_modified_at: latest_source_modified_at
+       }) do
+    query =
+      from membership in "ingestion_historical_order_memberships",
+        where:
+          membership.sync_run_id == type(^sync_run_id, Ecto.UUID) and
+            membership.source_order_id == ^source_order_id,
+        select: membership.id,
+        lock: "FOR UPDATE"
+
+    case Repo.one(query) do
+      nil ->
+        {:error, :catchup_member_not_in_manifest}
+
+      membership_id ->
+        with {:ok, membership} <-
+               Ash.get(HistoricalOrderMembership, membership_id, domain: EventSales.Ingestion),
+             latest_source_modified_at <-
+               max_source_modified_at(
+                 membership.last_source_modified_at,
+                 latest_source_modified_at
+               ),
+             {:ok, updated, notifications} <-
+               Ash.update(
+                 membership,
+                 %{last_source_modified_at: latest_source_modified_at},
+                 action: :resolve_catchup,
+                 domain: EventSales.Ingestion,
+                 return_notifications?: true
+               ) do
+          {:ok, updated, notifications}
+        else
+          {:ok, %HistoricalOrderMembership{} = updated} -> {:ok, updated, []}
+          {:error, _reason} -> {:error, :catchup_membership_checkpoint_failed}
+        end
+    end
+  end
+
+  defp max_source_modified_at(%DateTime{} = current, %DateTime{} = candidate) do
+    if DateTime.compare(candidate, current) == :gt, do: candidate, else: current
   end
 
   defp complete_certified_transaction(run, cursor, metadata, coverage) do

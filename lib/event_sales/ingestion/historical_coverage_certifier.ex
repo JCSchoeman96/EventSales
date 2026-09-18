@@ -55,6 +55,10 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifier do
           | :corrupt_catchup_evidence
           | :catchup_parent_binding_mismatch
           | :catchup_before_manifest
+          | :historical_membership_incomplete
+          | :historical_member_order_missing
+          | :historical_member_attribution_incomplete
+          | :nonmember_target_order_detected
           | :invalid_coverage_range
           | :coverage_evidence_invalid
 
@@ -166,17 +170,34 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifier do
     source_event_id = event.external_event_id || 0
     source_system_id = Ecto.UUID.dump!(run.source_system_id)
     event_id = Ecto.UUID.dump!(event.id)
+    run_id = Ecto.UUID.dump!(run.id)
 
     query =
-      from oi in "sales_order_items",
-        join: o in "sales_orders",
-        on: o.id == oi.order_id,
-        where:
+      from membership in "ingestion_historical_order_memberships",
+        left_join: o in "sales_orders",
+        on:
           o.source_system_id == ^source_system_id and
-            o.created_at_source >= ^coverage_start and
-            o.created_at_source <= ^sales_covered_through and
+            o.woo_order_id == membership.source_order_id,
+        left_join: oi in "sales_order_items",
+        on:
+          oi.order_id == o.id and
             (oi.event_id == ^event_id or oi.source_tickera_event_id == ^source_event_id),
+        where: membership.sync_run_id == ^run_id,
         select: %{
+          membership_count: fragment("COUNT(DISTINCT ?)", membership.id),
+          member_order_missing:
+            fragment("COUNT(DISTINCT ?) FILTER (WHERE ? IS NULL)", membership.id, o.id),
+          historical_member_attribution_incomplete:
+            fragment(
+              "COUNT(DISTINCT ?) FILTER (WHERE (? = ? AND ? IS NULL) OR (? = ? AND ? IS NOT NULL))",
+              membership.id,
+              membership.event_match_state,
+              ^"target",
+              oi.id,
+              membership.event_match_state,
+              ^"non_target",
+              oi.id
+            ),
           orders_durable: fragment("COUNT(DISTINCT ?)", oi.order_id),
           order_items_durable: count(oi.id),
           pending_or_unmapped:
@@ -241,6 +262,52 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifier do
             )
         }
 
+    facts = repo.one!(query)
+
+    Map.put(
+      facts,
+      :nonmember_target_orders,
+      nonmember_target_order_count(
+        run,
+        event,
+        coverage_start,
+        sales_covered_through,
+        source_system_id,
+        event_id,
+        source_event_id,
+        repo
+      )
+    )
+  end
+
+  defp nonmember_target_order_count(
+         run,
+         _event,
+         coverage_start,
+         sales_covered_through,
+         source_system_id,
+         event_id,
+         source_event_id,
+         repo
+       ) do
+    run_id = Ecto.UUID.dump!(run.id)
+
+    query =
+      from oi in "sales_order_items",
+        join: o in "sales_orders",
+        on: o.id == oi.order_id,
+        where:
+          o.source_system_id == ^source_system_id and
+            o.created_at_source >= ^coverage_start and
+            o.created_at_source <= ^sales_covered_through and
+            (oi.event_id == ^event_id or oi.source_tickera_event_id == ^source_event_id) and
+            fragment(
+              "NOT EXISTS (SELECT 1 FROM ingestion_historical_order_memberships AS m WHERE m.sync_run_id = ? AND m.source_order_id = ?)",
+              ^run_id,
+              o.woo_order_id
+            ),
+        select: fragment("COUNT(DISTINCT ?)", o.id)
+
     repo.one!(query)
   end
 
@@ -255,6 +322,11 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifier do
       :effective_time_missing
     ])
     |> Map.merge(%{
+      historical_membership_incomplete:
+        if(facts.membership_count == run.orders_seen_count, do: 0, else: 1),
+      historical_member_order_missing: facts.member_order_missing,
+      historical_member_attribution_incomplete: facts.historical_member_attribution_incomplete,
+      nonmember_target_order_detected: facts.nonmember_target_orders,
       order_history_incomplete: max(run.orders_matched_count - facts.orders_durable, 0),
       order_counter_inconsistent: if(counter_inconsistent?(run), do: 1, else: 0)
     })
@@ -264,6 +336,11 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifier do
 
   defp rename_order_reasons(counts) do
     %{
+      "historical_membership_incomplete" => Map.get(counts, :historical_membership_incomplete, 0),
+      "historical_member_order_missing" => Map.get(counts, :historical_member_order_missing, 0),
+      "historical_member_attribution_incomplete" =>
+        Map.get(counts, :historical_member_attribution_incomplete, 0),
+      "nonmember_target_order_detected" => Map.get(counts, :nonmember_target_order_detected, 0),
       "attribution_incomplete" => Map.get(counts, :pending_or_unmapped, 0),
       "mapped_line_invalid" => Map.get(counts, :mapped_invalid, 0),
       "source_event_identity_conflict" => Map.get(counts, :source_event_identity_conflict, 0),
@@ -284,19 +361,35 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifier do
     source_event_id = event.external_event_id || 0
     source_system_id = Ecto.UUID.dump!(run.source_system_id)
     event_id = Ecto.UUID.dump!(event.id)
+    run_id = Ecto.UUID.dump!(run.id)
 
     query =
-      from r in "sales_refunds",
+      from membership in "ingestion_historical_order_memberships",
         join: o in "sales_orders",
         on:
-          o.source_system_id == r.source_system_id and
-            o.woo_order_id == r.woo_order_id,
+          fragment(
+            "? = ? AND ? = ?",
+            o.source_system_id,
+            ^source_system_id,
+            o.woo_order_id,
+            membership.source_order_id
+          ),
+        join: r in "sales_refunds",
+        on:
+          fragment(
+            "? = ? AND ? = ?",
+            r.source_system_id,
+            o.source_system_id,
+            r.woo_order_id,
+            o.woo_order_id
+          ),
         left_join: rl in "sales_refund_lines",
         on: rl.refund_id == r.id,
         left_join: oi in "sales_order_items",
         on: oi.id == rl.order_item_id,
         where:
-          r.source_system_id == ^source_system_id and
+          fragment("? = ?", membership.sync_run_id, ^run_id) and
+            r.source_system_id == ^source_system_id and
             o.created_at_source >= ^coverage_start and
             o.created_at_source <= ^sales_covered_through and
             o.source_system_id == ^source_system_id and
@@ -443,17 +536,35 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifier do
        ) do
     source_system_id = Ecto.UUID.dump!(run.source_system_id)
     event_id = Ecto.UUID.dump!(event.id)
+    run_id = Ecto.UUID.dump!(run.id)
 
     query =
-      from r in "sales_refunds",
+      from membership in "ingestion_historical_order_memberships",
         join: o in "sales_orders",
-        on: o.source_system_id == r.source_system_id and o.woo_order_id == r.woo_order_id,
+        on:
+          fragment(
+            "? = ? AND ? = ?",
+            o.source_system_id,
+            ^source_system_id,
+            o.woo_order_id,
+            membership.source_order_id
+          ),
+        join: r in "sales_refunds",
+        on:
+          fragment(
+            "? = ? AND ? = ?",
+            r.source_system_id,
+            o.source_system_id,
+            r.woo_order_id,
+            o.woo_order_id
+          ),
         join: rl in "sales_refund_lines",
         on: rl.refund_id == r.id,
         join: oi in "sales_order_items",
         on: oi.id == rl.order_item_id,
         where:
-          r.source_system_id == ^source_system_id and
+          fragment("? = ?", membership.sync_run_id, ^run_id) and
+            r.source_system_id == ^source_system_id and
             o.created_at_source >= ^coverage_start and
             o.created_at_source <= ^sales_covered_through and
             r.source_state == ^"active" and

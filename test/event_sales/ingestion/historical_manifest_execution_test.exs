@@ -6,8 +6,10 @@ defmodule EventSales.Ingestion.HistoricalManifestExecutionTest do
   alias EventSales.Ingestion
   alias EventSales.Ingestion.HistoricalManifestEvidence
   alias EventSales.Ingestion.HistoricalManifestExecution
-  alias EventSales.Ingestion.Resources.{SyncCursor, SyncRun}
+  alias EventSales.Ingestion.Resources.{HistoricalOrderMembership, SyncCursor, SyncRun}
   alias EventSales.TestSupport.SalesHelpers
+
+  require Ash.Query
 
   @source_url "https://store.example.test"
   @date_from ~U[2026-08-01 08:00:00.123456Z]
@@ -295,6 +297,50 @@ defmodule EventSales.Ingestion.HistoricalManifestExecutionTest do
 
     assert {:continue, _run, _cursor} = run_step(run, cursor)
     assert Enum.map(WooClient.calls(), &elem(&1, 1)) == ["42", "43"]
+  end
+
+  test "a successful manifest page checkpoints exact run membership", %{
+    run: run,
+    cursor: cursor
+  } do
+    enqueue_page(page(%{source_order_id: "42"}, %{source_order_id: "43"}))
+    WooClient.put_order!(42, {:ok, order_payload(42)})
+    WooClient.put_order!(43, {:ok, order_payload(43)})
+
+    assert {:continue, _updated_run, _updated_cursor} = run_step(run, cursor)
+
+    members =
+      HistoricalOrderMembership
+      |> Ash.Query.filter(sync_run_id == ^run.id)
+      |> Ash.Query.sort(source_order_id: :asc)
+      |> Ash.read!(domain: Ingestion)
+
+    assert Enum.map(members, & &1.source_order_id) == [42, 43]
+    assert Enum.all?(members, &(&1.resolution_state == :manifest_resolved))
+
+    assert Enum.map(members, & &1.manifest_source_created_at) == [
+             ~U[2026-08-04 10:00:00.000000Z],
+             ~U[2026-08-04 10:00:00.000000Z]
+           ]
+  end
+
+  test "membership checkpoint failure rolls back the page proof and cursor", %{
+    run: run,
+    cursor: cursor
+  } do
+    enqueue_page(page())
+    WooClient.put_order!(42, {:ok, order_payload(42)})
+
+    assert {:error, :membership_write_failed} =
+             run_step(run, cursor,
+               historical_membership_upserter: fn _attrs ->
+                 {:error, :membership_write_failed}
+               end
+             )
+
+    assert Ash.count!(HistoricalOrderMembership, domain: Ingestion) == 0
+    assert cursor_unchanged?(cursor)
+    assert run_counts(run) == %{seen: 0, matched: 0, upserted: 0, stale: 0}
   end
 
   test "returned order ID must exactly match the manifest identity", %{run: run, cursor: cursor} do

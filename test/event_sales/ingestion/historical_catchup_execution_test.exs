@@ -8,7 +8,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
   alias EventSales.Ingestion.HistoricalCatchupExecution
   alias EventSales.Ingestion.HistoricalEventLineSelector
   alias EventSales.Ingestion.HistoricalManifestEvidence
-  alias EventSales.Ingestion.Resources.{SyncCursor, SyncRun}
+  alias EventSales.Ingestion.Resources.{HistoricalOrderMembership, SyncCursor, SyncRun}
   alias EventSales.Sales.OrderUpserter
   alias EventSales.Sales.Resources.{Order, OrderItem}
   alias EventSales.TestSupport.{FixtureHelpers, HistoricalCoverageHelpers, SalesHelpers}
@@ -35,6 +35,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
       do:
         Agent.update(__MODULE__, &Map.update!(&1, :pages, fn pages -> pages ++ [{:ok, page}] end))
 
+    def first_page, do: Agent.get(__MODULE__, &List.first(&1.pages))
     def calls, do: Agent.get(__MODULE__, &Enum.reverse(&1.calls))
     def configured_base_url(_opts), do: {:ok, "https://catchup-store.example.test"}
 
@@ -233,6 +234,34 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     assert persisted_run.order_coverage_status == :incomplete
     assert persisted_run.refund_coverage_status == :not_started
     assert is_nil(persisted_run.coverage_certified_at)
+  end
+
+  test "catch-up rejects a source member that is absent from M", %{run: run, cursor: cursor} do
+    CatchupClient.enqueue!(page(["99"], has_more: true, next_cursor: "u-next.cursor"))
+    WooClient.put_order!(99, {:ok, order_payload(99)})
+
+    assert {:error, :catchup_member_not_in_manifest} =
+             run_step(run, cursor, seed_memberships: false)
+
+    assert WooClient.calls() == []
+    assert current_cursor(cursor).page == 1
+    assert current_run(run).orders_seen_count == 0
+  end
+
+  test "catch-up updates an existing M member in the cursor checkpoint", %{
+    run: run,
+    cursor: cursor
+  } do
+    membership = create_membership!(run, 42)
+    CatchupClient.enqueue!(page(["42"], has_more: true, next_cursor: "u-next.cursor"))
+    WooClient.put_order!(42, {:ok, order_payload(42)})
+
+    assert {:continue, _updated_run, _updated_cursor} = run_step(run, cursor)
+
+    updated = Ash.get!(HistoricalOrderMembership, membership.id, domain: Ingestion)
+    assert updated.resolution_state == :catchup_resolved
+    assert updated.last_source_modified_at == ~U[2026-08-04 10:00:00.000000Z]
+    assert current_cursor(cursor).page == 2
   end
 
   test "in-progress U uses the exact opaque cursor", %{run: run, cursor: cursor} do
@@ -717,7 +746,39 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
   end
 
   defp run_step(run, cursor, opts \\ []) do
-    HistoricalCatchupExecution.run_step(run, cursor, Keyword.merge(base_opts(), opts))
+    opts = Keyword.merge(base_opts(), opts)
+
+    if Keyword.get(opts, :seed_memberships, true) do
+      seed_first_page_memberships!(run)
+    end
+
+    opts =
+      if Keyword.has_key?(opts, :coverage_certifier) or not first_page_has_items?() do
+        opts
+      else
+        Keyword.put(opts, :coverage_certifier, CoverageCertifierPass)
+      end
+
+    HistoricalCatchupExecution.run_step(run, cursor, opts)
+  end
+
+  defp seed_first_page_memberships!(run) do
+    case CatchupClient.first_page() do
+      {:ok, page} ->
+        Enum.each(Map.get(page, "items", []), fn item ->
+          create_membership!(run, String.to_integer(item["source_order_id"]))
+        end)
+
+      _other ->
+        :ok
+    end
+  end
+
+  defp first_page_has_items? do
+    case CatchupClient.first_page() do
+      {:ok, page} -> Map.get(page, "items", []) != []
+      _other -> false
+    end
   end
 
   defp base_opts do
@@ -826,6 +887,21 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
       metadata: catchup_metadata()
     })
     |> Ash.create!(domain: Ingestion)
+  end
+
+  defp create_membership!(run, source_order_id) do
+    Ash.create!(
+      HistoricalOrderMembership,
+      %{
+        sync_run_id: run.id,
+        source_order_id: source_order_id,
+        manifest_source_created_at: ~U[2026-08-04 10:00:00.000000Z],
+        manifest_source_modified_at: ~U[2026-08-04 10:00:00.000000Z],
+        last_source_modified_at: ~U[2026-08-04 10:00:00.000000Z]
+      },
+      action: :resolve_manifest,
+      domain: Ingestion
+    )
   end
 
   defp replace_cursor!(cursor, page, metadata) do

@@ -38,6 +38,7 @@ defmodule EventSales.AshResourceSmokeTest do
       EventSales.Ingestion.Resources.WebhookDeliveryFailure,
       EventSales.Ingestion.Resources.SyncRun,
       EventSales.Ingestion.Resources.SyncCursor,
+      EventSales.Ingestion.Resources.HistoricalOrderMembership,
       EventSales.Ingestion.Resources.TickeraEventSource,
       EventSales.Ingestion.Resources.TickeraAttendeeSyncRun,
       EventSales.Ingestion.Resources.TickeraAttendeeSnapshot,

@@ -165,6 +165,7 @@
     "lib/event_sales/ingestion/resources/catalog_change_signal.ex",
     "lib/event_sales/ingestion/resources/csv_import_batch.ex",
     "lib/event_sales/ingestion/resources/csv_import_row.ex",
+    "lib/event_sales/ingestion/resources/historical_order_membership.ex",
     "lib/event_sales/ingestion/resources/sync_cursor.ex",
     "lib/event_sales/ingestion/resources/sync_run.ex",
     "lib/event_sales/ingestion/resources/tickera_attendee_snapshot.ex",
@@ -3877,6 +3878,18 @@
       "name": "EventSales.Ingestion.Resources.CsvImportRow",
       "parse_error": null,
       "path": "lib/event_sales/ingestion/resources/csv_import_row.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Resources.HistoricalOrderMembership",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/resources/historical_order_membership.ex",
       "public_funs": [],
       "specs?": false,
       "uses": [
