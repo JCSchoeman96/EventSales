@@ -6,9 +6,9 @@ defmodule EventSales.Sales.OrderUpserter do
   require Ash.Query
 
   alias EventSales.Ingestion.HistoricalCoverageInvalidator
-  alias EventSales.Ingestion.HistoricalRefundOrderItemImpactCoordinator
   alias EventSales.Ingestion.HistoricalOrderCoverageCandidateResolver
   alias EventSales.Ingestion.HistoricalOrderMutationDetector
+  alias EventSales.Ingestion.HistoricalRefundOrderItemImpactCoordinator
   alias EventSales.Ingestion.Parsers.WoocommerceOrderParser
   alias EventSales.Ingestion.Resources.WebhookEvent
   alias EventSales.Repo

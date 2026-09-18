@@ -28,8 +28,8 @@ defmodule EventSales.Ingestion.HistoricalRefundOrderItemImpactCoordinator do
   @doc """
   Captures allocation evidence for every Refund belonging to one parent Order.
 
-  The query is bounded by `order_id` and sorted by Refund UUID so callers can
-  process multiple Refunds deterministically.
+  The query is bounded by the parent Order identity and sorted by Refund UUID
+  so callers can process multiple Refunds deterministically.
   """
   @spec capture_for_order(Order.t()) :: {:ok, [snapshot()]} | {:error, term()}
   def capture_for_order(%Order{
@@ -80,28 +80,34 @@ defmodule EventSales.Ingestion.HistoricalRefundOrderItemImpactCoordinator do
     |> Kernel.++(Map.keys(after_by_id))
     |> Enum.uniq()
     |> Enum.sort()
-    |> Enum.flat_map(fn refund_id ->
-      before_snapshot = Map.get(before_by_id, refund_id)
-      after_snapshot = Map.get(after_by_id, refund_id)
+    |> Enum.flat_map(&compare_refund(&1, before_by_id, after_by_id))
+  end
 
-      case {before_snapshot, after_snapshot} do
-        {before, after_snapshot} when is_map(before) and is_map(after_snapshot) ->
-          impact = HistoricalRefundOrderItemImpactResolver.compare(before, after_snapshot)
+  defp compare_refund(refund_id, before_by_id, after_by_id) do
+    before_snapshot = Map.get(before_by_id, refund_id)
+    after_snapshot = Map.get(after_by_id, refund_id)
 
-          if impact.changed? do
-            [changed_refund(refund_id, before, after_snapshot, impact.candidate_event_ids)]
-          else
-            []
-          end
+    case {before_snapshot, after_snapshot} do
+      {before, after_snapshot} when is_map(before) and is_map(after_snapshot) ->
+        compare_existing_refund(refund_id, before, after_snapshot)
 
-        {nil, after_snapshot} when is_map(after_snapshot) ->
-          impact = HistoricalRefundOrderItemImpactResolver.compare(nil, after_snapshot)
-          [changed_refund(refund_id, nil, after_snapshot, impact.candidate_event_ids)]
+      {nil, after_snapshot} when is_map(after_snapshot) ->
+        impact = HistoricalRefundOrderItemImpactResolver.compare(nil, after_snapshot)
+        [changed_refund(refund_id, nil, after_snapshot, impact.candidate_event_ids)]
 
-        {_before, nil} ->
-          []
-      end
-    end)
+      {_before, nil} ->
+        []
+    end
+  end
+
+  defp compare_existing_refund(refund_id, before_snapshot, after_snapshot) do
+    impact = HistoricalRefundOrderItemImpactResolver.compare(before_snapshot, after_snapshot)
+
+    if impact.changed? do
+      [changed_refund(refund_id, before_snapshot, after_snapshot, impact.candidate_event_ids)]
+    else
+      []
+    end
   end
 
   defp changed_refund(refund_id, before_snapshot, after_snapshot, event_ids) do
@@ -130,20 +136,24 @@ defmodule EventSales.Ingestion.HistoricalRefundOrderItemImpactCoordinator do
       |> normalize_event_ids()
 
     with :ok <- HistoricalCoverageFence.acquire(event_ids) do
-      invalidator =
-        Keyword.get(
-          opts,
-          :historical_refund_coverage_invalidator,
-          &HistoricalRefundCoverageInvalidator.invalidate_refund_change/3
-        )
-
-      Enum.reduce_while(changes, :ok, fn change, :ok ->
-        case call_invalidator(invalidator, change) do
-          :ok -> {:cont, :ok}
-          {:error, reason} -> {:halt, {:error, reason}}
-        end
-      end)
+      invalidate_changes_locked(changes, opts)
     end
+  end
+
+  defp invalidate_changes_locked(changes, opts) do
+    invalidator =
+      Keyword.get(
+        opts,
+        :historical_refund_coverage_invalidator,
+        &HistoricalRefundCoverageInvalidator.invalidate_refund_change/3
+      )
+
+    Enum.reduce_while(changes, :ok, fn change, :ok ->
+      case call_invalidator(invalidator, change) do
+        :ok -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
   end
 
   defp call_invalidator(invalidator, %{
