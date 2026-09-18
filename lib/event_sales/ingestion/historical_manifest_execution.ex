@@ -8,11 +8,9 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
   """
 
   import Ecto.Query
-  require Ash.Query
-
   alias EventSales.Catalog
   alias EventSales.Catalog.Changes.NormalizeBaseUrl
-  alias EventSales.Catalog.Resources.{Event, ProductMapping, SourceSystem}
+  alias EventSales.Catalog.Resources.{Event, SourceSystem}
 
   alias EventSales.Ingestion.Clients.{
     WooCommerceClient,
@@ -21,6 +19,7 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
     WooOrderIndexError
   }
 
+  alias EventSales.Ingestion.HistoricalEventLineSelector
   alias EventSales.Ingestion.HistoricalManifestEvidence
   alias EventSales.Ingestion.OrderRefundSync
 
@@ -42,6 +41,7 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
   @woocommerce_client WooCommerceClient
   @order_upserter OrderUpserter
   @order_refund_sync OrderRefundSync
+  @line_selector HistoricalEventLineSelector
 
   @doc "Processes exactly one manifest page and checkpoints it after resolution."
   @spec run_step(SyncRun.t(), SyncCursor.t(), keyword()) :: result()
@@ -56,7 +56,7 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
          {:ok, source} <- load_source_system(run, opts),
          :ok <- validate_source_system(source, run),
          :ok <- validate_client_bindings(source, opts) do
-      execute_state(run, cursor, evidence, source, opts)
+      execute_state(run, cursor, evidence, event, source, opts)
     end
   end
 
@@ -67,18 +67,18 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
          run,
          cursor,
          %HistoricalManifestEvidence{state: "manifest_terminal"},
+         _event,
          _source,
          _opts
        ),
        do: {:manifest_terminal, run, cursor}
 
-  defp execute_state(run, cursor, evidence, source, opts) do
+  defp execute_state(run, cursor, evidence, event, source, opts) do
     with :ok <- HistoricalManifestEvidence.validate_unexpired(evidence, now(opts)),
          {:ok, page} <- fetch_one_page(evidence, opts),
          :ok <- HistoricalManifestEvidence.validate_continuity(evidence, page),
          :ok <- HistoricalManifestEvidence.validate_unexpired(evidence, now(opts)),
-         {:ok, mappings} <- load_mappings(run, opts),
-         {:ok, counts, memberships} <- resolve_page(run, page, mappings, source, opts),
+         {:ok, counts, memberships} <- resolve_page(run, event, page, source, opts),
          :ok <- before_checkpoint(opts),
          {:ok, result} <-
            checkpoint_page(run, cursor, evidence, page, counts, memberships, opts) do
@@ -259,42 +259,11 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
     end
   end
 
-  defp load_mappings(run, opts) do
-    case Keyword.fetch(opts, :mappings) do
-      {:ok, mappings} when is_list(mappings) ->
-        {:ok, Enum.filter(mappings, &active_mapping_for_run?(&1, run))}
-
-      {:ok, _other} ->
-        {:error, :invalid_product_mappings}
-
-      :error ->
-        ProductMapping
-        |> Ash.Query.filter(
-          source_system_id == ^run.source_system_id and event_id == ^run.event_id and
-            active == true
-        )
-        |> Ash.read(domain: Catalog)
-        |> case do
-          {:ok, mappings} -> {:ok, mappings}
-          {:error, _reason} -> {:error, :product_mappings_unavailable}
-        end
-    end
-  end
-
-  defp active_mapping_for_run?(mapping, run) when is_map(mapping) do
-    mapping_value(mapping, :source_system_id, "source_system_id") == run.source_system_id and
-      mapping_value(mapping, :event_id, "event_id") == run.event_id and
-      mapping_value(mapping, :active, "active") == true and
-      is_integer(mapping_value(mapping, :woo_product_id, "woo_product_id"))
-  end
-
-  defp active_mapping_for_run?(_mapping, _run), do: false
-
-  defp resolve_page(run, page, mappings, source, opts) do
+  defp resolve_page(run, event, page, source, opts) do
     page
     |> page_value(:items, "items")
     |> Enum.reduce_while({:ok, zero_counts(), []}, fn item, result ->
-      resolve_item(run, item, result, mappings, source, opts)
+      resolve_item(run, event, item, result, source, opts)
     end)
     |> case do
       {:ok, counts, memberships} ->
@@ -305,18 +274,18 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
     end
   end
 
-  defp resolve_item(run, item, {:ok, counts, memberships}, mappings, source, opts) do
+  defp resolve_item(run, event, item, {:ok, counts, memberships}, source, opts) do
     source_order_id = page_value(item, :source_order_id, "source_order_id")
 
     case fetch_order(source_order_id, opts) do
       {:ok, order} ->
         resolve_fetched_order(
           run,
+          event,
           item,
           source_order_id,
           order,
           {counts, memberships},
-          mappings,
           source,
           opts
         )
@@ -326,21 +295,21 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
     end
   end
 
-  defp resolve_item(_run, _item, result, _mappings, _source, _opts), do: {:halt, result}
+  defp resolve_item(_run, _event, _item, result, _source, _opts), do: {:halt, result}
 
   defp resolve_fetched_order(
          run,
+         event,
          item,
          source_order_id,
          order,
          {counts, memberships},
-         mappings,
          source,
          opts
        ) do
     case validate_returned_order_id(source_order_id, order) do
       :ok ->
-        case matching_line_items(order, mappings) do
+        case select_event_lines(event, source, order, opts) do
           {:ok, line_items} ->
             resolve_line_items(
               run,
@@ -462,6 +431,16 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
     }
   end
 
+  defp select_event_lines(event, source, order, opts) do
+    selector = Keyword.get(opts, :event_line_selector, @line_selector)
+
+    case selector do
+      selector when is_function(selector, 3) -> selector.(event, source, order)
+      selector when is_atom(selector) -> selector.select(event, source, order)
+      _other -> {:error, :historical_event_line_selection_failed}
+    end
+  end
+
   defp parse_source_datetime(value) do
     {:ok, datetime, 0} = DateTime.from_iso8601(value)
     datetime
@@ -493,32 +472,6 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
     else
       _error -> {:error, :source_order_id_mismatch}
     end
-  end
-
-  defp matching_line_items(order, mappings) do
-    case map_value(order, :line_items, "line_items") do
-      line_items when is_list(line_items) ->
-        {:ok,
-         Enum.filter(line_items, fn line_item ->
-           is_map(line_item) and
-             Enum.any?(mappings, &mapping_matches_line_item?(&1, line_item))
-         end)}
-
-      nil ->
-        {:ok, []}
-
-      _other ->
-        {:error, :invalid_source_order_line_items}
-    end
-  end
-
-  defp mapping_matches_line_item?(mapping, line_item) do
-    product_id = positive_or_nil_id(map_value(line_item, :product_id, "product_id"))
-    variation_id = positive_or_nil_id(map_value(line_item, :variation_id, "variation_id"))
-    mapped_product_id = mapping_value(mapping, :woo_product_id, "woo_product_id")
-    mapped_variation_id = mapping_value(mapping, :woo_variation_id, "woo_variation_id")
-
-    mapped_product_id == product_id and mapped_variation_id == variation_id
   end
 
   defp put_line_items(order, line_items), do: Map.put(order, "line_items", line_items)
@@ -817,20 +770,10 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
 
   defp positive_id(_value), do: {:error, :invalid_positive_id}
 
-  defp positive_or_nil_id(value) do
-    case positive_id(value) do
-      {:ok, id} -> id
-      _error when value in [nil, 0, "0"] -> nil
-      _error -> :invalid
-    end
-  end
-
   defp same_datetime?(%DateTime{} = left, %DateTime{} = right),
     do: DateTime.compare(left, right) == :eq
 
   defp same_datetime?(_left, _right), do: false
-
-  defp mapping_value(mapping, atom_key, string_key), do: map_value(mapping, atom_key, string_key)
 
   defp map_value(map, atom_key, string_key) when is_map(map) do
     case Map.fetch(map, atom_key) do

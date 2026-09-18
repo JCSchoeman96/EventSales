@@ -431,22 +431,24 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
          memberships,
          opts
        ) do
-    with :ok <- resolve_order(run, event, source, source_order_id, order, opts),
-         {:ok, attrs} <- catchup_membership_attrs(item, source_order_id) do
+    with {:ok, event_match_state} <-
+           resolve_order(run, event, source, source_order_id, order, opts),
+         {:ok, attrs} <- catchup_membership_attrs(item, source_order_id, event_match_state) do
       {:cont, {:ok, [attrs | memberships]}}
     else
       {:error, reason} -> {:halt, {:error, reason}}
     end
   end
 
-  defp catchup_membership_attrs(item, source_order_id) do
+  defp catchup_membership_attrs(item, source_order_id, event_match_state) do
     with {:ok, source_order_id} <- positive_id(source_order_id),
          {:ok, latest_source_modified_at} <-
            parse_source_datetime(item, :source_modified_at_gmt) do
       {:ok,
        %{
          source_order_id: source_order_id,
-         latest_source_modified_at: latest_source_modified_at
+         latest_source_modified_at: latest_source_modified_at,
+         event_match_state: event_match_state
        }}
     else
       _error -> {:error, :invalid_catchup_page}
@@ -475,7 +477,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
          result <- reconcile_order(run, event, source_order_id, order, raw_lines, opts),
          :ok <- normalize_reconcile_result(result),
          :ok <- sync_refunds(run, source, source_order_id, opts) do
-      :ok
+      {:ok, if(raw_lines == [], do: :non_target, else: :target)}
     else
       {:error, reason} -> {:error, reason}
     end
@@ -791,7 +793,8 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
   defp update_catchup_membership(%{
          sync_run_id: sync_run_id,
          source_order_id: source_order_id,
-         latest_source_modified_at: latest_source_modified_at
+         latest_source_modified_at: latest_source_modified_at,
+         event_match_state: event_match_state
        }) do
     query =
       from membership in "ingestion_historical_order_memberships",
@@ -816,7 +819,10 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
              {:ok, updated, notifications} <-
                Ash.update(
                  membership,
-                 %{last_source_modified_at: latest_source_modified_at},
+                 %{
+                   last_source_modified_at: latest_source_modified_at,
+                   event_match_state: event_match_state
+                 },
                  action: :resolve_catchup,
                  domain: EventSales.Ingestion,
                  return_notifications?: true

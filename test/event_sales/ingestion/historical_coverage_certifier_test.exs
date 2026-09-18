@@ -163,12 +163,9 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifierTest do
   end
 
   test "a non-target manifest member remains representable without a target Order", %{
-    source: source,
     run: run,
     cursor: cursor
   } do
-    create_order_only!(source, 12_001)
-
     Ash.create!(
       HistoricalOrderMembership,
       %{
@@ -193,6 +190,55 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifierTest do
 
     assert {:ok, result} = HistoricalCoverageCertifier.evaluate(run, cursor)
     assert result.coverage_evidence["orders"]["orders_durable"] == 0
+  end
+
+  test "blocks within-M substitution from a non-target member to a target member", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    create_complete_facts!(source, event, woo_order_id: 12_002)
+
+    Ash.create!(
+      HistoricalOrderMembership,
+      %{
+        sync_run_id: run.id,
+        source_order_id: 12_001,
+        manifest_source_created_at: @date_from,
+        manifest_source_modified_at: @date_from,
+        last_source_modified_at: @date_from,
+        event_match_state: :target
+      },
+      action: :resolve_manifest,
+      domain: Ingestion
+    )
+
+    Ash.create!(
+      HistoricalOrderMembership,
+      %{
+        sync_run_id: run.id,
+        source_order_id: 12_002,
+        manifest_source_created_at: @date_from,
+        manifest_source_modified_at: @date_from,
+        last_source_modified_at: @date_from,
+        event_match_state: :non_target
+      },
+      action: :resolve_manifest,
+      domain: Ingestion
+    )
+
+    run =
+      Ash.update!(
+        run,
+        %{orders_seen_count: 2, orders_matched_count: 1, orders_upserted_count: 1},
+        action: :record_counts,
+        domain: Ingestion
+      )
+
+    assert {:blocked, result} = HistoricalCoverageCertifier.evaluate(run, cursor)
+    assert_reason(result, "orders", "historical_member_order_missing")
+    assert_reason(result, "orders", "historical_member_attribution_incomplete")
   end
 
   test "a mixed-event manifest member remains one membership row", %{
@@ -1197,28 +1243,6 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifierTest do
       )
 
     {order, item, refund, refund_line}
-  end
-
-  defp create_order_only!(source, woo_order_id) do
-    Ash.create!(
-      Order,
-      %{
-        source_system_id: source.id,
-        woo_order_id: woo_order_id,
-        order_number: to_string(woo_order_id),
-        status: :completed,
-        currency: "ZAR",
-        completed_at: DateTime.add(@date_from, 2, :hour),
-        paid_at: DateTime.add(@date_from, 1, :hour),
-        created_at_source: DateTime.add(@date_from, 3, :hour),
-        updated_at_source: DateTime.add(@date_from, 4, :hour),
-        raw_total: Decimal.new("10"),
-        raw_discount_total: Decimal.new("0"),
-        raw_tax_total: Decimal.new("0")
-      },
-      action: :create_normalized,
-      domain: Sales
-    )
   end
 
   defp assert_reason(result, section, reason) do

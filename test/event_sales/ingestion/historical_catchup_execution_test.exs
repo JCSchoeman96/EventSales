@@ -264,6 +264,54 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     assert current_cursor(cursor).page == 2
   end
 
+  test "catch-up refreshes a non-target member to target", %{run: run, cursor: cursor} do
+    membership = create_membership!(run, 42, :non_target)
+    CatchupClient.enqueue!(page(["42"], has_more: true, next_cursor: "u-next.cursor"))
+    WooClient.put_order!(42, {:ok, order_payload(42)})
+    Selector.set_lines!([%{"id" => 1}])
+
+    assert {:continue, _updated_run, _updated_cursor} = run_step(run, cursor)
+
+    updated = Ash.get!(HistoricalOrderMembership, membership.id, domain: Ingestion)
+    assert updated.event_match_state == :target
+    assert updated.resolution_state == :catchup_resolved
+  end
+
+  test "catch-up refreshes a target member to non-target", %{run: run, cursor: cursor} do
+    membership = create_membership!(run, 42, :target)
+    CatchupClient.enqueue!(page(["42"], has_more: true, next_cursor: "u-next.cursor"))
+    WooClient.put_order!(42, {:ok, order_payload(42)})
+    Selector.set_lines!([])
+
+    assert {:continue, _updated_run, _updated_cursor} = run_step(run, cursor)
+
+    updated = Ash.get!(HistoricalOrderMembership, membership.id, domain: Ingestion)
+    assert updated.event_match_state == :non_target
+    assert updated.resolution_state == :catchup_resolved
+  end
+
+  test "catch-up membership state failure rolls back the cursor checkpoint", %{
+    run: run,
+    cursor: cursor
+  } do
+    membership = create_membership!(run, 42, :non_target)
+    CatchupClient.enqueue!(page(["42"], has_more: true, next_cursor: "u-next.cursor"))
+    WooClient.put_order!(42, {:ok, order_payload(42)})
+    Selector.set_lines!([%{"id" => 1}])
+
+    assert {:error, :membership_write_failed} =
+             run_step(run, cursor,
+               historical_membership_updater: fn _attrs ->
+                 {:error, :membership_write_failed}
+               end
+             )
+
+    updated = Ash.get!(HistoricalOrderMembership, membership.id, domain: Ingestion)
+    assert updated.event_match_state == :non_target
+    assert updated.resolution_state == :manifest_resolved
+    assert current_cursor(cursor).page == 1
+  end
+
   test "in-progress U uses the exact opaque cursor", %{run: run, cursor: cursor} do
     replace_cursor!(cursor, 4, catchup_in_progress_metadata())
     CatchupClient.enqueue!(page(["43"], has_more: false, terminal_evidence: "u-proof"))
@@ -889,7 +937,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     |> Ash.create!(domain: Ingestion)
   end
 
-  defp create_membership!(run, source_order_id) do
+  defp create_membership!(run, source_order_id, event_match_state \\ :non_target) do
     Ash.create!(
       HistoricalOrderMembership,
       %{
@@ -897,7 +945,8 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
         source_order_id: source_order_id,
         manifest_source_created_at: ~U[2026-08-04 10:00:00.000000Z],
         manifest_source_modified_at: ~U[2026-08-04 10:00:00.000000Z],
-        last_source_modified_at: ~U[2026-08-04 10:00:00.000000Z]
+        last_source_modified_at: ~U[2026-08-04 10:00:00.000000Z],
+        event_match_state: event_match_state
       },
       action: :resolve_manifest,
       domain: Ingestion

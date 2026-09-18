@@ -186,7 +186,13 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifier do
         select: %{
           membership_count: fragment("COUNT(DISTINCT ?)", membership.id),
           member_order_missing:
-            fragment("COUNT(DISTINCT ?) FILTER (WHERE ? IS NULL)", membership.id, o.id),
+            fragment(
+              "COUNT(DISTINCT ?) FILTER (WHERE ? = ? AND ? IS NULL)",
+              membership.id,
+              membership.event_match_state,
+              ^"target",
+              o.id
+            ),
           historical_member_attribution_incomplete:
             fragment(
               "COUNT(DISTINCT ?) FILTER (WHERE (? = ? AND ? IS NULL) OR (? = ? AND ? IS NOT NULL))",

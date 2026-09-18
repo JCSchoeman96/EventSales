@@ -57,7 +57,7 @@ defmodule EventSales.Ingestion.Resources.HistoricalOrderMembership do
     end
 
     update :resolve_catchup do
-      accept [:last_source_modified_at]
+      accept [:last_source_modified_at, :event_match_state]
       require_atomic? false
       change transition_state(:catchup_resolved)
     end
