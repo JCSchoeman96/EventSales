@@ -312,6 +312,67 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     assert current_cursor(cursor).page == 1
   end
 
+  test "terminal catch-up target to non-target certifies from current membership state", %{
+    run: run,
+    cursor: cursor
+  } do
+    create_membership!(run, 42, :target)
+
+    Ash.update!(
+      run,
+      %{orders_seen_count: 1, orders_matched_count: 1, orders_upserted_count: 1},
+      action: :record_counts,
+      domain: Ingestion
+    )
+
+    CatchupClient.enqueue!(page(["42"], has_more: false, terminal_evidence: "u-target-removed"))
+    WooClient.put_order!(42, {:ok, order_payload(42)})
+    Selector.set_lines!([])
+
+    assert :ok = run_step(run, cursor, seed_memberships: false)
+
+    updated_membership = membership!(run, 42)
+    assert updated_membership.resolution_state == :catchup_resolved
+    assert updated_membership.event_match_state == :non_target
+
+    completed_run = current_run(run)
+    assert completed_run.status == :completed
+    assert completed_run.coverage_evidence["result"] == "certified"
+    assert completed_run.coverage_evidence["orders"]["blocking_reasons"] == %{}
+  end
+
+  test "terminal catch-up non-target to target certifies current target truth", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    create_membership!(run, 42, :non_target)
+
+    Ash.update!(
+      run,
+      %{orders_seen_count: 1, orders_matched_count: 0, orders_upserted_count: 0},
+      action: :record_counts,
+      domain: Ingestion
+    )
+
+    create_target_order_fact!(source, event, 42)
+    CatchupClient.enqueue!(page(["42"], has_more: false, terminal_evidence: "u-target-added"))
+    WooClient.put_order!(42, {:ok, order_payload(42)})
+    Selector.set_lines!([%{"id" => 1}])
+
+    assert :ok = run_step(run, cursor, seed_memberships: false)
+
+    updated_membership = membership!(run, 42)
+    assert updated_membership.resolution_state == :catchup_resolved
+    assert updated_membership.event_match_state == :target
+
+    completed_run = current_run(run)
+    assert completed_run.status == :completed
+    assert completed_run.coverage_evidence["result"] == "certified"
+    assert completed_run.coverage_evidence["orders"]["blocking_reasons"] == %{}
+  end
+
   test "in-progress U uses the exact opaque cursor", %{run: run, cursor: cursor} do
     replace_cursor!(cursor, 4, catchup_in_progress_metadata())
     CatchupClient.enqueue!(page(["43"], has_more: false, terminal_evidence: "u-proof"))
@@ -950,6 +1011,60 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
       },
       action: :resolve_manifest,
       domain: Ingestion
+    )
+  end
+
+  defp membership!(run, source_order_id) do
+    HistoricalOrderMembership
+    |> Ash.Query.filter(sync_run_id == ^run.id and source_order_id == ^source_order_id)
+    |> Ash.read_one!(domain: Ingestion)
+  end
+
+  defp create_target_order_fact!(source, event, woo_order_id) do
+    ticket = SalesHelpers.create_ticket_type!(event, %{name: "Catch-up Ticket"})
+
+    order =
+      Ash.create!(
+        Order,
+        %{
+          source_system_id: source.id,
+          woo_order_id: woo_order_id,
+          order_number: to_string(woo_order_id),
+          status: :completed,
+          currency: "ZAR",
+          completed_at: DateTime.add(@date_from, 2, :hour),
+          paid_at: DateTime.add(@date_from, 1, :hour),
+          created_at_source: DateTime.add(@date_from, 3, :hour),
+          updated_at_source: DateTime.add(@date_from, 4, :hour),
+          raw_total: Decimal.new("10"),
+          raw_discount_total: Decimal.new("0"),
+          raw_tax_total: Decimal.new("0")
+        },
+        action: :create_normalized,
+        domain: EventSales.Sales
+      )
+
+    Ash.create!(
+      OrderItem,
+      %{
+        order_id: order.id,
+        event_id: event.id,
+        ticket_type_id: ticket.id,
+        woo_line_item_id: 1,
+        woo_product_id: 501,
+        woo_variation_id: 601,
+        name: "Catch-up Ticket",
+        quantity: 1,
+        line_subtotal: Decimal.new("10"),
+        line_total: Decimal.new("10"),
+        line_total_tax: Decimal.new("0"),
+        discount_total: Decimal.new("0"),
+        item_kind: :ticket,
+        mapping_status: :mapped,
+        source_tickera_event_id: event.external_event_id
+      },
+      action: :create_normalized,
+      domain: EventSales.Sales
     )
   end
 

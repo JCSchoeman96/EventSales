@@ -185,6 +185,13 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifier do
         where: membership.sync_run_id == ^run_id,
         select: %{
           membership_count: fragment("COUNT(DISTINCT ?)", membership.id),
+          target_members_count:
+            fragment(
+              "COUNT(DISTINCT ?) FILTER (WHERE ? = ?)",
+              membership.id,
+              membership.event_match_state,
+              ^"target"
+            ),
           member_order_missing:
             fragment(
               "COUNT(DISTINCT ?) FILTER (WHERE ? = ? AND ? IS NULL)",
@@ -333,7 +340,7 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifier do
       historical_member_order_missing: facts.member_order_missing,
       historical_member_attribution_incomplete: facts.historical_member_attribution_incomplete,
       nonmember_target_order_detected: facts.nonmember_target_orders,
-      order_history_incomplete: max(run.orders_matched_count - facts.orders_durable, 0),
+      order_history_incomplete: max(facts.target_members_count - facts.orders_durable, 0),
       order_counter_inconsistent: if(counter_inconsistent?(run), do: 1, else: 0)
     })
     |> rename_order_reasons()
