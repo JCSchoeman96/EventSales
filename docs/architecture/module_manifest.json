@@ -147,6 +147,7 @@
     "lib/event_sales/ingestion/historical_order_mutation_detector.ex",
     "lib/event_sales/ingestion/historical_refund_coverage_invalidator.ex",
     "lib/event_sales/ingestion/historical_refund_mutation_detector.ex",
+    "lib/event_sales/ingestion/historical_refund_order_item_impact_resolver.ex",
     "lib/event_sales/ingestion/intake_backpressure.ex",
     "lib/event_sales/ingestion/manual_sync.ex",
     "lib/event_sales/ingestion/order_reconciliation.ex",
@@ -3505,7 +3506,7 @@
       "uses": []
     },
     {
-      "docs_count": 2,
+      "docs_count": 3,
       "moduledoc?": true,
       "name": "EventSales.Ingestion.HistoricalRefundMutationDetector",
       "parse_error": null,
@@ -3514,6 +3515,29 @@
         {
           "arity": 1,
           "name": "capture"
+        },
+        {
+          "arity": 2,
+          "name": "compare"
+        },
+        {
+          "arity": 1,
+          "name": "allocation"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 2,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.HistoricalRefundOrderItemImpactResolver",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/historical_refund_order_item_impact_resolver.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "resolve"
         },
         {
           "arity": 2,

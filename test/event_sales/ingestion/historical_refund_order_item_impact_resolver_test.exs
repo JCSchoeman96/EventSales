@@ -80,6 +80,33 @@ defmodule EventSales.Ingestion.HistoricalRefundOrderItemImpactResolverTest do
              HistoricalRefundOrderItemImpactResolver.compare(before, before)
   end
 
+  test "reports a new exact allocation from a nil before snapshot" do
+    after_snapshot =
+      snapshot(refund_lines: [line(@item_a)], parent_items: [item(@item_a, @event_a)])
+
+    assert %{changed?: true, candidate_event_ids: [@event_a]} =
+             HistoricalRefundOrderItemImpactResolver.compare(nil, after_snapshot)
+  end
+
+  test "reports the parent-wide before and after Event union" do
+    before =
+      snapshot(
+        refund_truth: %{shipping_refund_amount: Decimal.new("1.00")},
+        refund_lines: [line(@item_a)],
+        parent_items: [item(@item_a, @event_a)]
+      )
+
+    after_snapshot =
+      snapshot(
+        refund_truth: %{shipping_refund_amount: Decimal.new("1.00")},
+        refund_lines: [line(@item_b)],
+        parent_items: [item(@item_b, @event_b)]
+      )
+
+    assert %{changed?: true, candidate_event_ids: [@event_a, @event_b]} =
+             HistoricalRefundOrderItemImpactResolver.compare(before, after_snapshot)
+  end
+
   defp snapshot(opts) do
     %{
       refund_truth:
