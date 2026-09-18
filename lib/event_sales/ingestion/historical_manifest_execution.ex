@@ -21,7 +21,9 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
 
   alias EventSales.Ingestion.HistoricalEventLineSelector
   alias EventSales.Ingestion.HistoricalManifestEvidence
+  alias EventSales.Ingestion.HistoricalRefundEvidence
   alias EventSales.Ingestion.OrderRefundSync
+  alias EventSales.Ingestion.Parsers.WoocommerceRefundReferenceParser
 
   alias EventSales.Ingestion.Resources.{
     HistoricalOrderMembership,
@@ -311,20 +313,54 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
       :ok ->
         case select_event_lines(event, source, order, opts) do
           {:ok, line_items} ->
-            resolve_line_items(
-              run,
-              item,
-              source,
-              source_order_id,
-              order,
-              line_items,
-              {counts, memberships},
-              opts
+            resolve_selected_order(
+              %{
+                run: run,
+                item: item,
+                source: source,
+                source_order_id: source_order_id,
+                order: order,
+                counts: counts,
+                memberships: memberships,
+                opts: opts
+              },
+              line_items
             )
 
           {:error, reason} ->
             {:halt, {:error, reason}}
         end
+
+      {:error, reason} ->
+        {:halt, {:error, reason}}
+    end
+  end
+
+  defp resolve_selected_order(
+         %{
+           run: run,
+           item: item,
+           source: source,
+           source_order_id: source_order_id,
+           order: order,
+           counts: counts,
+           memberships: memberships,
+           opts: opts
+         },
+         line_items
+       ) do
+    case refund_evidence(run, source_order_id, order, opts) do
+      {:ok, refund_evidence} ->
+        resolve_line_items(
+          run,
+          item,
+          source,
+          source_order_id,
+          order,
+          {line_items, refund_evidence},
+          {counts, memberships},
+          opts
+        )
 
       {:error, reason} ->
         {:halt, {:error, reason}}
@@ -337,7 +373,7 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
          source,
          source_order_id,
          _order,
-         [],
+         {[], refund_evidence},
          {counts, memberships},
          opts
        ) do
@@ -347,7 +383,15 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
       :ok ->
         {:cont,
          {:ok, counts,
-          [manifest_membership_attrs(item, source_order_id, :non_target) | memberships]}}
+          [
+            manifest_membership_attrs(
+              item,
+              source_order_id,
+              :non_target,
+              refund_evidence
+            )
+            | memberships
+          ]}}
 
       {:error, reason} ->
         {:halt, {:error, reason}}
@@ -360,7 +404,7 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
          source,
          source_order_id,
          order,
-         line_items,
+         {line_items, refund_evidence},
          {counts, memberships},
          opts
        ) do
@@ -376,7 +420,7 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
           increment_match_counts(counts, :orders_stale_count),
           memberships,
           item,
-          :target,
+          {:target, refund_evidence},
           opts
         )
 
@@ -388,7 +432,7 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
           increment_match_counts(counts, :orders_upserted_count),
           memberships,
           item,
-          :target,
+          {:target, refund_evidence},
           opts
         )
 
@@ -407,28 +451,54 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
          counts,
          memberships,
          item,
-         event_match_state,
+         {event_match_state, refund_evidence},
          opts
        ) do
     case sync_refunds(run, source, source_order_id, opts) do
       :ok ->
         {:cont,
          {:ok, counts,
-          [manifest_membership_attrs(item, source_order_id, event_match_state) | memberships]}}
+          [
+            manifest_membership_attrs(
+              item,
+              source_order_id,
+              event_match_state,
+              refund_evidence
+            )
+            | memberships
+          ]}}
 
       {:error, reason} ->
         {:halt, {:error, reason}}
     end
   end
 
-  defp manifest_membership_attrs(item, source_order_id, event_match_state) do
+  defp manifest_membership_attrs(item, source_order_id, event_match_state, refund_evidence) do
     %{
       source_order_id: elem(positive_id(source_order_id), 1),
       manifest_source_created_at: parse_source_datetime(item["source_created_at_gmt"]),
       manifest_source_modified_at: parse_source_datetime(item["source_modified_at_gmt"]),
       last_source_modified_at: parse_source_datetime(item["source_modified_at_gmt"]),
-      event_match_state: event_match_state
+      event_match_state: event_match_state,
+      refund_evidence: refund_evidence
     }
+  end
+
+  defp refund_evidence(run, source_order_id, order, opts) do
+    with {:ok, references} <- WoocommerceRefundReferenceParser.parse_historical(order),
+         {:ok, source_order_id} <- positive_id(source_order_id),
+         %DateTime{} = observed_at <- now(opts) do
+      {:ok,
+       %{
+         reference_ids: Enum.map(references, & &1.woo_refund_id),
+         observed_at: observed_at,
+         source_system_id: run.source_system_id,
+         source_order_id: source_order_id
+       }}
+    else
+      {:error, reason} -> {:error, reason}
+      _other -> {:error, :invalid_refund_observation_time}
+    end
   end
 
   defp select_event_lines(event, source, order, opts) do
@@ -603,22 +673,45 @@ defmodule EventSales.Ingestion.HistoricalManifestExecution do
     upserter = Keyword.get(opts, :historical_membership_upserter, &upsert_manifest_membership/1)
 
     Enum.reduce_while(memberships, {:ok, []}, fn attrs, {:ok, notifications} ->
-      attrs = Map.put(attrs, :sync_run_id, sync_run_id)
-
-      case upserter.(attrs) do
-        {:ok, %HistoricalOrderMembership{}, new_notifications} ->
+      case persist_manifest_membership(attrs, sync_run_id, upserter, opts) do
+        {:ok, new_notifications} ->
           {:cont, {:ok, notifications ++ new_notifications}}
-
-        {:ok, %HistoricalOrderMembership{}} ->
-          {:cont, {:ok, notifications}}
 
         {:error, reason} ->
           {:halt, {:error, reason}}
-
-        _other ->
-          {:halt, {:error, :membership_checkpoint_failed}}
       end
     end)
+  end
+
+  defp persist_manifest_membership(attrs, sync_run_id, upserter, opts) do
+    refund_evidence = Map.fetch!(attrs, :refund_evidence)
+    attrs = attrs |> Map.delete(:refund_evidence) |> Map.put(:sync_run_id, sync_run_id)
+
+    with {:ok, membership, new_notifications} <- normalize_manifest_upsert(upserter.(attrs)),
+         {:ok, evidence_notifications} <-
+           persist_refund_evidence(:manifest, membership, refund_evidence, opts) do
+      {:ok, new_notifications ++ evidence_notifications}
+    end
+  end
+
+  defp normalize_manifest_upsert({:ok, %HistoricalOrderMembership{} = membership, notifications}),
+    do: {:ok, membership, notifications}
+
+  defp normalize_manifest_upsert({:ok, %HistoricalOrderMembership{} = membership}),
+    do: {:ok, membership, []}
+
+  defp normalize_manifest_upsert({:error, reason}), do: {:error, reason}
+  defp normalize_manifest_upsert(_other), do: {:error, :membership_checkpoint_failed}
+
+  defp persist_refund_evidence(phase, membership, evidence, opts) do
+    writer =
+      Keyword.get(
+        opts,
+        :historical_refund_evidence_writer,
+        &HistoricalRefundEvidence.persist/4
+      )
+
+    writer.(phase, membership, evidence, opts)
   end
 
   defp upsert_manifest_membership(attrs) do

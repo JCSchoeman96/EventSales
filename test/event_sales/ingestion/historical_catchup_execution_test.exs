@@ -8,7 +8,15 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
   alias EventSales.Ingestion.HistoricalCatchupExecution
   alias EventSales.Ingestion.HistoricalEventLineSelector
   alias EventSales.Ingestion.HistoricalManifestEvidence
-  alias EventSales.Ingestion.Resources.{HistoricalOrderMembership, SyncCursor, SyncRun}
+
+  alias EventSales.Ingestion.Resources.{
+    HistoricalOrderMembership,
+    HistoricalRefundObservation,
+    HistoricalRefundReference,
+    SyncCursor,
+    SyncRun
+  }
+
   alias EventSales.Sales.OrderUpserter
   alias EventSales.Sales.Resources.{Order, OrderItem}
   alias EventSales.TestSupport.{FixtureHelpers, HistoricalCoverageHelpers, SalesHelpers}
@@ -236,6 +244,44 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     assert is_nil(persisted_run.coverage_certified_at)
   end
 
+  test "catch-up records a newly discovered refund reference", %{run: run, cursor: cursor} do
+    CatchupClient.enqueue!(page(["42"], has_more: true, next_cursor: "u-next.cursor"))
+
+    WooClient.put_order!(42, {
+      :ok,
+      order_payload(42)
+      |> Map.put("refunds", [%{"id" => 91_101, "total" => "-10.00"}])
+    })
+
+    assert {:continue, _updated_run, _updated_cursor} = run_step(run, cursor)
+
+    membership = membership!(run, 42)
+
+    assert {:ok, observation} =
+             HistoricalRefundObservation
+             |> Ash.Query.filter(historical_order_membership_id == ^membership.id)
+             |> Ash.read_one(domain: Ingestion)
+
+    assert observation.resolution_state == :catchup_resolved
+    assert observation.reference_count == 1
+
+    assert [%{woo_refund_id: 91_101, source_state: :present}] =
+             HistoricalRefundReference
+             |> Ash.Query.filter(historical_refund_observation_id == ^observation.id)
+             |> Ash.read!(domain: Ingestion)
+  end
+
+  test "catch-up rejects a missing refunds field before cursor checkpoint", %{
+    run: run,
+    cursor: cursor
+  } do
+    CatchupClient.enqueue!(page(["42"], has_more: true, next_cursor: "u-next.cursor"))
+    WooClient.put_order!(42, {:ok, Map.delete(order_payload(42), "refunds")})
+
+    assert {:error, {:invalid_refund_reference, :refunds, :required}} = run_step(run, cursor)
+    assert current_cursor(cursor).page == cursor.page
+  end
+
   test "catch-up rejects a source member that is absent from M", %{run: run, cursor: cursor} do
     CatchupClient.enqueue!(page(["99"], has_more: true, next_cursor: "u-next.cursor"))
     WooClient.put_order!(99, {:ok, order_payload(99)})
@@ -303,6 +349,28 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
              run_step(run, cursor,
                historical_membership_updater: fn _attrs ->
                  {:error, :membership_write_failed}
+               end
+             )
+
+    updated = Ash.get!(HistoricalOrderMembership, membership.id, domain: Ingestion)
+    assert updated.event_match_state == :non_target
+    assert updated.resolution_state == :manifest_resolved
+    assert current_cursor(cursor).page == 1
+  end
+
+  test "refund observation checkpoint failure rolls back membership and cursor", %{
+    run: run,
+    cursor: cursor
+  } do
+    membership = create_membership!(run, 42, :non_target)
+    CatchupClient.enqueue!(page(["42"], has_more: true, next_cursor: "u-next.cursor"))
+    WooClient.put_order!(42, {:ok, order_payload(42)})
+    Selector.set_lines!([%{"id" => 1}])
+
+    assert {:error, :refund_reference_checkpoint_failed} =
+             run_step(run, cursor,
+               historical_refund_evidence_writer: fn _phase, _membership, _evidence, _opts ->
+                 {:error, :refund_reference_checkpoint_failed}
                end
              )
 
@@ -945,6 +1013,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
       "id" => id,
       "date_created_gmt" => "2026-08-04T10:00:00Z",
       "date_modified_gmt" => "2026-08-04T10:00:00Z",
+      "refunds" => [],
       "line_items" => []
     }
   end
@@ -999,19 +1068,33 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
   end
 
   defp create_membership!(run, source_order_id, event_match_state \\ :non_target) do
+    membership =
+      Ash.create!(
+        HistoricalOrderMembership,
+        %{
+          sync_run_id: run.id,
+          source_order_id: source_order_id,
+          manifest_source_created_at: ~U[2026-08-04 10:00:00.000000Z],
+          manifest_source_modified_at: ~U[2026-08-04 10:00:00.000000Z],
+          last_source_modified_at: ~U[2026-08-04 10:00:00.000000Z],
+          event_match_state: event_match_state
+        },
+        action: :resolve_manifest,
+        domain: Ingestion
+      )
+
     Ash.create!(
-      HistoricalOrderMembership,
+      HistoricalRefundObservation,
       %{
-        sync_run_id: run.id,
-        source_order_id: source_order_id,
-        manifest_source_created_at: ~U[2026-08-04 10:00:00.000000Z],
-        manifest_source_modified_at: ~U[2026-08-04 10:00:00.000000Z],
-        last_source_modified_at: ~U[2026-08-04 10:00:00.000000Z],
-        event_match_state: event_match_state
+        historical_order_membership_id: membership.id,
+        reference_count: 0,
+        observed_at: @manifest_observed_at
       },
       action: :resolve_manifest,
       domain: Ingestion
     )
+
+    membership
   end
 
   defp membership!(run, source_order_id) do

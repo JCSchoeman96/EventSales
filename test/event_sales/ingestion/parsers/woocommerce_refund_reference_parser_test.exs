@@ -49,4 +49,29 @@ defmodule EventSales.Ingestion.Parsers.WoocommerceRefundReferenceParserTest do
                "refunds" => [%{"id" => 91_005, "total" => "not-decimal"}]
              })
   end
+
+  test "historical parsing requires an explicit refunds key" do
+    assert {:error, {:invalid_refund_reference, :refunds, :required}} =
+             WoocommerceRefundReferenceParser.parse_historical(%{})
+
+    assert {:error, {:invalid_refund_reference, :refunds, :required}} =
+             WoocommerceRefundReferenceParser.parse_historical(%{"refunds" => nil})
+  end
+
+  test "historical parsing accepts only an explicit empty or exact reference set" do
+    assert {:ok, []} =
+             WoocommerceRefundReferenceParser.parse_historical(%{"refunds" => []})
+
+    assert {:ok, [%{woo_refund_id: 91_006}]} =
+             WoocommerceRefundReferenceParser.parse_historical(%{
+               "refunds" => [%{"id" => 91_006, "total" => "-12.00"}]
+             })
+  end
+
+  test "historical parsing rejects duplicate refund identities" do
+    assert {:error, {:invalid_refund_reference, :id, :duplicate}} =
+             WoocommerceRefundReferenceParser.parse_historical(%{
+               "refunds" => [%{"id" => 91_007}, %{"id" => 91_007}]
+             })
+  end
 end

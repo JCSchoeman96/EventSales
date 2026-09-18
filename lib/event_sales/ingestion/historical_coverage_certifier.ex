@@ -370,7 +370,7 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifier do
       run.orders_matched_count != run.orders_upserted_count + run.orders_stale_count
   end
 
-  defp refund_facts(run, event, coverage_start, sales_covered_through, repo) do
+  defp refund_facts(run, event, _coverage_start, _sales_covered_through, repo) do
     source_event_id = event.external_event_id || 0
     source_system_id = Ecto.UUID.dump!(run.source_system_id)
     event_id = Ecto.UUID.dump!(event.id)
@@ -378,7 +378,13 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifier do
 
     query =
       from membership in "ingestion_historical_order_memberships",
-        join: o in "sales_orders",
+        left_join: observation in "ingestion_historical_refund_observations",
+        on: observation.historical_order_membership_id == membership.id,
+        left_join: reference in "ingestion_historical_refund_references",
+        on:
+          reference.historical_refund_observation_id == observation.id and
+            reference.source_state == ^"present",
+        left_join: o in "sales_orders",
         on:
           fragment(
             "? = ? AND ? = ?",
@@ -387,46 +393,52 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifier do
             o.woo_order_id,
             membership.source_order_id
           ),
-        join: r in "sales_refunds",
+        left_join: r in "sales_refunds",
         on:
           fragment(
-            "? = ? AND ? = ?",
+            "? = ? AND ? = ? AND ? = ?",
             r.source_system_id,
-            o.source_system_id,
+            ^source_system_id,
             r.woo_order_id,
-            o.woo_order_id
+            membership.source_order_id,
+            r.woo_refund_id,
+            reference.woo_refund_id
           ),
         left_join: rl in "sales_refund_lines",
         on: rl.refund_id == r.id,
         left_join: oi in "sales_order_items",
         on: oi.id == rl.order_item_id,
         where:
-          fragment("? = ?", membership.sync_run_id, ^run_id) and
-            r.source_system_id == ^source_system_id and
-            o.created_at_source >= ^coverage_start and
-            o.created_at_source <= ^sales_covered_through and
-            o.source_system_id == ^source_system_id and
-            fragment(
-              "EXISTS (SELECT 1 FROM sales_order_items AS target_oi WHERE target_oi.order_id = ? AND (target_oi.event_id = ? OR target_oi.source_tickera_event_id = ?))",
-              o.id,
-              ^event_id,
-              ^source_event_id
-            ),
+          membership.sync_run_id == ^run_id and
+            membership.event_match_state == ^"target",
         select: %{
-          references_seen: fragment("COUNT(DISTINCT ?)", r.id),
+          references_seen: fragment("COUNT(DISTINCT ?)", reference.id),
           details_complete:
             fragment(
-              "COUNT(DISTINCT ?) FILTER (WHERE ? = ? OR ? = ?)",
-              r.id,
+              "COUNT(DISTINCT ?) FILTER (WHERE ? = ? AND ? = ?)",
+              reference.id,
               r.source_state,
-              ^"voided",
+              ^"active",
               r.detail_status,
               ^"complete"
             ),
-          refund_lines_durable: fragment("COUNT(DISTINCT ?)", rl.id),
+          refund_lines_durable:
+            fragment(
+              "COUNT(DISTINCT ?) FILTER (WHERE ? = ?)",
+              rl.id,
+              r.source_state,
+              ^"active"
+            ),
+          detail_missing:
+            fragment(
+              "COUNT(DISTINCT ?) FILTER (WHERE ? IS NULL)",
+              reference.id,
+              r.id
+            ),
           detail_incomplete:
             fragment(
-              "COUNT(DISTINCT ?) FILTER (WHERE ? = ? AND ? IS DISTINCT FROM ?)",
+              "COUNT(DISTINCT ?) FILTER (WHERE ? IS NOT NULL AND NOT (? = ? AND ? = ?))",
+              reference.id,
               r.id,
               r.source_state,
               ^"active",
@@ -436,7 +448,7 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifier do
           effective_time_missing:
             fragment(
               "COUNT(DISTINCT ?) FILTER (WHERE ? = ? AND ? IS NULL)",
-              r.id,
+              reference.id,
               r.source_state,
               ^"active",
               r.source_created_at
@@ -444,7 +456,7 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifier do
           parent_binding_incomplete:
             fragment(
               "COUNT(DISTINCT ?) FILTER (WHERE ? = ? AND (? IS NULL OR ? IS DISTINCT FROM ?))",
-              r.id,
+              reference.id,
               r.source_state,
               ^"active",
               r.order_id,
@@ -454,7 +466,7 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifier do
           line_binding_incomplete:
             fragment(
               "COUNT(DISTINCT ?) FILTER (WHERE ? = ? AND ? IS NOT NULL AND NOT (? IS NOT NULL AND (? IN (?, ?) OR ? = ? OR (? IS DISTINCT FROM ? AND ? IS DISTINCT FROM ?))) AND (? IS NULL OR ? IS NULL OR ? IS DISTINCT FROM ? OR ? IS DISTINCT FROM ? OR ? IS DISTINCT FROM ? OR ? IS DISTINCT FROM ? OR ? IS DISTINCT FROM ?))",
-              r.id,
+              reference.id,
               r.source_state,
               ^"active",
               rl.id,
@@ -484,7 +496,7 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifier do
           line_validation_conflict:
             fragment(
               "COUNT(DISTINCT ?) FILTER (WHERE ? = ? AND ? IS NOT NULL AND (? = ? OR ? = ?) AND ? = ? AND ? = ? AND (? IS NOT NULL OR ? IS NOT NULL OR (? IS NOT NULL AND ? IS DISTINCT FROM ?) OR (? IS NOT NULL AND ? IS DISTINCT FROM ?)))",
-              rl.id,
+              reference.id,
               r.source_state,
               ^"active",
               oi.id,
@@ -508,7 +520,7 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifier do
           header_financial_missing:
             fragment(
               "COUNT(DISTINCT ?) FILTER (WHERE ? = ? AND ? = ? AND ? IS NULL)",
-              r.id,
+              reference.id,
               r.source_state,
               ^"active",
               r.detail_status,
@@ -517,8 +529,11 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifier do
             ),
           currency_incomplete:
             fragment(
-              "COUNT(DISTINCT ?) FILTER (WHERE ? IS NULL OR btrim(?) = '' OR ? IS DISTINCT FROM ?)",
+              "COUNT(DISTINCT ?) FILTER (WHERE ? IS NOT NULL AND ? = ? AND (? IS NULL OR btrim(?) = '' OR ? IS DISTINCT FROM ?))",
+              reference.id,
               r.id,
+              r.source_state,
+              ^"active",
               r.currency,
               r.currency,
               r.currency,
@@ -532,54 +547,41 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifier do
       refund_ticket_line_financial_count(
         run,
         event,
-        coverage_start,
-        sales_covered_through,
         repo
       )
 
-    Map.put(base, :ticket_line_financial_missing, line_financial_missing)
+    base
+    |> Map.put(:ticket_line_financial_missing, line_financial_missing)
+    |> Map.merge(refund_reference_integrity_facts(run, repo))
   end
 
-  defp refund_ticket_line_financial_count(
-         run,
-         event,
-         coverage_start,
-         sales_covered_through,
-         repo
-       ) do
+  # Declarative SQL joins below encode the existing line-financial predicates.
+  # credo:disable-for-next-line Credo.Check.Refactor.CyclomaticComplexity
+  defp refund_ticket_line_financial_count(run, event, repo) do
     source_system_id = Ecto.UUID.dump!(run.source_system_id)
     event_id = Ecto.UUID.dump!(event.id)
     run_id = Ecto.UUID.dump!(run.id)
 
     query =
       from membership in "ingestion_historical_order_memberships",
-        join: o in "sales_orders",
+        join: observation in "ingestion_historical_refund_observations",
+        on: observation.historical_order_membership_id == membership.id,
+        join: reference in "ingestion_historical_refund_references",
         on:
-          fragment(
-            "? = ? AND ? = ?",
-            o.source_system_id,
-            ^source_system_id,
-            o.woo_order_id,
-            membership.source_order_id
-          ),
+          reference.historical_refund_observation_id == observation.id and
+            reference.source_state == ^"present",
         join: r in "sales_refunds",
         on:
-          fragment(
-            "? = ? AND ? = ?",
-            r.source_system_id,
-            o.source_system_id,
-            r.woo_order_id,
-            o.woo_order_id
-          ),
+          r.source_system_id == ^source_system_id and
+            r.woo_order_id == membership.source_order_id and
+            r.woo_refund_id == reference.woo_refund_id,
         join: rl in "sales_refund_lines",
         on: rl.refund_id == r.id,
         join: oi in "sales_order_items",
         on: oi.id == rl.order_item_id,
         where:
-          fragment("? = ?", membership.sync_run_id, ^run_id) and
-            r.source_system_id == ^source_system_id and
-            o.created_at_source >= ^coverage_start and
-            o.created_at_source <= ^sales_covered_through and
+          membership.sync_run_id == ^run_id and
+            membership.event_match_state == ^"target" and
             r.source_state == ^"active" and
             r.detail_status == ^"complete" and
             oi.event_id == ^event_id and
@@ -590,8 +592,120 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifier do
     repo.one!(query)
   end
 
+  # This bounded evidence query intentionally keeps all reference integrity
+  # checks together so they share the exact run-scoped membership universe.
+  # credo:disable-for-next-line Credo.Check.Refactor.CyclomaticComplexity
+  defp refund_reference_integrity_facts(run, repo) do
+    source_system_id = Ecto.UUID.dump!(run.source_system_id)
+    run_id = Ecto.UUID.dump!(run.id)
+
+    observation_query =
+      from membership in "ingestion_historical_order_memberships",
+        left_join: observation in "ingestion_historical_refund_observations",
+        on: observation.historical_order_membership_id == membership.id,
+        where:
+          membership.sync_run_id == ^run_id and
+            membership.event_match_state == ^"target",
+        select: %{
+          observation_missing:
+            fragment(
+              "COUNT(DISTINCT ?) FILTER (WHERE ? IS NULL)",
+              membership.id,
+              observation.id
+            ),
+          observation_incomplete:
+            fragment(
+              "COUNT(DISTINCT ?) FILTER (WHERE ? IS NOT NULL AND ? IS DISTINCT FROM ?)",
+              membership.id,
+              observation.id,
+              observation.resolution_state,
+              ^"catchup_resolved"
+            )
+        }
+
+    observation_facts = repo.one!(observation_query)
+
+    count_mismatch_query =
+      from observation in "ingestion_historical_refund_observations",
+        join: membership in "ingestion_historical_order_memberships",
+        on: membership.id == observation.historical_order_membership_id,
+        left_join: reference in "ingestion_historical_refund_references",
+        on: reference.historical_refund_observation_id == observation.id,
+        where:
+          membership.sync_run_id == ^run_id and
+            membership.event_match_state == ^"target",
+        group_by: [observation.id, observation.reference_count],
+        select: %{
+          expected: observation.reference_count,
+          present:
+            fragment(
+              "COUNT(?) FILTER (WHERE ? = ?)",
+              reference.id,
+              reference.source_state,
+              ^"present"
+            )
+        }
+
+    reference_count_inconsistent =
+      count_mismatch_query
+      |> repo.all()
+      |> Enum.count(fn %{expected: expected, present: present} -> expected != present end)
+
+    deletion_query =
+      from reference in "ingestion_historical_refund_references",
+        join: observation in "ingestion_historical_refund_observations",
+        on: observation.id == reference.historical_refund_observation_id,
+        join: membership in "ingestion_historical_order_memberships",
+        on: membership.id == observation.historical_order_membership_id,
+        left_join: refund in "sales_refunds",
+        on:
+          refund.source_system_id == ^source_system_id and
+            refund.woo_order_id == membership.source_order_id and
+            refund.woo_refund_id == reference.woo_refund_id,
+        where:
+          membership.sync_run_id == ^run_id and
+            membership.event_match_state == ^"target" and
+            reference.source_state == ^"absent_confirmed" and
+            (is_nil(refund.id) or refund.source_state != ^"voided"),
+        select: fragment("COUNT(DISTINCT ?)", reference.id)
+
+    untracked_query =
+      from refund in "sales_refunds",
+        join: membership in "ingestion_historical_order_memberships",
+        on:
+          membership.sync_run_id == ^run_id and
+            membership.event_match_state == ^"target" and
+            membership.source_order_id == refund.woo_order_id,
+        left_join: observation in "ingestion_historical_refund_observations",
+        on: observation.historical_order_membership_id == membership.id,
+        left_join: reference in "ingestion_historical_refund_references",
+        on:
+          reference.historical_refund_observation_id == observation.id and
+            reference.woo_refund_id == refund.woo_refund_id and
+            reference.source_state == ^"present",
+        where:
+          refund.source_system_id == ^source_system_id and
+            refund.source_state == ^"active" and
+            is_nil(reference.id),
+        select: fragment("COUNT(DISTINCT ?)", refund.id)
+
+    %{
+      observation_missing: observation_facts.observation_missing,
+      observation_incomplete: observation_facts.observation_incomplete,
+      reference_count_inconsistent: reference_count_inconsistent,
+      deletion_unconfirmed: repo.one!(deletion_query),
+      untracked_refund: repo.one!(untracked_query)
+    }
+  end
+
   defp refund_reason_counts(facts) do
     %{
+      "refund_reference_observation_missing" => facts.observation_missing,
+      "refund_reference_observation_incomplete" => facts.observation_incomplete,
+      "refund_reference_count_inconsistent" => facts.reference_count_inconsistent,
+      "refund_reference_detail_missing" => facts.detail_missing,
+      "refund_reference_deletion_unconfirmed" => facts.deletion_unconfirmed,
+      "untracked_refund_detected" => facts.untracked_refund,
       "refund_detail_incomplete" => facts.detail_incomplete,
       "refund_effective_time_incomplete" => facts.effective_time_missing,
       "refund_parent_binding_incomplete" => facts.parent_binding_incomplete,

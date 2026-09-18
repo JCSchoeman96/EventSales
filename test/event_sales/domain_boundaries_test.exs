@@ -37,6 +37,8 @@ defmodule EventSales.DomainBoundariesTest do
     EventSales.Ingestion.Resources.SyncRun,
     EventSales.Ingestion.Resources.SyncCursor,
     EventSales.Ingestion.Resources.HistoricalOrderMembership,
+    EventSales.Ingestion.Resources.HistoricalRefundObservation,
+    EventSales.Ingestion.Resources.HistoricalRefundReference,
     EventSales.Ingestion.Resources.TickeraEventSource,
     EventSales.Ingestion.Resources.TickeraAttendeeSyncRun,
     EventSales.Ingestion.Resources.TickeraAttendeeSnapshot,
