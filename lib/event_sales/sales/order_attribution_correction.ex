@@ -15,6 +15,7 @@ defmodule EventSales.Sales.OrderAttributionCorrection do
   alias EventSales.Catalog.Resources.{Event, ProductMapping}
   alias EventSales.Ingestion.HistoricalCoverageInvalidator
   alias EventSales.Ingestion.HistoricalOrderMutationDetector
+  alias EventSales.Ingestion.HistoricalRefundOrderItemImpactCoordinator
   alias EventSales.Repo
   alias EventSales.Sales
   alias EventSales.Sales.Resources.{Order, OrderItem}
@@ -64,22 +65,31 @@ defmodule EventSales.Sales.OrderAttributionCorrection do
     with :ok <- authorize_admin(opts),
          :ok <- validate_confirmation(confirmation) do
       source_system_id
-      |> correction_transaction(actor)
+      |> correction_transaction(actor, opts)
       |> handle_correction_transaction()
     end
   end
 
-  defp correction_transaction(source_system_id, actor) do
-    Repo.transaction(fn -> correction_transaction_body(source_system_id, actor) end)
+  defp correction_transaction(source_system_id, actor, opts) do
+    Repo.transaction(fn -> correction_transaction_body(source_system_id, actor, opts) end)
   end
 
-  defp correction_transaction_body(source_system_id, actor) do
+  defp correction_transaction_body(source_system_id, actor, opts) do
     with {:ok, context} <- preview_context(source_system_id, lock?: true),
          {:ok, before_snapshot} <- capture_before(context.order),
          {:ok, corrected, notifications} <- correct_order_item(context, actor),
          {:ok, _audit_log} <- audit_correction(context, corrected, actor),
          {:ok, after_snapshot} <- capture_after(context.order),
+         {:ok, after_refund_allocations} <-
+           HistoricalRefundOrderItemImpactCoordinator.capture_for_order(context.order),
          {:ok, comparison} <- compare_correction_truth(before_snapshot, after_snapshot),
+         :ok <-
+           invalidate_refund_allocation_changes(
+             context.before_refund_allocations,
+             after_refund_allocations,
+             comparison.candidate_event_ids,
+             opts
+           ),
          :ok <- invalidate_correction_coverage(context.order, comparison) do
       {corrected, public_preview(%{context | order_item: corrected}), notifications, context}
     else
@@ -110,6 +120,8 @@ defmodule EventSales.Sales.OrderAttributionCorrection do
 
   defp preview_context(source_system_id, opts) do
     with {:ok, %Order{} = order} <- load_order(source_system_id, opts),
+         {:ok, before_refund_allocations} <-
+           capture_before_refund_allocations(order, opts),
          {:ok, %OrderItem{} = item} <- load_confirmed_item(order, opts),
          {:ok, loaded_item} <- load_item_catalog(item),
          :ok <- validate_current_event(loaded_item),
@@ -124,8 +136,17 @@ defmodule EventSales.Sales.OrderAttributionCorrection do
          current_ticket_type: loaded_item.ticket_type,
          target_event: target_event,
          target_mapping: target_mapping,
-         target_ticket_type: target_mapping.ticket_type
+         target_ticket_type: target_mapping.ticket_type,
+         before_refund_allocations: before_refund_allocations
        }}
+    end
+  end
+
+  defp capture_before_refund_allocations(%Order{} = order, opts) do
+    if Keyword.get(opts, :lock?, false) do
+      HistoricalRefundOrderItemImpactCoordinator.capture_for_order(order)
+    else
+      {:ok, []}
     end
   end
 
@@ -247,6 +268,22 @@ defmodule EventSales.Sales.OrderAttributionCorrection do
     else
       {:error, :historical_order_truth_unchanged}
     end
+  end
+
+  defp invalidate_refund_allocation_changes(
+         before_snapshots,
+         after_snapshots,
+         order_candidate_event_ids,
+         opts
+       ) do
+    changes =
+      HistoricalRefundOrderItemImpactCoordinator.compare(
+        before_snapshots,
+        after_snapshots
+      )
+
+    opts = Keyword.put(opts, :additional_event_ids, order_candidate_event_ids)
+    HistoricalRefundOrderItemImpactCoordinator.invalidate_changes(changes, opts)
   end
 
   defp invalidate_correction_coverage(

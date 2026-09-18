@@ -16,7 +16,7 @@ defmodule EventSales.Sales.OrderAttributionCorrectionTest do
   alias EventSales.Repo
   alias EventSales.Sales
   alias EventSales.Sales.OrderAttributionCorrection
-  alias EventSales.Sales.Resources.{Order, OrderItem}
+  alias EventSales.Sales.Resources.{Order, OrderItem, Refund, RefundLine}
   alias EventSales.TestSupport.{HistoricalCoverageHelpers, SalesHelpers}
 
   @coverage_start ~U[2026-04-01 00:00:00.000000Z]
@@ -122,6 +122,64 @@ defmodule EventSales.Sales.OrderAttributionCorrectionTest do
     assert audit.metadata["from_event_external_id"] == 108_658
     assert audit.metadata["to_event_external_id"] == 109_120
     refute Map.has_key?(audit.metadata, "confirmation")
+  end
+
+  test "correction invalidates bound Refund allocation with both Event IDs", %{
+    admin: admin,
+    source: source,
+    order: order,
+    order_item: order_item,
+    mp_event: mp_event,
+    wr_event: wr_event
+  } do
+    refund = create_refund!(source, order, order_item)
+    test_pid = self()
+
+    d3b = fn before_snapshot, after_snapshot, event_ids ->
+      send(test_pid, {:refund_d3b, before_snapshot, after_snapshot, event_ids})
+      {:ok, %{}}
+    end
+
+    assert {:ok, %{order_item: corrected}} =
+             OrderAttributionCorrection.correct_confirmed_order_113834(
+               source.id,
+               "CORRECT ORDER 113834 109132/109167 FROM 108658 TO 109120",
+               actor: admin,
+               historical_refund_coverage_invalidator: d3b
+             )
+
+    assert corrected.event_id == wr_event.id
+    assert_receive {:refund_d3b, before_snapshot, after_snapshot, event_ids}
+    assert event_ids == Enum.sort([mp_event.id, wr_event.id])
+    assert hd(before_snapshot.parent_order_item_evidence).event_id == mp_event.id
+    assert hd(after_snapshot.parent_order_item_evidence).event_id == wr_event.id
+    assert [%RefundLine{order_item_id: item_id}] = refund_lines(refund.id)
+    assert item_id == order_item.id
+  end
+
+  test "rolls back correction when Refund allocation invalidation fails", %{
+    admin: admin,
+    source: source,
+    order: order,
+    order_item: order_item,
+    mp_event: mp_event
+  } do
+    _refund = create_refund!(source, order, order_item)
+    before_item = Ash.get!(OrderItem, order_item.id, domain: Sales)
+
+    assert {:error, :test_refund_d3b_failure} =
+             OrderAttributionCorrection.correct_confirmed_order_113834(
+               source.id,
+               "CORRECT ORDER 113834 109132/109167 FROM 108658 TO 109120",
+               actor: admin,
+               historical_refund_coverage_invalidator: fn _before, _after, _event_ids ->
+                 {:error, :test_refund_d3b_failure}
+               end
+             )
+
+    assert Ash.get!(OrderItem, order_item.id, domain: Sales) == before_item
+    assert audit_count() == 0
+    assert Ash.get!(Event, mp_event.id, domain: Catalog).id == mp_event.id
   end
 
   test "successful correction invalidates both exact current Event certificates", %{
@@ -357,6 +415,53 @@ defmodule EventSales.Sales.OrderAttributionCorrectionTest do
       mapping_status: :mapped,
       item_kind: :ticket
     })
+  end
+
+  defp create_refund!(source, order, item) do
+    refund =
+      Ash.create!(
+        Refund,
+        %{
+          source_system_id: source.id,
+          order_id: order.id,
+          woo_order_id: order.woo_order_id,
+          woo_refund_id: System.unique_integer([:positive]),
+          currency: "ZAR",
+          source_state: :active,
+          detail_status: :complete,
+          summary_total_amount: Decimal.new("10.00"),
+          header_amount: Decimal.new("10.00"),
+          unallocated_header_amount: Decimal.new("0.00"),
+          source_created_at: @coverage_start
+        },
+        action: :create_normalized,
+        domain: Sales
+      )
+
+    Ash.create!(
+      RefundLine,
+      %{
+        refund_id: refund.id,
+        order_item_id: item.id,
+        woo_refund_line_item_id: System.unique_integer([:positive]),
+        woo_refunded_item_id: item.woo_line_item_id,
+        refunded_quantity: 1,
+        refund_total_amount: Decimal.new("10.00"),
+        refund_total_tax: Decimal.new("0.00"),
+        binding_reason: nil,
+        validation_reason: nil
+      },
+      action: :create_normalized,
+      domain: Sales
+    )
+
+    refund
+  end
+
+  defp refund_lines(refund_id) do
+    RefundLine
+    |> Ash.Query.filter(refund_id == ^refund_id)
+    |> Ash.read!(domain: Sales)
   end
 
   defp assert_event_unchanged(event) do
