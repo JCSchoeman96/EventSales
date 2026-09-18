@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-374
+372
 
 ## Files
 
@@ -159,8 +159,6 @@ Project root: `.`
 - `lib/event_sales/ingestion/historical_order_mutation_detector.ex`
 - `lib/event_sales/ingestion/historical_refund_coverage_invalidator.ex`
 - `lib/event_sales/ingestion/historical_refund_mutation_detector.ex`
-- `lib/event_sales/ingestion/historical_refund_order_item_impact_coordinator.ex`
-- `lib/event_sales/ingestion/historical_refund_order_item_impact_resolver.ex`
 - `lib/event_sales/ingestion/intake_backpressure.ex`
 - `lib/event_sales/ingestion/manual_sync.ex`
 - `lib/event_sales/ingestion/order_reconciliation.ex`
@@ -1250,20 +1248,8 @@ Project root: `.`
 - `EventSales.Ingestion.HistoricalRefundMutationDetector` - `lib/event_sales/ingestion/historical_refund_mutation_detector.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 3
-  - public_funs: `capture/1`, `compare/2`, `allocation/1`
-  - uses: _none_
-- `EventSales.Ingestion.HistoricalRefundOrderItemImpactCoordinator` - `lib/event_sales/ingestion/historical_refund_order_item_impact_coordinator.ex`
-  - moduledoc?: true
-  - specs?: true
-  - docs_count: 3
-  - public_funs: `capture_for_order/1`, `compare/2`, `invalidate_changes/2`
-  - uses: _none_
-- `EventSales.Ingestion.HistoricalRefundOrderItemImpactResolver` - `lib/event_sales/ingestion/historical_refund_order_item_impact_resolver.ex`
-  - moduledoc?: true
-  - specs?: true
   - docs_count: 2
-  - public_funs: `resolve/1`, `compare/2`
+  - public_funs: `capture/1`, `compare/2`
   - uses: _none_
 - `EventSales.Ingestion.IntakeBackpressure` - `lib/event_sales/ingestion/intake_backpressure.ex`
   - moduledoc?: true
@@ -1917,7 +1903,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: _none_
+  - public_funs: `validate_order_item_binding/2`
   - uses: `Ash.Resource`
 - `EventSales.Sales.SourceVersionGuard` - `lib/event_sales/sales/source_version_guard.ex`
   - moduledoc?: true

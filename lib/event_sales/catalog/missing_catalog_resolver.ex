@@ -14,7 +14,6 @@ defmodule EventSales.Catalog.MissingCatalogResolver do
   alias EventSales.Ingestion.HistoricalCoverageInvalidator
   alias EventSales.Ingestion.HistoricalOrderCoverageCandidateResolver
   alias EventSales.Ingestion.HistoricalOrderMutationDetector
-  alias EventSales.Ingestion.HistoricalRefundOrderItemImpactCoordinator
   alias EventSales.Repo
   alias EventSales.Sales
   alias EventSales.Sales.OrderItemMapper
@@ -87,45 +86,16 @@ defmodule EventSales.Catalog.MissingCatalogResolver do
   defp recover_order(order_id, source_system_id, woo_product_id, woo_variation_id, opts) do
     Repo.transaction(fn ->
       with {:ok, order} <- lock_order(order_id, source_system_id),
-           {:ok, before_refund_allocations} <-
-             HistoricalRefundOrderItemImpactCoordinator.capture_for_order(order),
            {:ok, items} <- lock_pending_items(order.id, woo_product_id, woo_variation_id),
            {:ok, before_snapshot} <- capture_order(order, opts),
            {:ok, result} <- recover_items(items),
            {:ok, after_snapshot} <- capture_order(order, opts),
-           {:ok, after_refund_allocations} <-
-             HistoricalRefundOrderItemImpactCoordinator.capture_for_order(order),
-           {:ok, order_candidate_event_ids} <-
-             resolve_changed_order_candidates(order, before_snapshot, after_snapshot, opts),
-           :ok <-
-             invalidate_refund_allocation_changes(
-               before_refund_allocations,
-               after_refund_allocations,
-               order_candidate_event_ids,
-               opts
-             ),
-           :ok <- invalidate_resolved_candidates(order, order_candidate_event_ids, opts) do
+           :ok <- invalidate_changed_order(order, before_snapshot, after_snapshot, opts) do
         result
       else
         {:error, reason} -> Repo.rollback(reason)
       end
     end)
-  end
-
-  defp invalidate_refund_allocation_changes(
-         before_snapshots,
-         after_snapshots,
-         order_candidate_event_ids,
-         opts
-       ) do
-    changes =
-      HistoricalRefundOrderItemImpactCoordinator.compare(
-        before_snapshots,
-        after_snapshots
-      )
-
-    opts = Keyword.put(opts, :additional_event_ids, order_candidate_event_ids)
-    HistoricalRefundOrderItemImpactCoordinator.invalidate_changes(changes, opts)
   end
 
   defp lock_order(order_id, source_system_id) do
@@ -238,16 +208,19 @@ defmodule EventSales.Catalog.MissingCatalogResolver do
     detector.capture(order)
   end
 
-  defp resolve_changed_order_candidates(order, before_snapshot, after_snapshot, opts) do
+  defp invalidate_changed_order(order, before_snapshot, after_snapshot, opts) do
     detector =
       Keyword.get(opts, :historical_order_mutation_detector, HistoricalOrderMutationDetector)
 
     case detector.compare(before_snapshot, after_snapshot) do
       %{changed?: false} ->
-        {:ok, []}
+        :ok
 
       %{changed?: true} ->
-        resolve_coverage_candidates(order, before_snapshot, after_snapshot, opts)
+        with {:ok, candidate_event_ids} <-
+               resolve_coverage_candidates(order, before_snapshot, after_snapshot, opts) do
+          invalidate_resolved_candidates(order, candidate_event_ids, opts)
+        end
 
       _other ->
         {:error, :invalid_historical_order_mutation_comparison}

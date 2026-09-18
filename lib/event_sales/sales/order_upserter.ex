@@ -8,13 +8,12 @@ defmodule EventSales.Sales.OrderUpserter do
   alias EventSales.Ingestion.HistoricalCoverageInvalidator
   alias EventSales.Ingestion.HistoricalOrderCoverageCandidateResolver
   alias EventSales.Ingestion.HistoricalOrderMutationDetector
-  alias EventSales.Ingestion.HistoricalRefundOrderItemImpactCoordinator
   alias EventSales.Ingestion.Parsers.WoocommerceOrderParser
   alias EventSales.Ingestion.Resources.WebhookEvent
   alias EventSales.Repo
   alias EventSales.Sales
   alias EventSales.Sales.OrderItemMapper
-  alias EventSales.Sales.Resources.{CouponSnapshot, Order, OrderItem}
+  alias EventSales.Sales.Resources.{CouponSnapshot, Order, OrderItem, RefundLine}
   alias EventSales.Sales.SourceVersionGuard
 
   @type upsert_result :: {:ok, Order.t()} | {:ok, :stale_noop} | {:error, term()}
@@ -116,7 +115,6 @@ defmodule EventSales.Sales.OrderUpserter do
              order: order,
              before_order: nil,
              before_snapshot: nil,
-             before_refund_allocations: [],
              created?: true
            }}
         end
@@ -165,8 +163,6 @@ defmodule EventSales.Sales.OrderUpserter do
 
   defp update_existing_order(existing, source_system_id, normalized, opts) do
     with {:ok, before_snapshot} <- HistoricalOrderMutationDetector.capture(existing),
-         {:ok, before_refund_allocations} <-
-           HistoricalRefundOrderItemImpactCoordinator.capture_for_order(existing),
          {:ok, %Order{} = order} <-
            update_order_with_children(existing, source_system_id, normalized, opts) do
       {:ok,
@@ -174,7 +170,6 @@ defmodule EventSales.Sales.OrderUpserter do
          order: order,
          before_order: existing,
          before_snapshot: before_snapshot,
-         before_refund_allocations: before_refund_allocations,
          created?: false
        }}
     else
@@ -188,90 +183,27 @@ defmodule EventSales.Sales.OrderUpserter do
          reconciliation_event_id,
          opts
        ) do
-    with {:ok, after_snapshot} <- HistoricalOrderMutationDetector.capture(order),
-         {:ok, after_refund_allocations} <-
-           HistoricalRefundOrderItemImpactCoordinator.capture_for_order(order),
-         {:ok, order_candidate_event_ids} <-
-           resolve_mutation_candidates(
-             mutation,
-             order,
-             after_snapshot,
-             reconciliation_event_id,
-             opts
-           ),
-         :ok <-
-           invalidate_refund_allocation_changes(
-             mutation,
-             after_refund_allocations,
-             order_candidate_event_ids,
-             opts
-           ) do
+    with {:ok, after_snapshot} <- HistoricalOrderMutationDetector.capture(order) do
       finalize_captured_mutation(
         mutation,
         after_snapshot,
-        opts,
-        created?,
-        order_candidate_event_ids
-      )
-    end
-  end
-
-  defp invalidate_refund_allocation_changes(
-         mutation,
-         after_refund_allocations,
-         order_candidate_event_ids,
-         opts
-       ) do
-    before_refund_allocations = Map.get(mutation, :before_refund_allocations, [])
-
-    changes =
-      HistoricalRefundOrderItemImpactCoordinator.compare(
-        before_refund_allocations,
-        after_refund_allocations
-      )
-
-    opts = Keyword.put(opts, :additional_event_ids, order_candidate_event_ids)
-    HistoricalRefundOrderItemImpactCoordinator.invalidate_changes(changes, opts)
-  end
-
-  defp resolve_mutation_candidates(
-         %{created?: true},
-         order,
-         after_snapshot,
-         reconciliation_event_id,
-         opts
-       ) do
-    resolve_coverage_candidates(order, nil, after_snapshot, reconciliation_event_id, opts)
-  end
-
-  defp resolve_mutation_candidates(
-         %{created?: false, before_snapshot: before_snapshot},
-         order,
-         after_snapshot,
-         reconciliation_event_id,
-         opts
-       ) do
-    if HistoricalOrderMutationDetector.compare(before_snapshot, after_snapshot).changed? do
-      resolve_coverage_candidates(
-        order,
-        before_snapshot,
-        after_snapshot,
         reconciliation_event_id,
-        opts
+        opts,
+        created?
       )
-    else
-      {:ok, []}
     end
   end
 
   defp finalize_captured_mutation(
          %{order: %Order{} = order},
-         _after_snapshot,
+         after_snapshot,
+         reconciliation_event_id,
          opts,
-         true,
-         candidates
+         true
        ) do
-    with :ok <- invalidate_new_order(order, candidates, opts) do
+    with {:ok, candidates} <-
+           resolve_coverage_candidates(order, nil, after_snapshot, reconciliation_event_id, opts),
+         :ok <- invalidate_new_order(order, candidates, opts) do
       {:ok, order}
     end
   end
@@ -279,9 +211,9 @@ defmodule EventSales.Sales.OrderUpserter do
   defp finalize_captured_mutation(
          %{order: %Order{} = order, before_order: before_order, before_snapshot: before_snapshot},
          after_snapshot,
+         reconciliation_event_id,
          opts,
-         false,
-         candidates
+         false
        ) do
     comparison = HistoricalOrderMutationDetector.compare(before_snapshot, after_snapshot)
 
@@ -290,7 +222,15 @@ defmodule EventSales.Sales.OrderUpserter do
         {:ok, order}
 
       %{changed?: true} ->
-        with :ok <-
+        with {:ok, candidates} <-
+               resolve_coverage_candidates(
+                 order,
+                 before_snapshot,
+                 after_snapshot,
+                 reconciliation_event_id,
+                 opts
+               ),
+             :ok <-
                invalidate_existing_order(
                  before_order,
                  order,
@@ -901,6 +841,7 @@ defmodule EventSales.Sales.OrderUpserter do
 
     OrderItem
     |> Ash.Query.filter(order_id == ^order_id and event_id == ^event_id)
+    |> Ash.Query.sort(woo_line_item_id: :asc, id: :asc)
     |> Ash.read(domain: Sales)
     |> handle_event_item_read(current_line_ids, opts)
   end
@@ -924,8 +865,52 @@ defmodule EventSales.Sales.OrderUpserter do
     if MapSet.member?(current_line_ids, item.woo_line_item_id) do
       :ok
     else
-      ash_destroy(item, :destroy_source_absent, opts)
+      with :ok <- mark_refund_lines_order_item_not_found(item, opts) do
+        ash_destroy(item, :destroy_source_absent, opts)
+      end
     end
+  end
+
+  defp mark_refund_lines_order_item_not_found(%OrderItem{id: order_item_id}, opts) do
+    case refund_lines_for_order_item(order_item_id) do
+      {:ok, refund_lines} -> unbind_refund_lines(refund_lines, opts)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp refund_lines_for_order_item(order_item_id) do
+    RefundLine
+    |> Ash.Query.filter(order_item_id == ^order_item_id)
+    |> Ash.Query.sort(id: :asc)
+    |> Ash.Query.lock(:for_update)
+    |> Ash.read(domain: Sales)
+  end
+
+  defp unbind_refund_lines(refund_lines, opts) do
+    Enum.reduce_while(refund_lines, :ok, fn refund_line, :ok ->
+      case mark_refund_line_order_item_not_found(refund_line, opts) do
+        :ok -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, reason}}
+        other -> {:halt, other}
+      end
+    end)
+  end
+
+  defp mark_refund_line_order_item_not_found(refund_line, opts) do
+    result =
+      case Keyword.get(opts, :refund_line_unbinder) do
+        unbinder when is_function(unbinder, 3) ->
+          unbinder.(
+            refund_line,
+            :mark_order_item_not_found,
+            ash_opts(opts, :mark_order_item_not_found)
+          )
+
+        _missing ->
+          ash_update(refund_line, %{}, :mark_order_item_not_found, opts)
+      end
+
+    normalize_update_result(result)
   end
 
   defp remove_absent_coupons(%Order{id: order_id}, current_coupons, opts) do
@@ -1002,6 +987,11 @@ defmodule EventSales.Sales.OrderUpserter do
   defp normalize_destroy_result({:ok, _record}), do: :ok
   defp normalize_destroy_result(:ok), do: :ok
   defp normalize_destroy_result(other), do: other
+
+  defp normalize_update_result({:ok, _record, _notifications}), do: :ok
+  defp normalize_update_result({:ok, _record}), do: :ok
+  defp normalize_update_result(:ok), do: :ok
+  defp normalize_update_result(other), do: other
 
   defp order_attrs(source_system_id, normalized) do
     normalized

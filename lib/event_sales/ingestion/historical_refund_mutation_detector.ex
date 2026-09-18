@@ -21,12 +21,6 @@ defmodule EventSales.Ingestion.HistoricalRefundMutationDetector do
         }
 
   @type comparison :: %{changed?: boolean(), candidate_event_ids: [String.t()]}
-  @type allocation_mode :: :exact | :parent_wide
-  @type allocation :: %{
-          refund_id: String.t() | nil,
-          allocation_mode: allocation_mode(),
-          event_ids: [String.t()]
-        }
 
   @doc """
   Captures one durable Refund and its exact durable parent/child rows.
@@ -79,27 +73,6 @@ defmodule EventSales.Ingestion.HistoricalRefundMutationDetector do
     %{
       changed?: changed?,
       candidate_event_ids: if(changed?, do: candidate_event_ids(before, after_snapshot), else: [])
-    }
-  end
-
-  @doc """
-  Resolves the bounded Event allocation for a captured Refund snapshot.
-
-  This exposes the same exact-bound and parent-wide rules used by `compare/2`
-  without changing which Refund fields count as certificate truth.
-  """
-  @spec allocation(snapshot()) :: allocation()
-  def allocation(snapshot) when is_map(snapshot) do
-    {allocation_mode, event_ids} =
-      case exact_event_ids(snapshot) do
-        {:ok, event_ids} -> {:exact, event_ids}
-        :fallback -> {:parent_wide, parent_event_ids(snapshot)}
-      end
-
-    %{
-      refund_id: snapshot |> Map.get(:refund_truth, %{}) |> Map.get(:id),
-      allocation_mode: allocation_mode,
-      event_ids: Enum.sort(event_ids)
     }
   end
 
@@ -245,7 +218,12 @@ defmodule EventSales.Ingestion.HistoricalRefundMutationDetector do
   end
 
   defp affected_event_ids(snapshot) do
-    allocation(snapshot).event_ids
+    parent_event_ids = parent_event_ids(snapshot)
+
+    case exact_event_ids(snapshot) do
+      {:ok, event_ids} -> Enum.sort(event_ids)
+      :fallback -> parent_event_ids
+    end
   end
 
   defp exact_event_ids(snapshot) do

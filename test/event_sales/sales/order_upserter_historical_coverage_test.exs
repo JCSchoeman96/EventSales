@@ -39,6 +39,271 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
     {:ok, source: source, event: event, ticket: ticket}
   end
 
+  test "OrderItem Event A to B mutation invalidates both certificates through D2", %{
+    source: source,
+    event: event_a
+  } do
+    event_b =
+      SalesHelpers.create_event!(source, %{
+        name: "D2 Event B",
+        external_event_id: 109_141,
+        external_event_kind: :tickera_event
+      })
+
+    ticket_b = SalesHelpers.create_variation_ticket_type!(event_b, 502, 602)
+    create_mapping!(source, event_b, ticket_b, %{woo_product_id: 502, woo_variation_id: 602})
+
+    initial_payload = payload(@historical_created_at)
+    assert {:ok, order} = OrderUpserter.upsert_order(source.id, initial_payload)
+    assert [%OrderItem{} = item] = order_items(order.id)
+    _refund = create_refund!(source, order, item)
+    event_a_run = certified_run!(event_a)
+    event_b_run = certified_run!(event_b)
+
+    corrected_payload =
+      initial_payload
+      |> Map.put("date_modified_gmt", woo_datetime(~U[2026-08-05 13:00:00.000000Z]))
+      |> Map.put("total", "901.00")
+      |> put_in(["line_items", Access.at(0), "product_id"], 502)
+      |> put_in(["line_items", Access.at(0), "variation_id"], 602)
+      |> put_in(["line_items", Access.at(0), "meta_data"], tickera_event_meta(109_141))
+
+    [corrected_line] = corrected_payload["line_items"]
+
+    assert {:ok, _reconciled} =
+             OrderUpserter.reconcile_event_order(
+               source.id,
+               event_b.id,
+               corrected_payload,
+               [corrected_line]
+             )
+
+    for run_id <- [event_a_run.id, event_b_run.id] do
+      invalidated = Ash.get!(SyncRun, run_id, domain: Ingestion)
+      assert invalidated.order_coverage_status == :incomplete
+      assert invalidated.refund_coverage_status == :incomplete
+      assert %DateTime{} = invalidated.coverage_invalidated_at
+    end
+
+    assert {:error, :historical_coverage_not_current} =
+             HistoricalCoverageResolver.resolve_current(event_a.id)
+
+    assert {:error, :historical_coverage_not_current} =
+             HistoricalCoverageResolver.resolve_current(event_b.id)
+  end
+
+  test "source-absent deletion explicitly marks RefundLines unresolved before D2", %{
+    source: source,
+    event: event
+  } do
+    initial_payload = payload(@historical_created_at)
+    assert {:ok, order} = OrderUpserter.upsert_order(source.id, initial_payload)
+    assert [%OrderItem{} = item] = order_items(order.id)
+    run = certified_run!(event)
+    refund = create_refund!(source, order, item)
+    [line_before] = refund_lines(refund.id)
+
+    assert {:ok, _reconciled} =
+             OrderUpserter.reconcile_event_order(source.id, event.id, initial_payload, [])
+
+    assert order_items(order.id) == []
+    assert [%RefundLine{} = line_after] = refund_lines(refund.id)
+    assert line_after.order_item_id == nil
+    assert line_after.binding_reason == "order_item_not_found"
+    assert line_after.validation_reason == nil
+    assert line_after.woo_refunded_item_id == line_before.woo_refunded_item_id
+    assert line_after.woo_product_id == line_before.woo_product_id
+    assert line_after.woo_variation_id == line_before.woo_variation_id
+    assert line_after.refunded_quantity == line_before.refunded_quantity
+    assert line_after.refund_subtotal_amount == line_before.refund_subtotal_amount
+    assert line_after.refund_total_amount == line_before.refund_total_amount
+    assert line_after.refund_total_tax == line_before.refund_total_tax
+
+    invalidated = Ash.get!(SyncRun, run.id, domain: Ingestion)
+    assert invalidated.order_coverage_status == :incomplete
+    assert invalidated.refund_coverage_status == :incomplete
+    assert %DateTime{} = invalidated.coverage_invalidated_at
+
+    assert {:error, :historical_coverage_not_current} =
+             HistoricalCoverageResolver.resolve_current(event.id)
+  end
+
+  test "unmapped OrderItem becomes mapped through OrderUpserter and D2 invalidates both Events",
+       %{
+         source: source,
+         event: event_a
+       } do
+    event_b =
+      SalesHelpers.create_event!(source, %{
+        name: "D2 Unmapped Event B",
+        external_event_id: 109_142,
+        external_event_kind: :tickera_event
+      })
+
+    ticket_b = SalesHelpers.create_variation_ticket_type!(event_b, 502, 602)
+    create_mapping!(source, event_b, ticket_b, %{woo_product_id: 502, woo_variation_id: 602})
+
+    initial_payload = payload(@historical_created_at)
+    assert {:ok, order} = OrderUpserter.upsert_order(source.id, initial_payload)
+    assert [%OrderItem{} = item] = order_items(order.id)
+    assert {:ok, pending} = Ash.update(item, %{}, action: :remap, domain: Sales)
+    assert pending.mapping_status == :pending_mapping_resolution
+
+    assert {:ok, unmapped} = Ash.update(pending, %{}, action: :mark_unmapped, domain: Sales)
+    assert unmapped.mapping_status == :unmapped
+
+    event_a_run = certified_run!(event_a)
+    event_b_run = certified_run!(event_b)
+
+    corrected_payload =
+      initial_payload
+      |> Map.put("date_modified_gmt", woo_datetime(~U[2026-08-05 13:00:00.000000Z]))
+      |> Map.put("total", "901.00")
+      |> put_in(["line_items", Access.at(0), "product_id"], 502)
+      |> put_in(["line_items", Access.at(0), "variation_id"], 602)
+      |> put_in(["line_items", Access.at(0), "meta_data"], tickera_event_meta(109_142))
+
+    [corrected_line] = corrected_payload["line_items"]
+
+    assert {:ok, _updated} =
+             OrderUpserter.reconcile_event_order(
+               source.id,
+               event_b.id,
+               corrected_payload,
+               [corrected_line]
+             )
+
+    event_b_id = event_b.id
+    assert [%OrderItem{mapping_status: :mapped, event_id: ^event_b_id}] = order_items(order.id)
+
+    for run_id <- [event_a_run.id, event_b_run.id] do
+      invalidated = Ash.get!(SyncRun, run_id, domain: Ingestion)
+      assert invalidated.order_coverage_status == :incomplete
+      assert invalidated.refund_coverage_status == :incomplete
+      assert %DateTime{} = invalidated.coverage_invalidated_at
+    end
+  end
+
+  test "source-absent deletion marks every RefundLine for the OrderItem", %{
+    source: source,
+    event: event
+  } do
+    initial_payload = payload(@historical_created_at)
+    assert {:ok, order} = OrderUpserter.upsert_order(source.id, initial_payload)
+    assert [%OrderItem{} = item] = order_items(order.id)
+    refund = create_refund!(source, order, item)
+
+    Ash.create!(
+      RefundLine,
+      %{
+        refund_id: refund.id,
+        order_item_id: item.id,
+        woo_refund_line_item_id: 992_002,
+        woo_refunded_item_id: item.woo_line_item_id,
+        refunded_quantity: 1,
+        refund_total_amount: Decimal.new("5.00"),
+        refund_total_tax: Decimal.new("0.50"),
+        binding_reason: nil,
+        validation_reason: nil
+      },
+      action: :create_normalized,
+      domain: Sales
+    )
+
+    assert {:ok, _reconciled} =
+             OrderUpserter.reconcile_event_order(source.id, event.id, initial_payload, [])
+
+    assert [%RefundLine{} = first, %RefundLine{} = second] = refund_lines(refund.id)
+    assert Enum.all?([first, second], &is_nil(&1.order_item_id))
+    assert Enum.all?([first, second], &(&1.binding_reason == "order_item_not_found"))
+  end
+
+  test "a RefundLine unbind failure rolls back every line and the OrderItem", %{
+    source: source,
+    event: event
+  } do
+    initial_payload = payload(@historical_created_at)
+    assert {:ok, order} = OrderUpserter.upsert_order(source.id, initial_payload)
+    assert [%OrderItem{} = item] = order_items(order.id)
+    refund = create_refund!(source, order, item)
+
+    second_line =
+      Ash.create!(
+        RefundLine,
+        %{
+          refund_id: refund.id,
+          order_item_id: item.id,
+          woo_refund_line_item_id: 992_003,
+          woo_refunded_item_id: item.woo_line_item_id,
+          refunded_quantity: 1,
+          refund_total_amount: Decimal.new("5.00"),
+          refund_total_tax: Decimal.new("0.50"),
+          binding_reason: nil,
+          validation_reason: nil
+        },
+        action: :create_normalized,
+        domain: Sales
+      )
+
+    unbinder = fn line, _action, ash_opts ->
+      if line.id == second_line.id do
+        {:error, :forced_unbind_failure}
+      else
+        Ash.update(line, %{}, ash_opts)
+      end
+    end
+
+    assert {:error, :forced_unbind_failure} =
+             OrderUpserter.reconcile_event_order(
+               source.id,
+               event.id,
+               initial_payload,
+               [],
+               refund_line_unbinder: unbinder,
+               historical_coverage_invalidator: fn _order, _event_ids ->
+                 flunk("D2 must not run after RefundLine unbind failure")
+               end
+             )
+
+    item_id = item.id
+    assert [%OrderItem{id: ^item_id}] = order_items(order.id)
+
+    assert Enum.all?(refund_lines(refund.id), fn line ->
+             line.order_item_id == item.id and is_nil(line.binding_reason)
+           end)
+  end
+
+  test "D2 failure rolls back explicit unbind, deletion, and coverage state", %{
+    source: source,
+    event: event
+  } do
+    initial_payload = payload(@historical_created_at)
+    assert {:ok, order} = OrderUpserter.upsert_order(source.id, initial_payload)
+    assert [%OrderItem{} = item] = order_items(order.id)
+    run = certified_run!(event)
+    refund = create_refund!(source, order, item)
+
+    assert {:error, :forced_d2_failure} =
+             OrderUpserter.reconcile_event_order(
+               source.id,
+               event.id,
+               initial_payload,
+               [],
+               historical_coverage_invalidator: fn _order, _event_ids ->
+                 {:error, :forced_d2_failure}
+               end
+             )
+
+    item_id = item.id
+    assert [%OrderItem{id: ^item_id}] = order_items(order.id)
+    assert [%RefundLine{order_item_id: ^item_id, binding_reason: nil}] = refund_lines(refund.id)
+    restored = Ash.get!(SyncRun, run.id, domain: Ingestion)
+    assert restored.order_coverage_status == :complete
+    assert restored.refund_coverage_status == :complete
+    assert is_nil(restored.coverage_invalidated_at)
+    assert {:ok, _current} = HistoricalCoverageResolver.resolve_current(event.id)
+  end
+
   test "new historical Order invalidates its current Event certificate", %{
     source: source,
     event: event
@@ -53,242 +318,6 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
 
     invalidated = Ash.get!(SyncRun, run.id, domain: Ingestion)
     assert invalidated.coverage_invalidation_reason == :historical_order_changed
-  end
-
-  test "source-absent OrderItem deletion invalidates bound Refund allocation before D2", %{
-    source: source,
-    event: event
-  } do
-    initial_payload = payload(@historical_created_at)
-    assert {:ok, order} = OrderUpserter.upsert_order(source.id, initial_payload)
-    assert [%OrderItem{} = item] = order_items(order.id)
-
-    refund =
-      Ash.create!(
-        Refund,
-        %{
-          source_system_id: source.id,
-          order_id: order.id,
-          woo_order_id: order.woo_order_id,
-          woo_refund_id: 991_001,
-          currency: "ZAR",
-          source_state: :active,
-          detail_status: :complete,
-          summary_total_amount: Decimal.new("10.00"),
-          header_amount: Decimal.new("10.00"),
-          unallocated_header_amount: Decimal.new("0.00"),
-          source_created_at: @historical_created_at
-        },
-        action: :create_normalized,
-        domain: Sales
-      )
-
-    Ash.create!(
-      RefundLine,
-      %{
-        refund_id: refund.id,
-        order_item_id: item.id,
-        woo_refund_line_item_id: 992_001,
-        woo_refunded_item_id: item.woo_line_item_id,
-        refunded_quantity: 1,
-        refund_total_amount: Decimal.new("10.00"),
-        refund_total_tax: Decimal.new("0.00"),
-        binding_reason: nil,
-        validation_reason: nil
-      },
-      action: :create_normalized,
-      domain: Sales
-    )
-
-    d3b = fn before_snapshot, after_snapshot, event_ids ->
-      send(self(), {:refund_d3b, before_snapshot, after_snapshot, event_ids})
-      {:ok, %{}}
-    end
-
-    d2 = fn _order, _event_ids -> {:ok, %{}} end
-
-    assert {:ok, _reconciled} =
-             OrderUpserter.reconcile_event_order(
-               source.id,
-               event.id,
-               initial_payload,
-               [],
-               historical_refund_coverage_invalidator: d3b,
-               historical_coverage_invalidator: d2
-             )
-
-    assert_receive {:refund_d3b, before_snapshot, after_snapshot, [event_id]}
-    assert event_id == event.id
-    assert before_snapshot.refund_line_truth |> hd() |> Map.get(:order_item_id) == item.id
-    assert after_snapshot.refund_line_truth |> hd() |> Map.get(:order_item_id) == nil
-    assert [%RefundLine{order_item_id: nil}] = refund_lines(refund.id)
-    assert [] = order_items(order.id)
-  end
-
-  test "source-absent deletion rolls back when Refund coverage invalidation fails", %{
-    source: source,
-    event: event
-  } do
-    initial_payload = payload(@historical_created_at)
-    assert {:ok, order} = OrderUpserter.upsert_order(source.id, initial_payload)
-    assert [%OrderItem{} = item] = order_items(order.id)
-
-    refund =
-      Ash.create!(
-        Refund,
-        %{
-          source_system_id: source.id,
-          order_id: order.id,
-          woo_order_id: order.woo_order_id,
-          woo_refund_id: 991_002,
-          currency: "ZAR",
-          source_state: :active,
-          detail_status: :complete,
-          summary_total_amount: Decimal.new("10.00"),
-          header_amount: Decimal.new("10.00"),
-          unallocated_header_amount: Decimal.new("0.00"),
-          source_created_at: @historical_created_at
-        },
-        action: :create_normalized,
-        domain: Sales
-      )
-
-    Ash.create!(
-      RefundLine,
-      %{
-        refund_id: refund.id,
-        order_item_id: item.id,
-        woo_refund_line_item_id: 992_002,
-        woo_refunded_item_id: item.woo_line_item_id,
-        refunded_quantity: 1,
-        refund_total_amount: Decimal.new("10.00"),
-        refund_total_tax: Decimal.new("0.00"),
-        binding_reason: nil,
-        validation_reason: nil
-      },
-      action: :create_normalized,
-      domain: Sales
-    )
-
-    d3b = fn _before_snapshot, _after_snapshot, _event_ids -> {:error, :forced_refund_failure} end
-    d2 = fn _order, _event_ids -> flunk("Order coverage must not run after D3B failure") end
-
-    assert {:error, :forced_refund_failure} =
-             OrderUpserter.reconcile_event_order(
-               source.id,
-               event.id,
-               initial_payload,
-               [],
-               historical_refund_coverage_invalidator: d3b,
-               historical_coverage_invalidator: d2
-             )
-
-    item_id = item.id
-    assert [%OrderItem{id: ^item_id}] = order_items(order.id)
-    assert [%RefundLine{order_item_id: ^item_id}] = refund_lines(refund.id)
-  end
-
-  test "OrderItem Event A to B remap invalidates the existing Refund allocation", %{
-    source: source,
-    event: event_a
-  } do
-    event_b =
-      SalesHelpers.create_event!(source, %{
-        name: "D4R Event B",
-        external_event_id: 109_140,
-        external_event_kind: :tickera_event
-      })
-
-    ticket_b =
-      SalesHelpers.create_variation_ticket_type!(event_b, 502, 602, %{
-        name: "D4R Ticket B"
-      })
-
-    create_mapping!(source, event_b, ticket_b, %{woo_product_id: 502, woo_variation_id: 602})
-
-    initial_payload = payload(@historical_created_at)
-    assert {:ok, order} = OrderUpserter.upsert_order(source.id, initial_payload)
-    assert [%OrderItem{} = item] = order_items(order.id)
-    assert item.event_id == event_a.id
-
-    refund =
-      Ash.create!(
-        Refund,
-        %{
-          source_system_id: source.id,
-          order_id: order.id,
-          woo_order_id: order.woo_order_id,
-          woo_refund_id: 991_003,
-          currency: "ZAR",
-          source_state: :active,
-          detail_status: :complete,
-          summary_total_amount: Decimal.new("10.00"),
-          header_amount: Decimal.new("10.00"),
-          unallocated_header_amount: Decimal.new("0.00"),
-          source_created_at: @historical_created_at
-        },
-        action: :create_normalized,
-        domain: Sales
-      )
-
-    Ash.create!(
-      RefundLine,
-      %{
-        refund_id: refund.id,
-        order_item_id: item.id,
-        woo_refund_line_item_id: 992_003,
-        woo_refunded_item_id: item.woo_line_item_id,
-        refunded_quantity: 1,
-        refund_total_amount: Decimal.new("10.00"),
-        refund_total_tax: Decimal.new("0.00"),
-        binding_reason: nil,
-        validation_reason: nil
-      },
-      action: :create_normalized,
-      domain: Sales
-    )
-
-    corrected_payload =
-      initial_payload
-      |> Map.put("date_modified_gmt", woo_datetime(~U[2026-08-05 13:00:00.000000Z]))
-      |> Map.put("total", "901.00")
-      |> put_in(["line_items", Access.at(0), "product_id"], 502)
-      |> put_in(["line_items", Access.at(0), "variation_id"], 602)
-      |> put_in(["line_items", Access.at(0), "meta_data"], tickera_event_meta(109_140))
-
-    [corrected_line] = corrected_payload["line_items"]
-    test_pid = self()
-
-    d3b = fn before_snapshot, after_snapshot, event_ids ->
-      send(test_pid, {:refund_d3b_remap, before_snapshot, after_snapshot, event_ids})
-      {:ok, %{}}
-    end
-
-    d2 = fn _order, event_ids ->
-      send(test_pid, {:order_d2_remap, event_ids})
-      {:ok, %{}}
-    end
-
-    assert {:ok, reconciled} =
-             OrderUpserter.reconcile_event_order(
-               source.id,
-               event_b.id,
-               corrected_payload,
-               [corrected_line],
-               historical_refund_coverage_invalidator: d3b,
-               historical_coverage_invalidator: d2
-             )
-
-    assert reconciled.id == order.id
-    event_b_id = event_b.id
-    assert [%OrderItem{event_id: ^event_b_id}] = order_items(order.id)
-
-    assert_receive {:refund_d3b_remap, before_snapshot, after_snapshot, event_ids}
-    assert event_ids == Enum.sort([event_a.id, event_b.id])
-    assert before_snapshot.refund_line_truth |> hd() |> Map.get(:order_item_id) == item.id
-    assert after_snapshot.refund_line_truth |> hd() |> Map.get(:order_item_id) == item.id
-    assert_receive {:order_d2_remap, ^event_ids}
-    assert_receive {:order_d2_remap, ^event_ids}
   end
 
   test "new historical Order with a latent exact source Event invalidates its certificate", %{
@@ -973,9 +1002,54 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
     |> Enum.sort_by(& &1.code)
   end
 
+  defp create_refund!(source, order, item) do
+    refund =
+      Ash.create!(
+        Refund,
+        %{
+          source_system_id: source.id,
+          order_id: order.id,
+          woo_order_id: order.woo_order_id,
+          woo_refund_id: System.unique_integer([:positive]),
+          currency: "ZAR",
+          source_state: :active,
+          detail_status: :complete,
+          summary_total_amount: Decimal.new("10.00"),
+          header_amount: Decimal.new("10.00"),
+          unallocated_header_amount: Decimal.new("0.00"),
+          source_created_at: @historical_created_at
+        },
+        action: :create_normalized,
+        domain: Sales
+      )
+
+    Ash.create!(
+      RefundLine,
+      %{
+        refund_id: refund.id,
+        order_item_id: item.id,
+        woo_refund_line_item_id: System.unique_integer([:positive]),
+        woo_refunded_item_id: item.woo_line_item_id,
+        woo_product_id: item.woo_product_id,
+        woo_variation_id: item.woo_variation_id,
+        refunded_quantity: 1,
+        refund_subtotal_amount: Decimal.new("12.00"),
+        refund_total_amount: Decimal.new("10.00"),
+        refund_total_tax: Decimal.new("0.00"),
+        binding_reason: nil,
+        validation_reason: nil
+      },
+      action: :create_normalized,
+      domain: Sales
+    )
+
+    refund
+  end
+
   defp refund_lines(refund_id) do
     RefundLine
     |> Ash.Query.filter(refund_id == ^refund_id)
+    |> Ash.Query.sort(id: :asc)
     |> Ash.read!(domain: Sales)
   end
 
