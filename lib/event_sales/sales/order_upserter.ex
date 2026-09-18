@@ -191,18 +191,37 @@ defmodule EventSales.Sales.OrderUpserter do
     with {:ok, after_snapshot} <- HistoricalOrderMutationDetector.capture(order),
          {:ok, after_refund_allocations} <-
            HistoricalRefundOrderItemImpactCoordinator.capture_for_order(order),
-         :ok <- invalidate_refund_allocation_changes(mutation, after_refund_allocations, opts) do
+         {:ok, order_candidate_event_ids} <-
+           resolve_mutation_candidates(
+             mutation,
+             order,
+             after_snapshot,
+             reconciliation_event_id,
+             opts
+           ),
+         :ok <-
+           invalidate_refund_allocation_changes(
+             mutation,
+             after_refund_allocations,
+             order_candidate_event_ids,
+             opts
+           ) do
       finalize_captured_mutation(
         mutation,
         after_snapshot,
-        reconciliation_event_id,
         opts,
-        created?
+        created?,
+        order_candidate_event_ids
       )
     end
   end
 
-  defp invalidate_refund_allocation_changes(mutation, after_refund_allocations, opts) do
+  defp invalidate_refund_allocation_changes(
+         mutation,
+         after_refund_allocations,
+         order_candidate_event_ids,
+         opts
+       ) do
     before_refund_allocations = Map.get(mutation, :before_refund_allocations, [])
 
     changes =
@@ -211,19 +230,48 @@ defmodule EventSales.Sales.OrderUpserter do
         after_refund_allocations
       )
 
+    opts = Keyword.put(opts, :additional_event_ids, order_candidate_event_ids)
     HistoricalRefundOrderItemImpactCoordinator.invalidate_changes(changes, opts)
+  end
+
+  defp resolve_mutation_candidates(
+         %{created?: true},
+         order,
+         after_snapshot,
+         reconciliation_event_id,
+         opts
+       ) do
+    resolve_coverage_candidates(order, nil, after_snapshot, reconciliation_event_id, opts)
+  end
+
+  defp resolve_mutation_candidates(
+         %{created?: false, before_snapshot: before_snapshot},
+         order,
+         after_snapshot,
+         reconciliation_event_id,
+         opts
+       ) do
+    if HistoricalOrderMutationDetector.compare(before_snapshot, after_snapshot).changed? do
+      resolve_coverage_candidates(
+        order,
+        before_snapshot,
+        after_snapshot,
+        reconciliation_event_id,
+        opts
+      )
+    else
+      {:ok, []}
+    end
   end
 
   defp finalize_captured_mutation(
          %{order: %Order{} = order},
-         after_snapshot,
-         reconciliation_event_id,
+         _after_snapshot,
          opts,
-         true
+         true,
+         candidates
        ) do
-    with {:ok, candidates} <-
-           resolve_coverage_candidates(order, nil, after_snapshot, reconciliation_event_id, opts),
-         :ok <- invalidate_new_order(order, candidates, opts) do
+    with :ok <- invalidate_new_order(order, candidates, opts) do
       {:ok, order}
     end
   end
@@ -231,9 +279,9 @@ defmodule EventSales.Sales.OrderUpserter do
   defp finalize_captured_mutation(
          %{order: %Order{} = order, before_order: before_order, before_snapshot: before_snapshot},
          after_snapshot,
-         reconciliation_event_id,
          opts,
-         false
+         false,
+         candidates
        ) do
     comparison = HistoricalOrderMutationDetector.compare(before_snapshot, after_snapshot)
 
@@ -242,15 +290,7 @@ defmodule EventSales.Sales.OrderUpserter do
         {:ok, order}
 
       %{changed?: true} ->
-        with {:ok, candidates} <-
-               resolve_coverage_candidates(
-                 order,
-                 before_snapshot,
-                 after_snapshot,
-                 reconciliation_event_id,
-                 opts
-               ),
-             :ok <-
+        with :ok <-
                invalidate_existing_order(
                  before_order,
                  order,

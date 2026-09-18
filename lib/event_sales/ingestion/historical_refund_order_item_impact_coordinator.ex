@@ -126,6 +126,7 @@ defmodule EventSales.Ingestion.HistoricalRefundOrderItemImpactCoordinator do
     event_ids =
       changes
       |> Enum.flat_map(&Map.get(&1, :event_ids, []))
+      |> Kernel.++(Keyword.get(opts, :additional_event_ids, []))
       |> normalize_event_ids()
 
     with :ok <- HistoricalCoverageFence.acquire(event_ids) do
