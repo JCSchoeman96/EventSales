@@ -518,6 +518,18 @@
       {
         "docs_count": 0,
         "moduledoc?": true,
+        "name": "EventSales.Ingestion.Resources.HistoricalOrderMembership",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/resources/historical_order_membership.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
         "name": "EventSales.Ingestion.Resources.SyncCursor",
         "parse_error": null,
         "path": "lib/event_sales/ingestion/resources/sync_cursor.ex",

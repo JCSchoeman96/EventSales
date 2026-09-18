@@ -361,6 +361,11 @@ defmodule EventSales.Ingestion.Resources.SyncRun do
       allow_nil? false
       public? true
     end
+
+    has_many :historical_order_memberships,
+             EventSales.Ingestion.Resources.HistoricalOrderMembership do
+      destination_attribute :sync_run_id
+    end
   end
 
   state_machine do

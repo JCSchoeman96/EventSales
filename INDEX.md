@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-372
+373
 
 ## Files
 
@@ -177,6 +177,7 @@ Project root: `.`
 - `lib/event_sales/ingestion/resources/catalog_change_signal.ex`
 - `lib/event_sales/ingestion/resources/csv_import_batch.ex`
 - `lib/event_sales/ingestion/resources/csv_import_row.ex`
+- `lib/event_sales/ingestion/resources/historical_order_membership.ex`
 - `lib/event_sales/ingestion/resources/sync_cursor.ex`
 - `lib/event_sales/ingestion/resources/sync_run.ex`
 - `lib/event_sales/ingestion/resources/tickera_attendee_snapshot.ex`
@@ -1354,6 +1355,12 @@ Project root: `.`
   - public_funs: _none_
   - uses: `Ash.Resource`
 - `EventSales.Ingestion.Resources.CsvImportRow` - `lib/event_sales/ingestion/resources/csv_import_row.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
+- `EventSales.Ingestion.Resources.HistoricalOrderMembership` - `lib/event_sales/ingestion/resources/historical_order_membership.ex`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
@@ -2613,6 +2620,7 @@ Project root: `.`
 - `EventSales.Ingestion.Resources.CatalogChangeSignal` - `lib/event_sales/ingestion/resources/catalog_change_signal.ex`
 - `EventSales.Ingestion.Resources.CsvImportBatch` - `lib/event_sales/ingestion/resources/csv_import_batch.ex`
 - `EventSales.Ingestion.Resources.CsvImportRow` - `lib/event_sales/ingestion/resources/csv_import_row.ex`
+- `EventSales.Ingestion.Resources.HistoricalOrderMembership` - `lib/event_sales/ingestion/resources/historical_order_membership.ex`
 - `EventSales.Ingestion.Resources.SyncCursor` - `lib/event_sales/ingestion/resources/sync_cursor.ex`
 - `EventSales.Ingestion.Resources.SyncRun` - `lib/event_sales/ingestion/resources/sync_run.ex`
 - `EventSales.Ingestion.Resources.TickeraAttendeeSnapshot` - `lib/event_sales/ingestion/resources/tickera_attendee_snapshot.ex`
