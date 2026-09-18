@@ -6,6 +6,7 @@ defmodule EventSales.Sales.OrderUpserter do
   require Ash.Query
 
   alias EventSales.Ingestion.HistoricalCoverageInvalidator
+  alias EventSales.Ingestion.HistoricalRefundOrderItemImpactCoordinator
   alias EventSales.Ingestion.HistoricalOrderCoverageCandidateResolver
   alias EventSales.Ingestion.HistoricalOrderMutationDetector
   alias EventSales.Ingestion.Parsers.WoocommerceOrderParser
@@ -115,6 +116,7 @@ defmodule EventSales.Sales.OrderUpserter do
              order: order,
              before_order: nil,
              before_snapshot: nil,
+             before_refund_allocations: [],
              created?: true
            }}
         end
@@ -163,6 +165,8 @@ defmodule EventSales.Sales.OrderUpserter do
 
   defp update_existing_order(existing, source_system_id, normalized, opts) do
     with {:ok, before_snapshot} <- HistoricalOrderMutationDetector.capture(existing),
+         {:ok, before_refund_allocations} <-
+           HistoricalRefundOrderItemImpactCoordinator.capture_for_order(existing),
          {:ok, %Order{} = order} <-
            update_order_with_children(existing, source_system_id, normalized, opts) do
       {:ok,
@@ -170,6 +174,7 @@ defmodule EventSales.Sales.OrderUpserter do
          order: order,
          before_order: existing,
          before_snapshot: before_snapshot,
+         before_refund_allocations: before_refund_allocations,
          created?: false
        }}
     else
@@ -183,7 +188,10 @@ defmodule EventSales.Sales.OrderUpserter do
          reconciliation_event_id,
          opts
        ) do
-    with {:ok, after_snapshot} <- HistoricalOrderMutationDetector.capture(order) do
+    with {:ok, after_snapshot} <- HistoricalOrderMutationDetector.capture(order),
+         {:ok, after_refund_allocations} <-
+           HistoricalRefundOrderItemImpactCoordinator.capture_for_order(order),
+         :ok <- invalidate_refund_allocation_changes(mutation, after_refund_allocations, opts) do
       finalize_captured_mutation(
         mutation,
         after_snapshot,
@@ -192,6 +200,18 @@ defmodule EventSales.Sales.OrderUpserter do
         created?
       )
     end
+  end
+
+  defp invalidate_refund_allocation_changes(mutation, after_refund_allocations, opts) do
+    before_refund_allocations = Map.get(mutation, :before_refund_allocations, [])
+
+    changes =
+      HistoricalRefundOrderItemImpactCoordinator.compare(
+        before_refund_allocations,
+        after_refund_allocations
+      )
+
+    HistoricalRefundOrderItemImpactCoordinator.invalidate_changes(changes, opts)
   end
 
   defp finalize_captured_mutation(
