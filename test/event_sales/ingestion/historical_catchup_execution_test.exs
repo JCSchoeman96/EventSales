@@ -6,11 +6,20 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
   alias EventSales.Ingestion
   alias EventSales.Ingestion.HistoricalCatchupEvidence
   alias EventSales.Ingestion.HistoricalCatchupExecution
+  alias EventSales.Ingestion.HistoricalCoverageCertifier
   alias EventSales.Ingestion.HistoricalEventLineSelector
   alias EventSales.Ingestion.HistoricalManifestEvidence
-  alias EventSales.Ingestion.Resources.{HistoricalOrderMembership, SyncCursor, SyncRun}
+
+  alias EventSales.Ingestion.Resources.{
+    HistoricalOrderMembership,
+    HistoricalRefundObservation,
+    HistoricalRefundReference,
+    SyncCursor,
+    SyncRun
+  }
+
   alias EventSales.Sales.OrderUpserter
-  alias EventSales.Sales.Resources.{Order, OrderItem}
+  alias EventSales.Sales.Resources.{Order, OrderItem, Refund}
   alias EventSales.TestSupport.{FixtureHelpers, HistoricalCoverageHelpers, SalesHelpers}
 
   require Ash.Query
@@ -236,6 +245,44 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     assert is_nil(persisted_run.coverage_certified_at)
   end
 
+  test "catch-up records a newly discovered refund reference", %{run: run, cursor: cursor} do
+    CatchupClient.enqueue!(page(["42"], has_more: true, next_cursor: "u-next.cursor"))
+
+    WooClient.put_order!(42, {
+      :ok,
+      order_payload(42)
+      |> Map.put("refunds", [%{"id" => 91_101, "total" => "-10.00"}])
+    })
+
+    assert {:continue, _updated_run, _updated_cursor} = run_step(run, cursor)
+
+    membership = membership!(run, 42)
+
+    assert {:ok, observation} =
+             HistoricalRefundObservation
+             |> Ash.Query.filter(historical_order_membership_id == ^membership.id)
+             |> Ash.read_one(domain: Ingestion)
+
+    assert observation.resolution_state == :catchup_resolved
+    assert observation.reference_count == 1
+
+    assert [%{woo_refund_id: 91_101, source_state: :present}] =
+             HistoricalRefundReference
+             |> Ash.Query.filter(historical_refund_observation_id == ^observation.id)
+             |> Ash.read!(domain: Ingestion)
+  end
+
+  test "catch-up rejects a missing refunds field before cursor checkpoint", %{
+    run: run,
+    cursor: cursor
+  } do
+    CatchupClient.enqueue!(page(["42"], has_more: true, next_cursor: "u-next.cursor"))
+    WooClient.put_order!(42, {:ok, Map.delete(order_payload(42), "refunds")})
+
+    assert {:error, {:invalid_refund_reference, :refunds, :required}} = run_step(run, cursor)
+    assert current_cursor(cursor).page == cursor.page
+  end
+
   test "catch-up rejects a source member that is absent from M", %{run: run, cursor: cursor} do
     CatchupClient.enqueue!(page(["99"], has_more: true, next_cursor: "u-next.cursor"))
     WooClient.put_order!(99, {:ok, order_payload(99)})
@@ -303,6 +350,28 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
              run_step(run, cursor,
                historical_membership_updater: fn _attrs ->
                  {:error, :membership_write_failed}
+               end
+             )
+
+    updated = Ash.get!(HistoricalOrderMembership, membership.id, domain: Ingestion)
+    assert updated.event_match_state == :non_target
+    assert updated.resolution_state == :manifest_resolved
+    assert current_cursor(cursor).page == 1
+  end
+
+  test "refund observation checkpoint failure rolls back membership and cursor", %{
+    run: run,
+    cursor: cursor
+  } do
+    membership = create_membership!(run, 42, :non_target)
+    CatchupClient.enqueue!(page(["42"], has_more: true, next_cursor: "u-next.cursor"))
+    WooClient.put_order!(42, {:ok, order_payload(42)})
+    Selector.set_lines!([%{"id" => 1}])
+
+    assert {:error, :refund_reference_checkpoint_failed} =
+             run_step(run, cursor,
+               historical_refund_evidence_writer: fn _phase, _membership, _evidence, _opts ->
+                 {:error, :refund_reference_checkpoint_failed}
                end
              )
 
@@ -419,6 +488,72 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
 
     assert terminal_cursor.metadata["historical_catchup"]["state"] == "catchup_terminal"
     assert terminal_cursor.metadata["historical_catchup"]["terminal_evidence"] == "u-empty-proof"
+  end
+
+  test "empty U certifies an unchanged manifest target with an explicit zero-refund observation",
+       %{
+         source: source,
+         event: event,
+         run: run,
+         cursor: cursor
+       } do
+    create_membership!(run, 42, :target)
+    create_target_order_fact!(source, event, 42)
+
+    Ash.update!(
+      run,
+      %{orders_seen_count: 1, orders_matched_count: 1, orders_upserted_count: 1},
+      action: :record_counts,
+      domain: Ingestion
+    )
+
+    CatchupClient.enqueue!(
+      page([], has_more: false, terminal_evidence: "u-empty-unchanged-target-proof")
+    )
+
+    assert :ok =
+             run_step(run, cursor,
+               seed_memberships: false,
+               coverage_certifier: HistoricalCoverageCertifier
+             )
+
+    completed_run = current_run(run)
+    assert completed_run.status == :completed
+    assert completed_run.coverage_evidence["refunds"]["blocking_reasons"] == %{}
+  end
+
+  test "empty U certifies an unchanged manifest target with complete refund evidence", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    create_membership!(run, 42, :target, [91_101])
+    create_target_order_fact!(source, event, 42)
+    create_refund!(source, 42, 91_101)
+
+    Ash.update!(
+      run,
+      %{orders_seen_count: 1, orders_matched_count: 1, orders_upserted_count: 1},
+      action: :record_counts,
+      domain: Ingestion
+    )
+
+    CatchupClient.enqueue!(
+      page([], has_more: false, terminal_evidence: "u-empty-unchanged-refund-proof")
+    )
+
+    assert :ok =
+             run_step(run, cursor,
+               seed_memberships: false,
+               coverage_certifier: HistoricalCoverageCertifier
+             )
+
+    completed_run = current_run(run)
+    assert completed_run.status == :completed
+    assert completed_run.coverage_evidence["refunds"]["references_seen"] == 1
+    assert completed_run.coverage_evidence["refunds"]["details_complete"] == 1
+    assert completed_run.coverage_evidence["refunds"]["blocking_reasons"] == %{}
   end
 
   test "blocked coverage fails the terminal run and cursor atomically", %{
@@ -945,6 +1080,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
       "id" => id,
       "date_created_gmt" => "2026-08-04T10:00:00Z",
       "date_modified_gmt" => "2026-08-04T10:00:00Z",
+      "refunds" => [],
       "line_items" => []
     }
   end
@@ -998,19 +1134,81 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     |> Ash.create!(domain: Ingestion)
   end
 
-  defp create_membership!(run, source_order_id, event_match_state \\ :non_target) do
+  defp create_membership!(
+         run,
+         source_order_id,
+         event_match_state \\ :non_target,
+         refund_ids \\ []
+       ) do
+    membership =
+      Ash.create!(
+        HistoricalOrderMembership,
+        %{
+          sync_run_id: run.id,
+          source_order_id: source_order_id,
+          manifest_source_created_at: ~U[2026-08-04 10:00:00.000000Z],
+          manifest_source_modified_at: ~U[2026-08-04 10:00:00.000000Z],
+          last_source_modified_at: ~U[2026-08-04 10:00:00.000000Z],
+          event_match_state: event_match_state
+        },
+        action: :resolve_manifest,
+        domain: Ingestion
+      )
+
     Ash.create!(
-      HistoricalOrderMembership,
+      HistoricalRefundObservation,
       %{
-        sync_run_id: run.id,
-        source_order_id: source_order_id,
-        manifest_source_created_at: ~U[2026-08-04 10:00:00.000000Z],
-        manifest_source_modified_at: ~U[2026-08-04 10:00:00.000000Z],
-        last_source_modified_at: ~U[2026-08-04 10:00:00.000000Z],
-        event_match_state: event_match_state
+        historical_order_membership_id: membership.id,
+        reference_count: length(refund_ids),
+        observed_at: @manifest_observed_at
       },
       action: :resolve_manifest,
       domain: Ingestion
+    )
+
+    observation =
+      HistoricalRefundObservation
+      |> Ash.Query.filter(historical_order_membership_id == ^membership.id)
+      |> Ash.read_one!(domain: Ingestion)
+
+    Enum.each(refund_ids, fn refund_id ->
+      Ash.create!(
+        HistoricalRefundReference,
+        %{
+          historical_refund_observation_id: observation.id,
+          woo_refund_id: refund_id,
+          last_observed_at: @manifest_observed_at
+        },
+        action: :observe_present,
+        domain: Ingestion
+      )
+    end)
+
+    membership
+  end
+
+  defp create_refund!(source, woo_order_id, woo_refund_id) do
+    order =
+      Order
+      |> Ash.Query.filter(source_system_id == ^source.id and woo_order_id == ^woo_order_id)
+      |> Ash.read_one!(domain: EventSales.Sales)
+
+    Ash.create!(
+      Refund,
+      %{
+        source_system_id: source.id,
+        order_id: order.id,
+        woo_order_id: woo_order_id,
+        woo_refund_id: woo_refund_id,
+        currency: "ZAR",
+        source_state: :active,
+        detail_status: :complete,
+        summary_total_amount: Decimal.new("5"),
+        header_amount: Decimal.new("5"),
+        source_created_at: DateTime.add(@date_from, 2, :day)
+      },
+      action: :create_normalized,
+      domain: EventSales.Sales
     )
   end
 

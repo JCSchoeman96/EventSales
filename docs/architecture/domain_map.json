@@ -530,6 +530,30 @@
       {
         "docs_count": 0,
         "moduledoc?": true,
+        "name": "EventSales.Ingestion.Resources.HistoricalRefundObservation",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/resources/historical_refund_observation.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Ingestion.Resources.HistoricalRefundReference",
+        "parse_error": null,
+        "path": "lib/event_sales/ingestion/resources/historical_refund_reference.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
         "name": "EventSales.Ingestion.Resources.SyncCursor",
         "parse_error": null,
         "path": "lib/event_sales/ingestion/resources/sync_cursor.ex",

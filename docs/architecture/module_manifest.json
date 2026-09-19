@@ -146,6 +146,7 @@
     "lib/event_sales/ingestion/historical_order_coverage_candidate_resolver.ex",
     "lib/event_sales/ingestion/historical_order_mutation_detector.ex",
     "lib/event_sales/ingestion/historical_refund_coverage_invalidator.ex",
+    "lib/event_sales/ingestion/historical_refund_evidence.ex",
     "lib/event_sales/ingestion/historical_refund_mutation_detector.ex",
     "lib/event_sales/ingestion/intake_backpressure.ex",
     "lib/event_sales/ingestion/manual_sync.ex",
@@ -166,6 +167,8 @@
     "lib/event_sales/ingestion/resources/csv_import_batch.ex",
     "lib/event_sales/ingestion/resources/csv_import_row.ex",
     "lib/event_sales/ingestion/resources/historical_order_membership.ex",
+    "lib/event_sales/ingestion/resources/historical_refund_observation.ex",
+    "lib/event_sales/ingestion/resources/historical_refund_reference.ex",
     "lib/event_sales/ingestion/resources/sync_cursor.ex",
     "lib/event_sales/ingestion/resources/sync_run.ex",
     "lib/event_sales/ingestion/resources/tickera_attendee_snapshot.ex",
@@ -3506,6 +3509,21 @@
       "uses": []
     },
     {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.HistoricalRefundEvidence",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/historical_refund_evidence.ex",
+      "public_funs": [
+        {
+          "arity": 4,
+          "name": "persist"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
       "docs_count": 2,
       "moduledoc?": true,
       "name": "EventSales.Ingestion.HistoricalRefundMutationDetector",
@@ -3635,7 +3653,7 @@
       "uses": []
     },
     {
-      "docs_count": 0,
+      "docs_count": 1,
       "moduledoc?": true,
       "name": "EventSales.Ingestion.Parsers.WoocommerceRefundReferenceParser",
       "parse_error": null,
@@ -3644,6 +3662,10 @@
         {
           "arity": 1,
           "name": "parse"
+        },
+        {
+          "arity": 1,
+          "name": "parse_historical"
         }
       ],
       "specs?": true,
@@ -3890,6 +3912,30 @@
       "name": "EventSales.Ingestion.Resources.HistoricalOrderMembership",
       "parse_error": null,
       "path": "lib/event_sales/ingestion/resources/historical_order_membership.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Resources.HistoricalRefundObservation",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/resources/historical_refund_observation.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Resources.HistoricalRefundReference",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/resources/historical_refund_reference.ex",
       "public_funs": [],
       "specs?": false,
       "uses": [

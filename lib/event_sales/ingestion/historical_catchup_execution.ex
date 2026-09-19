@@ -27,7 +27,9 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
   alias EventSales.Ingestion.HistoricalCoverageFence
   alias EventSales.Ingestion.HistoricalEventLineSelector
   alias EventSales.Ingestion.HistoricalManifestEvidence
+  alias EventSales.Ingestion.HistoricalRefundEvidence
   alias EventSales.Ingestion.OrderRefundSync
+  alias EventSales.Ingestion.Parsers.WoocommerceRefundReferenceParser
   alias EventSales.Ingestion.Resources.{HistoricalOrderMembership, SyncCursor, SyncRun}
   alias EventSales.Repo
   alias EventSales.Sales.OrderUpserter
@@ -431,16 +433,22 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
          memberships,
          opts
        ) do
-    with {:ok, event_match_state} <-
+    with {:ok, {event_match_state, refund_evidence}} <-
            resolve_order(run, event, source, source_order_id, order, opts),
-         {:ok, attrs} <- catchup_membership_attrs(item, source_order_id, event_match_state) do
+         {:ok, attrs} <-
+           catchup_membership_attrs(
+             item,
+             source_order_id,
+             event_match_state,
+             refund_evidence
+           ) do
       {:cont, {:ok, [attrs | memberships]}}
     else
       {:error, reason} -> {:halt, {:error, reason}}
     end
   end
 
-  defp catchup_membership_attrs(item, source_order_id, event_match_state) do
+  defp catchup_membership_attrs(item, source_order_id, event_match_state, refund_evidence) do
     with {:ok, source_order_id} <- positive_id(source_order_id),
          {:ok, latest_source_modified_at} <-
            parse_source_datetime(item, :source_modified_at_gmt) do
@@ -448,7 +456,8 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
        %{
          source_order_id: source_order_id,
          latest_source_modified_at: latest_source_modified_at,
-         event_match_state: event_match_state
+         event_match_state: event_match_state,
+         refund_evidence: refund_evidence
        }}
     else
       _error -> {:error, :invalid_catchup_page}
@@ -474,12 +483,30 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
   defp resolve_order(run, event, source, source_order_id, order, opts) do
     with :ok <- validate_returned_order_id(source_order_id, order),
          {:ok, raw_lines} <- select_event_lines(event, source, order, opts),
+         {:ok, refund_evidence} <- refund_evidence(run, source_order_id, order, opts),
          result <- reconcile_order(run, event, source_order_id, order, raw_lines, opts),
          :ok <- normalize_reconcile_result(result),
          :ok <- sync_refunds(run, source, source_order_id, opts) do
-      {:ok, if(raw_lines == [], do: :non_target, else: :target)}
+      {:ok, {if(raw_lines == [], do: :non_target, else: :target), refund_evidence}}
     else
       {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp refund_evidence(run, source_order_id, order, opts) do
+    with {:ok, references} <- WoocommerceRefundReferenceParser.parse_historical(order),
+         {:ok, source_order_id} <- positive_id(source_order_id),
+         %DateTime{} = observed_at <- now(opts) do
+      {:ok,
+       %{
+         reference_ids: Enum.map(references, & &1.woo_refund_id),
+         observed_at: observed_at,
+         source_system_id: run.source_system_id,
+         source_order_id: source_order_id
+       }}
+    else
+      {:error, reason} -> {:error, reason}
+      _other -> {:error, :invalid_refund_observation_time}
     end
   end
 
@@ -772,22 +799,47 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
       Keyword.get(opts, :historical_membership_updater, &update_catchup_membership/1)
 
     Enum.reduce_while(memberships, {:ok, []}, fn attrs, {:ok, notifications} ->
-      attrs = Map.put(attrs, :sync_run_id, sync_run_id)
-
-      case updater.(attrs) do
-        {:ok, %HistoricalOrderMembership{}, new_notifications} ->
+      case persist_catchup_membership(attrs, sync_run_id, updater, opts) do
+        {:ok, new_notifications} ->
           {:cont, {:ok, notifications ++ new_notifications}}
-
-        {:ok, %HistoricalOrderMembership{}} ->
-          {:cont, {:ok, notifications}}
 
         {:error, reason} ->
           {:halt, {:error, reason}}
-
-        _other ->
-          {:halt, {:error, :catchup_membership_checkpoint_failed}}
       end
     end)
+  end
+
+  defp persist_catchup_membership(attrs, sync_run_id, updater, opts) do
+    refund_evidence = Map.fetch!(attrs, :refund_evidence)
+    attrs = attrs |> Map.delete(:refund_evidence) |> Map.put(:sync_run_id, sync_run_id)
+
+    with {:ok, membership, new_notifications} <- normalize_catchup_update(updater.(attrs)),
+         {:ok, evidence_notifications} <-
+           persist_refund_evidence(:catchup, membership, refund_evidence, opts) do
+      {:ok, new_notifications ++ evidence_notifications}
+    end
+  end
+
+  defp normalize_catchup_update({:ok, %HistoricalOrderMembership{} = membership, notifications}),
+    do: {:ok, membership, notifications}
+
+  defp normalize_catchup_update({:ok, %HistoricalOrderMembership{} = membership}),
+    do: {:ok, membership, []}
+
+  defp normalize_catchup_update({:error, reason}), do: {:error, reason}
+
+  defp normalize_catchup_update(_other),
+    do: {:error, :catchup_membership_checkpoint_failed}
+
+  defp persist_refund_evidence(phase, membership, evidence, opts) do
+    writer =
+      Keyword.get(
+        opts,
+        :historical_refund_evidence_writer,
+        &HistoricalRefundEvidence.persist/4
+      )
+
+    writer.(phase, membership, evidence, opts)
   end
 
   defp update_catchup_membership(%{
