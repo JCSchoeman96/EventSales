@@ -615,11 +615,12 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifier do
             ),
           observation_incomplete:
             fragment(
+              # U is changed-only, so unchanged members may remain manifest-resolved.
               "COUNT(DISTINCT ?) FILTER (WHERE ? IS NOT NULL AND ? IS DISTINCT FROM ?)",
               membership.id,
               observation.id,
               observation.resolution_state,
-              ^"catchup_resolved"
+              membership.resolution_state
             )
         }
 

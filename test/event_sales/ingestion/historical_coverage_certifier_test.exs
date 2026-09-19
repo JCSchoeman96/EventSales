@@ -143,6 +143,103 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifierTest do
     assert_reason(result, "refunds", "refund_reference_observation_missing")
   end
 
+  test "accepts a target member whose manifest observation remains manifest-resolved", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    {_order, _item, refund, refund_line} = create_complete_facts!(source, event)
+
+    Repo.query!("DELETE FROM sales_refund_lines WHERE id = $1", [Ecto.UUID.dump!(refund_line.id)])
+    Repo.query!("DELETE FROM sales_refunds WHERE id = $1", [Ecto.UUID.dump!(refund.id)])
+    create_refund_observation!(run, 12_001, [], phase: :manifest)
+
+    run =
+      record_counts!(run, %{
+        orders_seen_count: 1,
+        orders_matched_count: 1,
+        orders_upserted_count: 1
+      })
+
+    assert {:ok, result} = HistoricalCoverageCertifier.evaluate(run, cursor)
+    assert result.coverage_evidence["refunds"]["blocking_reasons"] == %{}
+  end
+
+  test "accepts a target member with matching catchup-resolved refund observation", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    create_complete_facts!(source, event)
+    create_refund_observation!(run, 12_001, [701])
+
+    run =
+      record_counts!(run, %{
+        orders_seen_count: 1,
+        orders_matched_count: 1,
+        orders_upserted_count: 1
+      })
+
+    assert {:ok, result} = HistoricalCoverageCertifier.evaluate(run, cursor)
+    assert result.coverage_evidence["refunds"]["blocking_reasons"] == %{}
+  end
+
+  test "blocks a catchup-resolved target with stale manifest refund observation", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    {_order, _item, _refund, _refund_line} = create_complete_facts!(source, event)
+    {membership, _observation} = create_refund_observation!(run, 12_001, [701], phase: :manifest)
+
+    Ash.update!(
+      membership,
+      %{last_source_modified_at: membership.last_source_modified_at, event_match_state: :target},
+      action: :resolve_catchup,
+      domain: Ingestion
+    )
+
+    run =
+      record_counts!(run, %{
+        orders_seen_count: 1,
+        orders_matched_count: 1,
+        orders_upserted_count: 1
+      })
+
+    assert {:blocked, result} = HistoricalCoverageCertifier.evaluate(run, cursor)
+    assert_reason(result, "refunds", "refund_reference_observation_incomplete")
+  end
+
+  test "blocks a manifest-resolved target with unexpected catchup refund observation", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    {_order, _item, _refund, _refund_line} = create_complete_facts!(source, event)
+    {_membership, observation} = create_refund_observation!(run, 12_001, [701], phase: :manifest)
+
+    Ash.update!(
+      observation,
+      %{reference_count: 1, observed_at: @catchup_observed_at},
+      action: :resolve_catchup,
+      domain: Ingestion
+    )
+
+    run =
+      record_counts!(run, %{
+        orders_seen_count: 1,
+        orders_matched_count: 1,
+        orders_upserted_count: 1
+      })
+
+    assert {:blocked, result} = HistoricalCoverageCertifier.evaluate(run, cursor)
+    assert_reason(result, "refunds", "refund_reference_observation_incomplete")
+  end
+
   test "certifies an explicitly observed zero-refund target member", %{
     source: source,
     event: event,
@@ -1488,6 +1585,16 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifierTest do
         end)
 
         Ash.update!(
+          membership,
+          %{
+            last_source_modified_at: membership.last_source_modified_at,
+            event_match_state: membership.event_match_state
+          },
+          action: :resolve_catchup,
+          domain: Ingestion
+        )
+
+        Ash.update!(
           observation,
           %{reference_count: length(active_ids), observed_at: @catchup_observed_at},
           action: :resolve_catchup,
@@ -1612,7 +1719,7 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifierTest do
     )
   end
 
-  defp create_refund_observation!(run, source_order_id, refund_ids) do
+  defp create_refund_observation!(run, source_order_id, refund_ids, opts \\ []) do
     run_id = run.id
 
     membership =
@@ -1664,12 +1771,24 @@ defmodule EventSales.Ingestion.HistoricalCoverageCertifierTest do
       )
     end)
 
-    Ash.update!(
-      observation,
-      %{reference_count: length(refund_ids), observed_at: @catchup_observed_at},
-      action: :resolve_catchup,
-      domain: Ingestion
-    )
+    if Keyword.get(opts, :phase, :catchup) == :catchup do
+      Ash.update!(
+        membership,
+        %{
+          last_source_modified_at: membership.last_source_modified_at,
+          event_match_state: membership.event_match_state
+        },
+        action: :resolve_catchup,
+        domain: Ingestion
+      )
+
+      Ash.update!(
+        observation,
+        %{reference_count: length(refund_ids), observed_at: @catchup_observed_at},
+        action: :resolve_catchup,
+        domain: Ingestion
+      )
+    end
 
     {membership, observation}
   end
