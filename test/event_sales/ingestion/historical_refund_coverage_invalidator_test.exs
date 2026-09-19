@@ -5,6 +5,7 @@ defmodule EventSales.Ingestion.HistoricalRefundCoverageInvalidatorTest do
   alias EventSales.Ingestion.HistoricalCoverageResolver
   alias EventSales.Ingestion.HistoricalRefundCoverageInvalidator
   alias EventSales.Ingestion.Resources.SyncRun
+  alias EventSales.TestSupport.HistoricalCoverageHelpers
   alias EventSales.TestSupport.SalesHelpers
 
   @coverage_start ~U[2026-08-01 08:00:00.000000Z]
@@ -133,6 +134,33 @@ defmodule EventSales.Ingestion.HistoricalRefundCoverageInvalidatorTest do
              )
 
     assert {:ok, _current} = HistoricalCoverageResolver.resolve_current(event.id)
+  end
+
+  test "rolls back earlier Event invalidations when a later candidate fails", %{source: source} do
+    other_source = SalesHelpers.create_source_system!()
+    event_a = SalesHelpers.create_event!(source, %{name: "Atomic Refund Event A"})
+    event_b = SalesHelpers.create_event!(other_source, %{name: "Atomic Refund Event B"})
+    run_a = certified_run!(event_a)
+    run_b = certified_run!(event_b)
+
+    {first_event, first_source, second_event} =
+      if event_a.id < event_b.id do
+        {event_a, source, event_b}
+      else
+        {event_b, other_source, event_a}
+      end
+
+    assert {:error, :coverage_source_mismatch} =
+             HistoricalRefundCoverageInvalidator.invalidate_refund_change(
+               snapshot(first_source.id, @sale_inside, @refund_inside),
+               snapshot(first_source.id, @sale_inside, @refund_inside),
+               [first_event.id, second_event.id]
+             )
+
+    assert {:ok, current_a} = HistoricalCoverageResolver.resolve_current(event_a.id)
+    assert current_a.id == run_a.id
+    assert {:ok, current_b} = HistoricalCoverageResolver.resolve_current(event_b.id)
+    assert current_b.id == run_b.id
   end
 
   test "treats a parent sale exactly at B as inside", %{source: source} do
@@ -444,7 +472,8 @@ defmodule EventSales.Ingestion.HistoricalRefundCoverageInvalidatorTest do
         %{
           coverage_start: @coverage_start,
           sales_covered_through: @sales_covered_through,
-          refunds_covered_through: @refunds_covered_through
+          refunds_covered_through: @refunds_covered_through,
+          coverage_evidence: HistoricalCoverageHelpers.certified_evidence()
         },
         attrs
       )

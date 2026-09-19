@@ -34,7 +34,8 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorker do
     :server_error,
     :queue_timeout,
     :circuit_open,
-    :transport_error
+    :transport_error,
+    :coverage_evidence_read_failed
   ]
 
   @permanent_reasons [
@@ -314,6 +315,16 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorker do
 
   defp handle_catchup_result({:continue, _run, _cursor}, _job, _loaded_run), do: {:snooze, 1}
   defp handle_catchup_result(:ok, _job, _loaded_run), do: :ok
+
+  defp handle_catchup_result(
+         {:blocked, :historical_coverage_blocked},
+         _job,
+         _loaded_run
+       ),
+       do: {:discard, :historical_coverage_blocked}
+
+  defp handle_catchup_result({:retry, reason}, job, loaded_run),
+    do: handle_error(loaded_run, job, reason)
 
   defp handle_catchup_result({:error, reason}, job, loaded_run),
     do: handle_error(loaded_run, job, reason)

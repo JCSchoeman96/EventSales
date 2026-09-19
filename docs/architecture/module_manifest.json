@@ -135,6 +135,8 @@
     "lib/event_sales/ingestion/historical_catchup_evidence.ex",
     "lib/event_sales/ingestion/historical_catchup_execution.ex",
     "lib/event_sales/ingestion/historical_coverage_certifier.ex",
+    "lib/event_sales/ingestion/historical_coverage_evidence.ex",
+    "lib/event_sales/ingestion/historical_coverage_fence.ex",
     "lib/event_sales/ingestion/historical_coverage_invalidator.ex",
     "lib/event_sales/ingestion/historical_coverage_resolver.ex",
     "lib/event_sales/ingestion/historical_event_line_selector.ex",
@@ -144,6 +146,7 @@
     "lib/event_sales/ingestion/historical_order_coverage_candidate_resolver.ex",
     "lib/event_sales/ingestion/historical_order_mutation_detector.ex",
     "lib/event_sales/ingestion/historical_refund_coverage_invalidator.ex",
+    "lib/event_sales/ingestion/historical_refund_evidence.ex",
     "lib/event_sales/ingestion/historical_refund_mutation_detector.ex",
     "lib/event_sales/ingestion/intake_backpressure.ex",
     "lib/event_sales/ingestion/manual_sync.ex",
@@ -163,6 +166,9 @@
     "lib/event_sales/ingestion/resources/catalog_change_signal.ex",
     "lib/event_sales/ingestion/resources/csv_import_batch.ex",
     "lib/event_sales/ingestion/resources/csv_import_row.ex",
+    "lib/event_sales/ingestion/resources/historical_order_membership.ex",
+    "lib/event_sales/ingestion/resources/historical_refund_observation.ex",
+    "lib/event_sales/ingestion/resources/historical_refund_reference.ex",
     "lib/event_sales/ingestion/resources/sync_cursor.ex",
     "lib/event_sales/ingestion/resources/sync_run.ex",
     "lib/event_sales/ingestion/resources/tickera_attendee_snapshot.ex",
@@ -359,6 +365,7 @@
     "test/support/fakes/fake_tickera_attendee_client.ex",
     "test/support/fixture_helpers.ex",
     "test/support/fixture_verification_helpers.ex",
+    "test/support/historical_coverage_helpers.ex",
     "test/support/ingestion/memory_rate_limiter_adapter.ex",
     "test/support/ingestion/memory_webhook_buffer_adapter.ex",
     "test/support/ingestion/stub_webhook_event_store.ex",
@@ -3253,6 +3260,60 @@
       "uses": []
     },
     {
+      "docs_count": 7,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.HistoricalCoverageEvidence",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/historical_coverage_evidence.ex",
+      "public_funs": [
+        {
+          "arity": 0,
+          "name": "schema_version"
+        },
+        {
+          "arity": 0,
+          "name": "metadata_max_bytes"
+        },
+        {
+          "arity": 1,
+          "name": "build"
+        },
+        {
+          "arity": 1,
+          "name": "validate"
+        },
+        {
+          "arity": 1,
+          "name": "certified?"
+        },
+        {
+          "arity": 1,
+          "name": "blocked?"
+        },
+        {
+          "arity": 1,
+          "name": "proof_hash"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.HistoricalCoverageFence",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/historical_coverage_fence.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "acquire"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
       "docs_count": 0,
       "moduledoc?": true,
       "name": "EventSales.Ingestion.HistoricalCoverageInvalidator",
@@ -3448,6 +3509,21 @@
       "uses": []
     },
     {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.HistoricalRefundEvidence",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/historical_refund_evidence.ex",
+      "public_funs": [
+        {
+          "arity": 4,
+          "name": "persist"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
       "docs_count": 2,
       "moduledoc?": true,
       "name": "EventSales.Ingestion.HistoricalRefundMutationDetector",
@@ -3577,7 +3653,7 @@
       "uses": []
     },
     {
-      "docs_count": 0,
+      "docs_count": 1,
       "moduledoc?": true,
       "name": "EventSales.Ingestion.Parsers.WoocommerceRefundReferenceParser",
       "parse_error": null,
@@ -3586,6 +3662,10 @@
         {
           "arity": 1,
           "name": "parse"
+        },
+        {
+          "arity": 1,
+          "name": "parse_historical"
         }
       ],
       "specs?": true,
@@ -3829,6 +3909,42 @@
     {
       "docs_count": 0,
       "moduledoc?": true,
+      "name": "EventSales.Ingestion.Resources.HistoricalOrderMembership",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/resources/historical_order_membership.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Resources.HistoricalRefundObservation",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/resources/historical_refund_observation.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Resources.HistoricalRefundReference",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/resources/historical_refund_reference.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
       "name": "EventSales.Ingestion.Resources.SyncCursor",
       "parse_error": null,
       "path": "lib/event_sales/ingestion/resources/sync_cursor.ex",
@@ -3859,7 +3975,15 @@
         },
         {
           "arity": 2,
+          "name": "validate_coverage_failure"
+        },
+        {
+          "arity": 2,
           "name": "record_coverage_certification"
+        },
+        {
+          "arity": 2,
+          "name": "record_coverage_failure"
         },
         {
           "arity": 2,
@@ -5737,7 +5861,12 @@
       "name": "EventSales.Sales.Resources.RefundLine",
       "parse_error": null,
       "path": "lib/event_sales/sales/resources/refund_line.ex",
-      "public_funs": [],
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "validate_order_item_binding"
+        }
+      ],
       "specs?": false,
       "uses": [
         "Ash.Resource"
@@ -8164,6 +8293,25 @@
         }
       ],
       "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.HistoricalCoverageHelpers",
+      "parse_error": null,
+      "path": "test/support/historical_coverage_helpers.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "certified_evidence"
+        },
+        {
+          "arity": 1,
+          "name": "blocked_evidence"
+        }
+      ],
+      "specs?": false,
       "uses": []
     },
     {

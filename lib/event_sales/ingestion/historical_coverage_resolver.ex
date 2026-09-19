@@ -9,6 +9,7 @@ defmodule EventSales.Ingestion.HistoricalCoverageResolver do
   require Ash.Query
 
   alias EventSales.Ingestion
+  alias EventSales.Ingestion.HistoricalCoverageEvidence
   alias EventSales.Ingestion.Resources.SyncRun
 
   @type error_reason ::
@@ -90,7 +91,8 @@ defmodule EventSales.Ingestion.HistoricalCoverageResolver do
   defp current_certification?(%SyncRun{} = run) do
     not is_nil(run.coverage_certified_at) and
       is_nil(run.coverage_invalidated_at) and
-      is_nil(run.coverage_invalidation_reason)
+      is_nil(run.coverage_invalidation_reason) and
+      HistoricalCoverageEvidence.certified?(run.coverage_evidence)
   end
 
   defp complete_coverage_boundaries?(%SyncRun{} = run) do

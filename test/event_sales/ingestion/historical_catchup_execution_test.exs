@@ -6,12 +6,21 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
   alias EventSales.Ingestion
   alias EventSales.Ingestion.HistoricalCatchupEvidence
   alias EventSales.Ingestion.HistoricalCatchupExecution
+  alias EventSales.Ingestion.HistoricalCoverageCertifier
   alias EventSales.Ingestion.HistoricalEventLineSelector
   alias EventSales.Ingestion.HistoricalManifestEvidence
-  alias EventSales.Ingestion.Resources.{SyncCursor, SyncRun}
+
+  alias EventSales.Ingestion.Resources.{
+    HistoricalOrderMembership,
+    HistoricalRefundObservation,
+    HistoricalRefundReference,
+    SyncCursor,
+    SyncRun
+  }
+
   alias EventSales.Sales.OrderUpserter
-  alias EventSales.Sales.Resources.{Order, OrderItem}
-  alias EventSales.TestSupport.{FixtureHelpers, SalesHelpers}
+  alias EventSales.Sales.Resources.{Order, OrderItem, Refund}
+  alias EventSales.TestSupport.{FixtureHelpers, HistoricalCoverageHelpers, SalesHelpers}
 
   require Ash.Query
 
@@ -35,6 +44,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
       do:
         Agent.update(__MODULE__, &Map.update!(&1, :pages, fn pages -> pages ++ [{:ok, page}] end))
 
+    def first_page, do: Agent.get(__MODULE__, &List.first(&1.pages))
     def calls, do: Agent.get(__MODULE__, &Enum.reverse(&1.calls))
     def configured_base_url(_opts), do: {:ok, "https://catchup-store.example.test"}
 
@@ -138,6 +148,30 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     end
   end
 
+  defmodule CoverageCertifierFake do
+    def evaluate(_run, _cursor, _opts), do: {:retry, :coverage_evidence_read_failed}
+  end
+
+  defmodule CoverageCertifierPass do
+    alias EventSales.TestSupport.HistoricalCoverageHelpers
+
+    def evaluate(run, _cursor, _opts) do
+      {:ok,
+       %{
+         coverage_start: run.date_from,
+         sales_covered_through: run.date_to,
+         refunds_covered_through: ~U[2026-08-13 12:00:00.000000Z],
+         coverage_evidence:
+           HistoricalCoverageHelpers.certified_evidence(%{
+             orders: %{
+               manifest_members_seen: run.orders_seen_count,
+               orders_durable: run.orders_matched_count
+             }
+           })
+       }}
+    end
+  end
+
   setup do
     start_supervised!(CatchupClient)
     start_supervised!(WooClient)
@@ -211,6 +245,203 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     assert is_nil(persisted_run.coverage_certified_at)
   end
 
+  test "catch-up records a newly discovered refund reference", %{run: run, cursor: cursor} do
+    CatchupClient.enqueue!(page(["42"], has_more: true, next_cursor: "u-next.cursor"))
+
+    WooClient.put_order!(42, {
+      :ok,
+      order_payload(42)
+      |> Map.put("refunds", [%{"id" => 91_101, "total" => "-10.00"}])
+    })
+
+    assert {:continue, _updated_run, _updated_cursor} = run_step(run, cursor)
+
+    membership = membership!(run, 42)
+
+    assert {:ok, observation} =
+             HistoricalRefundObservation
+             |> Ash.Query.filter(historical_order_membership_id == ^membership.id)
+             |> Ash.read_one(domain: Ingestion)
+
+    assert observation.resolution_state == :catchup_resolved
+    assert observation.reference_count == 1
+
+    assert [%{woo_refund_id: 91_101, source_state: :present}] =
+             HistoricalRefundReference
+             |> Ash.Query.filter(historical_refund_observation_id == ^observation.id)
+             |> Ash.read!(domain: Ingestion)
+  end
+
+  test "catch-up rejects a missing refunds field before cursor checkpoint", %{
+    run: run,
+    cursor: cursor
+  } do
+    CatchupClient.enqueue!(page(["42"], has_more: true, next_cursor: "u-next.cursor"))
+    WooClient.put_order!(42, {:ok, Map.delete(order_payload(42), "refunds")})
+
+    assert {:error, {:invalid_refund_reference, :refunds, :required}} = run_step(run, cursor)
+    assert current_cursor(cursor).page == cursor.page
+  end
+
+  test "catch-up rejects a source member that is absent from M", %{run: run, cursor: cursor} do
+    CatchupClient.enqueue!(page(["99"], has_more: true, next_cursor: "u-next.cursor"))
+    WooClient.put_order!(99, {:ok, order_payload(99)})
+
+    assert {:error, :catchup_member_not_in_manifest} =
+             run_step(run, cursor, seed_memberships: false)
+
+    assert WooClient.calls() == []
+    assert current_cursor(cursor).page == 1
+    assert current_run(run).orders_seen_count == 0
+  end
+
+  test "catch-up updates an existing M member in the cursor checkpoint", %{
+    run: run,
+    cursor: cursor
+  } do
+    membership = create_membership!(run, 42)
+    CatchupClient.enqueue!(page(["42"], has_more: true, next_cursor: "u-next.cursor"))
+    WooClient.put_order!(42, {:ok, order_payload(42)})
+
+    assert {:continue, _updated_run, _updated_cursor} = run_step(run, cursor)
+
+    updated = Ash.get!(HistoricalOrderMembership, membership.id, domain: Ingestion)
+    assert updated.resolution_state == :catchup_resolved
+    assert updated.last_source_modified_at == ~U[2026-08-04 10:00:00.000000Z]
+    assert current_cursor(cursor).page == 2
+  end
+
+  test "catch-up refreshes a non-target member to target", %{run: run, cursor: cursor} do
+    membership = create_membership!(run, 42, :non_target)
+    CatchupClient.enqueue!(page(["42"], has_more: true, next_cursor: "u-next.cursor"))
+    WooClient.put_order!(42, {:ok, order_payload(42)})
+    Selector.set_lines!([%{"id" => 1}])
+
+    assert {:continue, _updated_run, _updated_cursor} = run_step(run, cursor)
+
+    updated = Ash.get!(HistoricalOrderMembership, membership.id, domain: Ingestion)
+    assert updated.event_match_state == :target
+    assert updated.resolution_state == :catchup_resolved
+  end
+
+  test "catch-up refreshes a target member to non-target", %{run: run, cursor: cursor} do
+    membership = create_membership!(run, 42, :target)
+    CatchupClient.enqueue!(page(["42"], has_more: true, next_cursor: "u-next.cursor"))
+    WooClient.put_order!(42, {:ok, order_payload(42)})
+    Selector.set_lines!([])
+
+    assert {:continue, _updated_run, _updated_cursor} = run_step(run, cursor)
+
+    updated = Ash.get!(HistoricalOrderMembership, membership.id, domain: Ingestion)
+    assert updated.event_match_state == :non_target
+    assert updated.resolution_state == :catchup_resolved
+  end
+
+  test "catch-up membership state failure rolls back the cursor checkpoint", %{
+    run: run,
+    cursor: cursor
+  } do
+    membership = create_membership!(run, 42, :non_target)
+    CatchupClient.enqueue!(page(["42"], has_more: true, next_cursor: "u-next.cursor"))
+    WooClient.put_order!(42, {:ok, order_payload(42)})
+    Selector.set_lines!([%{"id" => 1}])
+
+    assert {:error, :membership_write_failed} =
+             run_step(run, cursor,
+               historical_membership_updater: fn _attrs ->
+                 {:error, :membership_write_failed}
+               end
+             )
+
+    updated = Ash.get!(HistoricalOrderMembership, membership.id, domain: Ingestion)
+    assert updated.event_match_state == :non_target
+    assert updated.resolution_state == :manifest_resolved
+    assert current_cursor(cursor).page == 1
+  end
+
+  test "refund observation checkpoint failure rolls back membership and cursor", %{
+    run: run,
+    cursor: cursor
+  } do
+    membership = create_membership!(run, 42, :non_target)
+    CatchupClient.enqueue!(page(["42"], has_more: true, next_cursor: "u-next.cursor"))
+    WooClient.put_order!(42, {:ok, order_payload(42)})
+    Selector.set_lines!([%{"id" => 1}])
+
+    assert {:error, :refund_reference_checkpoint_failed} =
+             run_step(run, cursor,
+               historical_refund_evidence_writer: fn _phase, _membership, _evidence, _opts ->
+                 {:error, :refund_reference_checkpoint_failed}
+               end
+             )
+
+    updated = Ash.get!(HistoricalOrderMembership, membership.id, domain: Ingestion)
+    assert updated.event_match_state == :non_target
+    assert updated.resolution_state == :manifest_resolved
+    assert current_cursor(cursor).page == 1
+  end
+
+  test "terminal catch-up target to non-target certifies from current membership state", %{
+    run: run,
+    cursor: cursor
+  } do
+    create_membership!(run, 42, :target)
+
+    Ash.update!(
+      run,
+      %{orders_seen_count: 1, orders_matched_count: 1, orders_upserted_count: 1},
+      action: :record_counts,
+      domain: Ingestion
+    )
+
+    CatchupClient.enqueue!(page(["42"], has_more: false, terminal_evidence: "u-target-removed"))
+    WooClient.put_order!(42, {:ok, order_payload(42)})
+    Selector.set_lines!([])
+
+    assert :ok = run_step(run, cursor, seed_memberships: false)
+
+    updated_membership = membership!(run, 42)
+    assert updated_membership.resolution_state == :catchup_resolved
+    assert updated_membership.event_match_state == :non_target
+
+    completed_run = current_run(run)
+    assert completed_run.status == :completed
+    assert completed_run.coverage_evidence["result"] == "certified"
+    assert completed_run.coverage_evidence["orders"]["blocking_reasons"] == %{}
+  end
+
+  test "terminal catch-up non-target to target certifies current target truth", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    create_membership!(run, 42, :non_target)
+
+    Ash.update!(
+      run,
+      %{orders_seen_count: 1, orders_matched_count: 0, orders_upserted_count: 0},
+      action: :record_counts,
+      domain: Ingestion
+    )
+
+    create_target_order_fact!(source, event, 42)
+    CatchupClient.enqueue!(page(["42"], has_more: false, terminal_evidence: "u-target-added"))
+    WooClient.put_order!(42, {:ok, order_payload(42)})
+    Selector.set_lines!([%{"id" => 1}])
+
+    assert :ok = run_step(run, cursor, seed_memberships: false)
+
+    updated_membership = membership!(run, 42)
+    assert updated_membership.resolution_state == :catchup_resolved
+    assert updated_membership.event_match_state == :target
+
+    completed_run = current_run(run)
+    assert completed_run.status == :completed
+    assert completed_run.coverage_evidence["result"] == "certified"
+    assert completed_run.coverage_evidence["orders"]["blocking_reasons"] == %{}
+  end
+
   test "in-progress U uses the exact opaque cursor", %{run: run, cursor: cursor} do
     replace_cursor!(cursor, 4, catchup_in_progress_metadata())
     CatchupClient.enqueue!(page(["43"], has_more: false, terminal_evidence: "u-proof"))
@@ -259,6 +490,110 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     assert terminal_cursor.metadata["historical_catchup"]["terminal_evidence"] == "u-empty-proof"
   end
 
+  test "empty U certifies an unchanged manifest target with an explicit zero-refund observation",
+       %{
+         source: source,
+         event: event,
+         run: run,
+         cursor: cursor
+       } do
+    create_membership!(run, 42, :target)
+    create_target_order_fact!(source, event, 42)
+
+    Ash.update!(
+      run,
+      %{orders_seen_count: 1, orders_matched_count: 1, orders_upserted_count: 1},
+      action: :record_counts,
+      domain: Ingestion
+    )
+
+    CatchupClient.enqueue!(
+      page([], has_more: false, terminal_evidence: "u-empty-unchanged-target-proof")
+    )
+
+    assert :ok =
+             run_step(run, cursor,
+               seed_memberships: false,
+               coverage_certifier: HistoricalCoverageCertifier
+             )
+
+    completed_run = current_run(run)
+    assert completed_run.status == :completed
+    assert completed_run.coverage_evidence["refunds"]["blocking_reasons"] == %{}
+  end
+
+  test "empty U certifies an unchanged manifest target with complete refund evidence", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    create_membership!(run, 42, :target, [91_101])
+    create_target_order_fact!(source, event, 42)
+    create_refund!(source, 42, 91_101)
+
+    Ash.update!(
+      run,
+      %{orders_seen_count: 1, orders_matched_count: 1, orders_upserted_count: 1},
+      action: :record_counts,
+      domain: Ingestion
+    )
+
+    CatchupClient.enqueue!(
+      page([], has_more: false, terminal_evidence: "u-empty-unchanged-refund-proof")
+    )
+
+    assert :ok =
+             run_step(run, cursor,
+               seed_memberships: false,
+               coverage_certifier: HistoricalCoverageCertifier
+             )
+
+    completed_run = current_run(run)
+    assert completed_run.status == :completed
+    assert completed_run.coverage_evidence["refunds"]["references_seen"] == 1
+    assert completed_run.coverage_evidence["refunds"]["details_complete"] == 1
+    assert completed_run.coverage_evidence["refunds"]["blocking_reasons"] == %{}
+  end
+
+  test "blocked coverage fails the terminal run and cursor atomically", %{
+    run: run,
+    cursor: cursor
+  } do
+    run =
+      Ash.update!(
+        run,
+        %{orders_seen_count: 1, orders_matched_count: 1, orders_upserted_count: 1},
+        action: :record_counts,
+        domain: Ingestion
+      )
+
+    CatchupClient.enqueue!(page([], has_more: false, terminal_evidence: "u-blocked-proof"))
+
+    assert {:blocked, :historical_coverage_blocked} = run_step(run, cursor)
+    assert current_run(run).status == :failed
+    assert current_run(run).order_coverage_status == :failed
+    assert current_run(run).refund_coverage_status == :failed
+    assert current_run(run).coverage_evidence["result"] == "blocked"
+    assert current_cursor(cursor).status == :failed
+    assert current_cursor(cursor).metadata["failure"] == "historical_coverage_blocked"
+  end
+
+  test "retryable coverage evidence reads leave terminal cursor and run unchanged", %{
+    run: run,
+    cursor: cursor
+  } do
+    CatchupClient.enqueue!(page([], has_more: false, terminal_evidence: "u-retry-proof"))
+
+    assert {:retry, :coverage_evidence_read_failed} =
+             run_step(run, cursor, coverage_certifier: CoverageCertifierFake)
+
+    assert current_run(run).status == :running
+    assert current_cursor(cursor).status == :active
+    assert current_cursor(cursor).page == cursor.page
+    assert current_cursor(cursor).metadata["historical_catchup"]["state"] == "pending_first_page"
+  end
+
   test "terminal coverage certification is not repeated by a stale terminal replay", %{
     run: run,
     cursor: cursor
@@ -289,7 +624,8 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
         %{
           coverage_start: @date_from,
           sales_covered_through: @date_to,
-          refunds_covered_through: @catchup_observed_at
+          refunds_covered_through: @catchup_observed_at,
+          coverage_evidence: HistoricalCoverageHelpers.certified_evidence()
         },
         action: :record_coverage_certification,
         domain: Ingestion
@@ -622,7 +958,13 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     assert cursor_a.page == 2
     assert {:continue, _, cursor_b} = run_step(current_run(run), current_cursor(cursor))
     assert cursor_b.page == 3
-    assert :ok = run_step(current_run(run), current_cursor(cursor))
+
+    assert :ok =
+             run_step(
+               current_run(run),
+               current_cursor(cursor),
+               coverage_certifier: CoverageCertifierPass
+             )
 
     assert length(WooClient.calls()) == 205
     assert current_cursor(cursor).status == :done
@@ -648,7 +990,39 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
   end
 
   defp run_step(run, cursor, opts \\ []) do
-    HistoricalCatchupExecution.run_step(run, cursor, Keyword.merge(base_opts(), opts))
+    opts = Keyword.merge(base_opts(), opts)
+
+    if Keyword.get(opts, :seed_memberships, true) do
+      seed_first_page_memberships!(run)
+    end
+
+    opts =
+      if Keyword.has_key?(opts, :coverage_certifier) or not first_page_has_items?() do
+        opts
+      else
+        Keyword.put(opts, :coverage_certifier, CoverageCertifierPass)
+      end
+
+    HistoricalCatchupExecution.run_step(run, cursor, opts)
+  end
+
+  defp seed_first_page_memberships!(run) do
+    case CatchupClient.first_page() do
+      {:ok, page} ->
+        Enum.each(Map.get(page, "items", []), fn item ->
+          create_membership!(run, String.to_integer(item["source_order_id"]))
+        end)
+
+      _other ->
+        :ok
+    end
+  end
+
+  defp first_page_has_items? do
+    case CatchupClient.first_page() do
+      {:ok, page} -> Map.get(page, "items", []) != []
+      _other -> false
+    end
   end
 
   defp base_opts do
@@ -706,6 +1080,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
       "id" => id,
       "date_created_gmt" => "2026-08-04T10:00:00Z",
       "date_modified_gmt" => "2026-08-04T10:00:00Z",
+      "refunds" => [],
       "line_items" => []
     }
   end
@@ -757,6 +1132,138 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
       metadata: catchup_metadata()
     })
     |> Ash.create!(domain: Ingestion)
+  end
+
+  defp create_membership!(
+         run,
+         source_order_id,
+         event_match_state \\ :non_target,
+         refund_ids \\ []
+       ) do
+    membership =
+      Ash.create!(
+        HistoricalOrderMembership,
+        %{
+          sync_run_id: run.id,
+          source_order_id: source_order_id,
+          manifest_source_created_at: ~U[2026-08-04 10:00:00.000000Z],
+          manifest_source_modified_at: ~U[2026-08-04 10:00:00.000000Z],
+          last_source_modified_at: ~U[2026-08-04 10:00:00.000000Z],
+          event_match_state: event_match_state
+        },
+        action: :resolve_manifest,
+        domain: Ingestion
+      )
+
+    Ash.create!(
+      HistoricalRefundObservation,
+      %{
+        historical_order_membership_id: membership.id,
+        reference_count: length(refund_ids),
+        observed_at: @manifest_observed_at
+      },
+      action: :resolve_manifest,
+      domain: Ingestion
+    )
+
+    observation =
+      HistoricalRefundObservation
+      |> Ash.Query.filter(historical_order_membership_id == ^membership.id)
+      |> Ash.read_one!(domain: Ingestion)
+
+    Enum.each(refund_ids, fn refund_id ->
+      Ash.create!(
+        HistoricalRefundReference,
+        %{
+          historical_refund_observation_id: observation.id,
+          woo_refund_id: refund_id,
+          last_observed_at: @manifest_observed_at
+        },
+        action: :observe_present,
+        domain: Ingestion
+      )
+    end)
+
+    membership
+  end
+
+  defp create_refund!(source, woo_order_id, woo_refund_id) do
+    order =
+      Order
+      |> Ash.Query.filter(source_system_id == ^source.id and woo_order_id == ^woo_order_id)
+      |> Ash.read_one!(domain: EventSales.Sales)
+
+    Ash.create!(
+      Refund,
+      %{
+        source_system_id: source.id,
+        order_id: order.id,
+        woo_order_id: woo_order_id,
+        woo_refund_id: woo_refund_id,
+        currency: "ZAR",
+        source_state: :active,
+        detail_status: :complete,
+        summary_total_amount: Decimal.new("5"),
+        header_amount: Decimal.new("5"),
+        source_created_at: DateTime.add(@date_from, 2, :day)
+      },
+      action: :create_normalized,
+      domain: EventSales.Sales
+    )
+  end
+
+  defp membership!(run, source_order_id) do
+    HistoricalOrderMembership
+    |> Ash.Query.filter(sync_run_id == ^run.id and source_order_id == ^source_order_id)
+    |> Ash.read_one!(domain: Ingestion)
+  end
+
+  defp create_target_order_fact!(source, event, woo_order_id) do
+    ticket = SalesHelpers.create_ticket_type!(event, %{name: "Catch-up Ticket"})
+
+    order =
+      Ash.create!(
+        Order,
+        %{
+          source_system_id: source.id,
+          woo_order_id: woo_order_id,
+          order_number: to_string(woo_order_id),
+          status: :completed,
+          currency: "ZAR",
+          completed_at: DateTime.add(@date_from, 2, :hour),
+          paid_at: DateTime.add(@date_from, 1, :hour),
+          created_at_source: DateTime.add(@date_from, 3, :hour),
+          updated_at_source: DateTime.add(@date_from, 4, :hour),
+          raw_total: Decimal.new("10"),
+          raw_discount_total: Decimal.new("0"),
+          raw_tax_total: Decimal.new("0")
+        },
+        action: :create_normalized,
+        domain: EventSales.Sales
+      )
+
+    Ash.create!(
+      OrderItem,
+      %{
+        order_id: order.id,
+        event_id: event.id,
+        ticket_type_id: ticket.id,
+        woo_line_item_id: 1,
+        woo_product_id: 501,
+        woo_variation_id: 601,
+        name: "Catch-up Ticket",
+        quantity: 1,
+        line_subtotal: Decimal.new("10"),
+        line_total: Decimal.new("10"),
+        line_total_tax: Decimal.new("0"),
+        discount_total: Decimal.new("0"),
+        item_kind: :ticket,
+        mapping_status: :mapped,
+        source_tickera_event_id: event.external_event_id
+      },
+      action: :create_normalized,
+      domain: EventSales.Sales
+    )
   end
 
   defp replace_cursor!(cursor, page, metadata) do

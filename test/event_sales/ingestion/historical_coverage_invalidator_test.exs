@@ -7,6 +7,7 @@ defmodule EventSales.Ingestion.HistoricalCoverageInvalidatorTest do
   alias EventSales.Ingestion.Resources.SyncRun
   alias EventSales.Sales
   alias EventSales.Sales.Resources.Order
+  alias EventSales.TestSupport.HistoricalCoverageHelpers
   alias EventSales.TestSupport.SalesHelpers
 
   @coverage_start ~U[2026-08-01 08:00:00.000000Z]
@@ -218,6 +219,26 @@ defmodule EventSales.Ingestion.HistoricalCoverageInvalidatorTest do
     assert current.id == run.id
   end
 
+  test "rolls back earlier Event invalidations when a later candidate fails", %{source: source} do
+    other_source = SalesHelpers.create_source_system!()
+    first_event = SalesHelpers.create_event!(source, %{name: "Atomic Order Event A"})
+    second_event = SalesHelpers.create_event!(other_source, %{name: "Atomic Order Event B"})
+    first_run = certified_run!(first_event)
+    second_run = certified_run!(second_event)
+    order = create_order!(source, @within_sales_scope)
+
+    assert {:error, :coverage_source_mismatch} =
+             HistoricalCoverageInvalidator.invalidate_order_change(order, [
+               first_event.id,
+               second_event.id
+             ])
+
+    assert {:ok, current_first} = HistoricalCoverageResolver.resolve_current(first_event.id)
+    assert current_first.id == first_run.id
+    assert {:ok, current_second} = HistoricalCoverageResolver.resolve_current(second_event.id)
+    assert current_second.id == second_run.id
+  end
+
   test "invalidates the exact certificate and replay becomes no current coverage", %{
     source: source
   } do
@@ -255,7 +276,8 @@ defmodule EventSales.Ingestion.HistoricalCoverageInvalidatorTest do
         %{
           coverage_start: @coverage_start,
           sales_covered_through: @sales_covered_through,
-          refunds_covered_through: @sales_covered_through
+          refunds_covered_through: @sales_covered_through,
+          coverage_evidence: HistoricalCoverageHelpers.certified_evidence()
         },
         attrs
       )

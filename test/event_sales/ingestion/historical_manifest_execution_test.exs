@@ -4,10 +4,21 @@ defmodule EventSales.Ingestion.HistoricalManifestExecutionTest do
   alias EventSales.Catalog
   alias EventSales.Catalog.Resources.ProductMapping
   alias EventSales.Ingestion
+  alias EventSales.Ingestion.HistoricalEventLineSelector
   alias EventSales.Ingestion.HistoricalManifestEvidence
   alias EventSales.Ingestion.HistoricalManifestExecution
-  alias EventSales.Ingestion.Resources.{SyncCursor, SyncRun}
+
+  alias EventSales.Ingestion.Resources.{
+    HistoricalOrderMembership,
+    HistoricalRefundObservation,
+    HistoricalRefundReference,
+    SyncCursor,
+    SyncRun
+  }
+
   alias EventSales.TestSupport.SalesHelpers
+
+  require Ash.Query
 
   @source_url "https://store.example.test"
   @date_from ~U[2026-08-01 08:00:00.123456Z]
@@ -229,6 +240,41 @@ defmodule EventSales.Ingestion.HistoricalManifestExecutionTest do
     assert ManifestClient.calls() == [{:fetch_manifest_page, "manifest-token", nil}]
   end
 
+  test "manifest records an explicit zero-refund observation", %{run: run, cursor: cursor} do
+    enqueue_page(page(%{has_more: false, terminal_evidence: "m-terminal"}))
+    WooClient.put_order!(42, {:ok, order_payload(42)})
+
+    assert {:manifest_terminal, _updated_run, _updated_cursor} = run_step(run, cursor)
+
+    membership = membership!(run, 42)
+
+    assert {:ok, observation} =
+             HistoricalRefundObservation
+             |> Ash.Query.filter(historical_order_membership_id == ^membership.id)
+             |> Ash.read_one(domain: Ingestion)
+
+    assert observation.reference_count == 0
+    assert observation.resolution_state == :manifest_resolved
+
+    assert [] =
+             HistoricalRefundReference
+             |> Ash.Query.filter(historical_refund_observation_id == ^observation.id)
+             |> Ash.read!(domain: Ingestion)
+  end
+
+  test "manifest rejects a missing refunds field before checkpoint", %{run: run, cursor: cursor} do
+    enqueue_page(page(%{has_more: false, terminal_evidence: "m-terminal"}))
+    WooClient.put_order!(42, {:ok, Map.delete(order_payload(42), "refunds")})
+
+    assert {:error, {:invalid_refund_reference, :refunds, :required}} = run_step(run, cursor)
+    assert cursor_unchanged?(cursor)
+
+    assert [] =
+             HistoricalOrderMembership
+             |> Ash.Query.filter(sync_run_id == ^run.id)
+             |> Ash.read!(domain: Ingestion)
+  end
+
   test "manifest_in_progress uses the exact persisted opaque cursor", %{run: run, cursor: cursor} do
     replace_cursor!(cursor, 2, in_progress_metadata())
     enqueue_page(page(%{source_order_id: "43"}))
@@ -297,6 +343,69 @@ defmodule EventSales.Ingestion.HistoricalManifestExecutionTest do
     assert Enum.map(WooClient.calls(), &elem(&1, 1)) == ["42", "43"]
   end
 
+  test "a successful manifest page checkpoints exact run membership", %{
+    run: run,
+    cursor: cursor
+  } do
+    enqueue_page(page(%{source_order_id: "42"}, %{source_order_id: "43"}))
+    WooClient.put_order!(42, {:ok, order_payload(42)})
+    WooClient.put_order!(43, {:ok, order_payload(43)})
+
+    assert {:continue, _updated_run, _updated_cursor} = run_step(run, cursor)
+
+    members =
+      HistoricalOrderMembership
+      |> Ash.Query.filter(sync_run_id == ^run.id)
+      |> Ash.Query.sort(source_order_id: :asc)
+      |> Ash.read!(domain: Ingestion)
+
+    assert Enum.map(members, & &1.source_order_id) == [42, 43]
+    assert Enum.all?(members, &(&1.resolution_state == :manifest_resolved))
+
+    assert Enum.map(members, & &1.manifest_source_created_at) == [
+             ~U[2026-08-04 10:00:00.000000Z],
+             ~U[2026-08-04 10:00:00.000000Z]
+           ]
+  end
+
+  test "membership checkpoint failure rolls back the page proof and cursor", %{
+    run: run,
+    cursor: cursor
+  } do
+    enqueue_page(page())
+    WooClient.put_order!(42, {:ok, order_payload(42)})
+
+    assert {:error, :membership_write_failed} =
+             run_step(run, cursor,
+               historical_membership_upserter: fn _attrs ->
+                 {:error, :membership_write_failed}
+               end
+             )
+
+    assert Ash.count!(HistoricalOrderMembership, domain: Ingestion) == 0
+    assert cursor_unchanged?(cursor)
+    assert run_counts(run) == %{seen: 0, matched: 0, upserted: 0, stale: 0}
+  end
+
+  test "refund observation checkpoint failure rolls back membership and cursor", %{
+    run: run,
+    cursor: cursor
+  } do
+    enqueue_page(page())
+    WooClient.put_order!(42, {:ok, order_payload(42)})
+
+    assert {:error, :refund_reference_checkpoint_failed} =
+             run_step(run, cursor,
+               historical_refund_evidence_writer: fn _phase, _membership, _evidence, _opts ->
+                 {:error, :refund_reference_checkpoint_failed}
+               end
+             )
+
+    assert Ash.count!(HistoricalOrderMembership, domain: Ingestion) == 0
+    assert cursor_unchanged?(cursor)
+    assert run_counts(run) == %{seen: 0, matched: 0, upserted: 0, stale: 0}
+  end
+
   test "returned order ID must exactly match the manifest identity", %{run: run, cursor: cursor} do
     enqueue_page(page())
     WooClient.put_order!(42, {:ok, order_payload(99)})
@@ -349,6 +458,68 @@ defmodule EventSales.Ingestion.HistoricalManifestExecutionTest do
     assert WooClient.calls() == [{:fetch_order, "42"}]
     assert Upserter.calls() == []
     assert run_counts(run) == %{seen: 1, matched: 0, upserted: 0, stale: 0}
+  end
+
+  test "source Event authority marks a member target without ProductMapping", %{
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    SalesHelpers.create_variation_ticket_type!(event, 42, 7)
+    enqueue_page(page())
+
+    payload = canonical_order_payload(42, event.external_event_id, 42, 7)
+    WooClient.put_order!(42, {:ok, payload})
+
+    assert {:continue, _run, _cursor} =
+             run_step(run, cursor, event_line_selector: HistoricalEventLineSelector)
+
+    membership = membership!(run, 42)
+    assert membership.event_match_state == :target
+    assert run_counts(run) == %{seen: 1, matched: 1, upserted: 1, stale: 0}
+  end
+
+  test "source Event authority wins over a conflicting ProductMapping", %{
+    source: source,
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    source_event_ticket = SalesHelpers.create_variation_ticket_type!(event, 42, 7)
+
+    conflicting_event =
+      SalesHelpers.create_event!(source, %{
+        external_event_id: event.external_event_id + 1,
+        external_event_kind: :tickera_event
+      })
+
+    conflicting_ticket = SalesHelpers.create_variation_ticket_type!(conflicting_event, 42, 7)
+
+    Ash.create!(
+      ProductMapping,
+      %{
+        source_system_id: source.id,
+        event_id: conflicting_event.id,
+        ticket_type_id: conflicting_ticket.id,
+        woo_product_id: 42,
+        woo_variation_id: 7,
+        original_label: "Conflicting mapping",
+        current_label: "Conflicting mapping",
+        active: true
+      },
+      action: :create,
+      domain: Catalog
+    )
+
+    assert source_event_ticket.external_product_id == 42
+    enqueue_page(page())
+    WooClient.put_order!(42, {:ok, canonical_order_payload(42, event.external_event_id, 42, 7)})
+
+    assert {:continue, _run, _cursor} =
+             run_step(run, cursor, event_line_selector: HistoricalEventLineSelector)
+
+    membership = membership!(run, 42)
+    assert membership.event_match_state == :target
   end
 
   test "exact product and variation identities control the filtered payload", %{
@@ -708,7 +879,26 @@ defmodule EventSales.Ingestion.HistoricalManifestExecutionTest do
   end
 
   defp run_step(run, cursor, opts \\ []) do
-    HistoricalManifestExecution.run_step(run, cursor, Keyword.merge(base_opts(), opts))
+    opts = Keyword.merge(base_opts(), opts)
+
+    opts = Keyword.put_new(opts, :event_line_selector, legacy_event_line_selector(opts))
+
+    HistoricalManifestExecution.run_step(run, cursor, opts)
+  end
+
+  defp legacy_event_line_selector(opts) do
+    fn _event, _source, order ->
+      mappings = Keyword.get(opts, :mappings, [])
+      lines = Map.get(order, "line_items", [])
+      {:ok, Enum.filter(lines, &legacy_mapping_matches?(&1, mappings))}
+    end
+  end
+
+  defp legacy_mapping_matches?(line, mappings) do
+    Enum.any?(mappings, fn mapping ->
+      mapping.woo_product_id == line["product_id"] and
+        mapping.woo_variation_id == line["variation_id"]
+    end)
   end
 
   defp base_opts do
@@ -784,8 +974,43 @@ defmodule EventSales.Ingestion.HistoricalManifestExecutionTest do
       "id" => id,
       "date_created_gmt" => "2026-08-04T10:00:00Z",
       "date_modified_gmt" => modified_at,
+      "refunds" => [],
       "line_items" => line_items
     }
+  end
+
+  defp canonical_order_payload(id, event_external_id, product_id, variation_id) do
+    order_payload(id, [
+      %{
+        "id" => 1,
+        "product_id" => product_id,
+        "variation_id" => variation_id,
+        "name" => "Canonical ticket",
+        "quantity" => 1,
+        "subtotal" => "100.00",
+        "total" => "100.00",
+        "total_tax" => "0.00",
+        "discount_total" => "0.00",
+        "meta_data" => [
+          %{"key" => "tickera_event_id", "value" => Integer.to_string(event_external_id)}
+        ]
+      }
+    ])
+    |> Map.merge(%{
+      "number" => to_string(id),
+      "status" => "completed",
+      "currency" => "ZAR",
+      "total" => "100.00",
+      "discount_total" => "0.00",
+      "total_tax" => "0.00",
+      "coupon_lines" => []
+    })
+  end
+
+  defp membership!(run, source_order_id) do
+    HistoricalOrderMembership
+    |> Ash.Query.filter(sync_run_id == ^run.id and source_order_id == ^source_order_id)
+    |> Ash.read_one!(domain: Ingestion)
   end
 
   defp pending_metadata(expires_at \\ @manifest_expires_at) do

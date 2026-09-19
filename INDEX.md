@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-369
+376
 
 ## Files
 
@@ -147,6 +147,8 @@ Project root: `.`
 - `lib/event_sales/ingestion/historical_catchup_evidence.ex`
 - `lib/event_sales/ingestion/historical_catchup_execution.ex`
 - `lib/event_sales/ingestion/historical_coverage_certifier.ex`
+- `lib/event_sales/ingestion/historical_coverage_evidence.ex`
+- `lib/event_sales/ingestion/historical_coverage_fence.ex`
 - `lib/event_sales/ingestion/historical_coverage_invalidator.ex`
 - `lib/event_sales/ingestion/historical_coverage_resolver.ex`
 - `lib/event_sales/ingestion/historical_event_line_selector.ex`
@@ -156,6 +158,7 @@ Project root: `.`
 - `lib/event_sales/ingestion/historical_order_coverage_candidate_resolver.ex`
 - `lib/event_sales/ingestion/historical_order_mutation_detector.ex`
 - `lib/event_sales/ingestion/historical_refund_coverage_invalidator.ex`
+- `lib/event_sales/ingestion/historical_refund_evidence.ex`
 - `lib/event_sales/ingestion/historical_refund_mutation_detector.ex`
 - `lib/event_sales/ingestion/intake_backpressure.ex`
 - `lib/event_sales/ingestion/manual_sync.ex`
@@ -175,6 +178,9 @@ Project root: `.`
 - `lib/event_sales/ingestion/resources/catalog_change_signal.ex`
 - `lib/event_sales/ingestion/resources/csv_import_batch.ex`
 - `lib/event_sales/ingestion/resources/csv_import_row.ex`
+- `lib/event_sales/ingestion/resources/historical_order_membership.ex`
+- `lib/event_sales/ingestion/resources/historical_refund_observation.ex`
+- `lib/event_sales/ingestion/resources/historical_refund_reference.ex`
 - `lib/event_sales/ingestion/resources/sync_cursor.ex`
 - `lib/event_sales/ingestion/resources/sync_run.ex`
 - `lib/event_sales/ingestion/resources/tickera_attendee_snapshot.ex`
@@ -371,6 +377,7 @@ Project root: `.`
 - `test/support/fakes/fake_tickera_attendee_client.ex`
 - `test/support/fixture_helpers.ex`
 - `test/support/fixture_verification_helpers.ex`
+- `test/support/historical_coverage_helpers.ex`
 - `test/support/ingestion/memory_rate_limiter_adapter.ex`
 - `test/support/ingestion/memory_webhook_buffer_adapter.ex`
 - `test/support/ingestion/stub_webhook_event_store.ex`
@@ -1176,6 +1183,18 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `evaluate/3`
   - uses: _none_
+- `EventSales.Ingestion.HistoricalCoverageEvidence` - `lib/event_sales/ingestion/historical_coverage_evidence.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 7
+  - public_funs: `schema_version/0`, `metadata_max_bytes/0`, `build/1`, `validate/1`, `certified?/1`, `blocked?/1`, `proof_hash/1`
+  - uses: _none_
+- `EventSales.Ingestion.HistoricalCoverageFence` - `lib/event_sales/ingestion/historical_coverage_fence.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `acquire/1`
+  - uses: _none_
 - `EventSales.Ingestion.HistoricalCoverageInvalidator` - `lib/event_sales/ingestion/historical_coverage_invalidator.ex`
   - moduledoc?: true
   - specs?: true
@@ -1230,6 +1249,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `invalidate_refund_change/3`
   - uses: _none_
+- `EventSales.Ingestion.HistoricalRefundEvidence` - `lib/event_sales/ingestion/historical_refund_evidence.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `persist/4`
+  - uses: _none_
 - `EventSales.Ingestion.HistoricalRefundMutationDetector` - `lib/event_sales/ingestion/historical_refund_mutation_detector.ex`
   - moduledoc?: true
   - specs?: true
@@ -1275,8 +1300,8 @@ Project root: `.`
 - `EventSales.Ingestion.Parsers.WoocommerceRefundReferenceParser` - `lib/event_sales/ingestion/parsers/woocommerce_refund_reference_parser.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 0
-  - public_funs: `parse/1`
+  - docs_count: 1
+  - public_funs: `parse/1`, `parse_historical/1`
   - uses: _none_
 - `EventSales.Ingestion.ReconciliationPeakGuard` - `lib/event_sales/ingestion/reconciliation_peak_guard.ex`
   - moduledoc?: true
@@ -1344,6 +1369,24 @@ Project root: `.`
   - docs_count: 0
   - public_funs: _none_
   - uses: `Ash.Resource`
+- `EventSales.Ingestion.Resources.HistoricalOrderMembership` - `lib/event_sales/ingestion/resources/historical_order_membership.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
+- `EventSales.Ingestion.Resources.HistoricalRefundObservation` - `lib/event_sales/ingestion/resources/historical_refund_observation.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
+- `EventSales.Ingestion.Resources.HistoricalRefundReference` - `lib/event_sales/ingestion/resources/historical_refund_reference.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
 - `EventSales.Ingestion.Resources.SyncCursor` - `lib/event_sales/ingestion/resources/sync_cursor.ex`
   - moduledoc?: true
   - specs?: false
@@ -1354,7 +1397,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: `set_started_at/2`, `set_finished_at/2`, `validate_coverage_certification/2`, `record_coverage_certification/2`, `invalidate_order_coverage/2`, `invalidate_refund_coverage/2`
+  - public_funs: `set_started_at/2`, `set_finished_at/2`, `validate_coverage_certification/2`, `validate_coverage_failure/2`, `record_coverage_certification/2`, `record_coverage_failure/2`, `invalidate_order_coverage/2`, `invalidate_refund_coverage/2`
   - uses: `Ash.Resource`
 - `EventSales.Ingestion.Resources.TickeraAttendeeSnapshot` - `lib/event_sales/ingestion/resources/tickera_attendee_snapshot.ex`
   - moduledoc?: true
@@ -1888,7 +1931,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
-  - public_funs: _none_
+  - public_funs: `validate_order_item_binding/2`
   - uses: `Ash.Resource`
 - `EventSales.Sales.SourceVersionGuard` - `lib/event_sales/sales/source_version_guard.ex`
   - moduledoc?: true
@@ -2502,6 +2545,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `required_fixtures/0`, `required_fixtures/1`, `required_fixture!/1`, `committed_woocommerce_fixtures/0`, `decode_fixture!/1`, `missing_order_paths/1`, `missing_product_paths/2`, `sensitive_findings/1`, `format_finding/1`, `future_placeholder_allowed?/1`, `parser_work_blocked?/0`, `parser_work_allowed?/0`
   - uses: _none_
+- `EventSales.TestSupport.HistoricalCoverageHelpers` - `test/support/historical_coverage_helpers.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `certified_evidence/1`, `blocked_evidence/1`
+  - uses: _none_
 - `EventSales.TestSupport.Ingestion.MemoryRateLimiterAdapter` - `test/support/ingestion/memory_rate_limiter_adapter.ex`
   - moduledoc?: true
   - specs?: false
@@ -2592,6 +2641,9 @@ Project root: `.`
 - `EventSales.Ingestion.Resources.CatalogChangeSignal` - `lib/event_sales/ingestion/resources/catalog_change_signal.ex`
 - `EventSales.Ingestion.Resources.CsvImportBatch` - `lib/event_sales/ingestion/resources/csv_import_batch.ex`
 - `EventSales.Ingestion.Resources.CsvImportRow` - `lib/event_sales/ingestion/resources/csv_import_row.ex`
+- `EventSales.Ingestion.Resources.HistoricalOrderMembership` - `lib/event_sales/ingestion/resources/historical_order_membership.ex`
+- `EventSales.Ingestion.Resources.HistoricalRefundObservation` - `lib/event_sales/ingestion/resources/historical_refund_observation.ex`
+- `EventSales.Ingestion.Resources.HistoricalRefundReference` - `lib/event_sales/ingestion/resources/historical_refund_reference.ex`
 - `EventSales.Ingestion.Resources.SyncCursor` - `lib/event_sales/ingestion/resources/sync_cursor.ex`
 - `EventSales.Ingestion.Resources.SyncRun` - `lib/event_sales/ingestion/resources/sync_run.ex`
 - `EventSales.Ingestion.Resources.TickeraAttendeeSnapshot` - `lib/event_sales/ingestion/resources/tickera_attendee_snapshot.ex`

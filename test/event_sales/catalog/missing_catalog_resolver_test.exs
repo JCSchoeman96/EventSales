@@ -14,6 +14,7 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
   alias EventSales.Sales
   alias EventSales.Sales.Resources.{Order, OrderItem}
   alias EventSales.TestSupport.FixtureHelpers
+  alias EventSales.TestSupport.HistoricalCoverageHelpers
   alias EventSales.TestSupport.SalesHelpers
 
   @coverage_start ~U[2026-08-01 08:00:00.000000Z]
@@ -46,8 +47,11 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
     assert {:error, :historical_coverage_not_current} =
              HistoricalCoverageResolver.resolve_current(event_b.id)
 
-    assert Ash.get!(SyncRun, run.id, domain: Ingestion).coverage_invalidation_reason ==
-             :historical_order_changed
+    invalidated = Ash.get!(SyncRun, run.id, domain: Ingestion)
+    assert invalidated.coverage_invalidation_reason == :historical_order_changed
+    assert invalidated.order_coverage_status == :incomplete
+    assert invalidated.refund_coverage_status == :incomplete
+    assert %DateTime{} = invalidated.coverage_invalidated_at
   end
 
   test "marks a pending item with a latent exact source Event unmapped and invalidates it", %{
@@ -79,8 +83,11 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
     assert {:error, :historical_coverage_not_current} =
              HistoricalCoverageResolver.resolve_current(event.id)
 
-    assert Ash.get!(SyncRun, run.id, domain: Ingestion).coverage_invalidation_reason ==
-             :historical_order_changed
+    invalidated = Ash.get!(SyncRun, run.id, domain: Ingestion)
+    assert invalidated.coverage_invalidation_reason == :historical_order_changed
+    assert invalidated.order_coverage_status == :incomplete
+    assert invalidated.refund_coverage_status == :incomplete
+    assert %DateTime{} = invalidated.coverage_invalidated_at
   end
 
   test "marks an unresolved source item without guessing or calling D2A", %{source: source} do
@@ -305,8 +312,11 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
     assert {:error, :historical_coverage_not_current} =
              HistoricalCoverageResolver.resolve_current(event_a.id)
 
-    assert Ash.get!(SyncRun, run.id, domain: Ingestion).coverage_invalidation_reason ==
-             :historical_order_changed
+    invalidated = Ash.get!(SyncRun, run.id, domain: Ingestion)
+    assert invalidated.coverage_invalidation_reason == :historical_order_changed
+    assert invalidated.order_coverage_status == :incomplete
+    assert invalidated.refund_coverage_status == :incomplete
+    assert %DateTime{} = invalidated.coverage_invalidated_at
   end
 
   test "commits changed recovery with no candidates without guessing or calling D2A", %{
@@ -678,7 +688,8 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
       %{
         coverage_start: @coverage_start,
         sales_covered_through: @sales_covered_through,
-        refunds_covered_through: @sales_covered_through
+        refunds_covered_through: @sales_covered_through,
+        coverage_evidence: HistoricalCoverageHelpers.certified_evidence()
       },
       action: :record_coverage_certification,
       domain: Ingestion

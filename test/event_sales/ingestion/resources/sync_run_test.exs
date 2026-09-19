@@ -4,6 +4,7 @@ defmodule EventSales.Ingestion.Resources.SyncRunTest do
   alias EventSales.Ingestion
   alias EventSales.Ingestion.ReconciliationPeakGuard
   alias EventSales.Ingestion.Resources.SyncRun
+  alias EventSales.TestSupport.HistoricalCoverageHelpers
   alias EventSales.TestSupport.SalesHelpers
 
   @peak_monday ~U[2026-05-18 12:00:00.000000Z]
@@ -225,6 +226,7 @@ defmodule EventSales.Ingestion.Resources.SyncRunTest do
 
       assert persisted.order_coverage_status == :incomplete
       assert persisted.refund_coverage_status == :not_started
+      assert persisted.coverage_evidence == %{}
 
       for field <- [
             :coverage_start,
@@ -254,6 +256,34 @@ defmodule EventSales.Ingestion.Resources.SyncRunTest do
       assert certified.order_coverage_status == :complete
       assert certified.refund_coverage_status == :complete
       assert %DateTime{} = certified.coverage_certified_at
+      assert certified.coverage_evidence == attrs.coverage_evidence
+    end
+
+    test "blocked coverage evidence fails the run and persists bounded failure evidence" do
+      run = create_historical_run!() |> start_run!()
+      evidence = HistoricalCoverageHelpers.blocked_evidence()
+
+      assert {:ok, failed} =
+               Ash.update(
+                 run,
+                 %{
+                   coverage_start: @coverage_start,
+                   sales_covered_through: @sales_covered_through,
+                   refunds_covered_through: @refunds_covered_through,
+                   coverage_evidence: evidence,
+                   last_error: "historical_coverage_blocked"
+                 },
+                 action: :fail_coverage,
+                 domain: Ingestion
+               )
+
+      assert failed.status == :failed
+      assert failed.order_coverage_status == :failed
+      assert failed.refund_coverage_status == :failed
+      assert failed.coverage_evidence == evidence
+      assert failed.last_error == "historical_coverage_blocked"
+      assert %DateTime{} = failed.finished_at
+      assert is_nil(failed.coverage_certified_at)
     end
 
     test "rejects coverage certification when coverage_start is later than sales_covered_through" do
@@ -522,7 +552,8 @@ defmodule EventSales.Ingestion.Resources.SyncRunTest do
     %{
       coverage_start: @coverage_start,
       sales_covered_through: @sales_covered_through,
-      refunds_covered_through: @refunds_covered_through
+      refunds_covered_through: @refunds_covered_through,
+      coverage_evidence: HistoricalCoverageHelpers.certified_evidence()
     }
   end
 

@@ -13,14 +13,35 @@ defmodule EventSales.Ingestion.Parsers.WoocommerceRefundReferenceParser do
   def parse(payload) when is_map(payload) do
     case Map.get(payload, "refunds", []) do
       nil -> {:ok, []}
-      references when is_list(references) -> parse_references(references)
+      references when is_list(references) -> parse_references(references, :deduplicate)
       _other -> {:error, {:invalid_refund_reference, :refunds, :not_list}}
     end
   end
 
   def parse(_payload), do: {:error, {:invalid_refund_reference, :payload, :not_map}}
 
-  defp parse_references(references) do
+  @doc "Parses the embedded refund references for historical completeness proof."
+  @spec parse_historical(map()) :: result()
+  def parse_historical(payload) when is_map(payload) do
+    case Map.fetch(payload, "refunds") do
+      {:ok, references} when is_list(references) ->
+        parse_references(references, :reject_duplicates)
+
+      {:ok, nil} ->
+        {:error, {:invalid_refund_reference, :refunds, :required}}
+
+      {:ok, _other} ->
+        {:error, {:invalid_refund_reference, :refunds, :not_list}}
+
+      :error ->
+        {:error, {:invalid_refund_reference, :refunds, :required}}
+    end
+  end
+
+  def parse_historical(_payload),
+    do: {:error, {:invalid_refund_reference, :payload, :not_map}}
+
+  defp parse_references(references, duplicate_mode) do
     references
     |> Enum.reduce_while({:ok, []}, fn reference, {:ok, acc} ->
       case parse_reference(reference) do
@@ -30,14 +51,23 @@ defmodule EventSales.Ingestion.Parsers.WoocommerceRefundReferenceParser do
     end)
     |> case do
       {:ok, parsed} ->
-        parsed
-        |> Enum.reverse()
-        |> Enum.uniq_by(& &1.woo_refund_id)
-        |> then(&{:ok, &1})
+        finalize_references(Enum.reverse(parsed), duplicate_mode)
 
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  defp finalize_references(parsed, :deduplicate) do
+    parsed
+    |> Enum.uniq_by(& &1.woo_refund_id)
+    |> then(&{:ok, &1})
+  end
+
+  defp finalize_references(parsed, :reject_duplicates) do
+    if Enum.uniq_by(parsed, & &1.woo_refund_id) == parsed,
+      do: {:ok, parsed},
+      else: {:error, {:invalid_refund_reference, :id, :duplicate}}
   end
 
   defp parse_reference(reference) when is_map(reference) do

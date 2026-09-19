@@ -13,7 +13,7 @@ defmodule EventSales.Sales.OrderUpserter do
   alias EventSales.Repo
   alias EventSales.Sales
   alias EventSales.Sales.OrderItemMapper
-  alias EventSales.Sales.Resources.{CouponSnapshot, Order, OrderItem}
+  alias EventSales.Sales.Resources.{CouponSnapshot, Order, OrderItem, RefundLine}
   alias EventSales.Sales.SourceVersionGuard
 
   @type upsert_result :: {:ok, Order.t()} | {:ok, :stale_noop} | {:error, term()}
@@ -841,6 +841,7 @@ defmodule EventSales.Sales.OrderUpserter do
 
     OrderItem
     |> Ash.Query.filter(order_id == ^order_id and event_id == ^event_id)
+    |> Ash.Query.sort(woo_line_item_id: :asc, id: :asc)
     |> Ash.read(domain: Sales)
     |> handle_event_item_read(current_line_ids, opts)
   end
@@ -864,8 +865,52 @@ defmodule EventSales.Sales.OrderUpserter do
     if MapSet.member?(current_line_ids, item.woo_line_item_id) do
       :ok
     else
-      ash_destroy(item, :destroy_source_absent, opts)
+      with :ok <- mark_refund_lines_order_item_not_found(item, opts) do
+        ash_destroy(item, :destroy_source_absent, opts)
+      end
     end
+  end
+
+  defp mark_refund_lines_order_item_not_found(%OrderItem{id: order_item_id}, opts) do
+    case refund_lines_for_order_item(order_item_id) do
+      {:ok, refund_lines} -> unbind_refund_lines(refund_lines, opts)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp refund_lines_for_order_item(order_item_id) do
+    RefundLine
+    |> Ash.Query.filter(order_item_id == ^order_item_id)
+    |> Ash.Query.sort(id: :asc)
+    |> Ash.Query.lock(:for_update)
+    |> Ash.read(domain: Sales)
+  end
+
+  defp unbind_refund_lines(refund_lines, opts) do
+    Enum.reduce_while(refund_lines, :ok, fn refund_line, :ok ->
+      case mark_refund_line_order_item_not_found(refund_line, opts) do
+        :ok -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, reason}}
+        other -> {:halt, other}
+      end
+    end)
+  end
+
+  defp mark_refund_line_order_item_not_found(refund_line, opts) do
+    result =
+      case Keyword.get(opts, :refund_line_unbinder) do
+        unbinder when is_function(unbinder, 3) ->
+          unbinder.(
+            refund_line,
+            :mark_order_item_not_found,
+            ash_opts(opts, :mark_order_item_not_found)
+          )
+
+        _missing ->
+          ash_update(refund_line, %{}, :mark_order_item_not_found, opts)
+      end
+
+    normalize_update_result(result)
   end
 
   defp remove_absent_coupons(%Order{id: order_id}, current_coupons, opts) do
@@ -942,6 +987,11 @@ defmodule EventSales.Sales.OrderUpserter do
   defp normalize_destroy_result({:ok, _record}), do: :ok
   defp normalize_destroy_result(:ok), do: :ok
   defp normalize_destroy_result(other), do: other
+
+  defp normalize_update_result({:ok, _record, _notifications}), do: :ok
+  defp normalize_update_result({:ok, _record}), do: :ok
+  defp normalize_update_result(:ok), do: :ok
+  defp normalize_update_result(other), do: other
 
   defp order_attrs(source_system_id, normalized) do
     normalized

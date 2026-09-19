@@ -109,6 +109,8 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorkerTest do
           case response do
             :continue -> {:continue, run, cursor}
             :ok -> :ok
+            :retry -> {:retry, :coverage_evidence_read_failed}
+            :blocked -> {:blocked, :historical_coverage_blocked}
             {:error, reason} -> {:error, reason}
           end
 
@@ -256,6 +258,33 @@ defmodule EventSales.Ingestion.Workers.BackfillOrdersWorkerTest do
 
     assert :ok = perform(run.id)
     assert CatchupExecutionFake.calls() == [{run.id, 1}]
+  end
+
+  test "blocked terminal coverage is discarded after executor closes the run", %{
+    run: run,
+    cursor: cursor
+  } do
+    replace_cursor!(cursor, pending_catchup_metadata())
+    BootstrapFake.put_response!({:ok, :evidence})
+    CatchupExecutionFake.put_response!(:blocked)
+
+    assert {:discard, :historical_coverage_blocked} = perform(run.id)
+    assert CatchupExecutionFake.calls() == [{run.id, 1}]
+  end
+
+  test "retryable terminal coverage reads use normal pause and snooze handling", %{
+    run: run,
+    cursor: cursor
+  } do
+    replace_cursor!(cursor, pending_catchup_metadata())
+    BootstrapFake.put_response!({:ok, :evidence})
+    CatchupExecutionFake.put_response!(:retry)
+
+    assert {:snooze, seconds} = perform(run.id)
+    assert seconds > 0
+    paused = Ash.get!(SyncRun, run.id, domain: Ingestion)
+    assert paused.status == :paused
+    assert paused.last_error == "coverage_evidence_read_failed"
   end
 
   test "retryable source failures pause the run and snooze", %{run: run} do

@@ -5,6 +5,7 @@ defmodule EventSales.Ingestion.HistoricalCoverageResolverTest do
   alias EventSales.Ingestion.HistoricalCoverageResolver
   alias EventSales.Ingestion.Resources.SyncRun
   alias EventSales.Repo
+  alias EventSales.TestSupport.HistoricalCoverageHelpers
   alias EventSales.TestSupport.SalesHelpers
 
   @coverage_start ~U[2026-08-01 08:00:00.000000Z]
@@ -39,6 +40,31 @@ defmodule EventSales.Ingestion.HistoricalCoverageResolverTest do
 
     assert {:ok, returned} = HistoricalCoverageResolver.resolve_current(event.id)
     assert returned.id == run.id
+  end
+
+  test "rejects a legacy certificate without bounded evidence", %{event: event} do
+    run = certified_run!(event)
+    _run = update_run!(run, "coverage_evidence = '{}'::jsonb")
+
+    assert {:error, :historical_coverage_not_current} =
+             HistoricalCoverageResolver.resolve_current(event.id)
+  end
+
+  test "rejects a malformed certificate evidence map", %{event: event} do
+    run = certified_run!(event)
+    _run = update_run!(run, "coverage_evidence = $2::jsonb", [%{"result" => "certified"}])
+
+    assert {:error, :historical_coverage_not_current} =
+             HistoricalCoverageResolver.resolve_current(event.id)
+  end
+
+  test "rejects a certificate containing blocked evidence", %{event: event} do
+    run = certified_run!(event)
+    evidence = HistoricalCoverageHelpers.blocked_evidence()
+    _run = update_run!(run, "coverage_evidence = $2::jsonb", [evidence])
+
+    assert {:error, :historical_coverage_not_current} =
+             HistoricalCoverageResolver.resolve_current(event.id)
   end
 
   test "rejects a certificate whose order coverage is incomplete", %{event: event} do
@@ -205,7 +231,8 @@ defmodule EventSales.Ingestion.HistoricalCoverageResolverTest do
       %{
         coverage_start: @coverage_start,
         sales_covered_through: @sales_covered_through,
-        refunds_covered_through: @refunds_covered_through
+        refunds_covered_through: @refunds_covered_through,
+        coverage_evidence: HistoricalCoverageHelpers.certified_evidence()
       },
       action: :record_coverage_certification,
       domain: Ingestion

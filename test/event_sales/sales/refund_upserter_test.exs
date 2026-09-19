@@ -127,6 +127,44 @@ defmodule EventSales.Sales.RefundUpserterTest do
     assert item_id == order_item.id
   end
 
+  test "rebinds an explicitly unresolved RefundLine when the exact parent returns", %{
+    source: source
+  } do
+    order = SalesHelpers.create_order_from_fixture!(:order_completed, source)
+    source_line = order_line_fixture()
+    order_item = SalesHelpers.create_order_item_from_line!(order, source_line)
+    normalized = normalized_refund(92_004, [refund_line(88_104, order_item.woo_line_item_id)])
+
+    assert {:ok, refund} =
+             RefundUpserter.upsert_normalized_refund(source.id, order.woo_order_id, normalized)
+
+    [persisted_line] = refund_lines(refund.id)
+
+    assert {:ok, unresolved} =
+             Ash.update(
+               persisted_line,
+               %{},
+               action: :mark_order_item_not_found,
+               domain: Sales
+             )
+
+    assert unresolved.order_item_id == nil
+    assert unresolved.binding_reason == "order_item_not_found"
+    Ash.destroy!(order_item, action: :destroy_source_absent, domain: Sales)
+
+    replacement = SalesHelpers.create_order_item_from_line!(order, source_line)
+
+    assert {:ok, rebound} =
+             RefundUpserter.upsert_normalized_refund(source.id, order.woo_order_id, normalized)
+
+    assert rebound.id == refund.id
+
+    assert [%RefundLine{order_item_id: replacement_id, binding_reason: nil}] =
+             refund_lines(rebound.id)
+
+    assert replacement_id == replacement.id
+  end
+
   test "preserves parser binding reasons and never uses a fuzzy fallback", %{source: source} do
     order = SalesHelpers.create_order_from_fixture!(:order_completed, source)
     order_item = SalesHelpers.create_order_item_from_line!(order, order_line_fixture())
