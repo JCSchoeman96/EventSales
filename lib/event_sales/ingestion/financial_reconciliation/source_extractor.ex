@@ -457,7 +457,7 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractor do
   defp parse_woo_refund_ids(order_payload) do
     case WoocommerceRefundReferenceParser.parse_historical(order_payload) do
       {:ok, references} ->
-        {:ok, MapSet.new(references, & &1.woo_refund_id)}
+        {:ok, Enum.map(references, & &1.woo_refund_id) |> Enum.sort()}
 
       {:error, _reason} ->
         {:error, {:refund_identity_drift, %{reason: :invalid_refund_discovery}}}
@@ -469,7 +469,7 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractor do
          |> Ash.Query.filter(historical_order_membership_id == ^membership.id)
          |> Ash.read_one(domain: Ingestion) do
       {:ok, nil} ->
-        {:ok, MapSet.new()}
+        {:ok, []}
 
       {:ok, %HistoricalRefundObservation{} = observation} ->
         references =
@@ -479,7 +479,7 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractor do
           )
           |> Ash.read!(domain: Ingestion)
 
-        {:ok, MapSet.new(references, & &1.woo_refund_id)}
+        {:ok, Enum.map(references, & &1.woo_refund_id) |> Enum.sort()}
 
       {:error, _reason} ->
         {:error, {:missing_source_fact, %{kind: :refund_reference_lookup}}}
@@ -487,15 +487,15 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractor do
   end
 
   defp assert_refund_identity_sets(woo_ids, expected_ids, membership) do
-    if MapSet.equal?(woo_ids, expected_ids) do
+    if woo_ids == expected_ids do
       :ok
     else
       {:error,
        {:refund_identity_drift,
         %{
           source_order_id: membership.source_order_id,
-          woo_refund_ids: MapSet.to_list(woo_ids),
-          expected_refund_ids: MapSet.to_list(expected_ids)
+          woo_refund_ids: woo_ids,
+          expected_refund_ids: expected_ids
         }}}
     end
   end
