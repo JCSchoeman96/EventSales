@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-376
+378
 
 ## Files
 
@@ -141,6 +141,7 @@ Project root: `.`
 - `lib/event_sales/ingestion/csv/parser.ex`
 - `lib/event_sales/ingestion/csv_imports.ex`
 - `lib/event_sales/ingestion/event_structural_certifier.ex`
+- `lib/event_sales/ingestion/financial_reconciliation/source_extractor.ex`
 - `lib/event_sales/ingestion/findings_csv_export.ex`
 - `lib/event_sales/ingestion/handlers/product_updated_handler.ex`
 - `lib/event_sales/ingestion/historical_catchup_bootstrap.ex`
@@ -260,6 +261,7 @@ Project root: `.`
 - `lib/event_sales/sales/changes/guard_source_version.ex`
 - `lib/event_sales/sales/changes/sync_status_from_source.ex`
 - `lib/event_sales/sales/changes/validate_ticket_type_event.ex`
+- `lib/event_sales/sales/financial_primitives.ex`
 - `lib/event_sales/sales/order_attribution_correction.ex`
 - `lib/event_sales/sales/order_item_mapper.ex`
 - `lib/event_sales/sales/order_upserter.ex`
@@ -1147,6 +1149,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `certify/3`
   - uses: _none_
+- `EventSales.Ingestion.FinancialReconciliation.SourceExtractor` - `lib/event_sales/ingestion/financial_reconciliation/source_extractor.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 2
+  - public_funs: `extract/2`, `extract_for_run/4`
+  - uses: _none_
 - `EventSales.Ingestion.FindingsCsvExport` - `lib/event_sales/ingestion/findings_csv_export.ex`
   - moduledoc?: true
   - specs?: true
@@ -1879,6 +1887,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `change/3`
   - uses: `Ash.Resource.Change`
+- `EventSales.Sales.FinancialPrimitives` - `lib/event_sales/sales/financial_primitives.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 14
+  - public_funs: `primitives/0`, `historically_recognised_order?/2`, `historically_recognised_source_order?/2`, `empty_totals/0`, `add_totals/2`, `gross_ticket_quantity/1`, `gross_ticket_value/2`, `refund_ticket_quantity/1`, `refund_ticket_value/2`, `net_ticket_quantity/2`, `net_ticket_value/2`, `derive_net_totals/1`, `integral_quantity?/1`, `quantity_primitive?/1`
+  - uses: _none_
 - `EventSales.Sales.OrderAttributionCorrection` - `lib/event_sales/sales/order_attribution_correction.ex`
   - moduledoc?: true
   - specs?: true

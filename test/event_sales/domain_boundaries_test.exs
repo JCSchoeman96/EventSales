@@ -236,6 +236,7 @@ defmodule EventSales.DomainBoundariesTest do
       "lib/event_sales/ingestion/order_refund_sync.ex",
       "lib/event_sales/ingestion/historical_manifest_execution.ex",
       "lib/event_sales/ingestion/historical_catchup_execution.ex",
+      "lib/event_sales/ingestion/financial_reconciliation/source_extractor.ex",
       "lib/event_sales/ingestion/woocommerce_rest_config.ex"
     ]
 
