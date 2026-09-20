@@ -129,6 +129,7 @@
     "lib/event_sales/ingestion/csv/parser.ex",
     "lib/event_sales/ingestion/csv_imports.ex",
     "lib/event_sales/ingestion/event_structural_certifier.ex",
+    "lib/event_sales/ingestion/financial_reconciliation/source_extractor.ex",
     "lib/event_sales/ingestion/findings_csv_export.ex",
     "lib/event_sales/ingestion/handlers/product_updated_handler.ex",
     "lib/event_sales/ingestion/historical_catchup_bootstrap.ex",
@@ -248,6 +249,7 @@
     "lib/event_sales/sales/changes/guard_source_version.ex",
     "lib/event_sales/sales/changes/sync_status_from_source.ex",
     "lib/event_sales/sales/changes/validate_ticket_type_event.ex",
+    "lib/event_sales/sales/financial_primitives.ex",
     "lib/event_sales/sales/order_attribution_correction.ex",
     "lib/event_sales/sales/order_item_mapper.ex",
     "lib/event_sales/sales/order_upserter.ex",
@@ -3114,6 +3116,25 @@
       "uses": []
     },
     {
+      "docs_count": 2,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.FinancialReconciliation.SourceExtractor",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/financial_reconciliation/source_extractor.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "extract"
+        },
+        {
+          "arity": 4,
+          "name": "extract_for_run"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
       "docs_count": 0,
       "moduledoc?": true,
       "name": "EventSales.Ingestion.FindingsCsvExport",
@@ -5698,6 +5719,73 @@
       "uses": [
         "Ash.Resource.Change"
       ]
+    },
+    {
+      "docs_count": 14,
+      "moduledoc?": true,
+      "name": "EventSales.Sales.FinancialPrimitives",
+      "parse_error": null,
+      "path": "lib/event_sales/sales/financial_primitives.ex",
+      "public_funs": [
+        {
+          "arity": 0,
+          "name": "primitives"
+        },
+        {
+          "arity": 2,
+          "name": "historically_recognised_order?"
+        },
+        {
+          "arity": 2,
+          "name": "historically_recognised_source_order?"
+        },
+        {
+          "arity": 0,
+          "name": "empty_totals"
+        },
+        {
+          "arity": 2,
+          "name": "add_totals"
+        },
+        {
+          "arity": 1,
+          "name": "gross_ticket_quantity"
+        },
+        {
+          "arity": 2,
+          "name": "gross_ticket_value"
+        },
+        {
+          "arity": 1,
+          "name": "refund_ticket_quantity"
+        },
+        {
+          "arity": 2,
+          "name": "refund_ticket_value"
+        },
+        {
+          "arity": 2,
+          "name": "net_ticket_quantity"
+        },
+        {
+          "arity": 2,
+          "name": "net_ticket_value"
+        },
+        {
+          "arity": 1,
+          "name": "derive_net_totals"
+        },
+        {
+          "arity": 1,
+          "name": "integral_quantity?"
+        },
+        {
+          "arity": 1,
+          "name": "quantity_primitive?"
+        }
+      ],
+      "specs?": true,
+      "uses": []
     },
     {
       "docs_count": 0,
