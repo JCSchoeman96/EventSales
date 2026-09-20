@@ -15,6 +15,7 @@ defmodule EventSales.Ingestion.FinancialReconciliation.LocalTotalsTest do
 
   alias EventSales.Repo
   alias EventSales.Sales
+  alias EventSales.Sales.FinancialPrimitives
   alias EventSales.Sales.Resources.{Order, OrderItem, Refund, RefundLine}
   alias EventSales.TestSupport.{HistoricalCoverageHelpers, SalesHelpers}
 
@@ -142,7 +143,7 @@ defmodule EventSales.Ingestion.FinancialReconciliation.LocalTotalsTest do
     assert Decimal.equal?(totals.net_ticket_quantity, Decimal.new("0"))
   end
 
-  test "excludes never-completed orders from gross", %{
+  test "seeds zero-value currency partition for never-completed target orders", %{
     source: source,
     event: event,
     ticket: ticket,
@@ -153,7 +154,45 @@ defmodule EventSales.Ingestion.FinancialReconciliation.LocalTotalsTest do
     create_ticket_item!(order, event, ticket, 512, qty: 1, total: "10.00", tax: "0.00")
 
     assert {:ok, result} = LocalTotals.extract_for_run(run, event, source)
-    assert result.currencies == %{}
+    assert_six_zero_partition!(result, "ZAR")
+  end
+
+  test "collapses multiple zero-value target orders into one currency partition", %{
+    source: source,
+    event: event,
+    ticket: ticket,
+    run: run
+  } do
+    create_membership!(run, 20_081, :target, :manifest, [])
+    create_membership!(run, 20_082, :target, :manifest, [])
+
+    order_a = create_order!(source, 20_081, status: :processing, completed_at: nil)
+    order_b = create_order!(source, 20_082, status: :processing, completed_at: nil)
+    create_ticket_item!(order_a, event, ticket, 581, qty: 1, total: "10.00", tax: "0.00")
+    create_ticket_item!(order_b, event, ticket, 582, qty: 1, total: "10.00", tax: "0.00")
+
+    assert {:ok, result} = LocalTotals.extract_for_run(run, event, source)
+    assert map_size(result.currencies) == 1
+    assert_six_zero_partition!(result, "ZAR")
+  end
+
+  test "returns zero and recognised currency partitions together", %{
+    source: source,
+    event: event,
+    ticket: ticket,
+    run: run
+  } do
+    create_membership!(run, 20_083, :target, :manifest, [])
+    create_membership!(run, 20_084, :target, :manifest, [])
+
+    order_zar = create_order!(source, 20_083, status: :processing, completed_at: nil)
+    order_usd = create_order!(source, 20_084, status: :completed, currency: "USD")
+    create_ticket_item!(order_zar, event, ticket, 583, qty: 1, total: "10.00", tax: "0.00")
+    create_ticket_item!(order_usd, event, ticket, 584, qty: 1, total: "20.00", tax: "0.00")
+
+    assert {:ok, result} = LocalTotals.extract_for_run(run, event, source)
+    assert_six_zero_partition!(result, "ZAR")
+    assert Decimal.equal?(result.currencies["USD"].gross_ticket_value, Decimal.new("20.00"))
   end
 
   test "accumulates totals per currency across multiple target members", %{
@@ -444,6 +483,98 @@ defmodule EventSales.Ingestion.FinancialReconciliation.LocalTotalsTest do
              LocalTotals.extract_for_run(run, event, source)
   end
 
+  test "blocks nil refund currency", %{source: source, event: event, ticket: ticket, run: run} do
+    create_membership!(run, 20_091, :target, :manifest, [791])
+    order = create_order!(source, 20_091, status: :completed)
+    item = create_ticket_item!(order, event, ticket, 591, qty: 1, total: "10.00", tax: "0.00")
+    refund = create_refund!(source, order, 791)
+    create_refund_line!(refund, item, qty: 1, total: "10.00", tax: "0.00")
+    nullify_column!("sales_refunds", refund.id, "currency")
+
+    assert {:error, {:currency_conflict, %{woo_refund_id: 791}}} =
+             LocalTotals.extract_for_run(run, event, source)
+  end
+
+  test "blocks blank refund currency", %{source: source, event: event, ticket: ticket, run: run} do
+    create_membership!(run, 20_092, :target, :manifest, [792])
+    order = create_order!(source, 20_092, status: :completed)
+    item = create_ticket_item!(order, event, ticket, 592, qty: 1, total: "10.00", tax: "0.00")
+    refund = create_refund!(source, order, 792)
+    create_refund_line!(refund, item, qty: 1, total: "10.00", tax: "0.00")
+    set_column!("sales_refunds", refund.id, "currency", "")
+
+    assert {:error, {:currency_conflict, %{woo_refund_id: 792}}} =
+             LocalTotals.extract_for_run(run, event, source)
+  end
+
+  test "blocks whitespace refund currency", %{
+    source: source,
+    event: event,
+    ticket: ticket,
+    run: run
+  } do
+    create_membership!(run, 20_093, :target, :manifest, [793])
+    order = create_order!(source, 20_093, status: :completed)
+    item = create_ticket_item!(order, event, ticket, 593, qty: 1, total: "10.00", tax: "0.00")
+    refund = create_refund!(source, order, 793)
+    create_refund_line!(refund, item, qty: 1, total: "10.00", tax: "0.00")
+    set_column!("sales_refunds", refund.id, "currency", "   ")
+
+    assert {:error, {:currency_conflict, %{woo_refund_id: 793}}} =
+             LocalTotals.extract_for_run(run, event, source)
+  end
+
+  test "accepts matching refund currency", %{
+    source: source,
+    event: event,
+    ticket: ticket,
+    run: run
+  } do
+    create_membership!(run, 20_094, :target, :manifest, [794])
+    order = create_order!(source, 20_094, status: :completed, currency: "ZAR")
+    item = create_ticket_item!(order, event, ticket, 594, qty: 1, total: "10.00", tax: "0.00")
+    refund = create_refund!(source, order, 794, currency: "ZAR")
+    create_refund_line!(refund, item, qty: 1, total: "10.00", tax: "0.00")
+
+    assert {:ok, result} = LocalTotals.extract_for_run(run, event, source)
+    assert Decimal.equal?(result.currencies["ZAR"].refund_ticket_value, Decimal.new("10.00"))
+  end
+
+  test "blocks nil refund parent order_id", %{
+    source: source,
+    event: event,
+    ticket: ticket,
+    run: run
+  } do
+    create_membership!(run, 20_095, :target, :manifest, [795])
+    order = create_order!(source, 20_095, status: :completed)
+    item = create_ticket_item!(order, event, ticket, 595, qty: 1, total: "10.00", tax: "0.00")
+    refund = create_refund!(source, order, 795)
+    create_refund_line!(refund, item, qty: 1, total: "10.00", tax: "0.00")
+    nullify_column!("sales_refunds", refund.id, "order_id")
+
+    assert {:error, {:missing_local_fact, %{kind: :refund_parent_binding, woo_refund_id: 795}}} =
+             LocalTotals.extract_for_run(run, event, source)
+  end
+
+  test "blocks refund parent order_id pointing at another order", %{
+    source: source,
+    event: event,
+    ticket: ticket,
+    run: run
+  } do
+    create_membership!(run, 20_096, :target, :manifest, [796])
+    order = create_order!(source, 20_096, status: :completed)
+    other_order = create_order!(source, 20_196, status: :completed)
+    item = create_ticket_item!(order, event, ticket, 596, qty: 1, total: "10.00", tax: "0.00")
+    refund = create_refund!(source, order, 796)
+    create_refund_line!(refund, item, qty: 1, total: "10.00", tax: "0.00")
+    set_column!("sales_refunds", refund.id, "order_id", Ecto.UUID.dump!(other_order.id))
+
+    assert {:error, {:missing_local_fact, %{kind: :refund_parent_binding, woo_refund_id: 796}}} =
+             LocalTotals.extract_for_run(run, event, source)
+  end
+
   test "blocks historical recognition unproven when refund evidence exists", %{
     source: source,
     event: event,
@@ -458,6 +589,37 @@ defmodule EventSales.Ingestion.FinancialReconciliation.LocalTotalsTest do
 
     assert {:error, {:historical_recognition_unproven, %{source_order_id: 20_069}}} =
              LocalTotals.extract_for_run(run, event, source)
+  end
+
+  test "excludes absent_confirmed refund references from refund totals", %{
+    source: source,
+    event: event,
+    ticket: ticket,
+    run: run
+  } do
+    membership = create_membership!(run, 20_085, :target, :manifest, [785])
+    order = create_order!(source, 20_085, status: :completed)
+    item = create_ticket_item!(order, event, ticket, 585, qty: 1, total: "10.00", tax: "0.00")
+    refund = create_refund!(source, order, 785)
+    create_refund_line!(refund, item, qty: 1, total: "10.00", tax: "0.00")
+
+    observation =
+      HistoricalRefundObservation
+      |> Ash.Query.filter(historical_order_membership_id == ^membership.id)
+      |> Ash.read_one!(domain: Ingestion)
+
+    reference =
+      HistoricalRefundReference
+      |> Ash.Query.filter(
+        historical_refund_observation_id == ^observation.id and woo_refund_id == 785
+      )
+      |> Ash.read_one!(domain: Ingestion)
+
+    Ash.update!(reference, %{}, action: :confirm_absent, domain: Ingestion)
+    set_observation_reference_count!(observation.id, 0)
+
+    assert {:ok, result} = LocalTotals.extract_for_run(run, event, source)
+    assert Decimal.equal?(result.currencies["ZAR"].refund_ticket_value, Decimal.new("0"))
   end
 
   test "excludes refund lines bound to non-target order lines", %{
@@ -507,6 +669,275 @@ defmodule EventSales.Ingestion.FinancialReconciliation.LocalTotalsTest do
 
     assert {:ok, result} = LocalTotals.extract_for_run(run, event, source)
     assert Decimal.equal?(result.currencies["ZAR"].refund_ticket_value, Decimal.new("0"))
+  end
+
+  test "blocks non-target refund line with nil order_item_id", %{
+    source: source,
+    event: event,
+    ticket: ticket,
+    run: run
+  } do
+    other_event =
+      SalesHelpers.create_event!(source, %{
+        name: "Other Nil Binder",
+        slug: "other-nil-#{System.unique_integer([:positive])}"
+      })
+
+    other_ticket = SalesHelpers.create_ticket_type!(other_event, %{name: "Other"})
+
+    create_membership!(run, 20_101, :target, :manifest, [801])
+    order = create_order!(source, 20_101, status: :completed)
+    create_ticket_item!(order, event, ticket, 601, qty: 1, total: "10.00", tax: "0.00")
+
+    other_item =
+      Ash.create!(
+        OrderItem,
+        %{
+          order_id: order.id,
+          event_id: other_event.id,
+          ticket_type_id: other_ticket.id,
+          woo_line_item_id: 602,
+          woo_product_id: 1,
+          name: "Other",
+          quantity: 1,
+          line_subtotal: Decimal.new("5"),
+          line_total: Decimal.new("5"),
+          line_total_tax: Decimal.new("0"),
+          discount_total: Decimal.new("0"),
+          item_kind: :ticket,
+          mapping_status: :mapped
+        },
+        action: :create_normalized,
+        domain: Sales
+      )
+
+    refund = create_refund!(source, order, 801)
+
+    Ash.create!(
+      RefundLine,
+      %{
+        refund_id: refund.id,
+        order_item_id: nil,
+        woo_refund_line_item_id: 1,
+        woo_refunded_item_id: other_item.woo_line_item_id,
+        refunded_quantity: 1,
+        refund_total_amount: Decimal.new("5"),
+        refund_total_tax: Decimal.new("0")
+      },
+      action: :create_normalized,
+      domain: Sales
+    )
+
+    assert {:error, {:unresolved_attribution, %{reason: "binder_mismatch"}}} =
+             LocalTotals.extract_for_run(run, event, source)
+  end
+
+  test "blocks non-target refund line with wrong same-order order_item_id", %{
+    source: source,
+    event: event,
+    ticket: ticket,
+    run: run
+  } do
+    other_event =
+      SalesHelpers.create_event!(source, %{
+        name: "Other Wrong Binder",
+        slug: "other-wrong-#{System.unique_integer([:positive])}"
+      })
+
+    other_ticket = SalesHelpers.create_ticket_type!(other_event, %{name: "Other"})
+
+    create_membership!(run, 20_102, :target, :manifest, [802])
+    order = create_order!(source, 20_102, status: :completed)
+
+    target_item =
+      create_ticket_item!(order, event, ticket, 611, qty: 1, total: "10.00", tax: "0.00")
+
+    other_item =
+      Ash.create!(
+        OrderItem,
+        %{
+          order_id: order.id,
+          event_id: other_event.id,
+          ticket_type_id: other_ticket.id,
+          woo_line_item_id: 612,
+          woo_product_id: 1,
+          name: "Other",
+          quantity: 1,
+          line_subtotal: Decimal.new("5"),
+          line_total: Decimal.new("5"),
+          line_total_tax: Decimal.new("0"),
+          discount_total: Decimal.new("0"),
+          item_kind: :ticket,
+          mapping_status: :mapped
+        },
+        action: :create_normalized,
+        domain: Sales
+      )
+
+    refund = create_refund!(source, order, 802)
+
+    Ash.create!(
+      RefundLine,
+      %{
+        refund_id: refund.id,
+        order_item_id: target_item.id,
+        woo_refund_line_item_id: 1,
+        woo_refunded_item_id: other_item.woo_line_item_id,
+        refunded_quantity: 1,
+        refund_total_amount: Decimal.new("5"),
+        refund_total_tax: Decimal.new("0")
+      },
+      action: :create_normalized,
+      domain: Sales
+    )
+
+    assert {:error, {:unresolved_attribution, %{reason: "binder_mismatch"}}} =
+             LocalTotals.extract_for_run(run, event, source)
+  end
+
+  test "blocks cross-order refund line order_item_id", %{
+    source: source,
+    event: event,
+    ticket: ticket,
+    run: run
+  } do
+    other_event =
+      SalesHelpers.create_event!(source, %{
+        name: "Cross Order Binder",
+        slug: "cross-order-#{System.unique_integer([:positive])}"
+      })
+
+    other_ticket = SalesHelpers.create_ticket_type!(other_event, %{name: "Other"})
+
+    create_membership!(run, 20_103, :target, :manifest, [803])
+    order = create_order!(source, 20_103, status: :completed)
+    create_ticket_item!(order, event, ticket, 621, qty: 1, total: "10.00", tax: "0.00")
+
+    other_order = create_order!(source, 20_203, status: :completed)
+
+    member_other_item =
+      Ash.create!(
+        OrderItem,
+        %{
+          order_id: order.id,
+          event_id: other_event.id,
+          ticket_type_id: other_ticket.id,
+          woo_line_item_id: 622,
+          woo_product_id: 1,
+          name: "Other",
+          quantity: 1,
+          line_subtotal: Decimal.new("5"),
+          line_total: Decimal.new("5"),
+          line_total_tax: Decimal.new("0"),
+          discount_total: Decimal.new("0"),
+          item_kind: :ticket,
+          mapping_status: :mapped
+        },
+        action: :create_normalized,
+        domain: Sales
+      )
+
+    cross_order_item =
+      Ash.create!(
+        OrderItem,
+        %{
+          order_id: other_order.id,
+          event_id: other_event.id,
+          ticket_type_id: other_ticket.id,
+          woo_line_item_id: 623,
+          woo_product_id: 1,
+          name: "Cross",
+          quantity: 1,
+          line_subtotal: Decimal.new("5"),
+          line_total: Decimal.new("5"),
+          line_total_tax: Decimal.new("0"),
+          discount_total: Decimal.new("0"),
+          item_kind: :ticket,
+          mapping_status: :mapped
+        },
+        action: :create_normalized,
+        domain: Sales
+      )
+
+    refund = create_refund!(source, order, 803)
+
+    Ash.create!(
+      RefundLine,
+      %{
+        refund_id: refund.id,
+        order_item_id: cross_order_item.id,
+        woo_refund_line_item_id: 1,
+        woo_refunded_item_id: member_other_item.woo_line_item_id,
+        refunded_quantity: 1,
+        refund_total_amount: Decimal.new("5"),
+        refund_total_tax: Decimal.new("0")
+      },
+      action: :create_normalized,
+      domain: Sales
+    )
+
+    assert {:error, {:unresolved_attribution, %{reason: "cross_order_binder"}}} =
+             LocalTotals.extract_for_run(run, event, source)
+  end
+
+  test "blocks unknown woo_refunded_item_id", %{
+    source: source,
+    event: event,
+    ticket: ticket,
+    run: run
+  } do
+    create_membership!(run, 20_104, :target, :manifest, [804])
+    order = create_order!(source, 20_104, status: :completed)
+    item = create_ticket_item!(order, event, ticket, 631, qty: 1, total: "10.00", tax: "0.00")
+    refund = create_refund!(source, order, 804)
+
+    Ash.create!(
+      RefundLine,
+      %{
+        refund_id: refund.id,
+        order_item_id: item.id,
+        woo_refund_line_item_id: 1,
+        woo_refunded_item_id: 99_999,
+        refunded_quantity: 1,
+        refund_total_amount: Decimal.new("10"),
+        refund_total_tax: Decimal.new("0")
+      },
+      action: :create_normalized,
+      domain: Sales
+    )
+
+    assert {:error, {:unresolved_attribution, %{reason: "unknown_parent_line_binder"}}} =
+             LocalTotals.extract_for_run(run, event, source)
+  end
+
+  test "blocks missing woo_refunded_item_id", %{
+    source: source,
+    event: event,
+    ticket: ticket,
+    run: run
+  } do
+    create_membership!(run, 20_105, :target, :manifest, [805])
+    order = create_order!(source, 20_105, status: :completed)
+    item = create_ticket_item!(order, event, ticket, 641, qty: 1, total: "10.00", tax: "0.00")
+    refund = create_refund!(source, order, 805)
+
+    Ash.create!(
+      RefundLine,
+      %{
+        refund_id: refund.id,
+        order_item_id: item.id,
+        woo_refund_line_item_id: 1,
+        woo_refunded_item_id: nil,
+        refunded_quantity: 1,
+        refund_total_amount: Decimal.new("10"),
+        refund_total_tax: Decimal.new("0")
+      },
+      action: :create_normalized,
+      domain: Sales
+    )
+
+    assert {:error, {:unresolved_attribution, %{reason: "missing_refunded_item_id"}}} =
+             LocalTotals.extract_for_run(run, event, source)
   end
 
   test "blocks unresolved refund binder", %{
@@ -751,10 +1182,24 @@ defmodule EventSales.Ingestion.FinancialReconciliation.LocalTotalsTest do
     )
   end
 
+  defp assert_six_zero_partition!(result, currency) do
+    totals = result.currencies[currency]
+    assert totals
+
+    assert totals == FinancialPrimitives.derive_net_totals(FinancialPrimitives.empty_totals())
+  end
+
   defp nullify_column!(table, id, column) do
     Repo.query!(
       "UPDATE #{table} SET #{column} = NULL WHERE id = $1",
       [Ecto.UUID.dump!(id)]
+    )
+  end
+
+  defp set_column!(table, id, column, value) do
+    Repo.query!(
+      "UPDATE #{table} SET #{column} = $2 WHERE id = $1",
+      [Ecto.UUID.dump!(id), value]
     )
   end
 
