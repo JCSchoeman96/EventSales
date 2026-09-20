@@ -579,7 +579,7 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractor do
             selected_line_ids,
             parent_line_ids,
             source_order_id,
-            refund_id
+            normalized.woo_refund_id
           )
         end
 
@@ -617,23 +617,44 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractor do
          normalized,
          selected_line_ids,
          parent_line_ids,
-         _source_order_id,
-         _refund_id
+         source_order_id,
+         woo_refund_id
        ) do
-    Enum.reduce_while(normalized.line_items, {:ok, FinancialPrimitives.empty_totals()}, fn line,
-                                                                                           {:ok,
-                                                                                            acc} ->
-      case classify_refund_line(line, selected_line_ids, parent_line_ids) do
-        :include ->
-          {:cont, {:ok, add_refund_line(acc, line)}}
+    Enum.reduce_while(
+      normalized.line_items,
+      {:ok, FinancialPrimitives.empty_totals()},
+      &reduce_refund_line(
+        &1,
+        &2,
+        selected_line_ids,
+        parent_line_ids,
+        source_order_id,
+        woo_refund_id
+      )
+    )
+  end
 
-        :exclude ->
-          {:cont, {:ok, acc}}
+  defp reduce_refund_line(
+         line,
+         {:ok, acc},
+         selected_line_ids,
+         parent_line_ids,
+         source_order_id,
+         woo_refund_id
+       ) do
+    case classify_refund_line(line, selected_line_ids, parent_line_ids) do
+      :include ->
+        case add_refund_line(acc, line, source_order_id, woo_refund_id) do
+          {:ok, updated} -> {:cont, {:ok, updated}}
+          {:error, reason} -> {:halt, {:error, reason}}
+        end
 
-        {:error, reason} ->
-          {:halt, {:error, reason}}
-      end
-    end)
+      :exclude ->
+        {:cont, {:ok, acc}}
+
+      {:error, reason} ->
+        {:halt, {:error, reason}}
+    end
   end
 
   defp classify_refund_line(line, selected_line_ids, parent_line_ids) do
@@ -679,18 +700,56 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractor do
     |> MapSet.new()
   end
 
-  defp add_refund_line(acc, line) do
-    qty = FinancialPrimitives.refund_ticket_quantity(line.refunded_quantity || 0)
+  defp add_refund_line(acc, line, source_order_id, woo_refund_id) do
+    with {:ok, total} <-
+           require_refund_decimal(
+             line.refund_total_amount,
+             :refund_total_amount,
+             line,
+             source_order_id,
+             woo_refund_id
+           ),
+         {:ok, total_tax} <-
+           require_refund_decimal(
+             line.refund_total_tax,
+             :refund_total_tax,
+             line,
+             source_order_id,
+             woo_refund_id
+           ) do
+      qty = FinancialPrimitives.refund_ticket_quantity(line.refunded_quantity || 0)
+      value = FinancialPrimitives.refund_ticket_value(total, total_tax)
 
-    value =
-      FinancialPrimitives.refund_ticket_value(
-        line.refund_total_amount,
-        line.refund_total_tax
-      )
+      {:ok,
+       acc
+       |> Map.update!(:refund_ticket_quantity, &Decimal.add(&1, qty))
+       |> Map.update!(:refund_ticket_value, &Decimal.add(&1, value))}
+    end
+  end
 
-    acc
-    |> Map.update!(:refund_ticket_quantity, &Decimal.add(&1, qty))
-    |> Map.update!(:refund_ticket_value, &Decimal.add(&1, value))
+  defp require_refund_decimal(nil, field, line, source_order_id, woo_refund_id) do
+    {:error,
+     refund_financial_primitive_error(field, line, source_order_id, woo_refund_id, :missing)}
+  end
+
+  defp require_refund_decimal(%Decimal{} = value, _field, _line, _source_order_id, _woo_refund_id) do
+    {:ok, value}
+  end
+
+  defp require_refund_decimal(_value, field, line, source_order_id, woo_refund_id) do
+    {:error,
+     refund_financial_primitive_error(field, line, source_order_id, woo_refund_id, :invalid)}
+  end
+
+  defp refund_financial_primitive_error(field, line, source_order_id, woo_refund_id, reason) do
+    {:financial_primitive_incomplete,
+     %{
+       field: field,
+       woo_refund_line_item_id: line.woo_refund_line_item_id,
+       woo_refund_id: woo_refund_id,
+       source_order_id: source_order_id,
+       reason: reason
+     }}
   end
 
   defp merge_acc(acc, update) do

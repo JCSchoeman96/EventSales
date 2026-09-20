@@ -794,6 +794,132 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractorTest do
     assert result.source_refunds_fetched == 0
   end
 
+  test "blocks selected ticket refund line missing total", %{
+    source: source,
+    event: event,
+    run: run
+  } do
+    create_membership!(run, 10_080, :target, :manifest, [780])
+
+    Selector.set_lines!(10_080, [
+      %{"id" => 580, "quantity" => 1, "total" => "10.00", "total_tax" => "0.00"}
+    ])
+
+    WooClient.put_order!(
+      10_080,
+      order_payload(10_080,
+        status: "completed",
+        line_items: [%{"id" => 580}],
+        refunds: [%{"id" => 780, "total" => "-10.00"}]
+      )
+    )
+
+    WooClient.put_refund!(10_080, 780, refund_payload(780, 580, include_total: false))
+
+    assert {:error, {:financial_primitive_incomplete, %{field: :refund_total_amount}}} =
+             SourceExtractor.extract_for_run(run, event, source,
+               woo_client: WooClient,
+               line_selector: &Selector.select/3
+             )
+  end
+
+  test "blocks selected ticket refund line missing total_tax", %{
+    source: source,
+    event: event,
+    run: run
+  } do
+    create_membership!(run, 10_081, :target, :manifest, [781])
+
+    Selector.set_lines!(10_081, [
+      %{"id" => 581, "quantity" => 1, "total" => "10.00", "total_tax" => "0.00"}
+    ])
+
+    WooClient.put_order!(
+      10_081,
+      order_payload(10_081,
+        status: "completed",
+        line_items: [%{"id" => 581}],
+        refunds: [%{"id" => 781, "total" => "-10.00"}]
+      )
+    )
+
+    WooClient.put_refund!(10_081, 781, refund_payload(781, 581, include_tax: false))
+
+    assert {:error, {:financial_primitive_incomplete, %{field: :refund_total_tax}}} =
+             SourceExtractor.extract_for_run(run, event, source,
+               woo_client: WooClient,
+               line_selector: &Selector.select/3
+             )
+  end
+
+  test "accepts selected ticket refund line with explicit zero total_tax", %{
+    source: source,
+    event: event,
+    run: run
+  } do
+    create_membership!(run, 10_082, :target, :manifest, [782])
+
+    Selector.set_lines!(10_082, [
+      %{"id" => 582, "quantity" => 1, "total" => "10.00", "total_tax" => "0.00"}
+    ])
+
+    WooClient.put_order!(
+      10_082,
+      order_payload(10_082,
+        status: "completed",
+        line_items: [%{"id" => 582}],
+        refunds: [%{"id" => 782, "total" => "-10.00"}]
+      )
+    )
+
+    WooClient.put_refund!(10_082, 782, refund_payload(782, 582, tax: "0.00"))
+
+    assert {:ok, result} =
+             SourceExtractor.extract_for_run(run, event, source,
+               woo_client: WooClient,
+               line_selector: &Selector.select/3
+             )
+
+    assert Decimal.equal?(result.currencies["ZAR"].refund_ticket_value, Decimal.new("10.00"))
+  end
+
+  test "accepts value-only selected ticket refund with complete money and zero quantity", %{
+    source: source,
+    event: event,
+    run: run
+  } do
+    create_membership!(run, 10_083, :target, :manifest, [783])
+
+    Selector.set_lines!(10_083, [
+      %{"id" => 583, "quantity" => 1, "total" => "20.00", "total_tax" => "0.00"}
+    ])
+
+    WooClient.put_order!(
+      10_083,
+      order_payload(10_083,
+        status: "completed",
+        line_items: [%{"id" => 583}],
+        refunds: [%{"id" => 783, "total" => "-15.00"}]
+      )
+    )
+
+    WooClient.put_refund!(
+      10_083,
+      783,
+      refund_payload(783, 583, qty: 0, total: "15.00", tax: "0.00", include_quantity: false)
+    )
+
+    assert {:ok, result} =
+             SourceExtractor.extract_for_run(run, event, source,
+               woo_client: WooClient,
+               line_selector: &Selector.select/3
+             )
+
+    totals = result.currencies["ZAR"]
+    assert Decimal.equal?(totals.refund_ticket_quantity, Decimal.new("0"))
+    assert Decimal.equal?(totals.refund_ticket_value, Decimal.new("15.00"))
+  end
+
   test "blocks missing refund observation", %{source: source, event: event, run: run} do
     create_membership_without_observation!(run, 10_071, :target)
 
@@ -956,6 +1082,9 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractorTest do
     qty = Keyword.get(opts, :qty, 1)
     total = Keyword.get(opts, :total, "10.00")
     tax = Keyword.get(opts, :tax, "0.00")
+    include_total? = Keyword.get(opts, :include_total, true)
+    include_tax? = Keyword.get(opts, :include_tax, true)
+    include_quantity? = Keyword.get(opts, :include_quantity, true)
 
     meta_data =
       case Keyword.fetch(opts, :meta_data) do
@@ -966,28 +1095,32 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractorTest do
           [%{"key" => "_refunded_item_id", "value" => to_string(line_item_id)}]
       end
 
+    line_item =
+      %{
+        "id" => refund_id * 10,
+        "product_id" => "1",
+        "variation_id" => nil,
+        "subtotal" => "-#{total}",
+        "meta_data" => meta_data
+      }
+      |> maybe_put_refund_field(include_quantity?, "quantity", "-#{qty}")
+      |> maybe_put_refund_field(include_total?, "total", "-#{total}")
+      |> maybe_put_refund_field(include_tax?, "total_tax", "-#{tax}")
+
     %{
       "id" => refund_id,
       "amount" =>
         "-#{Decimal.add(Decimal.new(total), Decimal.new(tax)) |> Decimal.to_string(:normal)}",
       "date_created_gmt" => woo_datetime(~U[2026-08-05 10:00:00.000000Z]),
-      "line_items" => [
-        %{
-          "id" => refund_id * 10,
-          "product_id" => "1",
-          "variation_id" => nil,
-          "quantity" => "-#{qty}",
-          "subtotal" => "-#{total}",
-          "total" => "-#{total}",
-          "total_tax" => "-#{tax}",
-          "meta_data" => meta_data
-        }
-      ],
+      "line_items" => [line_item],
       "shipping_lines" => [],
       "fee_lines" => [],
       "tax_lines" => []
     }
   end
+
+  defp maybe_put_refund_field(line_item, true, key, value), do: Map.put(line_item, key, value)
+  defp maybe_put_refund_field(line_item, false, _key, _value), do: line_item
 
   defp woo_datetime(%DateTime{} = datetime) do
     datetime
