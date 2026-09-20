@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-378
+379
 
 ## Files
 
@@ -141,6 +141,7 @@ Project root: `.`
 - `lib/event_sales/ingestion/csv/parser.ex`
 - `lib/event_sales/ingestion/csv_imports.ex`
 - `lib/event_sales/ingestion/event_structural_certifier.ex`
+- `lib/event_sales/ingestion/financial_reconciliation/local_totals.ex`
 - `lib/event_sales/ingestion/financial_reconciliation/source_extractor.ex`
 - `lib/event_sales/ingestion/findings_csv_export.ex`
 - `lib/event_sales/ingestion/handlers/product_updated_handler.ex`
@@ -1148,6 +1149,12 @@ Project root: `.`
   - specs?: true
   - docs_count: 0
   - public_funs: `certify/3`
+  - uses: _none_
+- `EventSales.Ingestion.FinancialReconciliation.LocalTotals` - `lib/event_sales/ingestion/financial_reconciliation/local_totals.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 2
+  - public_funs: `extract/2`, `extract_for_run/4`
   - uses: _none_
 - `EventSales.Ingestion.FinancialReconciliation.SourceExtractor` - `lib/event_sales/ingestion/financial_reconciliation/source_extractor.ex`
   - moduledoc?: true

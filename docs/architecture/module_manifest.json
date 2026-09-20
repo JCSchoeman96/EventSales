@@ -129,6 +129,7 @@
     "lib/event_sales/ingestion/csv/parser.ex",
     "lib/event_sales/ingestion/csv_imports.ex",
     "lib/event_sales/ingestion/event_structural_certifier.ex",
+    "lib/event_sales/ingestion/financial_reconciliation/local_totals.ex",
     "lib/event_sales/ingestion/financial_reconciliation/source_extractor.ex",
     "lib/event_sales/ingestion/findings_csv_export.ex",
     "lib/event_sales/ingestion/handlers/product_updated_handler.ex",
@@ -3110,6 +3111,25 @@
         {
           "arity": 3,
           "name": "certify"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 2,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.FinancialReconciliation.LocalTotals",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/financial_reconciliation/local_totals.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "extract"
+        },
+        {
+          "arity": 4,
+          "name": "extract_for_run"
         }
       ],
       "specs?": true,
