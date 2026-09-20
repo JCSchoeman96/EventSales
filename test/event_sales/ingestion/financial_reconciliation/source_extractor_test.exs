@@ -25,6 +25,8 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractorTest do
   @modified_at ~U[2026-08-04 10:00:00.000000Z]
   @observed_at ~U[2026-08-13 11:00:00.000000Z]
   @now ~U[2026-08-13 12:30:00.000000Z]
+  @certified_at ~U[2026-08-10 10:00:00.000000Z]
+  @newer_certified_at ~U[2026-08-11 10:00:00.000000Z]
 
   defmodule WooClient do
     def child_spec(opts), do: %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}}
@@ -124,7 +126,11 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractorTest do
 
     WooClient.put_order!(
       10_001,
-      order_payload(10_001, status: "completed", refunds: [%{"id" => 701, "total" => "-46.00"}])
+      order_payload(10_001,
+        status: "completed",
+        line_items: [%{"id" => 501}],
+        refunds: [%{"id" => 701, "total" => "-46.00"}]
+      )
     )
 
     WooClient.put_refund!(
@@ -453,6 +459,357 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractorTest do
     assert Decimal.equal?(result.currencies["ZAR"].gross_ticket_quantity, Decimal.new("3"))
   end
 
+  test "accepts only the current exact M3 certificate", %{source: source, event: event, run: run} do
+    create_membership!(run, 10_030, :target, :manifest, [])
+
+    Selector.set_lines!(10_030, [
+      %{"id" => 530, "quantity" => 1, "total" => "10.00", "total_tax" => "0.00"}
+    ])
+
+    WooClient.put_order!(10_030, order_payload(10_030, status: "completed"))
+
+    assert {:ok, result} =
+             SourceExtractor.extract_for_run(run, event, source,
+               woo_client: WooClient,
+               line_selector: &Selector.select/3
+             )
+
+    assert result.sync_run_id == run.id
+  end
+
+  test "blocks an older certified run when a newer current certificate exists", %{
+    source: source,
+    event: event,
+    run: setup_run
+  } do
+    older = setup_run |> set_certified_at!(@certified_at)
+    _newer = certified_run!(event) |> set_certified_at!(@newer_certified_at)
+
+    create_membership!(older, 10_031, :target, :manifest, [])
+    WooClient.put_order!(10_031, order_payload(10_031, status: "completed"))
+
+    assert {:error, {:invalid_scope, %{reason: :historical_certificate_not_current}}} =
+             SourceExtractor.extract_for_run(older, event, source, woo_client: WooClient)
+
+    refute Enum.any?(WooClient.calls(), &match?({:fetch_order, _}, &1))
+  end
+
+  test "blocks an invalidated supplied certificate", %{source: source, event: event, run: run} do
+    create_membership!(run, 10_032, :target, :manifest, [])
+    WooClient.put_order!(10_032, order_payload(10_032, status: "completed"))
+
+    assert {:ok, invalidated} =
+             Ash.update(
+               run,
+               %{coverage_invalidation_reason: :historical_order_changed},
+               action: :invalidate_order_coverage,
+               domain: Ingestion
+             )
+
+    assert {:error, {:invalid_scope, %{reason: :historical_certificate_not_current}}} =
+             SourceExtractor.extract_for_run(invalidated, event, source, woo_client: WooClient)
+
+    refute Enum.any?(WooClient.calls(), &match?({:fetch_order, _}, &1))
+  end
+
+  test "blocks missing gross total", %{source: source, event: event, run: run} do
+    create_membership!(run, 10_040, :target, :manifest, [])
+
+    Selector.set_lines!(10_040, [
+      %{"id" => 540, "quantity" => 1, "total_tax" => "0.00"}
+    ])
+
+    WooClient.put_order!(10_040, order_payload(10_040, status: "completed"))
+
+    assert {:error, {:financial_primitive_incomplete, %{field: :total}}} =
+             SourceExtractor.extract_for_run(run, event, source,
+               woo_client: WooClient,
+               line_selector: &Selector.select/3
+             )
+  end
+
+  test "blocks invalid gross total", %{source: source, event: event, run: run} do
+    create_membership!(run, 10_041, :target, :manifest, [])
+
+    Selector.set_lines!(10_041, [
+      %{"id" => 541, "quantity" => 1, "total" => "not-money", "total_tax" => "0.00"}
+    ])
+
+    WooClient.put_order!(10_041, order_payload(10_041, status: "completed"))
+
+    assert {:error, {:financial_primitive_incomplete, %{field: :total, reason: :invalid}}} =
+             SourceExtractor.extract_for_run(run, event, source,
+               woo_client: WooClient,
+               line_selector: &Selector.select/3
+             )
+  end
+
+  test "blocks missing gross total_tax", %{source: source, event: event, run: run} do
+    create_membership!(run, 10_042, :target, :manifest, [])
+
+    Selector.set_lines!(10_042, [
+      %{"id" => 542, "quantity" => 1, "total" => "10.00"}
+    ])
+
+    WooClient.put_order!(10_042, order_payload(10_042, status: "completed"))
+
+    assert {:error, {:financial_primitive_incomplete, %{field: :total_tax}}} =
+             SourceExtractor.extract_for_run(run, event, source,
+               woo_client: WooClient,
+               line_selector: &Selector.select/3
+             )
+  end
+
+  test "blocks invalid gross total_tax", %{source: source, event: event, run: run} do
+    create_membership!(run, 10_043, :target, :manifest, [])
+
+    Selector.set_lines!(10_043, [
+      %{"id" => 543, "quantity" => 1, "total" => "10.00", "total_tax" => "bad"}
+    ])
+
+    WooClient.put_order!(10_043, order_payload(10_043, status: "completed"))
+
+    assert {:error, {:financial_primitive_incomplete, %{field: :total_tax, reason: :invalid}}} =
+             SourceExtractor.extract_for_run(run, event, source,
+               woo_client: WooClient,
+               line_selector: &Selector.select/3
+             )
+  end
+
+  test "accepts explicit zero gross total_tax", %{source: source, event: event, run: run} do
+    create_membership!(run, 10_044, :target, :manifest, [])
+
+    Selector.set_lines!(10_044, [
+      %{"id" => 544, "quantity" => 1, "total" => "10.00", "total_tax" => "0.00"}
+    ])
+
+    WooClient.put_order!(10_044, order_payload(10_044, status: "completed"))
+
+    assert {:ok, result} =
+             SourceExtractor.extract_for_run(run, event, source,
+               woo_client: WooClient,
+               line_selector: &Selector.select/3
+             )
+
+    assert Decimal.equal?(result.currencies["ZAR"].gross_ticket_value, Decimal.new("10.00"))
+  end
+
+  test "excludes refund lines bound to another real parent order line", %{
+    source: source,
+    event: event,
+    run: run
+  } do
+    create_membership!(run, 10_050, :target, :manifest, [750])
+
+    Selector.set_lines!(10_050, [
+      %{"id" => 550, "quantity" => 1, "total" => "50.00", "total_tax" => "0.00"}
+    ])
+
+    WooClient.put_order!(
+      10_050,
+      order_payload(10_050,
+        status: "completed",
+        line_items: [%{"id" => 550}, %{"id" => 551}],
+        refunds: [%{"id" => 750, "total" => "-10.00"}]
+      )
+    )
+
+    WooClient.put_refund!(
+      10_050,
+      750,
+      refund_payload(750, 551, qty: 1, total: "10.00", tax: "0.00")
+    )
+
+    assert {:ok, result} =
+             SourceExtractor.extract_for_run(run, event, source,
+               woo_client: WooClient,
+               line_selector: &Selector.select/3
+             )
+
+    assert Decimal.equal?(result.currencies["ZAR"].refund_ticket_quantity, Decimal.new("0"))
+  end
+
+  test "blocks missing refund binder", %{source: source, event: event, run: run} do
+    create_membership!(run, 10_051, :target, :manifest, [751])
+
+    Selector.set_lines!(10_051, [
+      %{"id" => 551, "quantity" => 1, "total" => "10.00", "total_tax" => "0.00"}
+    ])
+
+    WooClient.put_order!(
+      10_051,
+      order_payload(10_051,
+        status: "completed",
+        line_items: [%{"id" => 551}],
+        refunds: [%{"id" => 751, "total" => "-10.00"}]
+      )
+    )
+
+    WooClient.put_refund!(10_051, 751, refund_payload(751, 551, meta_data: []))
+
+    assert {:error, {:unresolved_attribution, %{reason: "missing_refunded_item_id"}}} =
+             SourceExtractor.extract_for_run(run, event, source,
+               woo_client: WooClient,
+               line_selector: &Selector.select/3
+             )
+  end
+
+  test "blocks invalid refund binder", %{source: source, event: event, run: run} do
+    create_membership!(run, 10_052, :target, :manifest, [752])
+
+    Selector.set_lines!(10_052, [
+      %{"id" => 552, "quantity" => 1, "total" => "10.00", "total_tax" => "0.00"}
+    ])
+
+    WooClient.put_order!(
+      10_052,
+      order_payload(10_052,
+        status: "completed",
+        line_items: [%{"id" => 552}],
+        refunds: [%{"id" => 752, "total" => "-10.00"}]
+      )
+    )
+
+    WooClient.put_refund!(
+      10_052,
+      752,
+      refund_payload(752, 552, meta_data: [%{"key" => "_refunded_item_id", "value" => "bad"}])
+    )
+
+    assert {:error, {:unresolved_attribution, %{reason: "invalid_refunded_item_id"}}} =
+             SourceExtractor.extract_for_run(run, event, source,
+               woo_client: WooClient,
+               line_selector: &Selector.select/3
+             )
+  end
+
+  test "blocks conflicting refund binder", %{source: source, event: event, run: run} do
+    create_membership!(run, 10_053, :target, :manifest, [753])
+
+    Selector.set_lines!(10_053, [
+      %{"id" => 553, "quantity" => 1, "total" => "10.00", "total_tax" => "0.00"}
+    ])
+
+    WooClient.put_order!(
+      10_053,
+      order_payload(10_053,
+        status: "completed",
+        line_items: [%{"id" => 553}, %{"id" => 554}],
+        refunds: [%{"id" => 753, "total" => "-10.00"}]
+      )
+    )
+
+    WooClient.put_refund!(
+      10_053,
+      753,
+      refund_payload(753, 553,
+        meta_data: [
+          %{"key" => "_refunded_item_id", "value" => "553"},
+          %{"key" => "_refunded_item_id", "value" => "554"}
+        ]
+      )
+    )
+
+    assert {:error, {:unresolved_attribution, %{reason: "conflicting_refunded_item_id"}}} =
+             SourceExtractor.extract_for_run(run, event, source,
+               woo_client: WooClient,
+               line_selector: &Selector.select/3
+             )
+  end
+
+  test "blocks unknown parent line binder", %{source: source, event: event, run: run} do
+    create_membership!(run, 10_054, :target, :manifest, [754])
+
+    Selector.set_lines!(10_054, [
+      %{"id" => 554, "quantity" => 1, "total" => "10.00", "total_tax" => "0.00"}
+    ])
+
+    WooClient.put_order!(
+      10_054,
+      order_payload(10_054,
+        status: "completed",
+        line_items: [%{"id" => 554}],
+        refunds: [%{"id" => 754, "total" => "-10.00"}]
+      )
+    )
+
+    WooClient.put_refund!(10_054, 754, refund_payload(754, 99_999))
+
+    assert {:error, {:unresolved_attribution, %{reason: :unknown_parent_line_binder}}} =
+             SourceExtractor.extract_for_run(run, event, source,
+               woo_client: WooClient,
+               line_selector: &Selector.select/3
+             )
+  end
+
+  test "blocks missing date_modified_gmt", %{source: source, event: event, run: run} do
+    create_membership!(run, 10_060, :target, :manifest, [])
+
+    payload = order_payload(10_060, status: "completed") |> Map.delete("date_modified_gmt")
+    WooClient.put_order!(10_060, payload)
+
+    assert {:error, {:timestamp_incomplete, %{field: "date_modified_gmt", reason: :missing}}} =
+             SourceExtractor.extract_for_run(run, event, source, woo_client: WooClient)
+  end
+
+  test "blocks blank date_modified_gmt", %{source: source, event: event, run: run} do
+    create_membership!(run, 10_061, :target, :manifest, [])
+
+    WooClient.put_order!(
+      10_061,
+      order_payload(10_061, status: "completed", modified_at: "")
+    )
+
+    assert {:error, {:timestamp_incomplete, %{field: "date_modified_gmt", reason: :blank}}} =
+             SourceExtractor.extract_for_run(run, event, source, woo_client: WooClient)
+  end
+
+  test "blocks malformed date_modified_gmt", %{source: source, event: event, run: run} do
+    create_membership!(run, 10_062, :target, :manifest, [])
+
+    WooClient.put_order!(
+      10_062,
+      Map.put(order_payload(10_062, status: "completed"), "date_modified_gmt", "not-a-timestamp")
+    )
+
+    assert {:error, {:timestamp_incomplete, %{field: "date_modified_gmt", reason: :invalid}}} =
+             SourceExtractor.extract_for_run(run, event, source, woo_client: WooClient)
+  end
+
+  test "accepts explicit zero refund observation", %{source: source, event: event, run: run} do
+    create_membership!(run, 10_070, :target, :manifest, [])
+
+    Selector.set_lines!(10_070, [
+      %{"id" => 570, "quantity" => 1, "total" => "10.00", "total_tax" => "0.00"}
+    ])
+
+    WooClient.put_order!(10_070, order_payload(10_070, status: "completed"))
+
+    assert {:ok, result} =
+             SourceExtractor.extract_for_run(run, event, source,
+               woo_client: WooClient,
+               line_selector: &Selector.select/3
+             )
+
+    assert result.source_refunds_fetched == 0
+  end
+
+  test "blocks missing refund observation", %{source: source, event: event, run: run} do
+    create_membership_without_observation!(run, 10_071, :target)
+
+    Selector.set_lines!(10_071, [
+      %{"id" => 571, "quantity" => 1, "total" => "10.00", "total_tax" => "0.00"}
+    ])
+
+    WooClient.put_order!(10_071, order_payload(10_071, status: "completed"))
+
+    assert {:error, {:missing_source_fact, %{kind: :refund_observation, source_order_id: 10_071}}} =
+             SourceExtractor.extract_for_run(run, event, source,
+               woo_client: WooClient,
+               line_selector: &Selector.select/3
+             )
+  end
+
   defp certified_run!(event) do
     SyncRun
     |> Ash.Changeset.for_create(:queue_historical_backfill, %{
@@ -536,6 +893,31 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractorTest do
     membership
   end
 
+  defp create_membership_without_observation!(run, source_order_id, event_match_state) do
+    Ash.create!(
+      HistoricalOrderMembership,
+      %{
+        sync_run_id: run.id,
+        source_order_id: source_order_id,
+        manifest_source_created_at: @modified_at,
+        manifest_source_modified_at: @modified_at,
+        last_source_modified_at: @modified_at,
+        event_match_state: event_match_state
+      },
+      action: :resolve_manifest,
+      domain: Ingestion
+    )
+  end
+
+  defp set_certified_at!(run, certified_at) do
+    EventSales.Repo.query!(
+      "UPDATE ingestion_sync_runs SET coverage_certified_at = $2 WHERE id = $1",
+      [Ecto.UUID.dump!(run.id), certified_at]
+    )
+
+    Ash.get!(SyncRun, run.id, domain: Ingestion)
+  end
+
   defp order_payload(order_id, opts) do
     status = Keyword.get(opts, :status, "completed")
     currency = Keyword.get(opts, :currency, "ZAR")
@@ -548,20 +930,41 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractorTest do
         :error -> []
       end
 
-    %{
+    line_items =
+      case Keyword.fetch(opts, :line_items) do
+        {:ok, value} -> value
+        :error -> []
+      end
+
+    payload = %{
       "id" => order_id,
       "status" => status,
       "currency" => currency,
-      "date_modified_gmt" => woo_datetime(modified_at),
       "date_completed_gmt" => if(completed_at, do: woo_datetime(completed_at), else: ""),
-      "refunds" => refunds
+      "refunds" => refunds,
+      "line_items" => line_items
     }
+
+    if Keyword.has_key?(opts, :modified_at) and opts[:modified_at] == "" do
+      Map.put(payload, "date_modified_gmt", "")
+    else
+      Map.put(payload, "date_modified_gmt", woo_datetime(modified_at))
+    end
   end
 
-  defp refund_payload(refund_id, line_item_id, opts) do
+  defp refund_payload(refund_id, line_item_id, opts \\ []) do
     qty = Keyword.get(opts, :qty, 1)
     total = Keyword.get(opts, :total, "10.00")
     tax = Keyword.get(opts, :tax, "0.00")
+
+    meta_data =
+      case Keyword.fetch(opts, :meta_data) do
+        {:ok, value} ->
+          value
+
+        :error ->
+          [%{"key" => "_refunded_item_id", "value" => to_string(line_item_id)}]
+      end
 
     %{
       "id" => refund_id,
@@ -577,9 +980,7 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractorTest do
           "subtotal" => "-#{total}",
           "total" => "-#{total}",
           "total_tax" => "-#{tax}",
-          "meta_data" => [
-            %{"key" => "_refunded_item_id", "value" => to_string(line_item_id)}
-          ]
+          "meta_data" => meta_data
         }
       ],
       "shipping_lines" => [],

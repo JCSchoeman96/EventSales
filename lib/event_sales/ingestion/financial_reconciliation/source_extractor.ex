@@ -38,6 +38,7 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractor do
           | :timestamp_incomplete
           | :currency_conflict
           | :unresolved_attribution
+          | :financial_primitive_incomplete
           | :invalid_currency
           | :http_under_lock
           | :invalid_scope
@@ -78,7 +79,8 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractor do
           {:ok, result()} | {:error, structural_error()}
   def extract_for_run(%SyncRun{} = run, %Event{} = event, %SourceSystem{} = source, opts \\ [])
       when is_list(opts) do
-    with :ok <- validate_run_scope(run, event, source) do
+    with :ok <- validate_run_scope(run, event, source),
+         :ok <- assert_current_certificate(run, event) do
       process_memberships(run, event, source, opts)
     end
   end
@@ -100,6 +102,22 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractor do
 
       true ->
         :ok
+    end
+  end
+
+  defp assert_current_certificate(%SyncRun{id: run_id}, %Event{id: event_id}) do
+    case HistoricalCoverageResolver.resolve_current(event_id) do
+      {:ok, %SyncRun{id: ^run_id}} ->
+        :ok
+
+      {:ok, %SyncRun{}} ->
+        {:error, {:invalid_scope, %{reason: :historical_certificate_not_current}}}
+
+      {:error, :historical_coverage_not_current} ->
+        {:error, {:invalid_scope, %{reason: :historical_certificate_not_current}}}
+
+      {:error, reason} ->
+        {:error, {:invalid_scope, %{reason: reason}}}
     end
   end
 
@@ -257,7 +275,8 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractor do
   end
 
   defp assert_source_snapshot(order_payload, membership) do
-    with {:ok, modified_at} <- parse_gmt_datetime(order_payload, "date_modified_gmt"),
+    with {:ok, %DateTime{} = modified_at} <-
+           parse_required_gmt_datetime(order_payload, "date_modified_gmt"),
          true <- DateTime.compare(modified_at, membership.last_source_modified_at) == :eq do
       :ok
     else
@@ -267,7 +286,7 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractor do
           %{
             source_order_id: membership.source_order_id,
             expected: membership.last_source_modified_at,
-            actual: modified_at_value(order_payload)
+            actual: snapshot_modified_at_value(order_payload)
           }}}
 
       {:error, reason} ->
@@ -275,10 +294,10 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractor do
     end
   end
 
-  defp modified_at_value(order_payload) do
-    case parse_gmt_datetime(order_payload, "date_modified_gmt") do
-      {:ok, value} -> value
-      error -> error
+  defp snapshot_modified_at_value(order_payload) do
+    case parse_required_gmt_datetime(order_payload, "date_modified_gmt") do
+      {:ok, %DateTime{} = value} -> value
+      {:error, reason} -> reason
     end
   end
 
@@ -316,17 +335,30 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractor do
              has_refund_evidence?,
              order_payload
            ) do
-      {:ok, accumulate_gross_lines(selected_lines, status, completed_at)}
+      accumulate_gross_lines(order_payload, selected_lines, status, completed_at)
     end
   end
 
-  defp accumulate_gross_lines(selected_lines, status, completed_at) do
+  defp accumulate_gross_lines(order_payload, selected_lines, status, completed_at) do
     if FinancialPrimitives.historically_recognised_source_order?(status, completed_at) do
-      Enum.reduce(selected_lines, FinancialPrimitives.empty_totals(), fn line, acc ->
-        add_gross_line(acc, line)
-      end)
+      reduce_gross_lines(selected_lines, Map.get(order_payload, "id"))
     else
-      FinancialPrimitives.empty_totals()
+      {:ok, FinancialPrimitives.empty_totals()}
+    end
+  end
+
+  defp reduce_gross_lines(lines, woo_order_id) do
+    Enum.reduce_while(
+      lines,
+      {:ok, FinancialPrimitives.empty_totals()},
+      &reduce_gross_line(&1, &2, woo_order_id)
+    )
+  end
+
+  defp reduce_gross_line(line, {:ok, acc}, woo_order_id) do
+    case add_gross_line(acc, line, woo_order_id) do
+      {:ok, updated} -> {:cont, {:ok, updated}}
+      {:error, reason} -> {:halt, {:error, reason}}
     end
   end
 
@@ -365,19 +397,23 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractor do
     end
   end
 
-  defp add_gross_line(acc, line) do
-    quantity = positive_integer(Map.get(line, "quantity", 0))
-    gross_qty = FinancialPrimitives.gross_ticket_quantity(quantity)
+  defp add_gross_line(acc, line, woo_order_id) do
+    line_id = Map.get(line, "id")
 
-    gross_val =
-      FinancialPrimitives.gross_ticket_value(
-        parse_decimal(Map.get(line, "total")),
-        parse_decimal(Map.get(line, "total_tax"))
-      )
+    with {:ok, quantity} <-
+           parse_required_positive_quantity(Map.get(line, "quantity"), line_id, woo_order_id),
+         {:ok, total} <-
+           parse_required_decimal(Map.get(line, "total"), :total, line_id, woo_order_id),
+         {:ok, total_tax} <-
+           parse_required_decimal(Map.get(line, "total_tax"), :total_tax, line_id, woo_order_id) do
+      gross_qty = FinancialPrimitives.gross_ticket_quantity(quantity)
+      gross_val = FinancialPrimitives.gross_ticket_value(total, total_tax)
 
-    acc
-    |> Map.update!(:gross_ticket_quantity, &Decimal.add(&1, gross_qty))
-    |> Map.update!(:gross_ticket_value, &Decimal.add(&1, gross_val))
+      {:ok,
+       acc
+       |> Map.update!(:gross_ticket_quantity, &Decimal.add(&1, gross_qty))
+       |> Map.update!(:gross_ticket_value, &Decimal.add(&1, gross_val))}
+    end
   end
 
   defp refund_totals_for_membership(
@@ -392,10 +428,13 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractor do
          :ok <- assert_refund_identity_sets(woo_refund_ids, expected_refund_ids, membership) do
       selected_line_ids = MapSet.new(selected_lines, &Map.get(&1, "id"))
 
+      parent_line_ids = parent_line_ids(order_payload)
+
       accumulate_refund_totals(
         expected_refund_ids,
         membership.source_order_id,
         selected_line_ids,
+        parent_line_ids,
         refunds_covered_through,
         woo_client
       )
@@ -406,6 +445,7 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractor do
          refund_ids,
          source_order_id,
          selected_line_ids,
+         parent_line_ids,
          refunds_covered_through,
          woo_client
        ) do
@@ -419,6 +459,7 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractor do
         count,
         source_order_id,
         selected_line_ids,
+        parent_line_ids,
         refunds_covered_through,
         woo_client
       )
@@ -435,6 +476,7 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractor do
          count,
          source_order_id,
          selected_line_ids,
+         parent_line_ids,
          refunds_covered_through,
          woo_client
        ) do
@@ -443,6 +485,7 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractor do
            source_order_id,
            refund_id,
            selected_line_ids,
+           parent_line_ids,
            refunds_covered_through
          ) do
       {:ok, refund_totals} ->
@@ -469,7 +512,12 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractor do
          |> Ash.Query.filter(historical_order_membership_id == ^membership.id)
          |> Ash.read_one(domain: Ingestion) do
       {:ok, nil} ->
-        {:ok, []}
+        {:error,
+         {:missing_source_fact,
+          %{
+            kind: :refund_observation,
+            source_order_id: membership.source_order_id
+          }}}
 
       {:ok, %HistoricalRefundObservation{} = observation} ->
         references =
@@ -479,7 +527,20 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractor do
           )
           |> Ash.read!(domain: Ingestion)
 
-        {:ok, Enum.map(references, & &1.woo_refund_id) |> Enum.sort()}
+        present_ids = Enum.map(references, & &1.woo_refund_id) |> Enum.sort()
+
+        if observation.reference_count == length(present_ids) do
+          {:ok, present_ids}
+        else
+          {:error,
+           {:missing_source_fact,
+            %{
+              kind: :refund_reference_inconsistent,
+              source_order_id: membership.source_order_id,
+              reference_count: observation.reference_count,
+              present_reference_count: length(present_ids)
+            }}}
+        end
 
       {:error, _reason} ->
         {:error, {:missing_source_fact, %{kind: :refund_reference_lookup}}}
@@ -505,6 +566,7 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractor do
          source_order_id,
          refund_id,
          selected_line_ids,
+         parent_line_ids,
          refunds_covered_through
        ) do
     case woo_client.fetch_refund(source_order_id, refund_id, []) do
@@ -512,7 +574,13 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractor do
         with {:ok, normalized} <- WoocommerceRefundParser.parse(payload),
              :ok <-
                assert_refund_effective_time(normalized.source_created_at, refunds_covered_through) do
-          {:ok, accumulate_refund_lines(normalized, selected_line_ids)}
+          accumulate_refund_lines(
+            normalized,
+            selected_line_ids,
+            parent_line_ids,
+            source_order_id,
+            refund_id
+          )
         end
 
       {:error, :not_found} ->
@@ -545,21 +613,70 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractor do
       else: {:error, {:timestamp_incomplete, %{field: :source_created_at, boundary: boundary}}}
   end
 
-  defp accumulate_refund_lines(normalized, selected_line_ids) do
-    Enum.reduce(normalized.line_items, FinancialPrimitives.empty_totals(), fn line, acc ->
-      if refund_line_matches?(line, selected_line_ids) do
-        add_refund_line(acc, line)
-      else
-        acc
+  defp accumulate_refund_lines(
+         normalized,
+         selected_line_ids,
+         parent_line_ids,
+         _source_order_id,
+         _refund_id
+       ) do
+    Enum.reduce_while(normalized.line_items, {:ok, FinancialPrimitives.empty_totals()}, fn line,
+                                                                                           {:ok,
+                                                                                            acc} ->
+      case classify_refund_line(line, selected_line_ids, parent_line_ids) do
+        :include ->
+          {:cont, {:ok, add_refund_line(acc, line)}}
+
+        :exclude ->
+          {:cont, {:ok, acc}}
+
+        {:error, reason} ->
+          {:halt, {:error, reason}}
       end
     end)
   end
 
-  defp refund_line_matches?(line, selected_line_ids) do
-    case Map.get(line, :woo_refunded_item_id) do
-      id when is_integer(id) -> MapSet.member?(selected_line_ids, id)
-      _ -> false
+  defp classify_refund_line(line, selected_line_ids, parent_line_ids) do
+    cond do
+      line.binding_reason != nil ->
+        {:error,
+         {:unresolved_attribution,
+          %{
+            reason: line.binding_reason,
+            woo_refund_line_item_id: line.woo_refund_line_item_id
+          }}}
+
+      is_nil(line.woo_refunded_item_id) ->
+        {:error,
+         {:unresolved_attribution,
+          %{
+            reason: :missing_refunded_item_id,
+            woo_refund_line_item_id: line.woo_refund_line_item_id
+          }}}
+
+      MapSet.member?(selected_line_ids, line.woo_refunded_item_id) ->
+        :include
+
+      MapSet.member?(parent_line_ids, line.woo_refunded_item_id) ->
+        :exclude
+
+      true ->
+        {:error,
+         {:unresolved_attribution,
+          %{
+            reason: :unknown_parent_line_binder,
+            woo_refunded_item_id: line.woo_refunded_item_id
+          }}}
     end
+  end
+
+  defp parent_line_ids(order_payload) do
+    order_payload
+    |> Map.get("line_items", [])
+    |> List.wrap()
+    |> Enum.map(&Map.get(&1, "id"))
+    |> Enum.filter(&is_integer/1)
+    |> MapSet.new()
   end
 
   defp add_refund_line(acc, line) do
@@ -623,33 +740,88 @@ defmodule EventSales.Ingestion.FinancialReconciliation.SourceExtractor do
         {:ok, nil}
 
       value when is_binary(value) ->
-        value
-        |> NaiveDateTime.from_iso8601()
-        |> case do
-          {:ok, naive} -> {:ok, DateTime.from_naive!(naive, "Etc/UTC")}
-          {:error, _} -> {:error, {:invalid_currency, %{field: key}}}
+        parse_gmt_datetime_string(value, key)
+
+      _other ->
+        {:error, {:timestamp_incomplete, %{field: key, reason: :invalid}}}
+    end
+  end
+
+  defp parse_required_gmt_datetime(payload, key) do
+    case Map.fetch(payload, key) do
+      :error ->
+        {:error, {:timestamp_incomplete, %{field: key, reason: :missing}}}
+
+      {:ok, value} ->
+        case blank_to_nil(value) do
+          nil ->
+            {:error, {:timestamp_incomplete, %{field: key, reason: :blank}}}
+
+          datetime when is_binary(datetime) ->
+            parse_gmt_datetime_string(datetime, key)
+
+          _other ->
+            {:error, {:timestamp_incomplete, %{field: key, reason: :invalid}}}
+        end
+    end
+  end
+
+  defp parse_gmt_datetime_string(value, key) do
+    value
+    |> NaiveDateTime.from_iso8601()
+    |> case do
+      {:ok, naive} -> {:ok, DateTime.from_naive!(naive, "Etc/UTC")}
+      {:error, _} -> {:error, {:timestamp_incomplete, %{field: key, reason: :invalid}}}
+    end
+  end
+
+  defp parse_required_decimal(value, field, line_id, woo_order_id) do
+    case value do
+      nil ->
+        {:error, financial_primitive_error(field, line_id, woo_order_id, :missing)}
+
+      %Decimal{} = decimal ->
+        {:ok, decimal}
+
+      value when is_integer(value) ->
+        {:ok, Decimal.new(value)}
+
+      value when is_binary(value) ->
+        case Decimal.parse(String.trim(value)) do
+          {decimal, ""} -> {:ok, decimal}
+          _ -> {:error, financial_primitive_error(field, line_id, woo_order_id, :invalid)}
         end
 
       _other ->
-        {:error, {:invalid_currency, %{field: key}}}
+        {:error, financial_primitive_error(field, line_id, woo_order_id, :invalid)}
     end
   end
 
-  defp parse_decimal(nil), do: Decimal.new("0")
-  defp parse_decimal(%Decimal{} = value), do: value
-  defp parse_decimal(value) when is_integer(value), do: Decimal.new(value)
-  defp parse_decimal(value) when is_binary(value), do: Decimal.new(value)
+  defp parse_required_positive_quantity(value, line_id, woo_order_id) do
+    case value do
+      quantity when is_integer(quantity) and quantity > 0 ->
+        {:ok, quantity}
 
-  defp positive_integer(value) when is_integer(value) and value > 0, do: value
+      quantity when is_binary(quantity) ->
+        case Integer.parse(String.trim(quantity)) do
+          {parsed, ""} when parsed > 0 -> {:ok, parsed}
+          _ -> {:error, financial_primitive_error(:quantity, line_id, woo_order_id, :invalid)}
+        end
 
-  defp positive_integer(value) when is_binary(value) do
-    case Integer.parse(String.trim(value)) do
-      {integer, ""} when integer > 0 -> integer
-      _ -> 0
+      _other ->
+        {:error, financial_primitive_error(:quantity, line_id, woo_order_id, :missing)}
     end
   end
 
-  defp positive_integer(_), do: 0
+  defp financial_primitive_error(field, line_id, woo_order_id, reason) do
+    {:financial_primitive_incomplete,
+     %{
+       field: field,
+       woo_line_item_id: line_id,
+       woo_order_id: woo_order_id,
+       reason: reason
+     }}
+  end
 
   defp blank_to_nil(value) when is_binary(value) do
     case String.trim(value) do
