@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-381
+390
 
 ## Files
 
@@ -143,8 +143,11 @@ Project root: `.`
 - `lib/event_sales/ingestion/event_structural_certifier.ex`
 - `lib/event_sales/ingestion/financial_reconciliation/comparator.ex`
 - `lib/event_sales/ingestion/financial_reconciliation/diagnostics.ex`
+- `lib/event_sales/ingestion/financial_reconciliation/finding_fingerprint.ex`
 - `lib/event_sales/ingestion/financial_reconciliation/local_totals.ex`
+- `lib/event_sales/ingestion/financial_reconciliation/orchestrator.ex`
 - `lib/event_sales/ingestion/financial_reconciliation/source_extractor.ex`
+- `lib/event_sales/ingestion/financial_reconciliation_runs.ex`
 - `lib/event_sales/ingestion/findings_csv_export.ex`
 - `lib/event_sales/ingestion/handlers/product_updated_handler.ex`
 - `lib/event_sales/ingestion/historical_catchup_bootstrap.ex`
@@ -182,6 +185,9 @@ Project root: `.`
 - `lib/event_sales/ingestion/resources/catalog_change_signal.ex`
 - `lib/event_sales/ingestion/resources/csv_import_batch.ex`
 - `lib/event_sales/ingestion/resources/csv_import_row.ex`
+- `lib/event_sales/ingestion/resources/financial_reconciliation_finding.ex`
+- `lib/event_sales/ingestion/resources/financial_reconciliation_metric.ex`
+- `lib/event_sales/ingestion/resources/financial_reconciliation_run.ex`
 - `lib/event_sales/ingestion/resources/historical_order_membership.ex`
 - `lib/event_sales/ingestion/resources/historical_refund_observation.ex`
 - `lib/event_sales/ingestion/resources/historical_refund_reference.ex`
@@ -219,6 +225,7 @@ Project root: `.`
 - `lib/event_sales/ingestion/tickera_reconciliation.ex`
 - `lib/event_sales/ingestion/tickera_reconciliation_findings.ex`
 - `lib/event_sales/ingestion/tickera_reconciliation_runs.ex`
+- `lib/event_sales/ingestion/validations/authorized_financial_reconciliation_state_mutation.ex`
 - `lib/event_sales/ingestion/validations/authorized_tickera_state_mutation.ex`
 - `lib/event_sales/ingestion/validations/bounded_metadata.ex`
 - `lib/event_sales/ingestion/validations/scoped_manual_sync.ex`
@@ -238,6 +245,7 @@ Project root: `.`
 - `lib/event_sales/ingestion/workers/process_csv_import_worker.ex`
 - `lib/event_sales/ingestion/workers/process_webhook_worker.ex`
 - `lib/event_sales/ingestion/workers/purge_raw_payloads_worker.ex`
+- `lib/event_sales/ingestion/workers/reconcile_financials_worker.ex`
 - `lib/event_sales/ingestion/workers/reconcile_orders_worker.ex`
 - `lib/event_sales/ingestion/workers/reconcile_tickera_attendees_worker.ex`
 - `lib/event_sales/ingestion/workers/recover_tickera_catalog_auto_apply_worker.ex`
@@ -380,6 +388,7 @@ Project root: `.`
 - `test/support/data_case.ex`
 - `test/support/db_topology_helpers.ex`
 - `test/support/fakes/fake_tickera_attendee_client.ex`
+- `test/support/financial_reconciliation_helpers.ex`
 - `test/support/fixture_helpers.ex`
 - `test/support/fixture_verification_helpers.ex`
 - `test/support/historical_coverage_helpers.ex`
@@ -1164,17 +1173,35 @@ Project root: `.`
   - docs_count: 4
   - public_funs: `from_comparison/1`, `from_source_error/2`, `from_local_error/2`, `from_comparator_error/2`
   - uses: _none_
+- `EventSales.Ingestion.FinancialReconciliation.FindingFingerprint` - `lib/event_sales/ingestion/financial_reconciliation/finding_fingerprint.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `compute/3`, `normalize_details/1`
+  - uses: _none_
 - `EventSales.Ingestion.FinancialReconciliation.LocalTotals` - `lib/event_sales/ingestion/financial_reconciliation/local_totals.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 2
   - public_funs: `extract/2`, `extract_for_run/4`
   - uses: _none_
+- `EventSales.Ingestion.FinancialReconciliation.Orchestrator` - `lib/event_sales/ingestion/financial_reconciliation/orchestrator.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `run/2`
+  - uses: _none_
 - `EventSales.Ingestion.FinancialReconciliation.SourceExtractor` - `lib/event_sales/ingestion/financial_reconciliation/source_extractor.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 2
   - public_funs: `extract/2`, `extract_for_run/4`
+  - uses: _none_
+- `EventSales.Ingestion.FinancialReconciliationRuns` - `lib/event_sales/ingestion/financial_reconciliation_runs.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 1
+  - public_funs: `list_runs/1`, `get_run/2`, `queue_manual_for_event/2`, `queue_system_for_event/2`, `cancel/2`, `mark_started/2`, `mark_failed/3`, `finalize_evidence/3`
   - uses: _none_
 - `EventSales.Ingestion.FindingsCsvExport` - `lib/event_sales/ingestion/findings_csv_export.ex`
   - moduledoc?: true
@@ -1398,6 +1425,24 @@ Project root: `.`
   - docs_count: 0
   - public_funs: _none_
   - uses: `Ash.Resource`
+- `EventSales.Ingestion.Resources.FinancialReconciliationFinding` - `lib/event_sales/ingestion/resources/financial_reconciliation_finding.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `structural_categories/0`, `numeric_mismatch_categories/0`, `validate_structural_category/2`, `validate_origin/2`, `validate_details/2`, `validate_fingerprint/2`
+  - uses: `Ash.Resource`
+- `EventSales.Ingestion.Resources.FinancialReconciliationMetric` - `lib/event_sales/ingestion/resources/financial_reconciliation_metric.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `validate_primitive/2`, `validate_currency/2`, `validate_arithmetic/2`, `validate_match_flag/2`, `validate_quantity_integral/2`, `validate_mismatch_category/2`
+  - uses: `Ash.Resource`
+- `EventSales.Ingestion.Resources.FinancialReconciliationRun` - `lib/event_sales/ingestion/resources/financial_reconciliation_run.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `validate_current_certificate/2`, `copy_scope_from_sync_run/2`, `set_started_at/2`, `set_finished_at/2`, `bound_last_error/2`
+  - uses: `Ash.Resource`
 - `EventSales.Ingestion.Resources.HistoricalOrderMembership` - `lib/event_sales/ingestion/resources/historical_order_membership.ex`
   - moduledoc?: true
   - specs?: false
@@ -1620,6 +1665,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `list_runs/1`, `get_run/2`, `queue_manual_for_event/2`, `queue_manual/3`, `mark_started/2`, `mark_completed/3`, `mark_failed/3`, `cancel/2`, `record_counts/3`
   - uses: _none_
+- `EventSales.Ingestion.Validations.AuthorizedFinancialReconciliationStateMutation` - `lib/event_sales/ingestion/validations/authorized_financial_reconciliation_state_mutation.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `init/1`, `validate/3`
+  - uses: `Ash.Resource.Validation`
 - `EventSales.Ingestion.Validations.AuthorizedTickeraStateMutation` - `lib/event_sales/ingestion/validations/authorized_tickera_state_mutation.ex`
   - moduledoc?: true
   - specs?: false
@@ -1740,6 +1791,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: _none_
   - uses: _none_
+- `EventSales.Ingestion.Workers.ReconcileFinancialsWorker` - `lib/event_sales/ingestion/workers/reconcile_financials_worker.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `perform/1`
+  - uses: `Oban.Worker`
 - `EventSales.Ingestion.Workers.ReconcileOrdersWorker` - `lib/event_sales/ingestion/workers/reconcile_orders_worker.ex`
   - moduledoc?: true
   - specs?: false
@@ -2568,6 +2625,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `child_spec/1`, `start_link/1`, `reset!/1`, `calls/0`, `fetch_attendees_page/5`
   - uses: _none_
+- `EventSales.TestSupport.FinancialReconciliationHelpers` - `test/support/financial_reconciliation_helpers.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `coverage_start/0`, `sales_covered_through/0`, `refunds_covered_through/0`, `certified_run!/1`, `scope_map/1`, `zero_currency_totals/1`, `successful_result/3`
+  - uses: _none_
 - `EventSales.TestSupport.FixtureHelpers` - `test/support/fixture_helpers.ex`
   - moduledoc?: true
   - specs?: true
@@ -2676,6 +2739,9 @@ Project root: `.`
 - `EventSales.Ingestion.Resources.CatalogChangeSignal` - `lib/event_sales/ingestion/resources/catalog_change_signal.ex`
 - `EventSales.Ingestion.Resources.CsvImportBatch` - `lib/event_sales/ingestion/resources/csv_import_batch.ex`
 - `EventSales.Ingestion.Resources.CsvImportRow` - `lib/event_sales/ingestion/resources/csv_import_row.ex`
+- `EventSales.Ingestion.Resources.FinancialReconciliationFinding` - `lib/event_sales/ingestion/resources/financial_reconciliation_finding.ex`
+- `EventSales.Ingestion.Resources.FinancialReconciliationMetric` - `lib/event_sales/ingestion/resources/financial_reconciliation_metric.ex`
+- `EventSales.Ingestion.Resources.FinancialReconciliationRun` - `lib/event_sales/ingestion/resources/financial_reconciliation_run.ex`
 - `EventSales.Ingestion.Resources.HistoricalOrderMembership` - `lib/event_sales/ingestion/resources/historical_order_membership.ex`
 - `EventSales.Ingestion.Resources.HistoricalRefundObservation` - `lib/event_sales/ingestion/resources/historical_refund_observation.ex`
 - `EventSales.Ingestion.Resources.HistoricalRefundReference` - `lib/event_sales/ingestion/resources/historical_refund_reference.ex`
@@ -2724,6 +2790,7 @@ Project root: `.`
 
 ### Validations
 
+- `EventSales.Ingestion.Validations.AuthorizedFinancialReconciliationStateMutation` - `lib/event_sales/ingestion/validations/authorized_financial_reconciliation_state_mutation.ex`
 - `EventSales.Ingestion.Validations.AuthorizedTickeraStateMutation` - `lib/event_sales/ingestion/validations/authorized_tickera_state_mutation.ex`
 - `EventSales.Ingestion.Validations.BoundedMetadata` - `lib/event_sales/ingestion/validations/bounded_metadata.ex`
 - `EventSales.Ingestion.Validations.ScopedManualSync` - `lib/event_sales/ingestion/validations/scoped_manual_sync.ex`
@@ -2826,6 +2893,7 @@ _none_
 - `EventSales.Ingestion.Workers.MissingCatalogResolutionWorker` - `lib/event_sales/ingestion/workers/missing_catalog_resolution_worker.ex`
 - `EventSales.Ingestion.Workers.ProcessCsvImportWorker` - `lib/event_sales/ingestion/workers/process_csv_import_worker.ex`
 - `EventSales.Ingestion.Workers.ProcessWebhookWorker` - `lib/event_sales/ingestion/workers/process_webhook_worker.ex`
+- `EventSales.Ingestion.Workers.ReconcileFinancialsWorker` - `lib/event_sales/ingestion/workers/reconcile_financials_worker.ex`
 - `EventSales.Ingestion.Workers.ReconcileOrdersWorker` - `lib/event_sales/ingestion/workers/reconcile_orders_worker.ex`
 - `EventSales.Ingestion.Workers.ReconcileTickeraAttendeesWorker` - `lib/event_sales/ingestion/workers/reconcile_tickera_attendees_worker.ex`
 - `EventSales.Ingestion.Workers.RecoverTickeraCatalogAutoApplyWorker` - `lib/event_sales/ingestion/workers/recover_tickera_catalog_auto_apply_worker.ex`

@@ -1,0 +1,269 @@
+{
+  "attributes": [
+    {
+      "allow_nil?": false,
+      "default": "fragment(\"gen_random_uuid()\")",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": true,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "id",
+      "type": "uuid"
+    },
+    {
+      "allow_nil?": false,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "currency",
+      "type": "text"
+    },
+    {
+      "allow_nil?": false,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "primitive",
+      "type": "text"
+    },
+    {
+      "allow_nil?": false,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "source_value",
+      "type": "decimal"
+    },
+    {
+      "allow_nil?": false,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "local_value",
+      "type": "decimal"
+    },
+    {
+      "allow_nil?": false,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "delta",
+      "type": "decimal"
+    },
+    {
+      "allow_nil?": false,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "matched?",
+      "type": "boolean"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "mismatch_category",
+      "type": "text"
+    },
+    {
+      "allow_nil?": false,
+      "default": "fragment(\"(now() AT TIME ZONE 'utc')\")",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "inserted_at",
+      "type": "utc_datetime_usec"
+    },
+    {
+      "allow_nil?": false,
+      "default": "fragment(\"(now() AT TIME ZONE 'utc')\")",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "updated_at",
+      "type": "utc_datetime_usec"
+    },
+    {
+      "allow_nil?": false,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": {
+        "deferrable": false,
+        "destination_attribute": "id",
+        "destination_attribute_default": null,
+        "destination_attribute_generated": null,
+        "index?": false,
+        "index_where": null,
+        "match_tenant?": false,
+        "match_type": null,
+        "match_with": null,
+        "multitenancy": {
+          "attribute": null,
+          "global": null,
+          "strategy": null
+        },
+        "name": "ingestion_financial_reconciliation_metrics_financial_reconciliation_run_id_fkey",
+        "on_delete": "restrict",
+        "on_update": "update",
+        "primary_key?": true,
+        "schema": "public",
+        "table": "ingestion_financial_reconciliation_runs"
+      },
+      "scale": null,
+      "size": null,
+      "source": "financial_reconciliation_run_id",
+      "type": "uuid"
+    }
+  ],
+  "base_filter": null,
+  "check_constraints": [
+    {
+      "attribute": [
+        "currency"
+      ],
+      "base_filter": null,
+      "check": "btrim(currency) <> ''",
+      "name": "ingestion_fin_recon_metrics_currency_check"
+    },
+    {
+      "attribute": [
+        "primitive"
+      ],
+      "base_filter": null,
+      "check": "primitive IN ('gross_ticket_quantity', 'gross_ticket_value', 'refund_ticket_quantity', 'refund_ticket_value', 'net_ticket_quantity', 'net_ticket_value')",
+      "name": "ingestion_fin_recon_metrics_primitive_check"
+    },
+    {
+      "attribute": [
+        "delta"
+      ],
+      "base_filter": null,
+      "check": "delta = local_value - source_value",
+      "name": "ingestion_fin_recon_metrics_delta_check"
+    },
+    {
+      "attribute": [
+        "matched?"
+      ],
+      "base_filter": null,
+      "check": "\"matched?\" = (source_value = local_value)",
+      "name": "ingestion_fin_recon_metrics_matched_check"
+    },
+    {
+      "attribute": [
+        "mismatch_category"
+      ],
+      "base_filter": null,
+      "check": "(\n  (\"matched?\" = true AND mismatch_category IS NULL)\n  OR\n  (\"matched?\" = false AND mismatch_category = CASE primitive\n    WHEN 'gross_ticket_quantity' THEN 'gross_quantity_mismatch'\n    WHEN 'gross_ticket_value' THEN 'gross_value_mismatch'\n    WHEN 'refund_ticket_quantity' THEN 'refund_quantity_mismatch'\n    WHEN 'refund_ticket_value' THEN 'refund_value_mismatch'\n    WHEN 'net_ticket_quantity' THEN 'net_quantity_mismatch'\n    WHEN 'net_ticket_value' THEN 'net_value_mismatch'\n  END)\n)\n",
+      "name": "ingestion_fin_recon_metrics_mismatch_category_check"
+    },
+    {
+      "attribute": [
+        "source_value"
+      ],
+      "base_filter": null,
+      "check": "(\n  primitive NOT IN ('gross_ticket_quantity', 'refund_ticket_quantity', 'net_ticket_quantity')\n  OR (\n    source_value = trunc(source_value)\n    AND local_value = trunc(local_value)\n    AND delta = trunc(delta)\n  )\n)\n",
+      "name": "ingestion_fin_recon_metrics_quantity_integral_check"
+    }
+  ],
+  "create_table_options": null,
+  "custom_indexes": [
+    {
+      "all_tenants?": false,
+      "concurrently": false,
+      "error_fields": [
+        "financial_reconciliation_run_id"
+      ],
+      "fields": [
+        {
+          "type": "atom",
+          "value": "financial_reconciliation_run_id"
+        }
+      ],
+      "include": null,
+      "include_base_filter?": true,
+      "message": null,
+      "name": "ingestion_fin_recon_metrics_run_id_idx",
+      "nulls_distinct": true,
+      "prefix": null,
+      "table": null,
+      "unique": false,
+      "using": null,
+      "where": null
+    }
+  ],
+  "custom_statements": [],
+  "has_create_action": true,
+  "hash": "AA94808190104754FE804FDA97987A3C939B87D1619B5F57F857EC17984D9647",
+  "identities": [
+    {
+      "all_tenants?": false,
+      "base_filter": null,
+      "index_name": "ingestion_fin_recon_metrics_identity_idx",
+      "keys": [
+        {
+          "type": "atom",
+          "value": "financial_reconciliation_run_id"
+        },
+        {
+          "type": "atom",
+          "value": "currency"
+        },
+        {
+          "type": "atom",
+          "value": "primitive"
+        }
+      ],
+      "name": "unique_run_currency_primitive",
+      "nils_distinct?": true,
+      "where": null
+    }
+  ],
+  "multitenancy": {
+    "attribute": null,
+    "global": null,
+    "strategy": null
+  },
+  "repo": "Elixir.EventSales.Repo",
+  "schema": null,
+  "table": "ingestion_financial_reconciliation_metrics"
+}

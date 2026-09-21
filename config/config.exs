@@ -41,6 +41,7 @@ config :event_sales, Oban,
     historical_backfill: 1,
     tickera_sync: 1,
     tickera_reconciliation: 1,
+    financial_reconciliation: 2,
     csv_imports: 1,
     maintenance: 1
   ]
