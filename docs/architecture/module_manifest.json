@@ -131,8 +131,11 @@
     "lib/event_sales/ingestion/event_structural_certifier.ex",
     "lib/event_sales/ingestion/financial_reconciliation/comparator.ex",
     "lib/event_sales/ingestion/financial_reconciliation/diagnostics.ex",
+    "lib/event_sales/ingestion/financial_reconciliation/finding_fingerprint.ex",
     "lib/event_sales/ingestion/financial_reconciliation/local_totals.ex",
+    "lib/event_sales/ingestion/financial_reconciliation/orchestrator.ex",
     "lib/event_sales/ingestion/financial_reconciliation/source_extractor.ex",
+    "lib/event_sales/ingestion/financial_reconciliation_runs.ex",
     "lib/event_sales/ingestion/findings_csv_export.ex",
     "lib/event_sales/ingestion/handlers/product_updated_handler.ex",
     "lib/event_sales/ingestion/historical_catchup_bootstrap.ex",
@@ -170,6 +173,9 @@
     "lib/event_sales/ingestion/resources/catalog_change_signal.ex",
     "lib/event_sales/ingestion/resources/csv_import_batch.ex",
     "lib/event_sales/ingestion/resources/csv_import_row.ex",
+    "lib/event_sales/ingestion/resources/financial_reconciliation_finding.ex",
+    "lib/event_sales/ingestion/resources/financial_reconciliation_metric.ex",
+    "lib/event_sales/ingestion/resources/financial_reconciliation_run.ex",
     "lib/event_sales/ingestion/resources/historical_order_membership.ex",
     "lib/event_sales/ingestion/resources/historical_refund_observation.ex",
     "lib/event_sales/ingestion/resources/historical_refund_reference.ex",
@@ -207,6 +213,7 @@
     "lib/event_sales/ingestion/tickera_reconciliation.ex",
     "lib/event_sales/ingestion/tickera_reconciliation_findings.ex",
     "lib/event_sales/ingestion/tickera_reconciliation_runs.ex",
+    "lib/event_sales/ingestion/validations/authorized_financial_reconciliation_state_mutation.ex",
     "lib/event_sales/ingestion/validations/authorized_tickera_state_mutation.ex",
     "lib/event_sales/ingestion/validations/bounded_metadata.ex",
     "lib/event_sales/ingestion/validations/scoped_manual_sync.ex",
@@ -226,6 +233,7 @@
     "lib/event_sales/ingestion/workers/process_csv_import_worker.ex",
     "lib/event_sales/ingestion/workers/process_webhook_worker.ex",
     "lib/event_sales/ingestion/workers/purge_raw_payloads_worker.ex",
+    "lib/event_sales/ingestion/workers/reconcile_financials_worker.ex",
     "lib/event_sales/ingestion/workers/reconcile_orders_worker.ex",
     "lib/event_sales/ingestion/workers/reconcile_tickera_attendees_worker.ex",
     "lib/event_sales/ingestion/workers/recover_tickera_catalog_auto_apply_worker.ex",
@@ -368,6 +376,7 @@
     "test/support/data_case.ex",
     "test/support/db_topology_helpers.ex",
     "test/support/fakes/fake_tickera_attendee_client.ex",
+    "test/support/financial_reconciliation_helpers.ex",
     "test/support/fixture_helpers.ex",
     "test/support/fixture_verification_helpers.ex",
     "test/support/historical_coverage_helpers.ex",
@@ -3161,6 +3170,25 @@
       "uses": []
     },
     {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.FinancialReconciliation.FindingFingerprint",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/financial_reconciliation/finding_fingerprint.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "compute"
+        },
+        {
+          "arity": 1,
+          "name": "normalize_details"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
       "docs_count": 2,
       "moduledoc?": true,
       "name": "EventSales.Ingestion.FinancialReconciliation.LocalTotals",
@@ -3174,6 +3202,21 @@
         {
           "arity": 4,
           "name": "extract_for_run"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.FinancialReconciliation.Orchestrator",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/financial_reconciliation/orchestrator.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "run"
         }
       ],
       "specs?": true,
@@ -3196,6 +3239,49 @@
         }
       ],
       "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.FinancialReconciliationRuns",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/financial_reconciliation_runs.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "list_runs"
+        },
+        {
+          "arity": 2,
+          "name": "get_run"
+        },
+        {
+          "arity": 2,
+          "name": "queue_manual_for_event"
+        },
+        {
+          "arity": 2,
+          "name": "queue_system_for_event"
+        },
+        {
+          "arity": 2,
+          "name": "cancel"
+        },
+        {
+          "arity": 2,
+          "name": "mark_started"
+        },
+        {
+          "arity": 3,
+          "name": "mark_failed"
+        },
+        {
+          "arity": 3,
+          "name": "finalize_evidence"
+        }
+      ],
+      "specs?": false,
       "uses": []
     },
     {
@@ -3986,6 +4072,113 @@
       "parse_error": null,
       "path": "lib/event_sales/ingestion/resources/csv_import_row.ex",
       "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Resources.FinancialReconciliationFinding",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/resources/financial_reconciliation_finding.ex",
+      "public_funs": [
+        {
+          "arity": 0,
+          "name": "structural_categories"
+        },
+        {
+          "arity": 0,
+          "name": "numeric_mismatch_categories"
+        },
+        {
+          "arity": 2,
+          "name": "validate_structural_category"
+        },
+        {
+          "arity": 2,
+          "name": "validate_origin"
+        },
+        {
+          "arity": 2,
+          "name": "validate_details"
+        },
+        {
+          "arity": 2,
+          "name": "validate_fingerprint"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Resources.FinancialReconciliationMetric",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/resources/financial_reconciliation_metric.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "validate_primitive"
+        },
+        {
+          "arity": 2,
+          "name": "validate_currency"
+        },
+        {
+          "arity": 2,
+          "name": "validate_arithmetic"
+        },
+        {
+          "arity": 2,
+          "name": "validate_match_flag"
+        },
+        {
+          "arity": 2,
+          "name": "validate_quantity_integral"
+        },
+        {
+          "arity": 2,
+          "name": "validate_mismatch_category"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Resources.FinancialReconciliationRun",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/resources/financial_reconciliation_run.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "validate_current_certificate"
+        },
+        {
+          "arity": 2,
+          "name": "copy_scope_from_sync_run"
+        },
+        {
+          "arity": 2,
+          "name": "set_started_at"
+        },
+        {
+          "arity": 2,
+          "name": "set_finished_at"
+        },
+        {
+          "arity": 2,
+          "name": "bound_last_error"
+        }
+      ],
       "specs?": false,
       "uses": [
         "Ash.Resource"
@@ -4942,6 +5135,27 @@
     {
       "docs_count": 0,
       "moduledoc?": true,
+      "name": "EventSales.Ingestion.Validations.AuthorizedFinancialReconciliationStateMutation",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/validations/authorized_financial_reconciliation_state_mutation.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "init"
+        },
+        {
+          "arity": 3,
+          "name": "validate"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource.Validation"
+      ]
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
       "name": "EventSales.Ingestion.Validations.AuthorizedTickeraStateMutation",
       "parse_error": null,
       "path": "lib/event_sales/ingestion/validations/authorized_tickera_state_mutation.ex",
@@ -5295,6 +5509,23 @@
       "public_funs": [],
       "specs?": false,
       "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.Workers.ReconcileFinancialsWorker",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/workers/reconcile_financials_worker.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "perform"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Oban.Worker"
+      ]
     },
     {
       "docs_count": 0,
@@ -8360,6 +8591,45 @@
         {
           "arity": 5,
           "name": "fetch_attendees_page"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.FinancialReconciliationHelpers",
+      "parse_error": null,
+      "path": "test/support/financial_reconciliation_helpers.ex",
+      "public_funs": [
+        {
+          "arity": 0,
+          "name": "coverage_start"
+        },
+        {
+          "arity": 0,
+          "name": "sales_covered_through"
+        },
+        {
+          "arity": 0,
+          "name": "refunds_covered_through"
+        },
+        {
+          "arity": 1,
+          "name": "certified_run!"
+        },
+        {
+          "arity": 1,
+          "name": "scope_map"
+        },
+        {
+          "arity": 1,
+          "name": "zero_currency_totals"
+        },
+        {
+          "arity": 3,
+          "name": "successful_result"
         }
       ],
       "specs?": false,
