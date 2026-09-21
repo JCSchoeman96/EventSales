@@ -38,6 +38,7 @@ defmodule EventSales.Ingestion.Resources.FinancialReconciliationFinding do
 
   @origins [:source, :local, :comparator]
   @max_details_bytes 4096
+  @category_check_sql "category IN (#{Enum.map_join(@structural_categories, ", ", &"'#{&1}'")})"
 
   @persist_accept [
     :financial_reconciliation_run_id,
@@ -64,6 +65,20 @@ defmodule EventSales.Ingestion.Resources.FinancialReconciliationFinding do
     end
 
     identity_index_names unique_run_fingerprint: "ingestion_fin_recon_findings_identity_idx"
+
+    check_constraints do
+      check_constraint :category,
+        name: "ingestion_fin_recon_findings_category_check",
+        check: @category_check_sql
+
+      check_constraint :origin,
+        name: "ingestion_fin_recon_findings_origin_check",
+        check: "origin IN ('source', 'local', 'comparator')"
+
+      check_constraint :fingerprint,
+        name: "ingestion_fin_recon_findings_fingerprint_check",
+        check: "fingerprint ~ '^[0-9a-f]{64}$'"
+    end
   end
 
   actions do
@@ -180,18 +195,19 @@ defmodule EventSales.Ingestion.Resources.FinancialReconciliationFinding do
     details = Ash.Changeset.get_attribute(changeset, :details) || %{}
     fingerprint = Ash.Changeset.get_attribute(changeset, :fingerprint)
 
-    with {:ok, expected} <- FindingFingerprint.compute(category, origin, details) do
-      cond do
-        fingerprint == expected and byte_size(fingerprint) == 64 ->
-          :ok
+    case FindingFingerprint.compute(category, origin, details) do
+      {:ok, expected} ->
+        cond do
+          fingerprint == expected and byte_size(fingerprint) == 64 ->
+            :ok
 
-        fingerprint == expected ->
-          {:error, field: :fingerprint, message: "fingerprint must be 64 lowercase hex chars"}
+          fingerprint == expected ->
+            {:error, field: :fingerprint, message: "fingerprint must be 64 lowercase hex chars"}
 
-        true ->
-          {:error, field: :fingerprint, message: "fingerprint does not match persisted details"}
-      end
-    else
+          true ->
+            {:error, field: :fingerprint, message: "fingerprint does not match persisted details"}
+        end
+
       {:error, _reason} ->
         {:error, field: :fingerprint, message: "unable to compute expected fingerprint"}
     end

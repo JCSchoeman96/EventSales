@@ -18,6 +18,7 @@ defmodule EventSales.Ingestion.Resources.FinancialReconciliationRun do
   @statuses [:queued, :running, :passed, :mismatched, :superseded, :failed, :cancelled]
   @active_statuses [:queued, :running]
   @active_index_name "ingestion_fin_recon_runs_active_idx"
+  @status_check_sql "status IN (#{Enum.map_join(@statuses, ", ", &"'#{&1}'")})"
 
   postgres do
     table "ingestion_financial_reconciliation_runs"
@@ -42,6 +43,16 @@ defmodule EventSales.Ingestion.Resources.FinancialReconciliationRun do
         unique: true,
         where: "status IN ('queued', 'running')",
         name: @active_index_name
+    end
+
+    check_constraints do
+      check_constraint :requested_via,
+        name: "ingestion_fin_recon_runs_requested_via_check",
+        check: "requested_via IN ('manual', 'system')"
+
+      check_constraint :status,
+        name: "ingestion_fin_recon_runs_status_check",
+        check: @status_check_sql
     end
   end
 

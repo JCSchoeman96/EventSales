@@ -143,6 +143,60 @@ defmodule EventSales.Ingestion.FinancialReconciliationRunsTest do
              |> Ash.create(domain: Ingestion)
   end
 
+  test "new run enqueue failure cancels the newly created run", %{event: event} do
+    assert {:error, :enqueue_failed} =
+             FinancialReconciliationRuns.queue_system_for_event(event.id,
+               internal?: true,
+               oban_insert: fn _ -> {:error, :oban_down} end
+             )
+
+    runs =
+      FinancialReconciliationRun
+      |> Ash.Query.filter(event_id == ^event.id)
+      |> Ash.read!(domain: Ingestion)
+
+    assert length(runs) == 1
+    assert hd(runs).status == :cancelled
+  end
+
+  test "existing queued run enqueue failure leaves run queued", %{event: event} do
+    oban_fail = fn _ -> {:error, :oban_down} end
+
+    assert {:ok, %{financial_reconciliation_run: first}} =
+             FinancialReconciliationRuns.queue_system_for_event(event.id,
+               internal?: true,
+               oban_insert: fn _ -> {:ok, %{}} end
+             )
+
+    assert {:error, :enqueue_failed} =
+             FinancialReconciliationRuns.queue_system_for_event(event.id,
+               internal?: true,
+               oban_insert: oban_fail
+             )
+
+    reloaded = Ash.get!(FinancialReconciliationRun, first.id, domain: Ingestion)
+    assert reloaded.status == :queued
+  end
+
+  test "existing running run enqueue failure leaves run running", %{event: event} do
+    assert {:ok, %{financial_reconciliation_run: run}} =
+             FinancialReconciliationRuns.queue_system_for_event(event.id,
+               internal?: true,
+               oban_insert: fn _ -> {:ok, %{}} end
+             )
+
+    {:ok, running} = FinancialReconciliationRuns.mark_started(run, internal?: true)
+
+    assert {:error, :enqueue_failed} =
+             FinancialReconciliationRuns.queue_system_for_event(event.id,
+               internal?: true,
+               oban_insert: fn _ -> {:error, :oban_down} end
+             )
+
+    reloaded = Ash.get!(FinancialReconciliationRun, running.id, domain: Ingestion)
+    assert reloaded.status == :running
+  end
+
   test "cancel sets finished_at", %{event: event} do
     {:ok, %{financial_reconciliation_run: run}} =
       FinancialReconciliationRuns.queue_system_for_event(event.id,

@@ -23,12 +23,27 @@ defmodule EventSales.Ingestion.FinancialReconciliation.Orchestrator do
   @spec run(FinancialReconciliationRun.t(), keyword()) ::
           {:ok, FinancialReconciliationRun.t()} | {:error, term()}
   def run(%FinancialReconciliationRun{} = run, opts \\ []) do
-    with {:ok, run} <- maybe_start(run),
-         {:ok, %SyncRun{} = sync_run, %Event{} = event, %SourceSystem{} = source} <-
-           load_scope(run),
-         :ok <- verify_run_scope(run, sync_run, event, source) do
-      scope = scope_map(sync_run)
-      execute_reconciliation(run, scope, sync_run, event, source, opts)
+    case maybe_start(run) do
+      {:ok, started} ->
+        with {:ok, sync_run, event, source} <- load_scope(started),
+             :ok <- verify_run_scope(started, sync_run, event, source) do
+          execute_reconciliation(
+            started,
+            scope_map(sync_run),
+            sync_run,
+            event,
+            source,
+            opts
+          )
+        else
+          {:error, reason} -> mark_internal_failure(started, reason)
+        end
+
+      {:error, :terminal} ->
+        {:error, :terminal}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -87,19 +102,68 @@ defmodule EventSales.Ingestion.FinancialReconciliation.Orchestrator do
       raise "source extraction must not run inside a database transaction"
     end
 
-    with {:ok, source_result} <-
-           invoke_source_extractor(source_extractor, sync_run, event, source, opts),
-         {:ok, local_result} <-
-           invoke_local_totals(local_totals, sync_run, event, source, opts),
-         {:ok, comparison_result} <- Comparator.compare(source_result, local_result),
-         {:ok, diagnostic_result} <- Diagnostics.from_comparison(comparison_result) do
-      finalize_diagnostic(run, diagnostic_result, comparison_result)
-    else
+    case invoke_source_extractor(source_extractor, sync_run, event, source, opts) do
+      {:ok, source_result} ->
+        reconcile_local(run, scope, sync_run, event, source, source_result, local_totals, opts)
+
       {:error, {category, details}} when is_atom(category) and is_map(details) ->
-        finalize_upstream_error(run, scope, category, details, opts)
+        finalize_stage_error(run, scope, :source, category, details)
 
       {:error, reason} ->
         mark_internal_failure(run, reason)
+    end
+  end
+
+  defp reconcile_local(run, scope, sync_run, event, source, source_result, local_totals, opts) do
+    case invoke_local_totals(local_totals, sync_run, event, source, opts) do
+      {:ok, local_result} ->
+        reconcile_compare(run, scope, source_result, local_result)
+
+      {:error, {category, details}} when is_atom(category) and is_map(details) ->
+        finalize_stage_error(run, scope, :local, category, details)
+
+      {:error, reason} ->
+        mark_internal_failure(run, reason)
+    end
+  end
+
+  defp reconcile_compare(run, scope, source_result, local_result) do
+    case Comparator.compare(source_result, local_result) do
+      {:ok, comparison_result} ->
+        case Diagnostics.from_comparison(comparison_result) do
+          {:ok, diagnostic_result} ->
+            finalize_diagnostic(run, diagnostic_result, comparison_result)
+
+          {:error, reason} ->
+            mark_internal_failure(run, reason)
+        end
+
+      {:error, {category, details}} when is_atom(category) and is_map(details) ->
+        finalize_stage_error(run, scope, :comparator, category, details)
+
+      {:error, reason} ->
+        mark_internal_failure(run, reason)
+    end
+  end
+
+  defp finalize_stage_error(run, scope, :source, category, details) do
+    case Diagnostics.from_source_error(scope, {category, details}) do
+      {:ok, result} -> finalize_diagnostic(run, result, nil)
+      {:error, reason} -> mark_internal_failure(run, reason)
+    end
+  end
+
+  defp finalize_stage_error(run, scope, :local, category, details) do
+    case Diagnostics.from_local_error(scope, {category, details}) do
+      {:ok, result} -> finalize_diagnostic(run, result, nil)
+      {:error, reason} -> mark_internal_failure(run, reason)
+    end
+  end
+
+  defp finalize_stage_error(run, scope, :comparator, category, details) do
+    case Diagnostics.from_comparator_error(scope, {category, details}) do
+      {:ok, result} -> finalize_diagnostic(run, result, nil)
+      {:error, reason} -> mark_internal_failure(run, reason)
     end
   end
 
@@ -115,79 +179,15 @@ defmodule EventSales.Ingestion.FinancialReconciliation.Orchestrator do
     invoke_extractor(module_or_fun, sync_run, event, source, opts)
   end
 
-  defp invoke_extractor(module_or_fun, sync_run, event, source, opts) do
+  defp invoke_extractor(module_or_fun, sync_run, event, source, opts)
+       when is_function(module_or_fun, 4) do
     dropped_opts = Keyword.drop(opts, [:source_extractor, :local_totals])
-
-    if is_function(module_or_fun, 4) do
-      module_or_fun.(sync_run, event, source, dropped_opts)
-    else
-      apply(module_or_fun, :extract_for_run, [sync_run, event, source, dropped_opts])
-    end
+    module_or_fun.(sync_run, event, source, dropped_opts)
   end
 
-  defp finalize_upstream_error(run, scope, category, details, _opts) do
-    diagnostic_result =
-      cond do
-        source_error?(category) ->
-          Diagnostics.from_source_error(scope, {category, details})
-
-        local_error?(category) ->
-          Diagnostics.from_local_error(scope, {category, details})
-
-        comparator_error?(category) ->
-          Diagnostics.from_comparator_error(scope, {category, details})
-
-        true ->
-          {:error, {:unclassified_upstream_error, category}}
-      end
-
-    case diagnostic_result do
-      {:ok, result} ->
-        finalize_diagnostic(run, result, nil)
-
-      {:error, reason} ->
-        mark_internal_failure(run, reason)
-    end
-  end
-
-  defp source_error?(category) do
-    category in [
-      :source_snapshot_stale,
-      :refund_identity_drift,
-      :missing_source_fact,
-      :historical_recognition_unproven,
-      :timestamp_incomplete,
-      :currency_conflict,
-      :unresolved_attribution,
-      :financial_primitive_incomplete,
-      :invalid_currency,
-      :http_under_lock,
-      :invalid_scope
-    ]
-  end
-
-  defp local_error?(category) do
-    category in [
-      :unresolved_attribution,
-      :timestamp_incomplete,
-      :currency_conflict,
-      :financial_primitive_incomplete,
-      :historical_recognition_unproven,
-      :missing_local_fact,
-      :invalid_scope
-    ]
-  end
-
-  defp comparator_error?(category) do
-    category in [
-      :currency_set_mismatch,
-      :scope_mismatch,
-      :invalid_scope_field,
-      :invalid_currency_key,
-      :invalid_currencies,
-      :invalid_primitive,
-      :invalid_input
-    ]
+  defp invoke_extractor(module, sync_run, event, source, opts) when is_atom(module) do
+    dropped_opts = Keyword.drop(opts, [:source_extractor, :local_totals])
+    module.extract_for_run(sync_run, event, source, dropped_opts)
   end
 
   defp finalize_diagnostic(run, diagnostic_result, comparison_result) do

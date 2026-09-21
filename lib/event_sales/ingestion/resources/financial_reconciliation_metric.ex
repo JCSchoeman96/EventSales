@@ -28,6 +28,34 @@ defmodule EventSales.Ingestion.Resources.FinancialReconciliationMetric do
     net_ticket_value: :net_value_mismatch
   }
 
+  @primitive_check_sql "primitive IN (#{Enum.map_join(FinancialPrimitives.primitives(), ", ", &"'#{&1}'")})"
+
+  @mismatch_category_check_sql """
+  (
+    ("matched?" = true AND mismatch_category IS NULL)
+    OR
+    ("matched?" = false AND mismatch_category = CASE primitive
+      WHEN 'gross_ticket_quantity' THEN 'gross_quantity_mismatch'
+      WHEN 'gross_ticket_value' THEN 'gross_value_mismatch'
+      WHEN 'refund_ticket_quantity' THEN 'refund_quantity_mismatch'
+      WHEN 'refund_ticket_value' THEN 'refund_value_mismatch'
+      WHEN 'net_ticket_quantity' THEN 'net_quantity_mismatch'
+      WHEN 'net_ticket_value' THEN 'net_value_mismatch'
+    END)
+  )
+  """
+
+  @quantity_integral_check_sql """
+  (
+    primitive NOT IN ('gross_ticket_quantity', 'refund_ticket_quantity', 'net_ticket_quantity')
+    OR (
+      source_value = trunc(source_value)
+      AND local_value = trunc(local_value)
+      AND delta = trunc(delta)
+    )
+  )
+  """
+
   @persist_accept [
     :financial_reconciliation_run_id,
     :currency,
@@ -53,6 +81,32 @@ defmodule EventSales.Ingestion.Resources.FinancialReconciliationMetric do
     end
 
     identity_index_names unique_run_currency_primitive: "ingestion_fin_recon_metrics_identity_idx"
+
+    check_constraints do
+      check_constraint :currency,
+        name: "ingestion_fin_recon_metrics_currency_check",
+        check: "btrim(currency) <> ''"
+
+      check_constraint :primitive,
+        name: "ingestion_fin_recon_metrics_primitive_check",
+        check: @primitive_check_sql
+
+      check_constraint :delta,
+        name: "ingestion_fin_recon_metrics_delta_check",
+        check: "delta = local_value - source_value"
+
+      check_constraint :matched?,
+        name: "ingestion_fin_recon_metrics_matched_check",
+        check: "\"matched?\" = (source_value = local_value)"
+
+      check_constraint :mismatch_category,
+        name: "ingestion_fin_recon_metrics_mismatch_category_check",
+        check: @mismatch_category_check_sql
+
+      check_constraint :source_value,
+        name: "ingestion_fin_recon_metrics_quantity_integral_check",
+        check: @quantity_integral_check_sql
+    end
   end
 
   actions do

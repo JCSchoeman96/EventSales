@@ -125,6 +125,90 @@ defmodule EventSales.Ingestion.FinancialReconciliation.OrchestratorTest do
     findings = list_findings(run.id)
     assert length(findings) == 1
     assert findings |> hd() |> Map.fetch!(:category) == :missing_source_fact
+    assert hd(findings).origin == :source
+  end
+
+  test "source currency conflict finding origin is source", %{run: run} do
+    set_stubs!({:error, {:currency_conflict, %{kind: :order}}}, {:ok, %{}})
+
+    assert {:ok, finalized} = run_orchestrator(run)
+    assert finalized.status == :failed
+    assert hd(list_findings(run.id)).origin == :source
+  end
+
+  test "local currency conflict finding origin is local", %{run: run, sync_run: sync_run} do
+    set_stubs!(
+      {:ok, successful_result(sync_run)},
+      {:error, {:currency_conflict, %{kind: :order}}}
+    )
+
+    assert {:ok, finalized} = run_orchestrator(run)
+    assert finalized.status == :failed
+    assert hd(list_findings(run.id)).origin == :local
+  end
+
+  test "local unresolved attribution finding origin is local", %{run: run, sync_run: sync_run} do
+    set_stubs!(
+      {:ok, successful_result(sync_run)},
+      {:error, {:unresolved_attribution, %{kind: :order}}}
+    )
+
+    assert {:ok, finalized} = run_orchestrator(run)
+    assert finalized.status == :failed
+    assert hd(list_findings(run.id)).origin == :local
+  end
+
+  test "local stale certificate finding origin is local and disposition superseded", %{
+    run: run,
+    sync_run: sync_run
+  } do
+    set_stubs!(
+      {:ok, successful_result(sync_run)},
+      {:error, {:invalid_scope, %{reason: :historical_certificate_not_current}}}
+    )
+
+    assert {:ok, finalized} = run_orchestrator(run)
+    assert finalized.status == :superseded
+    finding = hd(list_findings(run.id))
+    assert finding.origin == :local
+    assert finding.category == :invalid_scope
+  end
+
+  test "comparator currency set mismatch finding origin is comparator", %{
+    run: run,
+    sync_run: sync_run
+  } do
+    source = successful_result(sync_run, "ZAR", %{})
+    local = successful_result(sync_run, "USD", %{})
+
+    set_stubs!({:ok, source}, {:ok, local})
+
+    assert {:ok, finalized} = run_orchestrator(run)
+    assert finalized.status == :mismatched
+    assert hd(list_findings(run.id)).origin == :comparator
+  end
+
+  test "scope mismatch after start transitions to failed without evidence", %{run: run} do
+    run_uuid = Ecto.UUID.dump!(run.id)
+
+    Repo.query!(
+      "UPDATE ingestion_financial_reconciliation_runs SET coverage_start = coverage_start - interval '1 day' WHERE id = $1",
+      [run_uuid]
+    )
+
+    reloaded =
+      Ash.get!(EventSales.Ingestion.Resources.FinancialReconciliationRun, run.id,
+        domain: Ingestion
+      )
+
+    assert {:error, {:failed, failed, :scope_mismatch}} =
+             Orchestrator.run(reloaded, source_extractor: SourceStub, local_totals: LocalStub)
+
+    assert failed.status == :failed
+    assert %DateTime{} = failed.started_at
+    assert %DateTime{} = failed.finished_at
+    assert list_metrics(run.id) == []
+    assert list_findings(run.id) == []
   end
 
   test "source superseded flow transitions to superseded", %{run: run} do
@@ -181,6 +265,44 @@ defmodule EventSales.Ingestion.FinancialReconciliation.OrchestratorTest do
                source_extractor: transaction_probe,
                local_totals: LocalStub
              )
+  end
+
+  test "finalize rolls back all evidence when finding persistence fails", %{
+    run: run,
+    sync_run: sync_run
+  } do
+    {:ok, started} = FinancialReconciliationRuns.mark_started(run, internal?: true)
+
+    invalid_finding = %{
+      category: :missing_source_fact,
+      origin: :source,
+      scope:
+        FinancialReconciliationHelpers.scope_map(sync_run)
+        |> Map.put(:sync_run_id, Ecto.UUID.generate()),
+      details: %{kind: :order}
+    }
+
+    assert {:error, _} =
+             FinancialReconciliationRuns.finalize_evidence(
+               started,
+               %{
+                 disposition: :failed,
+                 comparisons: [],
+                 metric_mismatches: [],
+                 structural_findings: [invalid_finding]
+               },
+               internal?: true
+             )
+
+    assert list_findings(run.id) == []
+    assert list_metrics(run.id) == []
+
+    reloaded =
+      Ash.get!(EventSales.Ingestion.Resources.FinancialReconciliationRun, run.id,
+        domain: Ingestion
+      )
+
+    assert reloaded.status == :running
   end
 
   test "finalize rolls back all evidence when metric persistence fails", %{run: run} do

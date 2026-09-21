@@ -45,8 +45,8 @@ defmodule EventSales.Ingestion.FinancialReconciliationRuns do
 
     with :ok <- authorize_admin(opts),
          {:ok, %SyncRun{} = sync_run} <- HistoricalCoverageResolver.resolve_current(event_id),
-         {:ok, run} <- get_or_create_run(sync_run.id, :queue_manual),
-         {:ok, job} <- enqueue_run(run, oban_insert) do
+         {:ok, run, provenance} <- get_or_create_run(sync_run.id, :queue_manual),
+         {:ok, job} <- enqueue_run(run, oban_insert, provenance) do
       {:ok, %{financial_reconciliation_run: run, job: job}}
     end
   end
@@ -56,8 +56,8 @@ defmodule EventSales.Ingestion.FinancialReconciliationRuns do
 
     with :ok <- authorize_internal(opts),
          {:ok, %SyncRun{} = sync_run} <- HistoricalCoverageResolver.resolve_current(event_id),
-         {:ok, run} <- get_or_create_run(sync_run.id, :queue_system),
-         {:ok, job} <- enqueue_run(run, oban_insert) do
+         {:ok, run, provenance} <- get_or_create_run(sync_run.id, :queue_system),
+         {:ok, job} <- enqueue_run(run, oban_insert, provenance) do
       {:ok, %{financial_reconciliation_run: run, job: job}}
     end
   end
@@ -263,7 +263,7 @@ defmodule EventSales.Ingestion.FinancialReconciliationRuns do
 
   defp get_or_create_run(sync_run_id, action) do
     case find_active_run_for_certificate(sync_run_id) do
-      {:ok, run} -> {:ok, run}
+      {:ok, run} -> {:ok, run, :existing_active}
       :not_found -> create_run(sync_run_id, action)
     end
   end
@@ -275,11 +275,11 @@ defmodule EventSales.Ingestion.FinancialReconciliationRuns do
          |> Ash.Changeset.for_create(action, %{historical_sync_run_id: sync_run_id})
          |> Ash.create(domain: Ingestion) do
       {:ok, run} ->
-        {:ok, run}
+        {:ok, run, :newly_created}
 
       {:error, %Ash.Error.Invalid{}} ->
         case find_active_run_for_certificate(sync_run_id) do
-          {:ok, run} -> {:ok, run}
+          {:ok, run} -> {:ok, run, :existing_active}
           :not_found -> {:error, :active_run_conflict}
         end
 
@@ -309,7 +309,7 @@ defmodule EventSales.Ingestion.FinancialReconciliationRuns do
     end
   end
 
-  defp enqueue_run(run, oban_insert) do
+  defp enqueue_run(run, oban_insert, provenance) do
     case oban_insert.(
            ReconcileFinancialsWorker.new(%{"financial_reconciliation_run_id" => run.id})
          ) do
@@ -317,7 +317,10 @@ defmodule EventSales.Ingestion.FinancialReconciliationRuns do
         {:ok, job}
 
       {:error, _reason} ->
-        _ = cancel(run, internal?: true)
+        if provenance == :newly_created do
+          _ = cancel(run, internal?: true)
+        end
+
         {:error, :enqueue_failed}
     end
   end
