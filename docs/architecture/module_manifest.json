@@ -130,6 +130,7 @@
     "lib/event_sales/ingestion/csv_imports.ex",
     "lib/event_sales/ingestion/event_structural_certifier.ex",
     "lib/event_sales/ingestion/financial_reconciliation/comparator.ex",
+    "lib/event_sales/ingestion/financial_reconciliation/diagnostics.ex",
     "lib/event_sales/ingestion/financial_reconciliation/local_totals.ex",
     "lib/event_sales/ingestion/financial_reconciliation/source_extractor.ex",
     "lib/event_sales/ingestion/findings_csv_export.ex",
@@ -3127,6 +3128,33 @@
         {
           "arity": 2,
           "name": "compare"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 4,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.FinancialReconciliation.Diagnostics",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/financial_reconciliation/diagnostics.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "from_comparison"
+        },
+        {
+          "arity": 2,
+          "name": "from_source_error"
+        },
+        {
+          "arity": 2,
+          "name": "from_local_error"
+        },
+        {
+          "arity": 2,
+          "name": "from_comparator_error"
         }
       ],
       "specs?": true,
