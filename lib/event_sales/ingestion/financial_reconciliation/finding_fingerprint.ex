@@ -80,12 +80,20 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FindingFingerprint do
     end
   end
 
+  # Type-tagged canonical form preserves JSON object vs array identity while
+  # sorting object keys deterministically for the fingerprint hash input only.
   defp canonical_form(%{} = map) do
-    map
-    |> Enum.map(fn {key, value} -> [key, canonical_form(value)] end)
-    |> Enum.sort_by(&hd/1)
+    [
+      "$o",
+      map
+      |> Enum.map(fn {key, value} -> [key, canonical_form(value)] end)
+      |> Enum.sort_by(&hd/1)
+    ]
   end
 
-  defp canonical_form(list) when is_list(list), do: Enum.map(list, &canonical_form/1)
+  defp canonical_form(list) when is_list(list) do
+    ["$a", Enum.map(list, &canonical_form/1)]
+  end
+
   defp canonical_form(value), do: value
 end

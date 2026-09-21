@@ -59,6 +59,39 @@ defmodule EventSales.Ingestion.FinancialReconciliationDbConstraintsTest do
              })
   end
 
+  test "rejects unmatched metric with null mismatch category at database level", %{run: run} do
+    assert {:error, %Postgrex.Error{}} =
+             insert_metric(run.id, %{
+               source_value: Decimal.new("10"),
+               local_value: Decimal.new("12"),
+               delta: Decimal.new("2"),
+               matched?: false,
+               mismatch_category: nil
+             })
+  end
+
+  test "rejects matched metric with non-null mismatch category at database level", %{run: run} do
+    assert {:error, %Postgrex.Error{}} =
+             insert_metric(run.id, %{
+               source_value: Decimal.new("10"),
+               local_value: Decimal.new("10"),
+               delta: Decimal.new("0"),
+               matched?: true,
+               mismatch_category: "gross_value_mismatch"
+             })
+  end
+
+  test "accepts unmatched metric with exact mismatch category at database level", %{run: run} do
+    assert {:ok, %{num_rows: 1}} =
+             insert_metric(run.id, %{
+               source_value: Decimal.new("10"),
+               local_value: Decimal.new("12"),
+               delta: Decimal.new("2"),
+               matched?: false,
+               mismatch_category: "gross_value_mismatch"
+             })
+  end
+
   test "rejects wrong mismatch category at database level", %{run: run} do
     assert {:error, %Postgrex.Error{}} =
              insert_metric(run.id, %{

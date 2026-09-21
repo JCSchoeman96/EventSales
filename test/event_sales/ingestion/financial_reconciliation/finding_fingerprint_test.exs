@@ -93,6 +93,39 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FindingFingerprintTest do
     refute bool_fp == string_fp
   end
 
+  test "object and array shapes with equivalent pair structure produce different fingerprints" do
+    assert {:ok, object_fp} =
+             FindingFingerprint.compute(:missing_source_fact, :source, %{x: %{"a" => 1}})
+
+    assert {:ok, array_fp} =
+             FindingFingerprint.compute(:missing_source_fact, :source, %{x: [["a", 1]]})
+
+    refute object_fp == array_fp
+  end
+
+  test "nested object and array shapes produce different fingerprints" do
+    object_shape = %{outer: %{inner: %{"k" => %{"a" => 1}}}}
+    array_shape = %{outer: %{inner: [["k", [["a", 1]]]]}}
+
+    assert {:ok, object_fp} =
+             FindingFingerprint.compute(:missing_source_fact, :source, object_shape)
+
+    assert {:ok, array_fp} =
+             FindingFingerprint.compute(:missing_source_fact, :source, array_shape)
+
+    refute object_fp == array_fp
+  end
+
+  test "empty object and empty array produce different fingerprints" do
+    assert {:ok, object_fp} =
+             FindingFingerprint.compute(:missing_source_fact, :source, %{x: %{}})
+
+    assert {:ok, array_fp} =
+             FindingFingerprint.compute(:missing_source_fact, :source, %{x: []})
+
+    refute object_fp == array_fp
+  end
+
   test "nil and string nil produce different fingerprints" do
     assert {:ok, nil_fp} =
              FindingFingerprint.compute(:missing_source_fact, :source, %{value: nil})

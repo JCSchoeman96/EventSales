@@ -34,7 +34,7 @@ defmodule EventSales.Ingestion.Resources.FinancialReconciliationMetric do
   (
     ("matched?" = true AND mismatch_category IS NULL)
     OR
-    ("matched?" = false AND mismatch_category = CASE primitive
+    ("matched?" = false AND mismatch_category IS NOT NULL AND mismatch_category = CASE primitive
       WHEN 'gross_ticket_quantity' THEN 'gross_quantity_mismatch'
       WHEN 'gross_ticket_value' THEN 'gross_value_mismatch'
       WHEN 'refund_ticket_quantity' THEN 'refund_quantity_mismatch'
