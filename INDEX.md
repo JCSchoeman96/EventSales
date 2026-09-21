@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-390
+391
 
 ## Files
 
@@ -124,6 +124,7 @@ Project root: `.`
 - `lib/event_sales/health/database_readiness.ex`
 - `lib/event_sales/ingestion.ex`
 - `lib/event_sales/ingestion/admin_reconciliation_dashboard.ex`
+- `lib/event_sales/ingestion/analytics_readiness_resolver.ex`
 - `lib/event_sales/ingestion/backfill_start_capture.ex`
 - `lib/event_sales/ingestion/catalog_change_contract.ex`
 - `lib/event_sales/ingestion/catalog_change_dispatch.ex`
@@ -1052,6 +1053,12 @@ Project root: `.`
   - specs?: true
   - docs_count: 3
   - public_funs: `snapshot/1`, `list_runs/1`, `list_findings/1`, `get_finding/2`, `finding_row/2`, `resolve_finding/3`, `ignore_finding/3`, `reopen_finding/2`, `queue_attendee_sync/2`, `queue_reconciliation/2`, `stream_findings_for_export/1`, `filter_opts_from/1`, `export_row_limit/1`
+  - uses: _none_
+- `EventSales.Ingestion.AnalyticsReadinessResolver` - `lib/event_sales/ingestion/analytics_readiness_resolver.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `resolve/1`
   - uses: _none_
 - `EventSales.Ingestion.BackfillStartCapture` - `lib/event_sales/ingestion/backfill_start_capture.ex`
   - moduledoc?: true

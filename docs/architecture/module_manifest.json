@@ -112,6 +112,7 @@
     "lib/event_sales/health/database_readiness.ex",
     "lib/event_sales/ingestion.ex",
     "lib/event_sales/ingestion/admin_reconciliation_dashboard.ex",
+    "lib/event_sales/ingestion/analytics_readiness_resolver.ex",
     "lib/event_sales/ingestion/backfill_start_capture.ex",
     "lib/event_sales/ingestion/catalog_change_contract.ex",
     "lib/event_sales/ingestion/catalog_change_dispatch.ex",
@@ -2754,6 +2755,21 @@
         {
           "arity": 1,
           "name": "export_row_limit"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Ingestion.AnalyticsReadinessResolver",
+      "parse_error": null,
+      "path": "lib/event_sales/ingestion/analytics_readiness_resolver.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "resolve"
         }
       ],
       "specs?": true,
