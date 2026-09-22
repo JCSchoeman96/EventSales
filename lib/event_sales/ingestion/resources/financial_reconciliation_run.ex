@@ -17,11 +17,9 @@ defmodule EventSales.Ingestion.Resources.FinancialReconciliationRun do
   @requested_via_values [:manual, :system]
   @statuses [:queued, :running, :passed, :mismatched, :superseded, :failed, :cancelled]
   @active_statuses [:queued, :running]
-  @terminal_statuses [:passed, :mismatched, :superseded, :failed, :cancelled]
   @active_index_name "ingestion_fin_recon_runs_active_idx"
   @terminal_ready_index_name "ingestion_fin_recon_runs_terminal_ready_ix"
   @status_check_sql "status IN (#{Enum.map_join(@statuses, ", ", &"'#{&1}'")})"
-  @terminal_status_check_sql "status IN (#{Enum.map_join(@terminal_statuses, ", ", &"'#{&1}'")})"
 
   postgres do
     table "ingestion_financial_reconciliation_runs"
@@ -56,7 +54,6 @@ defmodule EventSales.Ingestion.Resources.FinancialReconciliationRun do
           inserted_at DESC,
           id DESC
         )
-        WHERE #{@terminal_status_check_sql}
         """
 
         down "DROP INDEX IF EXISTS #{@terminal_ready_index_name}"

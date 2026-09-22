@@ -23,7 +23,6 @@ defmodule EventSales.Repo.Migrations.PreM5ReadyIxTerminal do
       inserted_at DESC,
       id DESC
     )
-    WHERE status IN ('passed', 'mismatched', 'superseded', 'failed', 'cancelled')
     """)
   end
 

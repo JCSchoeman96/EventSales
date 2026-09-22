@@ -381,7 +381,7 @@
       "down": "DROP INDEX IF EXISTS ingestion_fin_recon_runs_terminal_ready_ix",
       "global?": false,
       "name": "ingestion_fin_recon_runs_terminal_ready_ix",
-      "up": "CREATE INDEX ingestion_fin_recon_runs_terminal_ready_ix\nON ingestion_financial_reconciliation_runs (\n  event_id,\n  historical_sync_run_id,\n  finished_at DESC NULLS LAST,\n  inserted_at DESC,\n  id DESC\n)\nWHERE status IN ('passed', 'mismatched', 'superseded', 'failed', 'cancelled')\n"
+      "up": "CREATE INDEX ingestion_fin_recon_runs_terminal_ready_ix\nON ingestion_financial_reconciliation_runs (\n  event_id,\n  historical_sync_run_id,\n  finished_at DESC NULLS LAST,\n  inserted_at DESC,\n  id DESC\n)\n"
     }
   ],
   "has_create_action": true,
