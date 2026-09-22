@@ -271,7 +271,7 @@ defmodule EventSales.Ingestion.AnalyticsReadinessResolverTest do
         finalize!(running, :failed, sync_run, categories)
 
       :superseded ->
-        finalize!(running, :superseded, sync_run, categories)
+        supersede_via_lost_certificate!(running, sync_run)
 
       :cancelled ->
         {:ok, cancelled} = FinancialReconciliationRuns.cancel(running, internal?: true)
@@ -279,29 +279,27 @@ defmodule EventSales.Ingestion.AnalyticsReadinessResolverTest do
     end
   end
 
+  defp supersede_via_lost_certificate!(running, sync_run) do
+    Ash.update!(
+      sync_run,
+      %{coverage_invalidation_reason: :historical_order_changed},
+      action: :invalidate_order_coverage,
+      domain: Ingestion
+    )
+
+    finalize!(running, :matched, sync_run, [])
+  end
+
   defp finalize!(running, disposition, sync_run, categories) do
     findings =
-      case {disposition, categories} do
-        {:superseded, []} ->
-          [
-            %{
-              category: :invalid_scope,
-              origin: :local,
-              scope: FinancialReconciliationHelpers.scope_map(sync_run),
-              details: %{reason: :historical_certificate_not_current}
-            }
-          ]
-
-        {_, categories} ->
-          Enum.map(categories, fn category ->
-            %{
-              category: category,
-              origin: :local,
-              scope: FinancialReconciliationHelpers.scope_map(sync_run),
-              details: %{test: Atom.to_string(category)}
-            }
-          end)
-      end
+      Enum.map(categories, fn category ->
+        %{
+          category: category,
+          origin: :local,
+          scope: FinancialReconciliationHelpers.scope_map(sync_run),
+          details: %{test: Atom.to_string(category)}
+        }
+      end)
 
     {:ok, finalized} =
       FinancialReconciliationRuns.finalize_evidence(

@@ -36,11 +36,15 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
     event = SalesHelpers.create_event!(source, %{name: "M4-07 Finalization"})
     sync_run = FinancialReconciliationHelpers.certified_run!(event)
 
+    prev_finalize_hooks = Application.get_env(:event_sales, :financial_reconciliation_finalize_hooks)
+    prev_invalidation = Application.get_env(:event_sales, :financial_reconciliation_coverage_invalidation)
+
     on_exit(fn ->
       Application.delete_env(:event_sales, :finalization_source_result)
       Application.delete_env(:event_sales, :finalization_local_result)
-      Application.delete_env(:event_sales, :financial_reconciliation_coverage_invalidation)
-      Application.delete_env(:event_sales, :financial_reconciliation_finalize_hooks)
+
+      restore_env(:financial_reconciliation_coverage_invalidation, prev_invalidation)
+      restore_env(:financial_reconciliation_finalize_hooks, prev_finalize_hooks)
     end)
 
     %{source: source, event: event, sync_run: sync_run}
@@ -165,18 +169,75 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
     assert Enum.any?(findings, &(&1.category == :invalid_scope))
   end
 
-  test "does not duplicate stale-certificate finding when already present", %{
+  test "does not duplicate stale-certificate finding when certificate already lost", %{
     sync_run: sync_run,
     event: event
   } do
     run = queue_run!(event)
     {:ok, started} = FinancialReconciliationRuns.mark_started(run, internal?: true)
-
     invalidate_sync_run!(sync_run)
 
+    assert {:ok, _} =
+             FinancialReconciliationRuns.finalize_evidence(
+               started,
+               %{disposition: :matched, comparisons: [], metric_mismatches: [], structural_findings: []},
+               internal?: true
+             )
+
+    assert length(list_findings(run.id)) == 1
+  end
+
+  test "M3 lookup failure rolls back without terminalizing or persisting evidence", %{
+    event: event,
+    sync_run: sync_run
+  } do
+    run = queue_run!(event)
+    {:ok, started} = FinancialReconciliationRuns.mark_started(run, internal?: true)
+
+    Application.put_env(:event_sales, :financial_reconciliation_finalize_hooks, [
+      resolve_current: fn _event_id -> {:error, :historical_coverage_lookup_failed} end
+    ])
+
+    assert {:error, :historical_coverage_recheck_failed} =
+             FinancialReconciliationRuns.finalize_evidence(
+               started,
+               drift_evidence(:matched, sync_run, :source_snapshot_stale),
+               internal?: true
+             )
+
+    assert_run_running!(run.id)
+    assert_sync_unchanged!(sync_run.id)
+    assert list_findings(run.id) == []
+    assert list_metrics(run.id) == []
+  end
+
+  test "resolver historical_coverage_not_current yields superseded", %{event: event} do
+    run = queue_run!(event)
+    {:ok, started} = FinancialReconciliationRuns.mark_started(run, internal?: true)
+
+    Application.put_env(:event_sales, :financial_reconciliation_finalize_hooks, [
+      resolve_current: fn _event_id -> {:error, :historical_coverage_not_current} end
+    ])
+
+    assert {:ok, finalized} =
+             FinancialReconciliationRuns.finalize_evidence(
+               started,
+               %{disposition: :matched, comparisons: [], metric_mismatches: [], structural_findings: []},
+               internal?: true
+             )
+
+    assert finalized.status == :superseded
+  end
+
+  test "current M3 rejects handcrafted historical_certificate_not_current finding", %{
+    event: event,
+    sync_run: sync_run
+  } do
+    run = queue_run!(event)
+    {:ok, started} = FinancialReconciliationRuns.mark_started(run, internal?: true)
     scope = FinancialReconciliationHelpers.scope_map(sync_run)
 
-    assert {:ok, _} =
+    assert {:error, :contradictory_stale_certificate_finding} =
              FinancialReconciliationRuns.finalize_evidence(
                started,
                %{
@@ -195,7 +256,113 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
                internal?: true
              )
 
-    assert length(list_findings(run.id)) == 1
+    assert_run_running!(run.id)
+    assert_sync_unchanged!(sync_run.id)
+  end
+
+  for {disposition, category} <- [
+        {:matched, :source_snapshot_stale},
+        {:failed, :source_snapshot_stale},
+        {:matched, :refund_identity_drift},
+        {:failed, :refund_identity_drift}
+      ] do
+    test "blocks #{disposition} with #{category} drift finding", %{event: event, sync_run: sync_run} do
+      run = queue_run!(event)
+      {:ok, started} = FinancialReconciliationRuns.mark_started(run, internal?: true)
+
+      assert {:error, :inconsistent_drift_evidence} =
+               FinancialReconciliationRuns.finalize_evidence(
+                 started,
+                 drift_evidence(unquote(disposition), sync_run, unquote(category)),
+                 internal?: true
+               )
+
+      assert_run_running!(run.id)
+      assert_sync_unchanged!(sync_run.id)
+    end
+  end
+
+  for {origin, category} <- [
+        {:local, :source_snapshot_stale},
+        {:comparator, :source_snapshot_stale},
+        {:local, :refund_identity_drift},
+        {:comparator, :refund_identity_drift}
+      ] do
+    test "blocks #{origin} origin for #{category}", %{event: event, sync_run: sync_run} do
+      run = queue_run!(event)
+      {:ok, started} = FinancialReconciliationRuns.mark_started(run, internal?: true)
+      scope = FinancialReconciliationHelpers.scope_map(sync_run)
+
+      assert {:error, :inconsistent_drift_evidence} =
+               FinancialReconciliationRuns.finalize_evidence(
+                 started,
+                 %{
+                   disposition: :superseded,
+                   comparisons: [],
+                   metric_mismatches: [],
+                   structural_findings: [
+                     %{
+                       category: unquote(category),
+                       origin: unquote(origin),
+                       scope: scope,
+                       details: %{kind: :order}
+                     }
+                   ]
+                 },
+                 internal?: true
+               )
+
+      assert_run_running!(run.id)
+      assert_sync_unchanged!(sync_run.id)
+    end
+  end
+
+  test "finding persistence failure after drift invalidation rolls back M3", %{
+    event: event,
+    sync_run: sync_run
+  } do
+    run = queue_run!(event)
+    {:ok, started} = FinancialReconciliationRuns.mark_started(run, internal?: true)
+
+    Application.put_env(:event_sales, :financial_reconciliation_finalize_hooks, [
+      persist_structural_finding: fn _run, _finding -> {:error, :forced_finding_failure} end
+    ])
+
+    assert {:error, :forced_finding_failure} =
+             FinancialReconciliationRuns.finalize_evidence(
+               started,
+               drift_evidence(:superseded, sync_run, :source_snapshot_stale),
+               internal?: true
+             )
+
+    assert_run_running!(run.id)
+    assert_sync_unchanged!(sync_run.id)
+    assert list_findings(run.id) == []
+    assert list_metrics(run.id) == []
+  end
+
+  test "terminal transition failure after drift invalidation rolls back M3", %{
+    event: event,
+    sync_run: sync_run
+  } do
+    run = queue_run!(event)
+    {:ok, started} = FinancialReconciliationRuns.mark_started(run, internal?: true)
+
+    Application.put_env(:event_sales, :financial_reconciliation_finalize_hooks, [
+      before_terminal_transition: fn _event_id -> {:error, :forced_terminal_failure} end
+    ])
+
+    assert {:error, :forced_terminal_failure} =
+             FinancialReconciliationRuns.finalize_evidence(
+               started,
+               drift_evidence(:superseded, sync_run, :source_snapshot_stale),
+               internal?: true
+             )
+
+    assert_run_running!(run.id)
+    assert_sync_unchanged!(sync_run.id)
+    assert list_findings(run.id) == []
+    assert list_metrics(run.id) == []
   end
 
   test "older bound certificate run supersedes without rebinding", %{source: source} do
@@ -302,9 +469,10 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
                internal?: true
              )
 
-    reloaded_sync = Ash.get!(SyncRun, sync_run.id, domain: Ingestion)
-    assert reloaded_sync.order_coverage_status == :complete
+    assert_run_running!(run.id)
+    assert_sync_unchanged!(sync_run.id)
     assert list_findings(run.id) == []
+    assert list_metrics(run.id) == []
   end
 
   test "mutation wins race: finalize supersedes after concurrent invalidation" do
@@ -490,7 +658,7 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
     assert fence_index < run_lock_index
   end
 
-  test "rejects handcrafted superseded evidence without a recognized cause", %{
+  test "rejects superseded evidence without authoritative source drift while M3 is current", %{
     event: event,
     sync_run: sync_run
   } do
@@ -554,6 +722,46 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
     |> Ash.Query.filter(financial_reconciliation_run_id == ^run_id)
     |> Ash.read!(domain: Ingestion)
   end
+
+  defp list_metrics(run_id) do
+    EventSales.Ingestion.Resources.FinancialReconciliationMetric
+    |> Ash.Query.filter(financial_reconciliation_run_id == ^run_id)
+    |> Ash.read!(domain: Ingestion)
+  end
+
+  defp drift_evidence(disposition, sync_run, category, opts \\ []) do
+    details = Keyword.get(opts, :details, %{kind: :order})
+
+    %{
+      disposition: disposition,
+      comparisons: [],
+      metric_mismatches: [],
+      structural_findings: [
+        %{
+          category: category,
+          origin: :source,
+          scope: FinancialReconciliationHelpers.scope_map(sync_run),
+          details: details
+        }
+      ]
+    }
+  end
+
+  defp assert_run_running!(run_id) do
+    run = Ash.get!(EventSales.Ingestion.Resources.FinancialReconciliationRun, run_id, domain: Ingestion)
+    assert run.status == :running
+  end
+
+  defp assert_sync_unchanged!(sync_run_id) do
+    sync = Ash.get!(SyncRun, sync_run_id, domain: Ingestion)
+    assert sync.order_coverage_status == :complete
+    assert sync.refund_coverage_status == :complete
+    assert is_nil(sync.coverage_invalidated_at)
+    assert is_nil(sync.coverage_invalidation_reason)
+  end
+
+  defp restore_env(key, nil), do: Application.delete_env(:event_sales, key)
+  defp restore_env(key, value), do: Application.put_env(:event_sales, key, value)
 
   defp with_unboxed_connection(fun) do
     :ok = Sandbox.checkout(Repo, sandbox: false)

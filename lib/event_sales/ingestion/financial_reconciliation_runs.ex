@@ -30,6 +30,7 @@ defmodule EventSales.Ingestion.FinancialReconciliationRuns do
   }
 
   @terminal_statuses [:passed, :mismatched, :superseded, :failed, :cancelled]
+  @source_drift_categories [:source_snapshot_stale, :refund_identity_drift]
   @invalidation_config_key :financial_reconciliation_coverage_invalidation
   @finalize_hooks_key :financial_reconciliation_finalize_hooks
   @sync_run_lock_query """
@@ -104,14 +105,15 @@ defmodule EventSales.Ingestion.FinancialReconciliationRuns do
          :ok <- HistoricalCoverageFence.acquire([peek.event_id]),
          :ok <- run_finalize_hook(:after_fence, peek.event_id),
          {:ok, %SyncRun{} = bound_sync_run} <- lock_sync_run(peek.historical_sync_run_id),
-         {:ok, certificate_current?} <- {:ok, bound_certificate_current?(bound_sync_run)},
+         {:ok, certificate_status} <- recheck_bound_certificate(bound_sync_run),
          {:ok, %FinancialReconciliationRun{} = run} <- lock_run(run_id),
          :ok <- ensure_running(run),
          :ok <- verify_bound_scope(run, bound_sync_run),
-         {:ok, evidence} <- reconcile_certificate_authority(evidence, run, certificate_current?),
+         :ok <- validate_raw_evidence_authority(evidence, run, certificate_status),
+         {:ok, evidence} <- apply_certificate_status(evidence, run, certificate_status),
          {:ok, evidence} <-
-           maybe_invalidate_for_drift(bound_sync_run, evidence, certificate_current?),
-         :ok <- validate_supersede_evidence(evidence),
+           maybe_invalidate_for_drift(bound_sync_run, run, evidence, certificate_status),
+         :ok <- validate_final_supersede_evidence(evidence, run, certificate_status),
          :ok <- persist_metrics(run, evidence),
          :ok <- persist_findings(run, evidence),
          {:ok, finalized} <- transition_terminal(run, evidence) do
@@ -143,13 +145,28 @@ defmodule EventSales.Ingestion.FinancialReconciliationRuns do
     end
   end
 
-  defp bound_certificate_current?(%SyncRun{id: bound_id, event_id: event_id} = bound_sync_run) do
-    case HistoricalCoverageResolver.resolve_current(event_id) do
+  defp recheck_bound_certificate(%SyncRun{id: bound_id, event_id: event_id} = bound_sync_run) do
+    case resolve_current_for_finalize(event_id) do
       {:ok, %SyncRun{id: current_id} = current} ->
-        current_id == bound_id and sync_run_scope_equal?(bound_sync_run, current)
+        if current_id == bound_id and sync_run_scope_equal?(bound_sync_run, current) do
+          {:ok, :current}
+        else
+          {:ok, :not_current}
+        end
 
-      _other ->
-        false
+      {:error, :historical_coverage_not_current} ->
+        {:ok, :not_current}
+
+      {:error, _reason} ->
+        {:error, :historical_coverage_recheck_failed}
+    end
+  end
+
+  defp resolve_current_for_finalize(event_id) do
+    case Application.get_env(:event_sales, @finalize_hooks_key, [])
+         |> Keyword.get(:resolve_current) do
+      fun when is_function(fun, 1) -> fun.(event_id)
+      _ -> HistoricalCoverageResolver.resolve_current(event_id)
     end
   end
 
@@ -174,46 +191,127 @@ defmodule EventSales.Ingestion.FinancialReconciliationRuns do
     end
   end
 
-  defp reconcile_certificate_authority(evidence, _run, true), do: {:ok, evidence}
-
-  defp reconcile_certificate_authority(evidence, run, false) do
+  defp validate_raw_evidence_authority(evidence, run, :current) do
     findings = Map.get(evidence, :structural_findings, [])
+    disposition = Map.get(evidence, :disposition)
 
-    updated_findings =
-      if stale_certificate_finding?(findings) do
-        findings
-      else
-        findings ++ [stale_certificate_finding(run)]
-      end
+    with :ok <- reject_stale_certificate_findings_when_current(findings),
+         :ok <- reject_contradictory_drift_disposition(disposition, findings),
+         :ok <- reject_non_source_drift_findings(findings),
+         :ok <- reject_drift_scope_mismatches(run, findings) do
+      :ok
+    end
+  end
 
+  defp validate_raw_evidence_authority(evidence, _run, :not_current) do
+    if drift_finding?(Map.get(evidence, :structural_findings, [])) do
+      {:error, :contradictory_supersede_evidence}
+    else
+      :ok
+    end
+  end
+
+  defp apply_certificate_status(evidence, _run, :current), do: {:ok, evidence}
+
+  defp apply_certificate_status(evidence, run, :not_current) do
     {:ok,
      %{
        evidence
        | disposition: :superseded,
-         structural_findings: updated_findings
+         structural_findings: [stale_certificate_finding(run)]
      }}
   end
 
-  defp maybe_invalidate_for_drift(bound_sync_run, evidence, true) do
-    findings = Map.get(evidence, :structural_findings, [])
-
-    cond do
-      Enum.any?(findings, &(&1.category == :source_snapshot_stale)) ->
-        with :ok <- invalidate_order_coverage_for_reconciliation(bound_sync_run) do
-          {:ok, evidence}
-        end
-
-      Enum.any?(findings, &(&1.category == :refund_identity_drift)) ->
-        with :ok <- invalidate_refund_coverage_for_reconciliation(bound_sync_run) do
-          {:ok, evidence}
-        end
-
-      true ->
-        {:ok, evidence}
+  defp maybe_invalidate_for_drift(bound_sync_run, run, evidence, :current) do
+    with :superseded <- Map.get(evidence, :disposition),
+         finding when not is_nil(finding) <-
+           authoritative_source_drift_finding(
+             Map.get(evidence, :structural_findings, []),
+             run
+           ) do
+      invalidate_for_drift_category(bound_sync_run, finding.category, evidence)
+    else
+      _ -> {:ok, evidence}
     end
   end
 
-  defp maybe_invalidate_for_drift(_bound_sync_run, evidence, false), do: {:ok, evidence}
+  defp maybe_invalidate_for_drift(_bound_sync_run, _run, evidence, :not_current),
+    do: {:ok, evidence}
+
+  defp invalidate_for_drift_category(bound_sync_run, :source_snapshot_stale, evidence) do
+    with :ok <- invalidate_order_coverage_for_reconciliation(bound_sync_run) do
+      {:ok, evidence}
+    end
+  end
+
+  defp invalidate_for_drift_category(bound_sync_run, :refund_identity_drift, evidence) do
+    with :ok <- invalidate_refund_coverage_for_reconciliation(bound_sync_run) do
+      {:ok, evidence}
+    end
+  end
+
+  defp invalidate_for_drift_category(_bound_sync_run, _category, _evidence),
+    do: {:error, :inconsistent_drift_evidence}
+
+  defp authoritative_source_drift_finding(findings, run) when is_list(findings) do
+    Enum.find(findings, &authoritative_source_drift_finding?(&1, run))
+  end
+
+  defp authoritative_source_drift_finding?(
+         %{category: category, origin: :source, scope: scope},
+         run
+       )
+       when category in @source_drift_categories do
+    scope_matches?(scope, run_scope_map(run))
+  end
+
+  defp authoritative_source_drift_finding?(_finding, _run), do: false
+
+  defp reject_stale_certificate_findings_when_current(findings) do
+    if handcrafted_stale_certificate_finding?(findings) do
+      {:error, :contradictory_stale_certificate_finding}
+    else
+      :ok
+    end
+  end
+
+  defp reject_contradictory_drift_disposition(disposition, findings)
+       when disposition in [:matched, :mismatched, :failed] do
+    if drift_finding?(findings) do
+      {:error, :inconsistent_drift_evidence}
+    else
+      :ok
+    end
+  end
+
+  defp reject_contradictory_drift_disposition(_disposition, _findings), do: :ok
+
+  defp reject_non_source_drift_findings(findings) do
+    if Enum.any?(findings, fn finding ->
+         finding.category in @source_drift_categories and finding.origin != :source
+       end) do
+      {:error, :inconsistent_drift_evidence}
+    else
+      :ok
+    end
+  end
+
+  defp reject_drift_scope_mismatches(run, findings) do
+    case Enum.find(findings, fn finding ->
+           finding.category in @source_drift_categories and
+             finding.origin == :source and
+             validate_finding_scope(run, finding) != :ok
+         end) do
+      nil -> :ok
+      _finding -> {:error, :inconsistent_drift_evidence}
+    end
+  end
+
+  defp drift_finding?(findings),
+    do: Enum.any?(findings, &(Map.get(&1, :category) in @source_drift_categories))
+
+  defp handcrafted_stale_certificate_finding?(findings),
+    do: stale_certificate_finding?(findings)
 
   defp invalidate_order_coverage_for_reconciliation(%SyncRun{} = sync_run) do
     case invalidation_callback(:invalidate_order_coverage) do
@@ -240,10 +338,32 @@ defmodule EventSales.Ingestion.FinancialReconciliationRuns do
     |> Keyword.get(key)
   end
 
+  defp run_persist_finding_hook(run, finding) do
+    case Application.get_env(:event_sales, @finalize_hooks_key, [])
+         |> Keyword.get(:persist_structural_finding) do
+      fun when is_function(fun, 2) ->
+        case fun.(run, finding) do
+          :ok -> :ok
+          {:error, reason} -> {:error, reason}
+          _other -> :ok
+        end
+
+      _ ->
+        :ok
+    end
+  end
+
   defp run_finalize_hook(name, event_id) do
     case Application.get_env(:event_sales, @finalize_hooks_key, []) |> Keyword.get(name) do
-      fun when is_function(fun, 1) -> fun.(event_id)
-      _ -> :ok
+      fun when is_function(fun, 1) ->
+        case fun.(event_id) do
+          :ok -> :ok
+          {:error, reason} -> {:error, reason}
+          _other -> :ok
+        end
+
+      _ ->
+        :ok
     end
   end
 
@@ -283,30 +403,27 @@ defmodule EventSales.Ingestion.FinancialReconciliationRuns do
     :throw, _value -> {:error, :refund_coverage_invalidation_failed}
   end
 
-  defp validate_supersede_evidence(%{disposition: :superseded} = evidence) do
-    if supersede_cause_present?(evidence) do
+  defp validate_final_supersede_evidence(%{disposition: :superseded} = evidence, run, :current) do
+    if authoritative_source_drift_finding(Map.get(evidence, :structural_findings, []), run) do
       :ok
     else
       {:error, :invalid_supersede_evidence}
     end
   end
 
-  defp validate_supersede_evidence(_evidence), do: :ok
-
-  defp supersede_cause_present?(%{structural_findings: findings}) when is_list(findings) do
-    Enum.any?(findings, &supersede_cause_finding?/1)
+  defp validate_final_supersede_evidence(
+         %{disposition: :superseded, structural_findings: findings},
+         _run,
+         :not_current
+       ) do
+    if stale_certificate_finding?(findings) and not drift_finding?(findings) do
+      :ok
+    else
+      {:error, :invalid_supersede_evidence}
+    end
   end
 
-  defp supersede_cause_present?(_evidence), do: false
-
-  defp supersede_cause_finding?(%{category: :source_snapshot_stale}), do: true
-  defp supersede_cause_finding?(%{category: :refund_identity_drift}), do: true
-
-  defp supersede_cause_finding?(%{category: :invalid_scope, details: details})
-       when is_map(details),
-       do: Map.get(details, :reason) == :historical_certificate_not_current
-
-  defp supersede_cause_finding?(_finding), do: false
+  defp validate_final_supersede_evidence(_evidence, _run, _certificate_status), do: :ok
 
   defp stale_certificate_finding(%FinancialReconciliationRun{} = run) do
     %{
@@ -382,6 +499,12 @@ defmodule EventSales.Ingestion.FinancialReconciliationRuns do
   defp persist_findings(_run, _evidence), do: :ok
 
   defp transition_terminal(run, %{disposition: disposition}) do
+    with :ok <- run_finalize_hook(:before_terminal_transition, run.event_id) do
+      do_transition_terminal(run, disposition)
+    end
+  end
+
+  defp do_transition_terminal(run, disposition) do
     action = terminal_action(disposition)
 
     run
@@ -434,7 +557,8 @@ defmodule EventSales.Ingestion.FinancialReconciliationRuns do
   end
 
   defp persist_structural_finding(run, finding) do
-    with :ok <- validate_finding_scope(run, finding),
+    with :ok <- run_persist_finding_hook(run, finding),
+         :ok <- validate_finding_scope(run, finding),
          {:ok, normalized_details} <- FindingFingerprint.normalize_details(finding.details),
          {:ok, fingerprint} <-
            FindingFingerprint.compute(finding.category, finding.origin, normalized_details) do
