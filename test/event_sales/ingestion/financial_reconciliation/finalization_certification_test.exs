@@ -620,11 +620,11 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
   test "mutation wins race: finalize supersedes after concurrent invalidation" do
     test_pid = self()
 
-    with_m407_race_lifecycle(fn agent ->
+    with_m407_race_lifecycle(fn supervisor, agent ->
       {event_id, sync_run_id, started} = commit_m407_race_fixture!(agent, "m407-race")
 
       holder =
-        Task.async(fn ->
+        m407_race_task!(supervisor, agent, fn ->
           with_unboxed_connection(fn ->
             holder_backend = backend_pid!()
             send(test_pid, {:race_backend, :holder, holder_backend})
@@ -649,13 +649,11 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
           end)
         end)
 
-      track_m407_task!(agent, holder)
-
       assert_receive :mutation_holding_fence, 10_000
       assert_receive {:race_backend, :holder, holder_backend}, 5_000
 
       finalizer =
-        Task.async(fn ->
+        m407_race_task!(supervisor, agent, fn ->
           with_unboxed_connection(fn ->
             finalizer_backend = backend_pid!()
             send(test_pid, {:race_backend, :finalizer, finalizer_backend})
@@ -672,8 +670,6 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
             )
           end)
         end)
-
-      track_m407_task!(agent, finalizer)
 
       assert_receive {:race_backend, :finalizer, finalizer_backend}, 5_000
       assert_race_connections_distinct!([holder_backend, finalizer_backend])
@@ -695,7 +691,7 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
   test "reconciliation wins race: pass then mutation blocks readiness" do
     test_pid = self()
 
-    with_m407_race_lifecycle(fn agent ->
+    with_m407_race_lifecycle(fn supervisor, agent ->
       {event_id, sync_run_id, started} = commit_m407_race_fixture!(agent, "m407-race2")
 
       Application.put_env(:event_sales, :financial_reconciliation_finalize_hooks,
@@ -709,7 +705,7 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
       )
 
       finalizer =
-        Task.async(fn ->
+        m407_race_task!(supervisor, agent, fn ->
           with_unboxed_connection(fn ->
             finalizer_backend = backend_pid!()
             send(test_pid, {:race_backend, :finalizer, finalizer_backend})
@@ -727,14 +723,12 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
           end)
         end)
 
-      track_m407_task!(agent, finalizer)
-
       assert_receive {:finalize_holding_fence, finalize_worker_pid, fence_backend}, 10_000
       assert_receive {:race_backend, :finalizer, finalizer_backend}, 5_000
       assert fence_backend == finalizer_backend
 
       mutation =
-        Task.async(fn ->
+        m407_race_task!(supervisor, agent, fn ->
           with_unboxed_connection(fn ->
             mutation_backend = backend_pid!()
             send(test_pid, {:race_backend, :mutation, mutation_backend})
@@ -753,8 +747,6 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
             end)
           end)
         end)
-
-      track_m407_task!(agent, mutation)
 
       assert_receive {:race_backend, :mutation, mutation_backend}, 5_000
       assert_race_connections_distinct!([finalizer_backend, mutation_backend])
@@ -935,11 +927,12 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
   defp restore_fetch_env(key, :error), do: Application.delete_env(:event_sales, key)
   defp restore_fetch_env(key, {:ok, value}), do: Application.put_env(:event_sales, key, value)
 
-  defp with_m407_race_lifecycle(fun) when is_function(fun, 1) do
-    {:ok, agent} = Agent.start_link(fn -> %{fixture: nil, tasks: []} end)
+  defp with_m407_race_lifecycle(fun) when is_function(fun, 2) do
+    {:ok, agent} = Agent.start(fn -> %{fixture: nil, tasks: []} end)
+    {:ok, supervisor} = Task.Supervisor.start_link()
 
     try do
-      fun.(agent)
+      fun.(supervisor, agent)
     after
       %{fixture: fixture, tasks: tasks} = Agent.get(agent, fn state -> state end)
       Enum.each(tasks, &shutdown_race_task!/1)
@@ -948,8 +941,15 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
         cleanup_unboxed_m407_fixture!(fixture)
       end
 
+      Supervisor.stop(supervisor, :normal, :infinity)
       Agent.stop(agent, :normal, 5_000)
     end
+  end
+
+  defp m407_race_task!(supervisor, agent, fun) when is_function(fun, 0) do
+    task = Task.Supervisor.async_nolink(supervisor, fun)
+    track_m407_task!(agent, task)
+    task
   end
 
   defp commit_m407_race_fixture!(agent, slug_prefix) do
