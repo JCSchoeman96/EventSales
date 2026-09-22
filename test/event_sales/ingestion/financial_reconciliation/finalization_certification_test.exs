@@ -244,6 +244,123 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
              )
 
     assert finalized.status == :superseded
+    assert canonical_stale_certificate_count(list_findings(run.id)) == 1
+  end
+
+  for disposition <- [:matched, :failed] do
+    test "not_current preserves non-drift structural finding for #{disposition} disposition",
+         %{event: event, sync_run: sync_run} do
+      run = queue_run!(event)
+      {:ok, started} = FinancialReconciliationRuns.mark_started(run, internal?: true)
+      scope = FinancialReconciliationHelpers.scope_map(sync_run)
+
+      Application.put_env(:event_sales, :financial_reconciliation_finalize_hooks,
+        resolve_current: fn _event_id -> {:error, :historical_coverage_not_current} end
+      )
+
+      assert {:ok, finalized} =
+               FinancialReconciliationRuns.finalize_evidence(
+                 started,
+                 %{
+                   disposition: unquote(disposition),
+                   comparisons: [],
+                   metric_mismatches: [],
+                   structural_findings: [
+                     %{
+                       category: :missing_local_fact,
+                       origin: :local,
+                       scope: scope,
+                       details: %{kind: :order}
+                     }
+                   ]
+                 },
+                 internal?: true
+               )
+
+      assert finalized.status == :superseded
+
+      findings = list_findings(run.id)
+      assert Enum.any?(findings, &(&1.category == :missing_local_fact and &1.origin == :local))
+      assert canonical_stale_certificate_count(findings) == 1
+    end
+  end
+
+  test "not_current with existing canonical stale finding in evidence yields exactly one stale finding",
+       %{event: event, sync_run: sync_run} do
+    run = queue_run!(event)
+    {:ok, started} = FinancialReconciliationRuns.mark_started(run, internal?: true)
+    scope = FinancialReconciliationHelpers.scope_map(sync_run)
+
+    Application.put_env(:event_sales, :financial_reconciliation_finalize_hooks,
+      resolve_current: fn _event_id -> {:error, :historical_coverage_not_current} end
+    )
+
+    assert {:ok, finalized} =
+             FinancialReconciliationRuns.finalize_evidence(
+               started,
+               %{
+                 disposition: :superseded,
+                 comparisons: [],
+                 metric_mismatches: [],
+                 structural_findings: [
+                   %{
+                     category: :invalid_scope,
+                     origin: :local,
+                     scope: scope,
+                     details: %{reason: :historical_certificate_not_current}
+                   }
+                 ]
+               },
+               internal?: true
+             )
+
+    assert finalized.status == :superseded
+    assert canonical_stale_certificate_count(list_findings(run.id)) == 1
+  end
+
+  test "not_current replaces malformed stale-looking finding with canonical finalizer finding", %{
+    event: event,
+    sync_run: sync_run
+  } do
+    run = queue_run!(event)
+    {:ok, started} = FinancialReconciliationRuns.mark_started(run, internal?: true)
+    scope = FinancialReconciliationHelpers.scope_map(sync_run)
+    wrong_scope = Map.put(scope, :sync_run_id, Ecto.UUID.generate())
+
+    Application.put_env(:event_sales, :financial_reconciliation_finalize_hooks,
+      resolve_current: fn _event_id -> {:error, :historical_coverage_not_current} end
+    )
+
+    assert {:ok, finalized} =
+             FinancialReconciliationRuns.finalize_evidence(
+               started,
+               %{
+                 disposition: :matched,
+                 comparisons: [],
+                 metric_mismatches: [],
+                 structural_findings: [
+                   %{
+                     category: :invalid_scope,
+                     origin: :source,
+                     scope: scope,
+                     details: %{reason: :historical_certificate_not_current}
+                   },
+                   %{
+                     category: :invalid_scope,
+                     origin: :local,
+                     scope: wrong_scope,
+                     details: %{reason: :historical_certificate_not_current}
+                   }
+                 ]
+               },
+               internal?: true
+             )
+
+    assert finalized.status == :superseded
+
+    findings = list_findings(run.id)
+    assert canonical_stale_certificate_count(findings) == 1
+    refute Enum.any?(findings, &(&1.origin == :source))
   end
 
   test "current M3 rejects handcrafted historical_certificate_not_current finding", %{
@@ -498,134 +615,152 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
   test "mutation wins race: finalize supersedes after concurrent invalidation" do
     test_pid = self()
 
-    with_unboxed_connection(fn ->
-      source = SalesHelpers.create_source_system!()
-      event = SalesHelpers.create_event!(source, %{name: "Mutation Wins Event"})
-      sync_run = FinancialReconciliationHelpers.certified_run!(event)
-      run = queue_run!(event)
-      {:ok, started} = FinancialReconciliationRuns.mark_started(run, internal?: true)
-      owner_pid = self()
+    fixture =
+      with_unboxed_connection(fn ->
+        source =
+          SalesHelpers.create_source_system!(%{
+            base_url: "https://m407-race-#{Ecto.UUID.generate()}.example.test"
+          })
 
-      holder =
-        Task.async(fn ->
-          Repo.transaction(fn ->
-            assert :ok = HistoricalCoverageFence.acquire([event.id])
-            send(test_pid, :mutation_holding_fence)
+        event = SalesHelpers.create_event!(source, %{name: "Mutation Wins Event"})
+        sync_run = FinancialReconciliationHelpers.certified_run!(event)
+        run = queue_run!(event)
+        {:ok, started} = FinancialReconciliationRuns.mark_started(run, internal?: true)
+        owner_pid = self()
 
-            Ash.update!(
-              sync_run,
-              %{coverage_invalidation_reason: :historical_order_changed},
-              action: :invalidate_order_coverage,
-              domain: Ingestion
-            )
+        holder =
+          Task.async(fn ->
+            Repo.transaction(fn ->
+              assert :ok = HistoricalCoverageFence.acquire([event.id])
+              send(test_pid, :mutation_holding_fence)
 
-            receive do
-              :release_mutation_holder -> :ok
-            end
+              Ash.update!(
+                sync_run,
+                %{coverage_invalidation_reason: :historical_order_changed},
+                action: :invalidate_order_coverage,
+                domain: Ingestion
+              )
+
+              receive do
+                :release_mutation_holder -> :ok
+              end
+            end)
           end)
-        end)
 
-      Sandbox.allow(Repo, owner_pid, holder.pid)
+        Sandbox.allow(Repo, owner_pid, holder.pid)
 
-      assert_receive :mutation_holding_fence, 10_000
+        assert_receive :mutation_holding_fence, 10_000
 
-      finalizer =
-        Task.async(fn ->
-          FinancialReconciliationRuns.finalize_evidence(
-            started,
-            %{
-              disposition: :matched,
-              comparisons: [],
-              metric_mismatches: [],
-              structural_findings: []
-            },
-            internal?: true
-          )
-        end)
+        finalizer =
+          Task.async(fn ->
+            FinancialReconciliationRuns.finalize_evidence(
+              started,
+              %{
+                disposition: :matched,
+                comparisons: [],
+                metric_mismatches: [],
+                structural_findings: []
+              },
+              internal?: true
+            )
+          end)
 
-      Sandbox.allow(Repo, owner_pid, finalizer.pid)
+        Sandbox.allow(Repo, owner_pid, finalizer.pid)
 
-      Process.sleep(100)
-      refute match?({:ok, _}, Task.yield(finalizer, 0))
+        Process.sleep(100)
+        refute match?({:ok, _}, Task.yield(finalizer, 0))
 
-      send(holder.pid, :release_mutation_holder)
+        send(holder.pid, :release_mutation_holder)
 
-      assert {:ok, finalized} = Task.await(finalizer, 10_000)
-      assert {:ok, :ok} = Task.await(holder, 10_000)
-      assert finalized.status == :superseded
+        assert {:ok, finalized} = Task.await(finalizer, 10_000)
+        assert {:ok, :ok} = Task.await(holder, 10_000)
+        assert finalized.status == :superseded
 
-      assert {:ok, readiness} = AnalyticsReadinessResolver.resolve(event.id)
-      assert readiness.analytics_ready? == false
-    end)
+        assert {:ok, readiness} = AnalyticsReadinessResolver.resolve(event.id)
+        assert readiness.analytics_ready? == false
+
+        %{source: source, event: event}
+      end)
+
+    cleanup_unboxed_m407_fixture!(fixture)
   end
 
   test "reconciliation wins race: pass then mutation blocks readiness" do
     test_pid = self()
 
-    with_unboxed_connection(fn ->
-      source = SalesHelpers.create_source_system!()
-      event = SalesHelpers.create_event!(source, %{name: "Reconciliation Wins Event"})
-      sync_run = FinancialReconciliationHelpers.certified_run!(event)
-      run = queue_run!(event)
-      {:ok, started} = FinancialReconciliationRuns.mark_started(run, internal?: true)
-      owner_pid = self()
+    fixture =
+      with_unboxed_connection(fn ->
+        source =
+          SalesHelpers.create_source_system!(%{
+            base_url: "https://m407-race2-#{Ecto.UUID.generate()}.example.test"
+          })
 
-      Application.put_env(:event_sales, :financial_reconciliation_finalize_hooks,
-        after_fence: fn _event_id ->
-          send(test_pid, {:finalize_holding_fence, self()})
+        event = SalesHelpers.create_event!(source, %{name: "Reconciliation Wins Event"})
+        sync_run = FinancialReconciliationHelpers.certified_run!(event)
+        run = queue_run!(event)
+        {:ok, started} = FinancialReconciliationRuns.mark_started(run, internal?: true)
+        owner_pid = self()
 
-          receive do
-            :release_finalize_fence -> :ok
+        Application.put_env(:event_sales, :financial_reconciliation_finalize_hooks,
+          after_fence: fn _event_id ->
+            send(test_pid, {:finalize_holding_fence, self()})
+
+            receive do
+              :release_finalize_fence -> :ok
+            end
           end
-        end
-      )
+        )
 
-      finalizer =
-        Task.async(fn ->
-          FinancialReconciliationRuns.finalize_evidence(
-            started,
-            %{
-              disposition: :matched,
-              comparisons: [],
-              metric_mismatches: [],
-              structural_findings: []
-            },
-            internal?: true
-          )
-        end)
-
-      Sandbox.allow(Repo, owner_pid, finalizer.pid)
-
-      assert_receive {:finalize_holding_fence, finalize_worker_pid}, 10_000
-
-      mutation =
-        Task.async(fn ->
-          Repo.transaction(fn ->
-            assert :ok = HistoricalCoverageFence.acquire([event.id])
-
-            Ash.update!(
-              sync_run,
-              %{coverage_invalidation_reason: :historical_order_changed},
-              action: :invalidate_order_coverage,
-              domain: Ingestion
+        finalizer =
+          Task.async(fn ->
+            FinancialReconciliationRuns.finalize_evidence(
+              started,
+              %{
+                disposition: :matched,
+                comparisons: [],
+                metric_mismatches: [],
+                structural_findings: []
+              },
+              internal?: true
             )
           end)
-        end)
 
-      Sandbox.allow(Repo, owner_pid, mutation.pid)
+        Sandbox.allow(Repo, owner_pid, finalizer.pid)
 
-      Process.sleep(100)
-      refute match?({:ok, _}, Task.yield(mutation, 0))
+        assert_receive {:finalize_holding_fence, finalize_worker_pid}, 10_000
 
-      send(finalize_worker_pid, :release_finalize_fence)
+        mutation =
+          Task.async(fn ->
+            Repo.transaction(fn ->
+              assert :ok = HistoricalCoverageFence.acquire([event.id])
 
-      assert {:ok, finalized} = Task.await(finalizer, 10_000)
-      assert finalized.status == :passed
-      assert {:ok, _result} = Task.await(mutation, 10_000)
+              Ash.update!(
+                sync_run,
+                %{coverage_invalidation_reason: :historical_order_changed},
+                action: :invalidate_order_coverage,
+                domain: Ingestion
+              )
+            end)
+          end)
 
-      assert {:ok, readiness} = AnalyticsReadinessResolver.resolve(event.id)
-      assert readiness.analytics_ready? == false
-    end)
+        Sandbox.allow(Repo, owner_pid, mutation.pid)
+
+        Process.sleep(100)
+        refute match?({:ok, _}, Task.yield(mutation, 0))
+
+        send(finalize_worker_pid, :release_finalize_fence)
+
+        assert {:ok, finalized} = Task.await(finalizer, 10_000)
+        assert finalized.status == :passed
+        assert {:ok, _result} = Task.await(mutation, 10_000)
+
+        assert {:ok, readiness} = AnalyticsReadinessResolver.resolve(event.id)
+        assert readiness.analytics_ready? == false
+
+        %{source: source, event: event}
+      end)
+
+    cleanup_unboxed_m407_fixture!(fixture)
   end
 
   test "different events do not block each other on the fence", %{event: event, source: source} do
@@ -796,4 +931,57 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
       Sandbox.checkin(Repo)
     end
   end
+
+  defp cleanup_unboxed_m407_fixture!(%{source: source, event: event}) do
+    with_unboxed_connection(fn ->
+      event_id = uuid_binary(event.id)
+      source_id = uuid_binary(source.id)
+
+      Repo.query!(
+        """
+        DELETE FROM ingestion_financial_reconciliation_findings
+        WHERE financial_reconciliation_run_id IN (
+          SELECT id FROM ingestion_financial_reconciliation_runs WHERE event_id = $1
+        )
+        """,
+        [event_id]
+      )
+
+      Repo.query!(
+        """
+        DELETE FROM ingestion_financial_reconciliation_metrics
+        WHERE financial_reconciliation_run_id IN (
+          SELECT id FROM ingestion_financial_reconciliation_runs WHERE event_id = $1
+        )
+        """,
+        [event_id]
+      )
+
+      Repo.query!("DELETE FROM ingestion_financial_reconciliation_runs WHERE event_id = $1", [
+        event_id
+      ])
+
+      Repo.query!("DELETE FROM ingestion_sync_runs WHERE event_id = $1", [event_id])
+      Repo.query!("DELETE FROM catalog_events WHERE id = $1", [event_id])
+      Repo.query!("DELETE FROM catalog_source_systems WHERE id = $1", [source_id])
+    end)
+  end
+
+  defp uuid_binary(uuid), do: Ecto.UUID.dump!(uuid)
+
+  defp canonical_stale_certificate_count(findings) when is_list(findings) do
+    Enum.count(findings, &persisted_canonical_stale_certificate?/1)
+  end
+
+  defp persisted_canonical_stale_certificate?(finding) do
+    finding.category == :invalid_scope and finding.origin == :local and
+      historical_certificate_not_current_reason?(finding.details)
+  end
+
+  defp historical_certificate_not_current_reason?(details) when is_map(details) do
+    Map.get(details, :reason) == :historical_certificate_not_current or
+      Map.get(details, "reason") == "historical_certificate_not_current"
+  end
+
+  defp historical_certificate_not_current_reason?(_details), do: false
 end

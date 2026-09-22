@@ -213,13 +213,37 @@ defmodule EventSales.Ingestion.FinancialReconciliationRuns do
   defp apply_certificate_status(evidence, _run, :current), do: {:ok, evidence}
 
   defp apply_certificate_status(evidence, run, :not_current) do
+    preserved =
+      preserve_structural_findings_for_not_current(
+        Map.get(evidence, :structural_findings, []),
+        run
+      )
+
     {:ok,
      %{
        evidence
        | disposition: :superseded,
-         structural_findings: [stale_certificate_finding(run)]
+         structural_findings: preserved ++ [stale_certificate_finding(run)]
      }}
   end
+
+  defp preserve_structural_findings_for_not_current(findings, _run) when is_list(findings) do
+    Enum.reject(findings, &(drift_finding_entry?(&1) or stale_certificate_like?(&1)))
+  end
+
+  defp preserve_structural_findings_for_not_current(_findings, _run), do: []
+
+  defp drift_finding_entry?(%{category: category}) when category in @source_drift_categories,
+    do: true
+
+  defp drift_finding_entry?(_finding), do: false
+
+  defp stale_certificate_like?(%{category: :invalid_scope, details: details})
+       when is_map(details) do
+    Map.get(details, :reason) == :historical_certificate_not_current
+  end
+
+  defp stale_certificate_like?(_finding), do: false
 
   defp maybe_invalidate_for_drift(bound_sync_run, run, evidence, :current) do
     with :superseded <- Map.get(evidence, :disposition),
@@ -412,10 +436,18 @@ defmodule EventSales.Ingestion.FinancialReconciliationRuns do
 
   defp validate_final_supersede_evidence(
          %{disposition: :superseded, structural_findings: findings},
-         _run,
+         run,
          :not_current
        ) do
-    if stale_certificate_finding?(findings) and not drift_finding?(findings) do
+    canonical_count = Enum.count(findings, &canonical_stale_certificate_finding?(&1, run))
+
+    preserved_only? =
+      Enum.all?(findings, fn finding ->
+        canonical_stale_certificate_finding?(finding, run) or
+          preserved_structural_finding?(finding)
+      end)
+
+    if canonical_count == 1 and preserved_only? and not drift_finding?(findings) do
       :ok
     else
       {:error, :invalid_supersede_evidence}
@@ -433,12 +465,23 @@ defmodule EventSales.Ingestion.FinancialReconciliationRuns do
     }
   end
 
+  defp canonical_stale_certificate_finding?(
+         %{category: :invalid_scope, origin: :local, scope: scope, details: details},
+         run
+       )
+       when is_map(scope) and is_map(details) do
+    Map.get(details, :reason) == :historical_certificate_not_current and
+      scope_matches?(scope, run_scope_map(run))
+  end
+
+  defp canonical_stale_certificate_finding?(_finding, _run), do: false
+
+  defp preserved_structural_finding?(finding) do
+    not drift_finding_entry?(finding) and not stale_certificate_like?(finding)
+  end
+
   defp stale_certificate_finding?(findings) when is_list(findings) do
-    Enum.any?(findings, fn finding ->
-      finding.category == :invalid_scope and
-        is_map(finding.details) and
-        Map.get(finding.details, :reason) == :historical_certificate_not_current
-    end)
+    Enum.any?(findings, &stale_certificate_like?/1)
   end
 
   defp lock_run(run_id) do
