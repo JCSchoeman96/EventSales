@@ -46,10 +46,15 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
     prev_invalidation =
       Application.get_env(:event_sales, :financial_reconciliation_coverage_invalidation)
 
-    on_exit(fn ->
-      Application.delete_env(:event_sales, :finalization_source_result)
-      Application.delete_env(:event_sales, :finalization_local_result)
+    prev_source_result =
+      Application.fetch_env(:event_sales, :finalization_source_result)
 
+    prev_local_result =
+      Application.fetch_env(:event_sales, :finalization_local_result)
+
+    on_exit(fn ->
+      restore_fetch_env(:finalization_source_result, prev_source_result)
+      restore_fetch_env(:finalization_local_result, prev_local_result)
       restore_env(:financial_reconciliation_coverage_invalidation, prev_invalidation)
       restore_env(:financial_reconciliation_finalize_hooks, prev_finalize_hooks)
     end)
@@ -615,14 +620,18 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
   test "mutation wins race: finalize supersedes after concurrent invalidation" do
     test_pid = self()
 
-    fixture =
-      with_unboxed_connection(fn ->
-        source =
-          SalesHelpers.create_source_system!(%{
-            base_url: "https://m407-race-#{Ecto.UUID.generate()}.example.test"
-          })
+    with_unboxed_connection(fn ->
+      source =
+        SalesHelpers.create_source_system!(%{
+          base_url: "https://m407-race-#{Ecto.UUID.generate()}.example.test"
+        })
 
-        event = SalesHelpers.create_event!(source, %{name: "Mutation Wins Event"})
+      event = SalesHelpers.create_event!(source, %{name: "Mutation Wins Event"})
+      fixture = %{source: source, event: event}
+      holder = nil
+      finalizer = nil
+
+      try do
         sync_run = FinancialReconciliationHelpers.certified_run!(event)
         run = queue_run!(event)
         {:ok, started} = FinancialReconciliationRuns.mark_started(run, internal?: true)
@@ -678,24 +687,29 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
 
         assert {:ok, readiness} = AnalyticsReadinessResolver.resolve(event.id)
         assert readiness.analytics_ready? == false
-
-        %{source: source, event: event}
-      end)
-
-    cleanup_unboxed_m407_fixture!(fixture)
+      after
+        shutdown_race_task!(holder)
+        shutdown_race_task!(finalizer)
+        cleanup_unboxed_m407_fixture_queries!(fixture)
+      end
+    end)
   end
 
   test "reconciliation wins race: pass then mutation blocks readiness" do
     test_pid = self()
 
-    fixture =
-      with_unboxed_connection(fn ->
-        source =
-          SalesHelpers.create_source_system!(%{
-            base_url: "https://m407-race2-#{Ecto.UUID.generate()}.example.test"
-          })
+    with_unboxed_connection(fn ->
+      source =
+        SalesHelpers.create_source_system!(%{
+          base_url: "https://m407-race2-#{Ecto.UUID.generate()}.example.test"
+        })
 
-        event = SalesHelpers.create_event!(source, %{name: "Reconciliation Wins Event"})
+      event = SalesHelpers.create_event!(source, %{name: "Reconciliation Wins Event"})
+      fixture = %{source: source, event: event}
+      finalizer = nil
+      mutation = nil
+
+      try do
         sync_run = FinancialReconciliationHelpers.certified_run!(event)
         run = queue_run!(event)
         {:ok, started} = FinancialReconciliationRuns.mark_started(run, internal?: true)
@@ -756,11 +770,12 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
 
         assert {:ok, readiness} = AnalyticsReadinessResolver.resolve(event.id)
         assert readiness.analytics_ready? == false
-
-        %{source: source, event: event}
-      end)
-
-    cleanup_unboxed_m407_fixture!(fixture)
+      after
+        shutdown_race_task!(finalizer)
+        shutdown_race_task!(mutation)
+        cleanup_unboxed_m407_fixture_queries!(fixture)
+      end
+    end)
   end
 
   test "different events do not block each other on the fence", %{event: event, source: source} do
@@ -922,6 +937,23 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
   defp restore_env(key, nil), do: Application.delete_env(:event_sales, key)
   defp restore_env(key, value), do: Application.put_env(:event_sales, key, value)
 
+  defp restore_fetch_env(key, :error), do: Application.delete_env(:event_sales, key)
+  defp restore_fetch_env(key, {:ok, value}), do: Application.put_env(:event_sales, key, value)
+
+  defp shutdown_race_task!(nil), do: :ok
+
+  defp shutdown_race_task!(task) do
+    unless task_done?(task), do: Task.shutdown(task, :brutal_kill)
+  end
+
+  defp task_done?(task) do
+    case Task.yield(task, 0) do
+      {:ok, _} -> true
+      {:exit, _} -> true
+      nil -> not Process.alive?(task.pid)
+    end
+  end
+
   defp with_unboxed_connection(fun) do
     :ok = Sandbox.checkout(Repo, sandbox: false)
 
@@ -932,39 +964,43 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
     end
   end
 
-  defp cleanup_unboxed_m407_fixture!(%{source: source, event: event}) do
+  defp cleanup_unboxed_m407_fixture!(fixture) do
     with_unboxed_connection(fn ->
-      event_id = uuid_binary(event.id)
-      source_id = uuid_binary(source.id)
-
-      Repo.query!(
-        """
-        DELETE FROM ingestion_financial_reconciliation_findings
-        WHERE financial_reconciliation_run_id IN (
-          SELECT id FROM ingestion_financial_reconciliation_runs WHERE event_id = $1
-        )
-        """,
-        [event_id]
-      )
-
-      Repo.query!(
-        """
-        DELETE FROM ingestion_financial_reconciliation_metrics
-        WHERE financial_reconciliation_run_id IN (
-          SELECT id FROM ingestion_financial_reconciliation_runs WHERE event_id = $1
-        )
-        """,
-        [event_id]
-      )
-
-      Repo.query!("DELETE FROM ingestion_financial_reconciliation_runs WHERE event_id = $1", [
-        event_id
-      ])
-
-      Repo.query!("DELETE FROM ingestion_sync_runs WHERE event_id = $1", [event_id])
-      Repo.query!("DELETE FROM catalog_events WHERE id = $1", [event_id])
-      Repo.query!("DELETE FROM catalog_source_systems WHERE id = $1", [source_id])
+      cleanup_unboxed_m407_fixture_queries!(fixture)
     end)
+  end
+
+  defp cleanup_unboxed_m407_fixture_queries!(%{source: source, event: event}) do
+    event_id = uuid_binary(event.id)
+    source_id = uuid_binary(source.id)
+
+    Repo.query!(
+      """
+      DELETE FROM ingestion_financial_reconciliation_findings
+      WHERE financial_reconciliation_run_id IN (
+        SELECT id FROM ingestion_financial_reconciliation_runs WHERE event_id = $1
+      )
+      """,
+      [event_id]
+    )
+
+    Repo.query!(
+      """
+      DELETE FROM ingestion_financial_reconciliation_metrics
+      WHERE financial_reconciliation_run_id IN (
+        SELECT id FROM ingestion_financial_reconciliation_runs WHERE event_id = $1
+      )
+      """,
+      [event_id]
+    )
+
+    Repo.query!("DELETE FROM ingestion_financial_reconciliation_runs WHERE event_id = $1", [
+      event_id
+    ])
+
+    Repo.query!("DELETE FROM ingestion_sync_runs WHERE event_id = $1", [event_id])
+    Repo.query!("DELETE FROM catalog_events WHERE id = $1", [event_id])
+    Repo.query!("DELETE FROM catalog_source_systems WHERE id = $1", [source_id])
   end
 
   defp uuid_binary(uuid), do: Ecto.UUID.dump!(uuid)
