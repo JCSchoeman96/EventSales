@@ -18,6 +18,37 @@ defmodule EventSales.Ingestion.AnalyticsReadinessResolverTest do
     {:ok, source: source, event: event, sync_run: sync_run}
   end
 
+  @newest_terminal_statuses [:passed, :mismatched, :superseded, :failed, :cancelled]
+
+  test "newest terminal Ash read emits parameterized statuses and ordered limit", %{
+    event: event,
+    sync_run: sync_run
+  } do
+    ash_query =
+      FinancialReconciliationRun
+      |> Ash.Query.filter(
+        event_id == ^event.id and
+          historical_sync_run_id == ^sync_run.id and
+          status in ^@newest_terminal_statuses
+      )
+      |> Ash.Query.sort(
+        finished_at: :desc_nils_last,
+        inserted_at: :desc,
+        id: :desc
+      )
+      |> Ash.Query.limit(1)
+
+    %{query: ecto_query} = Ash.data_layer_query!(ash_query, domain: Ingestion)
+    {sql, params} = Ecto.Adapters.SQL.to_sql(:all, Repo, ecto_query)
+
+    assert sql =~ ~s/"finished_at" DESC NULLS LAST/
+    assert sql =~ ~s/ANY($3::varchar\[\])/
+    assert List.last(params) == 1
+
+    assert Enum.sort(Enum.at(params, 2)) ==
+             Enum.sort(Enum.map(@newest_terminal_statuses, &Atom.to_string/1))
+  end
+
   test "rejects a malformed Event UUID" do
     assert {:error, :invalid_event_id} = AnalyticsReadinessResolver.resolve("not-a-uuid")
   end
@@ -142,6 +173,39 @@ defmodule EventSales.Ingestion.AnalyticsReadinessResolverTest do
       assert result.blocking_reason == unquote(reason)
       assert result.financial_reconciliation_run_id == newer.id
     end
+  end
+
+  test "selects the terminal run with the newest inserted_at when finished_at ties", %{
+    event: event
+  } do
+    older = terminal_run!(event, :matched)
+    newer = terminal_run!(event, :mismatched)
+    tie_finished_at = ~U[2026-09-21 15:00:00.000000Z]
+
+    set_finished_at!(older, tie_finished_at)
+    set_finished_at!(newer, tie_finished_at)
+    set_inserted_at!(older, ~U[2026-09-21 14:00:00.000000Z])
+    set_inserted_at!(newer, ~U[2026-09-21 16:00:00.000000Z])
+
+    assert {:ok, result} = AnalyticsReadinessResolver.resolve(event.id)
+    assert result.financial_reconciliation_run_id == newer.id
+  end
+
+  test "selects the terminal run with the greatest id when finished_at and inserted_at tie",
+       %{event: event} do
+    first = terminal_run!(event, :matched)
+    second = terminal_run!(event, :failed)
+    tie_timestamp = ~U[2026-09-21 16:00:00.000000Z]
+
+    set_finished_at!(first, tie_timestamp)
+    set_finished_at!(second, tie_timestamp)
+    set_inserted_at!(first, tie_timestamp)
+    set_inserted_at!(second, tie_timestamp)
+
+    expected_id = Enum.max([first.id, second.id])
+
+    assert {:ok, result} = AnalyticsReadinessResolver.resolve(event.id)
+    assert result.financial_reconciliation_run_id == expected_id
   end
 
   test "uses the newest terminal row before inspecting its status", %{event: event} do
@@ -350,6 +414,13 @@ defmodule EventSales.Ingestion.AnalyticsReadinessResolverTest do
     Repo.query!(
       "UPDATE ingestion_financial_reconciliation_runs SET finished_at = $2 WHERE id = $1",
       [Ecto.UUID.dump!(run.id), finished_at]
+    )
+  end
+
+  defp set_inserted_at!(run, inserted_at) do
+    Repo.query!(
+      "UPDATE ingestion_financial_reconciliation_runs SET inserted_at = $2 WHERE id = $1",
+      [Ecto.UUID.dump!(run.id), inserted_at]
     )
   end
 end

@@ -18,6 +18,7 @@ defmodule EventSales.Ingestion.Resources.FinancialReconciliationRun do
   @statuses [:queued, :running, :passed, :mismatched, :superseded, :failed, :cancelled]
   @active_statuses [:queued, :running]
   @active_index_name "ingestion_fin_recon_runs_active_idx"
+  @terminal_ready_index_name "ingestion_fin_recon_runs_terminal_ready_ix"
   @status_check_sql "status IN (#{Enum.map_join(@statuses, ", ", &"'#{&1}'")})"
 
   postgres do
@@ -36,13 +37,27 @@ defmodule EventSales.Ingestion.Resources.FinancialReconciliationRun do
       index :status, name: "ingestion_fin_recon_runs_status_idx"
       index :finished_at, name: "ingestion_fin_recon_runs_finished_at_idx"
 
-      index [:event_id, :historical_sync_run_id, :finished_at],
-        name: "ingestion_fin_recon_runs_cert_lookup_idx"
-
       index [:event_id, :historical_sync_run_id],
         unique: true,
         where: "status IN ('queued', 'running')",
         name: @active_index_name
+    end
+
+    custom_statements do
+      statement :ingestion_fin_recon_runs_terminal_ready_ix do
+        up """
+        CREATE INDEX #{@terminal_ready_index_name}
+        ON ingestion_financial_reconciliation_runs (
+          event_id,
+          historical_sync_run_id,
+          finished_at DESC NULLS LAST,
+          inserted_at DESC,
+          id DESC
+        )
+        """
+
+        down "DROP INDEX IF EXISTS #{@terminal_ready_index_name}"
+      end
     end
 
     check_constraints do
