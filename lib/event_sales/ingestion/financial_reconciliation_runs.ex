@@ -197,9 +197,8 @@ defmodule EventSales.Ingestion.FinancialReconciliationRuns do
 
     with :ok <- reject_stale_certificate_findings_when_current(findings),
          :ok <- reject_contradictory_drift_disposition(disposition, findings),
-         :ok <- reject_non_source_drift_findings(findings),
-         :ok <- reject_drift_scope_mismatches(run, findings) do
-      :ok
+         :ok <- reject_non_source_drift_findings(findings) do
+      reject_drift_scope_mismatches(run, findings)
     end
   end
 
