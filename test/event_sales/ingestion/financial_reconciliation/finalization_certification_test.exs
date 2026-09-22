@@ -620,28 +620,20 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
   test "mutation wins race: finalize supersedes after concurrent invalidation" do
     test_pid = self()
 
-    with_unboxed_connection(fn ->
-      source =
-        SalesHelpers.create_source_system!(%{
-          base_url: "https://m407-race-#{Ecto.UUID.generate()}.example.test"
-        })
+    with_m407_race_lifecycle(fn agent ->
+      {event_id, sync_run_id, started} = commit_m407_race_fixture!(agent, "m407-race")
 
-      event = SalesHelpers.create_event!(source, %{name: "Mutation Wins Event"})
-      fixture = %{source: source, event: event}
-      holder = nil
-      finalizer = nil
+      holder =
+        Task.async(fn ->
+          with_unboxed_connection(fn ->
+            holder_backend = backend_pid!()
+            send(test_pid, {:race_backend, :holder, holder_backend})
 
-      try do
-        sync_run = FinancialReconciliationHelpers.certified_run!(event)
-        run = queue_run!(event)
-        {:ok, started} = FinancialReconciliationRuns.mark_started(run, internal?: true)
-        owner_pid = self()
-
-        holder =
-          Task.async(fn ->
             Repo.transaction(fn ->
-              assert :ok = HistoricalCoverageFence.acquire([event.id])
+              assert :ok = HistoricalCoverageFence.acquire([event_id])
               send(test_pid, :mutation_holding_fence)
+
+              sync_run = Ash.get!(SyncRun, sync_run_id, domain: Ingestion)
 
               Ash.update!(
                 sync_run,
@@ -655,13 +647,19 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
               end
             end)
           end)
+        end)
 
-        Sandbox.allow(Repo, owner_pid, holder.pid)
+      track_m407_task!(agent, holder)
 
-        assert_receive :mutation_holding_fence, 10_000
+      assert_receive :mutation_holding_fence, 10_000
+      assert_receive {:race_backend, :holder, holder_backend}, 5_000
 
-        finalizer =
-          Task.async(fn ->
+      finalizer =
+        Task.async(fn ->
+          with_unboxed_connection(fn ->
+            finalizer_backend = backend_pid!()
+            send(test_pid, {:race_backend, :finalizer, finalizer_backend})
+
             FinancialReconciliationRuns.finalize_evidence(
               started,
               %{
@@ -673,60 +671,49 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
               internal?: true
             )
           end)
+        end)
 
-        Sandbox.allow(Repo, owner_pid, finalizer.pid)
+      track_m407_task!(agent, finalizer)
 
-        Process.sleep(100)
-        refute match?({:ok, _}, Task.yield(finalizer, 0))
+      assert_receive {:race_backend, :finalizer, finalizer_backend}, 5_000
+      assert_race_connections_distinct!([holder_backend, finalizer_backend])
 
-        send(holder.pid, :release_mutation_holder)
+      Process.sleep(100)
+      refute match?({:ok, _}, Task.yield(finalizer, 0))
 
-        assert {:ok, finalized} = Task.await(finalizer, 10_000)
-        assert {:ok, :ok} = Task.await(holder, 10_000)
-        assert finalized.status == :superseded
+      send(holder.pid, :release_mutation_holder)
 
-        assert {:ok, readiness} = AnalyticsReadinessResolver.resolve(event.id)
-        assert readiness.analytics_ready? == false
-      after
-        shutdown_race_task!(holder)
-        shutdown_race_task!(finalizer)
-        cleanup_unboxed_m407_fixture_queries!(fixture)
-      end
+      assert {:ok, finalized} = Task.await(finalizer, 10_000)
+      assert {:ok, :ok} = Task.await(holder, 10_000)
+      assert finalized.status == :superseded
+
+      assert {:ok, readiness} = AnalyticsReadinessResolver.resolve(event_id)
+      assert readiness.analytics_ready? == false
     end)
   end
 
   test "reconciliation wins race: pass then mutation blocks readiness" do
     test_pid = self()
 
-    with_unboxed_connection(fn ->
-      source =
-        SalesHelpers.create_source_system!(%{
-          base_url: "https://m407-race2-#{Ecto.UUID.generate()}.example.test"
-        })
+    with_m407_race_lifecycle(fn agent ->
+      {event_id, sync_run_id, started} = commit_m407_race_fixture!(agent, "m407-race2")
 
-      event = SalesHelpers.create_event!(source, %{name: "Reconciliation Wins Event"})
-      fixture = %{source: source, event: event}
-      finalizer = nil
-      mutation = nil
+      Application.put_env(:event_sales, :financial_reconciliation_finalize_hooks,
+        after_fence: fn _event_id ->
+          send(test_pid, {:finalize_holding_fence, self(), backend_pid!()})
 
-      try do
-        sync_run = FinancialReconciliationHelpers.certified_run!(event)
-        run = queue_run!(event)
-        {:ok, started} = FinancialReconciliationRuns.mark_started(run, internal?: true)
-        owner_pid = self()
-
-        Application.put_env(:event_sales, :financial_reconciliation_finalize_hooks,
-          after_fence: fn _event_id ->
-            send(test_pid, {:finalize_holding_fence, self()})
-
-            receive do
-              :release_finalize_fence -> :ok
-            end
+          receive do
+            :release_finalize_fence -> :ok
           end
-        )
+        end
+      )
 
-        finalizer =
-          Task.async(fn ->
+      finalizer =
+        Task.async(fn ->
+          with_unboxed_connection(fn ->
+            finalizer_backend = backend_pid!()
+            send(test_pid, {:race_backend, :finalizer, finalizer_backend})
+
             FinancialReconciliationRuns.finalize_evidence(
               started,
               %{
@@ -738,15 +725,24 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
               internal?: true
             )
           end)
+        end)
 
-        Sandbox.allow(Repo, owner_pid, finalizer.pid)
+      track_m407_task!(agent, finalizer)
 
-        assert_receive {:finalize_holding_fence, finalize_worker_pid}, 10_000
+      assert_receive {:finalize_holding_fence, finalize_worker_pid, fence_backend}, 10_000
+      assert_receive {:race_backend, :finalizer, finalizer_backend}, 5_000
+      assert fence_backend == finalizer_backend
 
-        mutation =
-          Task.async(fn ->
+      mutation =
+        Task.async(fn ->
+          with_unboxed_connection(fn ->
+            mutation_backend = backend_pid!()
+            send(test_pid, {:race_backend, :mutation, mutation_backend})
+
             Repo.transaction(fn ->
-              assert :ok = HistoricalCoverageFence.acquire([event.id])
+              assert :ok = HistoricalCoverageFence.acquire([event_id])
+
+              sync_run = Ash.get!(SyncRun, sync_run_id, domain: Ingestion)
 
               Ash.update!(
                 sync_run,
@@ -756,25 +752,24 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
               )
             end)
           end)
+        end)
 
-        Sandbox.allow(Repo, owner_pid, mutation.pid)
+      track_m407_task!(agent, mutation)
 
-        Process.sleep(100)
-        refute match?({:ok, _}, Task.yield(mutation, 0))
+      assert_receive {:race_backend, :mutation, mutation_backend}, 5_000
+      assert_race_connections_distinct!([finalizer_backend, mutation_backend])
 
-        send(finalize_worker_pid, :release_finalize_fence)
+      Process.sleep(100)
+      refute match?({:ok, _}, Task.yield(mutation, 0))
 
-        assert {:ok, finalized} = Task.await(finalizer, 10_000)
-        assert finalized.status == :passed
-        assert {:ok, _result} = Task.await(mutation, 10_000)
+      send(finalize_worker_pid, :release_finalize_fence)
 
-        assert {:ok, readiness} = AnalyticsReadinessResolver.resolve(event.id)
-        assert readiness.analytics_ready? == false
-      after
-        shutdown_race_task!(finalizer)
-        shutdown_race_task!(mutation)
-        cleanup_unboxed_m407_fixture_queries!(fixture)
-      end
+      assert {:ok, finalized} = Task.await(finalizer, 10_000)
+      assert finalized.status == :passed
+      assert {:ok, _result} = Task.await(mutation, 10_000)
+
+      assert {:ok, readiness} = AnalyticsReadinessResolver.resolve(event_id)
+      assert readiness.analytics_ready? == false
     end)
   end
 
@@ -939,6 +934,65 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
 
   defp restore_fetch_env(key, :error), do: Application.delete_env(:event_sales, key)
   defp restore_fetch_env(key, {:ok, value}), do: Application.put_env(:event_sales, key, value)
+
+  defp with_m407_race_lifecycle(fun) when is_function(fun, 1) do
+    {:ok, agent} = Agent.start_link(fn -> %{fixture: nil, tasks: []} end)
+
+    try do
+      fun.(agent)
+    after
+      %{fixture: fixture, tasks: tasks} = Agent.get(agent, fn state -> state end)
+      Enum.each(tasks, &shutdown_race_task!/1)
+
+      if fixture do
+        cleanup_unboxed_m407_fixture!(fixture)
+      end
+
+      Agent.stop(agent, :normal, 5_000)
+    end
+  end
+
+  defp commit_m407_race_fixture!(agent, slug_prefix) do
+    with_unboxed_connection(fn ->
+      source =
+        SalesHelpers.create_source_system!(%{
+          base_url: "https://#{slug_prefix}-#{Ecto.UUID.generate()}.example.test"
+        })
+
+      event =
+        SalesHelpers.create_event!(source, %{
+          name: "#{String.replace(slug_prefix, "-", " ")} event"
+        })
+
+      register_m407_fixture!(agent, %{source: source, event: event})
+
+      sync_run = FinancialReconciliationHelpers.certified_run!(event)
+      run = queue_run!(event)
+      {:ok, started} = FinancialReconciliationRuns.mark_started(run, internal?: true)
+
+      {event.id, sync_run.id, started}
+    end)
+  end
+
+  defp register_m407_fixture!(agent, fixture) do
+    Agent.update(agent, &Map.put(&1, :fixture, fixture))
+  end
+
+  defp track_m407_task!(agent, task) do
+    Agent.update(agent, fn state ->
+      Map.update!(state, :tasks, fn existing -> [task | existing] end)
+    end)
+  end
+
+  defp assert_race_connections_distinct!(backend_pids) when is_list(backend_pids) do
+    assert length(backend_pids) >= 2
+    assert length(backend_pids) == length(Enum.uniq(backend_pids))
+  end
+
+  defp backend_pid! do
+    %{rows: [[backend_pid]]} = Repo.query!("SELECT pg_backend_pid()")
+    backend_pid
+  end
 
   defp shutdown_race_task!(nil), do: :ok
 
