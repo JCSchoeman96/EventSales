@@ -111,10 +111,21 @@ defmodule EventSales.Ingestion.AnalyticsReadinessResolverTest do
     assert other_run.event_id == other_event.id
   end
 
+  test "maps latest superseded terminal evidence without an older PASS fallback", %{event: event} do
+    passed = terminal_run!(event, :matched)
+    newer = terminal_superseded_via_source_drift!(event)
+
+    set_finished_at!(passed, ~U[2026-09-21 10:00:00.000000Z])
+    set_finished_at!(newer, ~U[2026-09-21 11:00:00.000000Z])
+
+    assert {:ok, result} = AnalyticsReadinessResolver.resolve(event.id)
+    assert result.analytics_ready? == false
+    assert result.blocking_reason == :historical_coverage_not_current
+  end
+
   for {status, reason} <- [
         {:mismatched, :financial_reconciliation_failed},
         {:failed, :financial_reconciliation_failed},
-        {:superseded, :financial_reconciliation_failed},
         {:cancelled, :financial_reconciliation_pending}
       ] do
     test "maps latest #{status} terminal evidence without an older PASS fallback", %{
@@ -270,24 +281,43 @@ defmodule EventSales.Ingestion.AnalyticsReadinessResolverTest do
       :failed ->
         finalize!(running, :failed, sync_run, categories)
 
-      :superseded ->
-        supersede_via_lost_certificate!(running, sync_run)
-
       :cancelled ->
         {:ok, cancelled} = FinancialReconciliationRuns.cancel(running, internal?: true)
         cancelled
     end
   end
 
-  defp supersede_via_lost_certificate!(running, sync_run) do
-    Ash.update!(
-      sync_run,
-      %{coverage_invalidation_reason: :historical_order_changed},
-      action: :invalidate_order_coverage,
-      domain: Ingestion
-    )
+  defp terminal_superseded_via_source_drift!(event) do
+    run = queue_run!(event)
 
-    finalize!(running, :matched, sync_run, [])
+    sync_run =
+      Ash.get!(EventSales.Ingestion.Resources.SyncRun, run.historical_sync_run_id,
+        domain: Ingestion
+      )
+
+    {:ok, running} = FinancialReconciliationRuns.mark_started(run, internal?: true)
+    scope = FinancialReconciliationHelpers.scope_map(sync_run)
+
+    {:ok, finalized} =
+      FinancialReconciliationRuns.finalize_evidence(
+        running,
+        %{
+          disposition: :superseded,
+          comparisons: [],
+          metric_mismatches: [],
+          structural_findings: [
+            %{
+              category: :source_snapshot_stale,
+              origin: :source,
+              scope: scope,
+              details: %{kind: :order}
+            }
+          ]
+        },
+        internal?: true
+      )
+
+    finalized
   end
 
   defp finalize!(running, disposition, sync_run, categories) do

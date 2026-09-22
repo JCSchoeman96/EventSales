@@ -36,8 +36,11 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
     event = SalesHelpers.create_event!(source, %{name: "M4-07 Finalization"})
     sync_run = FinancialReconciliationHelpers.certified_run!(event)
 
-    prev_finalize_hooks = Application.get_env(:event_sales, :financial_reconciliation_finalize_hooks)
-    prev_invalidation = Application.get_env(:event_sales, :financial_reconciliation_coverage_invalidation)
+    prev_finalize_hooks =
+      Application.get_env(:event_sales, :financial_reconciliation_finalize_hooks)
+
+    prev_invalidation =
+      Application.get_env(:event_sales, :financial_reconciliation_coverage_invalidation)
 
     on_exit(fn ->
       Application.delete_env(:event_sales, :finalization_source_result)
@@ -180,7 +183,12 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
     assert {:ok, _} =
              FinancialReconciliationRuns.finalize_evidence(
                started,
-               %{disposition: :matched, comparisons: [], metric_mismatches: [], structural_findings: []},
+               %{
+                 disposition: :matched,
+                 comparisons: [],
+                 metric_mismatches: [],
+                 structural_findings: []
+               },
                internal?: true
              )
 
@@ -194,9 +202,9 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
     run = queue_run!(event)
     {:ok, started} = FinancialReconciliationRuns.mark_started(run, internal?: true)
 
-    Application.put_env(:event_sales, :financial_reconciliation_finalize_hooks, [
+    Application.put_env(:event_sales, :financial_reconciliation_finalize_hooks,
       resolve_current: fn _event_id -> {:error, :historical_coverage_lookup_failed} end
-    ])
+    )
 
     assert {:error, :historical_coverage_recheck_failed} =
              FinancialReconciliationRuns.finalize_evidence(
@@ -215,14 +223,19 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
     run = queue_run!(event)
     {:ok, started} = FinancialReconciliationRuns.mark_started(run, internal?: true)
 
-    Application.put_env(:event_sales, :financial_reconciliation_finalize_hooks, [
+    Application.put_env(:event_sales, :financial_reconciliation_finalize_hooks,
       resolve_current: fn _event_id -> {:error, :historical_coverage_not_current} end
-    ])
+    )
 
     assert {:ok, finalized} =
              FinancialReconciliationRuns.finalize_evidence(
                started,
-               %{disposition: :matched, comparisons: [], metric_mismatches: [], structural_findings: []},
+               %{
+                 disposition: :matched,
+                 comparisons: [],
+                 metric_mismatches: [],
+                 structural_findings: []
+               },
                internal?: true
              )
 
@@ -266,7 +279,10 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
         {:matched, :refund_identity_drift},
         {:failed, :refund_identity_drift}
       ] do
-    test "blocks #{disposition} with #{category} drift finding", %{event: event, sync_run: sync_run} do
+    test "blocks #{disposition} with #{category} drift finding", %{
+      event: event,
+      sync_run: sync_run
+    } do
       run = queue_run!(event)
       {:ok, started} = FinancialReconciliationRuns.mark_started(run, internal?: true)
 
@@ -324,9 +340,9 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
     run = queue_run!(event)
     {:ok, started} = FinancialReconciliationRuns.mark_started(run, internal?: true)
 
-    Application.put_env(:event_sales, :financial_reconciliation_finalize_hooks, [
+    Application.put_env(:event_sales, :financial_reconciliation_finalize_hooks,
       persist_structural_finding: fn _run, _finding -> {:error, :forced_finding_failure} end
-    ])
+    )
 
     assert {:error, :forced_finding_failure} =
              FinancialReconciliationRuns.finalize_evidence(
@@ -348,9 +364,9 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
     run = queue_run!(event)
     {:ok, started} = FinancialReconciliationRuns.mark_started(run, internal?: true)
 
-    Application.put_env(:event_sales, :financial_reconciliation_finalize_hooks, [
+    Application.put_env(:event_sales, :financial_reconciliation_finalize_hooks,
       before_terminal_transition: fn _event_id -> {:error, :forced_terminal_failure} end
-    ])
+    )
 
     assert {:error, :forced_terminal_failure} =
              FinancialReconciliationRuns.finalize_evidence(
@@ -748,7 +764,11 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
   end
 
   defp assert_run_running!(run_id) do
-    run = Ash.get!(EventSales.Ingestion.Resources.FinancialReconciliationRun, run_id, domain: Ingestion)
+    run =
+      Ash.get!(EventSales.Ingestion.Resources.FinancialReconciliationRun, run_id,
+        domain: Ingestion
+      )
+
     assert run.status == :running
   end
 
