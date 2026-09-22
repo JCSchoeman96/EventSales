@@ -1,6 +1,11 @@
 defmodule EventSales.Ingestion.FinancialReconciliationRuns do
   @moduledoc """
   Facade for durable financial reconciliation run state.
+
+  Terminal evidence finalization acquires `HistoricalCoverageFence` before row locks,
+  re-verifies the bound M3 certificate, optionally invalidates that certificate for
+  proven source drift, and commits metrics, findings, and the terminal run transition
+  in one transaction. Woo source extraction remains outside this transaction.
   """
 
   require Ash.Query
@@ -8,6 +13,7 @@ defmodule EventSales.Ingestion.FinancialReconciliationRuns do
   alias EventSales.Accounts.Policies
   alias EventSales.Ingestion
   alias EventSales.Ingestion.FinancialReconciliation.FindingFingerprint
+  alias EventSales.Ingestion.HistoricalCoverageFence
   alias EventSales.Ingestion.HistoricalCoverageResolver
   alias EventSales.Ingestion.Resources.FinancialReconciliationFinding
   alias EventSales.Ingestion.Resources.FinancialReconciliationMetric
@@ -24,6 +30,14 @@ defmodule EventSales.Ingestion.FinancialReconciliationRuns do
   }
 
   @terminal_statuses [:passed, :mismatched, :superseded, :failed, :cancelled]
+  @invalidation_config_key :financial_reconciliation_coverage_invalidation
+  @finalize_hooks_key :financial_reconciliation_finalize_hooks
+  @sync_run_lock_query """
+  SELECT id
+  FROM ingestion_sync_runs
+  WHERE id = $1
+  FOR UPDATE
+  """
 
   def list_runs(opts \\ []) do
     with :ok <- authorize_read(opts) do
@@ -86,8 +100,18 @@ defmodule EventSales.Ingestion.FinancialReconciliationRuns do
   end
 
   defp finalize_evidence_transaction(run_id, evidence) do
-    with {:ok, %FinancialReconciliationRun{} = run} <- lock_run(run_id),
+    with {:ok, %FinancialReconciliationRun{} = peek} <- fetch_run_peek(run_id),
+         :ok <- HistoricalCoverageFence.acquire([peek.event_id]),
+         :ok <- run_finalize_hook(:after_fence, peek.event_id),
+         {:ok, %SyncRun{} = bound_sync_run} <- lock_sync_run(peek.historical_sync_run_id),
+         {:ok, certificate_current?} <- {:ok, bound_certificate_current?(bound_sync_run)},
+         {:ok, %FinancialReconciliationRun{} = run} <- lock_run(run_id),
          :ok <- ensure_running(run),
+         :ok <- verify_bound_scope(run, bound_sync_run),
+         {:ok, evidence} <- reconcile_certificate_authority(evidence, run, certificate_current?),
+         {:ok, evidence} <-
+           maybe_invalidate_for_drift(bound_sync_run, evidence, certificate_current?),
+         :ok <- validate_supersede_evidence(evidence),
          :ok <- persist_metrics(run, evidence),
          :ok <- persist_findings(run, evidence),
          {:ok, finalized} <- transition_terminal(run, evidence) do
@@ -96,6 +120,209 @@ defmodule EventSales.Ingestion.FinancialReconciliationRuns do
       {:error, :terminal} -> Repo.rollback(:terminal)
       {:error, reason} -> Repo.rollback(reason)
     end
+  end
+
+  defp fetch_run_peek(run_id) do
+    case Ash.get(FinancialReconciliationRun, run_id, domain: Ingestion) do
+      {:ok, %FinancialReconciliationRun{} = run} -> {:ok, run}
+      {:ok, nil} -> {:error, :not_found}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp lock_sync_run(sync_run_id) do
+    case Repo.query(@sync_run_lock_query, [Ecto.UUID.dump!(sync_run_id)]) do
+      {:ok, %{num_rows: 1}} ->
+        Ash.get(SyncRun, sync_run_id, domain: Ingestion)
+
+      {:ok, %{num_rows: 0}} ->
+        {:error, :bound_sync_run_not_found}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp bound_certificate_current?(%SyncRun{id: bound_id, event_id: event_id} = bound_sync_run) do
+    case HistoricalCoverageResolver.resolve_current(event_id) do
+      {:ok, %SyncRun{id: current_id} = current} ->
+        current_id == bound_id and sync_run_scope_equal?(bound_sync_run, current)
+
+      _other ->
+        false
+    end
+  end
+
+  defp sync_run_scope_equal?(left, right) do
+    left.source_system_id == right.source_system_id and
+      left.event_id == right.event_id and
+      left.coverage_start == right.coverage_start and
+      left.sales_covered_through == right.sales_covered_through and
+      left.refunds_covered_through == right.refunds_covered_through
+  end
+
+  defp verify_bound_scope(%FinancialReconciliationRun{} = run, %SyncRun{} = sync_run) do
+    if run.historical_sync_run_id == sync_run.id and
+         run.source_system_id == sync_run.source_system_id and
+         run.event_id == sync_run.event_id and
+         run.coverage_start == sync_run.coverage_start and
+         run.sales_covered_through == sync_run.sales_covered_through and
+         run.refunds_covered_through == sync_run.refunds_covered_through do
+      :ok
+    else
+      {:error, :bound_scope_mismatch}
+    end
+  end
+
+  defp reconcile_certificate_authority(evidence, _run, true), do: {:ok, evidence}
+
+  defp reconcile_certificate_authority(evidence, run, false) do
+    findings = Map.get(evidence, :structural_findings, [])
+
+    updated_findings =
+      if stale_certificate_finding?(findings) do
+        findings
+      else
+        findings ++ [stale_certificate_finding(run)]
+      end
+
+    {:ok,
+     %{
+       evidence
+       | disposition: :superseded,
+         structural_findings: updated_findings
+     }}
+  end
+
+  defp maybe_invalidate_for_drift(bound_sync_run, evidence, true) do
+    findings = Map.get(evidence, :structural_findings, [])
+
+    cond do
+      Enum.any?(findings, &(&1.category == :source_snapshot_stale)) ->
+        with :ok <- invalidate_order_coverage_for_reconciliation(bound_sync_run) do
+          {:ok, evidence}
+        end
+
+      Enum.any?(findings, &(&1.category == :refund_identity_drift)) ->
+        with :ok <- invalidate_refund_coverage_for_reconciliation(bound_sync_run) do
+          {:ok, evidence}
+        end
+
+      true ->
+        {:ok, evidence}
+    end
+  end
+
+  defp maybe_invalidate_for_drift(_bound_sync_run, evidence, false), do: {:ok, evidence}
+
+  defp invalidate_order_coverage_for_reconciliation(%SyncRun{} = sync_run) do
+    case invalidation_callback(:invalidate_order_coverage) do
+      fun when is_function(fun, 1) ->
+        fun.(sync_run)
+
+      _ ->
+        default_invalidate_order_coverage(sync_run)
+    end
+  end
+
+  defp invalidate_refund_coverage_for_reconciliation(%SyncRun{} = sync_run) do
+    case invalidation_callback(:invalidate_refund_coverage) do
+      fun when is_function(fun, 1) ->
+        fun.(sync_run)
+
+      _ ->
+        default_invalidate_refund_coverage(sync_run)
+    end
+  end
+
+  defp invalidation_callback(key) do
+    Application.get_env(:event_sales, @invalidation_config_key, [])
+    |> Keyword.get(key)
+  end
+
+  defp run_finalize_hook(name, event_id) do
+    case Application.get_env(:event_sales, @finalize_hooks_key, []) |> Keyword.get(name) do
+      fun when is_function(fun, 1) -> fun.(event_id)
+      _ -> :ok
+    end
+  end
+
+  defp default_invalidate_order_coverage(%SyncRun{} = sync_run) do
+    case Ash.update(
+           sync_run,
+           %{coverage_invalidation_reason: :historical_order_changed},
+           action: :invalidate_order_coverage,
+           domain: Ingestion
+         ) do
+      {:ok, %SyncRun{}} -> :ok
+      {:ok, %SyncRun{}, _notifications} -> :ok
+      _other -> {:error, :order_coverage_invalidation_failed}
+    end
+  rescue
+    _error -> {:error, :order_coverage_invalidation_failed}
+  catch
+    :exit, _reason -> {:error, :order_coverage_invalidation_failed}
+    :throw, _value -> {:error, :order_coverage_invalidation_failed}
+  end
+
+  defp default_invalidate_refund_coverage(%SyncRun{} = sync_run) do
+    case Ash.update(
+           sync_run,
+           %{coverage_invalidation_reason: :historical_refund_changed},
+           action: :invalidate_refund_coverage,
+           domain: Ingestion
+         ) do
+      {:ok, %SyncRun{}} -> :ok
+      {:ok, %SyncRun{}, _notifications} -> :ok
+      _other -> {:error, :refund_coverage_invalidation_failed}
+    end
+  rescue
+    _error -> {:error, :refund_coverage_invalidation_failed}
+  catch
+    :exit, _reason -> {:error, :refund_coverage_invalidation_failed}
+    :throw, _value -> {:error, :refund_coverage_invalidation_failed}
+  end
+
+  defp validate_supersede_evidence(%{disposition: :superseded} = evidence) do
+    if supersede_cause_present?(evidence) do
+      :ok
+    else
+      {:error, :invalid_supersede_evidence}
+    end
+  end
+
+  defp validate_supersede_evidence(_evidence), do: :ok
+
+  defp supersede_cause_present?(%{structural_findings: findings}) when is_list(findings) do
+    Enum.any?(findings, &supersede_cause_finding?/1)
+  end
+
+  defp supersede_cause_present?(_evidence), do: false
+
+  defp supersede_cause_finding?(%{category: :source_snapshot_stale}), do: true
+  defp supersede_cause_finding?(%{category: :refund_identity_drift}), do: true
+
+  defp supersede_cause_finding?(%{category: :invalid_scope, details: details})
+       when is_map(details),
+       do: Map.get(details, :reason) == :historical_certificate_not_current
+
+  defp supersede_cause_finding?(_finding), do: false
+
+  defp stale_certificate_finding(%FinancialReconciliationRun{} = run) do
+    %{
+      category: :invalid_scope,
+      origin: :local,
+      scope: run_scope_map(run),
+      details: %{reason: :historical_certificate_not_current}
+    }
+  end
+
+  defp stale_certificate_finding?(findings) when is_list(findings) do
+    Enum.any?(findings, fn finding ->
+      finding.category == :invalid_scope and
+        is_map(finding.details) and
+        Map.get(finding.details, :reason) == :historical_certificate_not_current
+    end)
   end
 
   defp lock_run(run_id) do

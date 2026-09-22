@@ -281,14 +281,27 @@ defmodule EventSales.Ingestion.AnalyticsReadinessResolverTest do
 
   defp finalize!(running, disposition, sync_run, categories) do
     findings =
-      Enum.map(categories, fn category ->
-        %{
-          category: category,
-          origin: :local,
-          scope: FinancialReconciliationHelpers.scope_map(sync_run),
-          details: %{test: Atom.to_string(category)}
-        }
-      end)
+      case {disposition, categories} do
+        {:superseded, []} ->
+          [
+            %{
+              category: :invalid_scope,
+              origin: :local,
+              scope: FinancialReconciliationHelpers.scope_map(sync_run),
+              details: %{reason: :historical_certificate_not_current}
+            }
+          ]
+
+        {_, categories} ->
+          Enum.map(categories, fn category ->
+            %{
+              category: category,
+              origin: :local,
+              scope: FinancialReconciliationHelpers.scope_map(sync_run),
+              details: %{test: Atom.to_string(category)}
+            }
+          end)
+      end
 
     {:ok, finalized} =
       FinancialReconciliationRuns.finalize_evidence(
