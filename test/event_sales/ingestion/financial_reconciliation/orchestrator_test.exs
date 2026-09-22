@@ -160,8 +160,11 @@ defmodule EventSales.Ingestion.FinancialReconciliation.OrchestratorTest do
 
   test "local stale certificate finding origin is local and disposition superseded", %{
     run: run,
-    sync_run: sync_run
+    sync_run: sync_run,
+    event: event
   } do
+    _newer_sync_run = FinancialReconciliationHelpers.certified_run!(event)
+
     set_stubs!(
       {:ok, successful_result(sync_run)},
       {:error, {:invalid_scope, %{reason: :historical_certificate_not_current}}}
