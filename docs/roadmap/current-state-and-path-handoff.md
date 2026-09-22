@@ -8,7 +8,8 @@
 | Authority | This document wins for current program priority and Path 2 resume procedure |
 | Durable Phase 5D evidence | `docs/phase-5d/native-v3-e2e-run-report.md` |
 | Historical Phase 5D certification commit | `c286fd0e647199a261b6ef2ec3791617dacb5834` |
-| Last updated | 2026-09-16 |
+| Handoff version | `v21` |
+| Last updated | 2026-09-22 |
 | Path 1 repository truth | `docs/path-1/m1-01-current-repo-truth.md` |
 | Path 1 execution roadmap | `docs/path-1/path-1-phase-breakdown.md` |
 | Path 1 identity contract | `docs/path-1/m1-02-source-scoped-external-identity-contract.md` |
@@ -42,6 +43,7 @@
 - `v18` — M2-07 closeout: COMPLETE (PASS); PR #180 durable Event analytics onboarding state machine; next = M2-08 Structural Certification (fresh agent)
 - `v19` — M2 closeout: M2-08 Structural Certification COMPLETE (PASS) via PR #184; M2 COMPLETE (PASS); next = M3 Historical Sales Backfill (fresh agent); M3 implementation NOT STARTED
 - `v20` — M3-01 through M3-08 COMPLETE (PASS); durable bounded coverage evidence, Postgres fact certification, and atomic certified/blocked/retry terminal handling implemented; next = M4 Financial Reconciliation
+- `v21` — M4-01 through M4-07 COMPLETE (PASS); PR #241 two-parent merge (`fa71fef` / merge `5681ffd`); ANALYTICS_READY machinery certified on main; next = PRE-M5 Conformance Gate; M5 BLOCKED; PRE-M5 gaps preserved OPEN / CERTIFICATION_REQUIRED
 
 ### Conflict rule
 
@@ -122,7 +124,8 @@ Status: ESTABLISHED
 
 PATH 1 — MANAGEMENT ANALYTICS
 Status: ACTIVE
-Next milestone: M4 — Financial Reconciliation
+Next milestone: PRE-M5 Conformance Gate
+M5 authorization: BLOCKED
 P1-00: COMPLETE
 M1-01: COMPLETE (PASS)
 M1-01A: COMPLETE (PASS)
@@ -172,10 +175,16 @@ M2-07 evidence: PR #180; implementation commit e75570d4e95cc28b15ad236f0e2a71c8b
 M2: COMPLETE (PASS)
 M2-08: COMPLETE (PASS)
 M2-08 evidence: PR #184; initial implementation baedb7455fb4673c088ed9e8a3a749e56c198495; corrective/final reviewed head 25b83e053b4f7f259530498c47f91cbf70675e7f; merge 548cfce6e011b54824cb8787ef97cb3ec27e271b; CI #464: PASS
-Current Path 1 task: M4 — Financial Reconciliation
 M3: COMPLETE (PASS)
 M3 evidence: versioned `HistoricalCoverageEvidence` persisted on `SyncRun`; bounded Postgres certification covers orders, lines, refunds, attribution, tax-inclusive financial primitives, and effective timestamps; terminal certified, blocked, and retry outcomes are atomic.
-M4 and final `ANALYTICS_READY` remain pending.
+M4: COMPLETE (PASS)
+M4-01..M4-07: COMPLETE (PASS)
+M4 evidence: PR #241; approved head fa71fefcda3699288edcdf5c73a735fb8489f702; two-parent merge 5681ffdf7b2b1fdd4e3a02226f1b165f93184673; merge tree e795499661628e38fcd7aef96602951a2a45ebcc; post-merge CI run 35715870420 / #612 PASS
+ANALYTICS_READY_MACHINERY: IMPLEMENTED / CERTIFIED BY M4
+Current Path 1 task: PRE-M5 Conformance Gate (not M5-01)
+GAP-PRE-M5-METRICS: OPEN
+GAP-PRE-M5-TIME: OPEN
+GAP-PRE-M5-READY-IX: CERTIFICATION_REQUIRED
 
 PATH 2 — AUTOMATIC SYNC / CATALOGUE AUTOMATION
 Status: PAUSED AT CERTIFIED CHECKPOINT
@@ -566,7 +575,10 @@ M7 — Production Certification / Pilot
 
 ```text
 CURRENT NEXT STEP:
-M4 — Financial Reconciliation
+PRE-M5 Conformance Gate
+
+M5:
+BLOCKED (PRE-M5 gaps remain)
 
 P1-00:
 COMPLETE
@@ -691,6 +703,27 @@ COMPLETE (PASS)
 M3 evidence:
 Versioned bounded coverage evidence; Postgres aggregate certification; atomic certified, blocked, and retry terminal outcomes; resolver and invalidator enforcement.
 
+M4:
+COMPLETE (PASS)
+
+M4 evidence:
+PR #241; approved head fa71fefcda3699288edcdf5c73a735fb8489f702; two-parent merge 5681ffdf7b2b1fdd4e3a02226f1b165f93184673; merge tree e795499661628e38fcd7aef96602951a2a45ebcc; post-merge CI run 35715870420 / #612 PASS
+
+M4-01..M4-07:
+COMPLETE (PASS)
+
+ANALYTICS_READY_MACHINERY:
+IMPLEMENTED / CERTIFIED BY M4
+
+GAP-PRE-M5-METRICS:
+OPEN
+
+GAP-PRE-M5-TIME:
+OPEN
+
+GAP-PRE-M5-READY-IX:
+CERTIFICATION_REQUIRED
+
 TAX-INCLUSIVE REVENUE CONTRACT:
 IMPLEMENTATION_CHANGE_REQUIRED
 
@@ -714,6 +747,9 @@ M1-C — PRE-M2 Contract Conformance Gate (COMPLETE)
 
 M2 AUTHORIZATION:
 AUTHORIZED
+
+M5 AUTHORIZATION:
+BLOCKED
 
 Canonical gap ledger:
 docs/path-1/m1-09-m1-certification-and-pre-m2-gate.md §7
@@ -749,7 +785,7 @@ M1 certification / PRE-M2 gate:
 docs/path-1/m1-09-m1-certification-and-pre-m2-gate.md
 ```
 
-M1 contracts are certified. M1-C closed `GAP-PRE-M2-01` on `main`. M2-01 shipped `SourceEventResolver` via PR #168. M2-02 shipped `EventImporter` via PR #170. M2-03 certified event-scoped parent-product discovery via `TickeraCatalogSync`. M2-04A enforced ProductMapping source/Event identity via PR #173. M2-04 enforced parent-product write protection via PR #174. M2-05 certified event-scoped Woo variation discovery via PR #176 (`project_event_variations/2`). M2-06 enforced ProductMapping variation↔TicketType identity via PR #178. M2-07 shipped the durable Event analytics onboarding state machine via PR #180. M2-08 completed Structural Certification via PR #184. M2 is COMPLETE (PASS). M3-01 through M3-08 are COMPLETE (PASS): historical coverage evidence is durable and bounded, certification derives from local Postgres facts, and certified, blocked, and retry terminal outcomes are atomic. Current next is M4 — Financial Reconciliation. Final `ANALYTICS_READY` remains pending. Do not reopen M2-07 scope.
+M1 contracts are certified. M1-C closed `GAP-PRE-M2-01` on `main`. M2-01 shipped `SourceEventResolver` via PR #168. M2-02 shipped `EventImporter` via PR #170. M2-03 certified event-scoped parent-product discovery via `TickeraCatalogSync`. M2-04A enforced ProductMapping source/Event identity via PR #173. M2-04 enforced parent-product write protection via PR #174. M2-05 certified event-scoped Woo variation discovery via PR #176 (`project_event_variations/2`). M2-06 enforced ProductMapping variation↔TicketType identity via PR #178. M2-07 shipped the durable Event analytics onboarding state machine via PR #180. M2-08 completed Structural Certification via PR #184. M2 is COMPLETE (PASS). M3-01 through M3-08 are COMPLETE (PASS). M4-01 through M4-07 are COMPLETE (PASS) via PR #241 (two-parent merge `5681ffd`). ANALYTICS_READY machinery is implemented and certified by M4. Current next is PRE-M5 Conformance Gate — not M5-01. `GAP-PRE-M5-METRICS` and `GAP-PRE-M5-TIME` remain OPEN; `GAP-PRE-M5-READY-IX` remains CERTIFICATION_REQUIRED. M5 is BLOCKED. Do not reopen M2-07 scope. Do not start M5 aggregate implementation until PRE-M5 closes.
 
 ---
 
@@ -816,13 +852,31 @@ PATH 1 — TRUSTED MANAGEMENT ANALYTICS
 ACTIVE
 
 Current Path 1 task:
-M4 — Financial Reconciliation
+PRE-M5 Conformance Gate
 
 M3:
 COMPLETE (PASS)
 
-M3 evidence:
-Versioned bounded coverage evidence; Postgres aggregate certification; atomic certified, blocked, and retry terminal outcomes; resolver and invalidator enforcement.
+M4:
+COMPLETE (PASS)
+
+M4 evidence:
+PR #241; approved head fa71fefcda3699288edcdf5c73a735fb8489f702; two-parent merge 5681ffdf7b2b1fdd4e3a02226f1b165f93184673; merge tree e795499661628e38fcd7aef96602951a2a45ebcc; post-merge CI run 35715870420 / #612 PASS
+
+ANALYTICS_READY_MACHINERY:
+IMPLEMENTED / CERTIFIED BY M4
+
+M5:
+BLOCKED
+
+GAP-PRE-M5-METRICS:
+OPEN
+
+GAP-PRE-M5-TIME:
+OPEN
+
+GAP-PRE-M5-READY-IX:
+CERTIFICATION_REQUIRED
 
 P1-00:
 COMPLETE

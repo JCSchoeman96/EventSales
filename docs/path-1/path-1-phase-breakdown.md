@@ -4,7 +4,7 @@
 | --- | --- |
 | Document | Canonical Path 1 execution roadmap |
 | Plan ID | `path-1-phase-breakdown` |
-| Plan version | `v20` |
+| Plan version | `v21` |
 | Status | ACTIVE — repository-native execution contract |
 | Scope | Path 1 M1–M7 gated implementation sequence |
 | Authority | This file wins for Path 1 task sequencing and physical ownership assumptions |
@@ -21,8 +21,8 @@
 | Historical planning source | Supplied `EVENTSALES_PATH_1_UPDATED_PHASE_BREAKDOWN.md` (v1 conceptual plan; superseded for physical assumptions) |
 | Path 2 / Phase 5E | PAUSED |
 | Prepared | 2026-08-09 |
-| Last updated | 2026-09-16 |
-| Audit base HEAD | `0bd0526a383a0d7faa1e61472f8551f779773223` |
+| Last updated | 2026-09-22 |
+| Audit base HEAD | `5681ffdf7b2b1fdd4e3a02226f1b165f93184673` |
 
 ### Revision log
 
@@ -46,6 +46,7 @@
 - `v18` — M2-07 closeout: COMPLETE (PASS); PR #180 durable Event analytics onboarding state machine; next = M2-08 Structural Certification (fresh agent)
 - `v19` — M2 closeout: M2-08 Structural Certification COMPLETE (PASS) via PR #184; M2 COMPLETE (PASS); next = M3 Historical Sales Backfill (fresh agent); M3 implementation NOT STARTED
 - `v20` — M3-01 through M3-08 COMPLETE (PASS); durable bounded coverage evidence, Postgres fact certification, and atomic certified/blocked/retry terminal handling implemented; next = M4 Financial Reconciliation
+- `v21` — M4-01 through M4-07 COMPLETE (PASS); PR #241 two-parent merge (`fa71fef` / merge `5681ffd`); `AnalyticsReadinessResolver` and financial reconciliation machinery certified on main; next = PRE-M5 Conformance Gate; M5 BLOCKED until PRE-M5 gaps close
 
 ### Conflict rule
 
@@ -162,10 +163,17 @@ M2-07 evidence: PR #180; implementation commit e75570d4e95cc28b15ad236f0e2a71c8b
 M2: COMPLETE (PASS)
 M2-08: COMPLETE (PASS)
 M2-08 evidence: PR #184; initial implementation baedb7455fb4673c088ed9e8a3a749e56c198495; corrective/final reviewed head 25b83e053b4f7f259530498c47f91cbf70675e7f; merge 548cfce6e011b54824cb8787ef97cb3ec27e271b; CI #464: PASS
-Current Path 1 task: M4 — Financial Reconciliation
 M3: COMPLETE (PASS)
 M3 evidence: versioned `HistoricalCoverageEvidence` persisted on `SyncRun`; bounded Postgres certification covers orders, lines, refunds, attribution, tax-inclusive financial primitives, and effective timestamps; terminal certified, blocked, and retry outcomes are atomic.
-M4 and final `ANALYTICS_READY` remain pending.
+M4: COMPLETE (PASS)
+M4-01..M4-07: COMPLETE (PASS)
+M4 evidence: PR #241; approved head fa71fefcda3699288edcdf5c73a735fb8489f702; two-parent merge 5681ffdf7b2b1fdd4e3a02226f1b165f93184673; merge tree e795499661628e38fcd7aef96602951a2a45ebcc; post-merge CI run 35715870420 / #612 PASS
+ANALYTICS_READY_MACHINERY: IMPLEMENTED / CERTIFIED BY M4 (`AnalyticsReadinessResolver`; financial reconciliation path)
+Current Path 1 task: PRE-M5 Conformance Gate (not M5-01)
+M5 AUTHORIZATION: BLOCKED
+GAP-PRE-M5-METRICS: OPEN
+GAP-PRE-M5-TIME: OPEN
+GAP-PRE-M5-READY-IX: CERTIFICATION_REQUIRED
 ```
 
 ---
@@ -351,7 +359,7 @@ Freshness numeric thresholds: see §3.8 (M1-07 LOCKED; implementation still 5m r
 | M1 | Truth & Identity Contract | Contracts locked |
 | M2 | Operator Event Onboarding | COMPLETE (PASS); exact event → BACKFILL_PENDING |
 | M3 | Historical Sales Backfill | Durable history via OrderUpserter |
-| M4 | Financial Reconciliation | Source vs EventSales money match |
+| M4 | Financial Reconciliation | COMPLETE (PASS); source vs EventSales money match; ANALYTICS_READY machinery |
 | M5 | Analytics Read Model | Trusted bounded projections |
 | M6 | Management Dashboard | Read-only management UX |
 | M7 | Production Certification | Pilot-ready gate |
@@ -751,13 +759,30 @@ Prove source financial totals match EventSales before ANALYTICS_READY.
 
 | Task | Strategy | Existing foundation | Expected change | New resource | Migration | Performance |
 | --- | --- | --- | --- | --- | --- | --- |
-| M4-01 Authoritative Source Totals | NEW | WooCommerceClient (worker-only) | Bounded source total extraction per contract | TBD | TBD | Max concurrency 2 |
-| M4-02 EventSales Totals | REUSE / EXTEND | Order/OrderItem decimals; MetricRules | Deterministic platform totals from durable rows | NO | TBD | Indexed event/date paths |
-| M4-03 Deterministic Comparison | NEW | — | Compare source vs platform per M1-06/M1-08 | TBD | TBD | Bounded |
-| M4-04 Mismatch Diagnostics | NEW | — | Fail closed with actionable diagnostics | TBD | TBD | — |
-| M4-05 Reconciliation Audit Record | NEW / EXTEND | TickeraReconciliation* is **not** financial — do not overload it | Durable financial reconcile run/finding if contracted | TBD | TBD | Distinct from attendee recon |
-| M4-06 ANALYTICS_READY Gate | NEW | — | Block analytics trust on mismatch | TBD | TBD | Gate read is cheap |
-| M4-07 Reconciliation Certification | CERTIFY | — | Prove gate behaviour | NO | NO | — |
+| M4-01 Authoritative Source Totals | NEW — **COMPLETE (PASS)** | WooCommerceClient (worker-only) | Bounded source total extraction per contract | NO | NO | Max concurrency 2 |
+| M4-02 EventSales Totals | REUSE / EXTEND — **COMPLETE (PASS)** | Order/OrderItem decimals; MetricRules | Deterministic platform totals from durable rows | NO | NO | Indexed event/date paths |
+| M4-03 Deterministic Comparison | NEW — **COMPLETE (PASS)** | — | Compare source vs platform per M1-06/M1-08 | NO | NO | Bounded |
+| M4-04 Mismatch Diagnostics | NEW — **COMPLETE (PASS)** | — | Fail closed with actionable diagnostics | NO | NO | — |
+| M4-05 Reconciliation Audit Record | NEW / EXTEND — **COMPLETE (PASS)** | TickeraReconciliation* is **not** financial — do not overload it | Durable financial reconcile run/finding if contracted | YES — `FinancialReconciliationRun`, `FinancialReconciliationMetric`, `FinancialReconciliationFinding` | YES | Distinct from attendee recon |
+| M4-06 ANALYTICS_READY Gate | NEW — **COMPLETE (PASS)** | — | Block analytics trust on mismatch | NO | NO | Gate read is cheap |
+| M4-07 Reconciliation Certification | CERTIFY — **COMPLETE (PASS)** | — | Prove gate behaviour | NO | NO | — |
+
+### M4 Completion Gate
+
+```text
+M4 COMPLETION GATE:
+COMPLETE (PASS)
+
+M4-01..M4-07 shipped via PR #241 (approved head fa71fefcda3699288edcdf5c73a735fb8489f702).
+Two-parent merge commit 5681ffdf7b2b1fdd4e3a02226f1b165f93184673; merge tree e795499661628e38fcd7aef96602951a2a45ebcc.
+Post-merge CI run 35715870420 / #612 PASS.
+
+ANALYTICS_READY derivation machinery and gate behaviour are implemented and certified by M4.
+Per-event readiness remains a runtime-derived state from the current M3 certificate and bound M4 reconciliation evidence.
+M4 completion does not close GAP-PRE-M5-METRICS, GAP-PRE-M5-TIME, or GAP-PRE-M5-READY-IX.
+Next programme step: PRE-M5 Conformance Gate — not M5-01.
+M5 remains BLOCKED until PRE-M5 gaps are closed and certified.
+```
 
 Distinguish always:
 
@@ -941,9 +966,13 @@ Evidence: `HistoricalCoverageEvidence` is versioned, bounded, and persisted on `
 
 ### M4 — Reconciliation
 
+Status: COMPLETE (PASS)
+
+Evidence: PR #241; approved head `fa71fefcda3699288edcdf5c73a735fb8489f702`; two-parent merge `5681ffdf7b2b1fdd4e3a02226f1b165f93184673`; merge tree `e795499661628e38fcd7aef96602951a2a45ebcc`; post-merge CI run 35715870420 / #612 PASS. `AnalyticsReadinessResolver` derives readiness from durable M3/M4 evidence.
+
 | ID | Task |
 | --- | --- |
-| M4-01..M4-07 | Path 1 **financial** reconciliation (not attendee recon; no new domain by default) |
+| M4-01..M4-07 | Path 1 **financial** reconciliation — **COMPLETE (PASS)**; PR #241 |
 
 ### M5 — Analytics
 
@@ -988,11 +1017,11 @@ Evidence: `HistoricalCoverageEvidence` is versioned, bounded, and persisted on `
 [ ] Existing parser/OrderUpserter reused (no parallel writer)
 [x] Attribution certifies event-first + ProductMapping fallback
 [x] Refund contract exists before refund object implementation
-[ ] Financial reconciliation distinct from Tickera attendee recon
+[x] Financial reconciliation distinct from Tickera attendee recon
 [ ] Hot/warm/cold = ETS + Redis + Postgres (no mandatory Cachex)
 [x] Freshness contract resolves former OPEN M1-07 CONFLICT
 [ ] Management read-only; no Apply/AutoApply
-[ ] ANALYTICS_READY blocks on financial mismatch
+[x] ANALYTICS_READY blocks on financial mismatch (M4 machinery certified)
 [ ] Production certification recorded
 ```
 
@@ -1023,8 +1052,9 @@ P1-00 COMPLETE
 → M2-07 COMPLETE (PASS; PR #180)
 → M2-08 COMPLETE (PASS; PR #184)
 → M3 COMPLETE (PASS)
-→ M4 NEXT — Financial Reconciliation
-→ M5
+→ M4 COMPLETE (PASS; PR #241)
+→ PRE-M5 Conformance Gate NEXT (GAP-PRE-M5-METRICS / TIME / READY-IX)
+→ M5 BLOCKED
 → M6
 → M7
 ```
@@ -1120,13 +1150,37 @@ FINANCIAL RECONCILIATION CONTRACT:
 LOCKED (concept C; exact Decimal; ticket-scoped)
 
 Current Path 1 task:
-M4 — Financial Reconciliation
+PRE-M5 Conformance Gate
 
 M3:
 COMPLETE (PASS)
 
 M3 evidence:
 Versioned bounded coverage evidence; Postgres aggregate certification; atomic certified, blocked, and retry terminal outcomes; resolver and invalidator enforcement.
+
+M4:
+COMPLETE (PASS)
+
+M4 evidence:
+PR #241; approved head fa71fefcda3699288edcdf5c73a735fb8489f702; two-parent merge 5681ffdf7b2b1fdd4e3a02226f1b165f93184673; merge tree e795499661628e38fcd7aef96602951a2a45ebcc; post-merge CI run 35715870420 / #612 PASS
+
+M4-01..M4-07:
+COMPLETE (PASS)
+
+ANALYTICS_READY_MACHINERY:
+IMPLEMENTED / CERTIFIED BY M4
+
+M5 AUTHORIZATION:
+BLOCKED
+
+GAP-PRE-M5-METRICS:
+OPEN
+
+GAP-PRE-M5-TIME:
+OPEN
+
+GAP-PRE-M5-READY-IX:
+CERTIFICATION_REQUIRED
 
 M1-C:
 COMPLETE (PASS)
@@ -1226,7 +1280,9 @@ M2 COMPLETE (PASS).
 M2-08 COMPLETE (PASS); PR #184.
 M2-08 IMPLEMENTATION: COMPLETE (PASS).
 M3 IMPLEMENTATION: COMPLETE (PASS).
-NEXT = M4 — Financial Reconciliation.
-M3: COMPLETE (PASS).
+M4 IMPLEMENTATION: COMPLETE (PASS); PR #241.
+NEXT = PRE-M5 Conformance Gate (not M5-01).
+M5: BLOCKED.
 DO NOT REOPEN M2-07 SCOPE.
+DO NOT START M5-01 UNTIL PRE-M5 GATE CLOSES.
 ```
