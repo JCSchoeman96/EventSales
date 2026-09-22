@@ -4,7 +4,7 @@
 | --- | --- |
 | Document | Canonical Path 1 execution roadmap |
 | Plan ID | `path-1-phase-breakdown` |
-| Plan version | `v21` |
+| Plan version | `v22` |
 | Status | ACTIVE — repository-native execution contract |
 | Scope | Path 1 M1–M7 gated implementation sequence |
 | Authority | This file wins for Path 1 task sequencing and physical ownership assumptions |
@@ -22,7 +22,7 @@
 | Path 2 / Phase 5E | PAUSED |
 | Prepared | 2026-08-09 |
 | Last updated | 2026-09-22 |
-| Audit base HEAD | `5681ffdf7b2b1fdd4e3a02226f1b165f93184673` |
+| Audit base HEAD | `a90f4a6d991510684dde80a538c0847635de2ee9` |
 
 ### Revision log
 
@@ -47,6 +47,7 @@
 - `v19` — M2 closeout: M2-08 Structural Certification COMPLETE (PASS) via PR #184; M2 COMPLETE (PASS); next = M3 Historical Sales Backfill (fresh agent); M3 implementation NOT STARTED
 - `v20` — M3-01 through M3-08 COMPLETE (PASS); durable bounded coverage evidence, Postgres fact certification, and atomic certified/blocked/retry terminal handling implemented; next = M4 Financial Reconciliation
 - `v21` — M4-01 through M4-07 COMPLETE (PASS); PR #241 two-parent merge (`fa71fef` / merge `5681ffd`); `AnalyticsReadinessResolver` and financial reconciliation machinery certified on main; next = PRE-M5 Conformance Gate; M5 BLOCKED until PRE-M5 gaps close
+- `v22` — PRE-M5-01A/01B COMPLETE (PASS); PR #243 + PR #244; `GAP-PRE-M5-READY-IX` CLOSED; PRE-M5-02A metrics plans landed; next = PRE-M5-02 metrics foundation (PRE-M5-02B); METRICS/TIME OPEN; M5 BLOCKED
 
 ### Conflict rule
 
@@ -168,12 +169,18 @@ M3 evidence: versioned `HistoricalCoverageEvidence` persisted on `SyncRun`; boun
 M4: COMPLETE (PASS)
 M4-01..M4-07: COMPLETE (PASS)
 M4 evidence: PR #241; approved head fa71fefcda3699288edcdf5c73a735fb8489f702; two-parent merge 5681ffdf7b2b1fdd4e3a02226f1b165f93184673; merge tree e795499661628e38fcd7aef96602951a2a45ebcc; post-merge CI run 35715870420 / #612 PASS
+PRE-M5-01A: COMPLETE (PASS)
+PRE-M5-01A evidence: PR #243; approved head dad29dd762b3f95be980deb78dad5ddaf91a8595; merge d8d2a2b86c1adefe9ad329276d6f4fa534db96a5
+PRE-M5-01B: COMPLETE (PASS)
+PRE-M5-01B evidence: PR #244; approved head 9485e4c8e81cede0c99d7bba7d7d86840f34d95d; merge a90f4a6d991510684dde80a538c0847635de2ee9; post-merge CI run 35775996226 / #621 PASS
+PRE-M5-02A: COMPLETE (conformance specification; `docs/development/pre-m5-02-metrics-foundation.plan.md`)
+Metrics implementation plan: `docs/development/pre-m5-02-metrics-foundation-implementation.plan.md`
 ANALYTICS_READY_MACHINERY: IMPLEMENTED / CERTIFIED BY M4 (`AnalyticsReadinessResolver`; financial reconciliation path)
-Current Path 1 task: PRE-M5 Conformance Gate (not M5-01)
+Current Path 1 task: PRE-M5-02 metrics foundation (next PRE-M5-02B; not M5-01)
 M5 AUTHORIZATION: BLOCKED
 GAP-PRE-M5-METRICS: OPEN
 GAP-PRE-M5-TIME: OPEN
-GAP-PRE-M5-READY-IX: CERTIFICATION_REQUIRED
+GAP-PRE-M5-READY-IX: CLOSED
 ```
 
 ---
@@ -779,9 +786,9 @@ Post-merge CI run 35715870420 / #612 PASS.
 
 ANALYTICS_READY derivation machinery and gate behaviour are implemented and certified by M4.
 Per-event readiness remains a runtime-derived state from the current M3 certificate and bound M4 reconciliation evidence.
-M4 completion does not close GAP-PRE-M5-METRICS, GAP-PRE-M5-TIME, or GAP-PRE-M5-READY-IX.
-Next programme step: PRE-M5 Conformance Gate — not M5-01.
-M5 remains BLOCKED until PRE-M5 gaps are closed and certified.
+M4 completion closed `GAP-PRE-M5-READY-IX` via PRE-M5-01A/01B (PR #243, PR #244). `GAP-PRE-M5-METRICS` and `GAP-PRE-M5-TIME` remain OPEN.
+Next programme step: PRE-M5-02 metrics foundation (PRE-M5-02B next) — not M5-01.
+M5 remains BLOCKED until remaining PRE-M5 gaps are closed and certified.
 ```
 
 Distinguish always:
@@ -1053,7 +1060,11 @@ P1-00 COMPLETE
 → M2-08 COMPLETE (PASS; PR #184)
 → M3 COMPLETE (PASS)
 → M4 COMPLETE (PASS; PR #241)
-→ PRE-M5 Conformance Gate NEXT (GAP-PRE-M5-METRICS / TIME / READY-IX)
+→ PRE-M5-01A COMPLETE (PASS; PR #243)
+→ PRE-M5-01B COMPLETE (PASS; PR #244)
+→ PRE-M5-02A COMPLETE (metrics conformance specification)
+→ PRE-M5-02B NEXT (metrics foundation)
+→ GAP-PRE-M5-METRICS / TIME remain OPEN
 → M5 BLOCKED
 → M6
 → M7
@@ -1150,7 +1161,7 @@ FINANCIAL RECONCILIATION CONTRACT:
 LOCKED (concept C; exact Decimal; ticket-scoped)
 
 Current Path 1 task:
-PRE-M5 Conformance Gate
+PRE-M5-02 metrics foundation (PRE-M5-02B next)
 
 M3:
 COMPLETE (PASS)
@@ -1170,6 +1181,21 @@ COMPLETE (PASS)
 ANALYTICS_READY_MACHINERY:
 IMPLEMENTED / CERTIFIED BY M4
 
+PRE-M5-01A:
+COMPLETE (PASS)
+
+PRE-M5-01A evidence:
+PR #243; approved head dad29dd762b3f95be980deb78dad5ddaf91a8595; merge d8d2a2b86c1adefe9ad329276d6f4fa534db96a5
+
+PRE-M5-01B:
+COMPLETE (PASS)
+
+PRE-M5-01B evidence:
+PR #244; approved head 9485e4c8e81cede0c99d7bba7d7d86840f34d95d; merge a90f4a6d991510684dde80a538c0847635de2ee9; post-merge CI run 35775996226 / #621 PASS
+
+PRE-M5-02A:
+COMPLETE (conformance specification)
+
 M5 AUTHORIZATION:
 BLOCKED
 
@@ -1180,7 +1206,7 @@ GAP-PRE-M5-TIME:
 OPEN
 
 GAP-PRE-M5-READY-IX:
-CERTIFICATION_REQUIRED
+CLOSED
 
 M1-C:
 COMPLETE (PASS)
@@ -1281,7 +1307,7 @@ M2-08 COMPLETE (PASS); PR #184.
 M2-08 IMPLEMENTATION: COMPLETE (PASS).
 M3 IMPLEMENTATION: COMPLETE (PASS).
 M4 IMPLEMENTATION: COMPLETE (PASS); PR #241.
-NEXT = PRE-M5 Conformance Gate (not M5-01).
+NEXT = PRE-M5-02 metrics foundation (PRE-M5-02B next; not M5-01).
 M5: BLOCKED.
 DO NOT REOPEN M2-07 SCOPE.
 DO NOT START M5-01 UNTIL PRE-M5 GATE CLOSES.
