@@ -759,12 +759,12 @@ Prove source financial totals match EventSales before ANALYTICS_READY.
 
 | Task | Strategy | Existing foundation | Expected change | New resource | Migration | Performance |
 | --- | --- | --- | --- | --- | --- | --- |
-| M4-01 Authoritative Source Totals | NEW — **COMPLETE (PASS)** | WooCommerceClient (worker-only) | Bounded source total extraction per contract | TBD | TBD | Max concurrency 2 |
-| M4-02 EventSales Totals | REUSE / EXTEND — **COMPLETE (PASS)** | Order/OrderItem decimals; MetricRules | Deterministic platform totals from durable rows | NO | TBD | Indexed event/date paths |
-| M4-03 Deterministic Comparison | NEW — **COMPLETE (PASS)** | — | Compare source vs platform per M1-06/M1-08 | TBD | TBD | Bounded |
-| M4-04 Mismatch Diagnostics | NEW — **COMPLETE (PASS)** | — | Fail closed with actionable diagnostics | TBD | TBD | — |
-| M4-05 Reconciliation Audit Record | NEW / EXTEND — **COMPLETE (PASS)** | TickeraReconciliation* is **not** financial — do not overload it | Durable financial reconcile run/finding if contracted | TBD | TBD | Distinct from attendee recon |
-| M4-06 ANALYTICS_READY Gate | NEW — **COMPLETE (PASS)** | — | Block analytics trust on mismatch | TBD | TBD | Gate read is cheap |
+| M4-01 Authoritative Source Totals | NEW — **COMPLETE (PASS)** | WooCommerceClient (worker-only) | Bounded source total extraction per contract | NO | NO | Max concurrency 2 |
+| M4-02 EventSales Totals | REUSE / EXTEND — **COMPLETE (PASS)** | Order/OrderItem decimals; MetricRules | Deterministic platform totals from durable rows | NO | NO | Indexed event/date paths |
+| M4-03 Deterministic Comparison | NEW — **COMPLETE (PASS)** | — | Compare source vs platform per M1-06/M1-08 | NO | NO | Bounded |
+| M4-04 Mismatch Diagnostics | NEW — **COMPLETE (PASS)** | — | Fail closed with actionable diagnostics | NO | NO | — |
+| M4-05 Reconciliation Audit Record | NEW / EXTEND — **COMPLETE (PASS)** | TickeraReconciliation* is **not** financial — do not overload it | Durable financial reconcile run/finding if contracted | YES — `FinancialReconciliationRun`, `FinancialReconciliationMetric`, `FinancialReconciliationFinding` | YES | Distinct from attendee recon |
+| M4-06 ANALYTICS_READY Gate | NEW — **COMPLETE (PASS)** | — | Block analytics trust on mismatch | NO | NO | Gate read is cheap |
 | M4-07 Reconciliation Certification | CERTIFY — **COMPLETE (PASS)** | — | Prove gate behaviour | NO | NO | — |
 
 ### M4 Completion Gate
@@ -777,7 +777,8 @@ M4-01..M4-07 shipped via PR #241 (approved head fa71fefcda3699288edcdf5c73a735fb
 Two-parent merge commit 5681ffdf7b2b1fdd4e3a02226f1b165f93184673; merge tree e795499661628e38fcd7aef96602951a2a45ebcc.
 Post-merge CI run 35715870420 / #612 PASS.
 
-ANALYTICS_READY machinery is implemented and certified for scoped events.
+ANALYTICS_READY derivation machinery and gate behaviour are implemented and certified by M4.
+Per-event readiness remains a runtime-derived state from the current M3 certificate and bound M4 reconciliation evidence.
 M4 completion does not close GAP-PRE-M5-METRICS, GAP-PRE-M5-TIME, or GAP-PRE-M5-READY-IX.
 Next programme step: PRE-M5 Conformance Gate — not M5-01.
 M5 remains BLOCKED until PRE-M5 gaps are closed and certified.
