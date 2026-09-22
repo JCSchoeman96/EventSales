@@ -32,6 +32,7 @@ defmodule EventSales.Ingestion.Resources.SyncRun do
   ]
 
   @active_historical_index_name "ingestion_sync_runs_active_historical_event_idx"
+  @historical_cert_lookup_index_name "ingestion_sync_runs_historical_cert_lookup_idx"
 
   @queue_manual_accept [
     :source_system_id,
@@ -68,6 +69,10 @@ defmodule EventSales.Ingestion.Resources.SyncRun do
         unique: true,
         where: "sync_type = 'historical_backfill' AND status IN ('queued', 'running', 'paused')",
         name: @active_historical_index_name
+
+      index [:event_id, :coverage_certified_at, :finished_at, :id],
+        where: "sync_type = 'historical_backfill' AND coverage_certified_at IS NOT NULL",
+        name: @historical_cert_lookup_index_name
     end
   end
 
