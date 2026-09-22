@@ -8,7 +8,7 @@
 | Authority | This document wins for current program priority and Path 2 resume procedure |
 | Durable Phase 5D evidence | `docs/phase-5d/native-v3-e2e-run-report.md` |
 | Historical Phase 5D certification commit | `c286fd0e647199a261b6ef2ec3791617dacb5834` |
-| Handoff version | `v21` |
+| Handoff version | `v22` |
 | Last updated | 2026-09-22 |
 | Path 1 repository truth | `docs/path-1/m1-01-current-repo-truth.md` |
 | Path 1 execution roadmap | `docs/path-1/path-1-phase-breakdown.md` |
@@ -44,6 +44,7 @@
 - `v19` — M2 closeout: M2-08 Structural Certification COMPLETE (PASS) via PR #184; M2 COMPLETE (PASS); next = M3 Historical Sales Backfill (fresh agent); M3 implementation NOT STARTED
 - `v20` — M3-01 through M3-08 COMPLETE (PASS); durable bounded coverage evidence, Postgres fact certification, and atomic certified/blocked/retry terminal handling implemented; next = M4 Financial Reconciliation
 - `v21` — M4-01 through M4-07 COMPLETE (PASS); PR #241 two-parent merge (`fa71fef` / merge `5681ffd`); ANALYTICS_READY machinery certified on main; next = PRE-M5 Conformance Gate; M5 BLOCKED; PRE-M5 gaps preserved OPEN / CERTIFICATION_REQUIRED
+- `v22` — PRE-M5-01A/01B COMPLETE (PASS); PR #243 + PR #244; `GAP-PRE-M5-READY-IX` CLOSED; PRE-M5-02A metrics conformance spec landed; next = PRE-M5-02 metrics foundation (PRE-M5-02B); METRICS/TIME OPEN; M5 BLOCKED
 
 ### Conflict rule
 
@@ -124,7 +125,7 @@ Status: ESTABLISHED
 
 PATH 1 — MANAGEMENT ANALYTICS
 Status: ACTIVE
-Next milestone: PRE-M5 Conformance Gate
+Next milestone: PRE-M5-02 metrics foundation (PRE-M5-02B next)
 M5 authorization: BLOCKED
 P1-00: COMPLETE
 M1-01: COMPLETE (PASS)
@@ -180,11 +181,17 @@ M3 evidence: versioned `HistoricalCoverageEvidence` persisted on `SyncRun`; boun
 M4: COMPLETE (PASS)
 M4-01..M4-07: COMPLETE (PASS)
 M4 evidence: PR #241; approved head fa71fefcda3699288edcdf5c73a735fb8489f702; two-parent merge 5681ffdf7b2b1fdd4e3a02226f1b165f93184673; merge tree e795499661628e38fcd7aef96602951a2a45ebcc; post-merge CI run 35715870420 / #612 PASS
+PRE-M5-01A: COMPLETE (PASS)
+PRE-M5-01A evidence: PR #243; approved head dad29dd762b3f95be980deb78dad5ddaf91a8595; merge d8d2a2b86c1adefe9ad329276d6f4fa534db96a5
+PRE-M5-01B: COMPLETE (PASS)
+PRE-M5-01B evidence: PR #244; approved head 9485e4c8e81cede0c99d7bba7d7d86840f34d95d; merge a90f4a6d991510684dde80a538c0847635de2ee9; post-merge CI run 35775996226 / #621 PASS
+PRE-M5-02A: COMPLETE (conformance specification; `docs/development/pre-m5-02-metrics-foundation.plan.md`)
+Metrics implementation plan: `docs/development/pre-m5-02-metrics-foundation-implementation.plan.md`
 ANALYTICS_READY_MACHINERY: IMPLEMENTED / CERTIFIED BY M4
-Current Path 1 task: PRE-M5 Conformance Gate (not M5-01)
+Current Path 1 task: PRE-M5-02 metrics foundation (next PRE-M5-02B; not M5-01)
 GAP-PRE-M5-METRICS: OPEN
 GAP-PRE-M5-TIME: OPEN
-GAP-PRE-M5-READY-IX: CERTIFICATION_REQUIRED
+GAP-PRE-M5-READY-IX: CLOSED
 
 PATH 2 — AUTOMATIC SYNC / CATALOGUE AUTOMATION
 Status: PAUSED AT CERTIFIED CHECKPOINT
@@ -575,10 +582,10 @@ M7 — Production Certification / Pilot
 
 ```text
 CURRENT NEXT STEP:
-PRE-M5 Conformance Gate
+PRE-M5-02 metrics foundation (PRE-M5-02B next)
 
 M5:
-BLOCKED (PRE-M5 gaps remain)
+BLOCKED (PRE-M5 METRICS and TIME gaps remain)
 
 P1-00:
 COMPLETE
@@ -715,6 +722,21 @@ COMPLETE (PASS)
 ANALYTICS_READY_MACHINERY:
 IMPLEMENTED / CERTIFIED BY M4
 
+PRE-M5-01A:
+COMPLETE (PASS)
+
+PRE-M5-01A evidence:
+PR #243; approved head dad29dd762b3f95be980deb78dad5ddaf91a8595; merge d8d2a2b86c1adefe9ad329276d6f4fa534db96a5
+
+PRE-M5-01B:
+COMPLETE (PASS)
+
+PRE-M5-01B evidence:
+PR #244; approved head 9485e4c8e81cede0c99d7bba7d7d86840f34d95d; merge a90f4a6d991510684dde80a538c0847635de2ee9; post-merge CI run 35775996226 / #621 PASS
+
+PRE-M5-02A:
+COMPLETE (conformance specification)
+
 GAP-PRE-M5-METRICS:
 OPEN
 
@@ -722,7 +744,7 @@ GAP-PRE-M5-TIME:
 OPEN
 
 GAP-PRE-M5-READY-IX:
-CERTIFICATION_REQUIRED
+CLOSED
 
 TAX-INCLUSIVE REVENUE CONTRACT:
 IMPLEMENTATION_CHANGE_REQUIRED
@@ -785,7 +807,7 @@ M1 certification / PRE-M2 gate:
 docs/path-1/m1-09-m1-certification-and-pre-m2-gate.md
 ```
 
-M1 contracts are certified. M1-C closed `GAP-PRE-M2-01` on `main`. M2-01 shipped `SourceEventResolver` via PR #168. M2-02 shipped `EventImporter` via PR #170. M2-03 certified event-scoped parent-product discovery via `TickeraCatalogSync`. M2-04A enforced ProductMapping source/Event identity via PR #173. M2-04 enforced parent-product write protection via PR #174. M2-05 certified event-scoped Woo variation discovery via PR #176 (`project_event_variations/2`). M2-06 enforced ProductMapping variation↔TicketType identity via PR #178. M2-07 shipped the durable Event analytics onboarding state machine via PR #180. M2-08 completed Structural Certification via PR #184. M2 is COMPLETE (PASS). M3-01 through M3-08 are COMPLETE (PASS). M4-01 through M4-07 are COMPLETE (PASS) via PR #241 (two-parent merge `5681ffd`). ANALYTICS_READY machinery is implemented and certified by M4. Current next is PRE-M5 Conformance Gate — not M5-01. `GAP-PRE-M5-METRICS` and `GAP-PRE-M5-TIME` remain OPEN; `GAP-PRE-M5-READY-IX` remains CERTIFICATION_REQUIRED. M5 is BLOCKED. Do not reopen M2-07 scope. Do not start M5 aggregate implementation until PRE-M5 closes.
+M1 contracts are certified. M1-C closed `GAP-PRE-M2-01` on `main`. M2-01 shipped `SourceEventResolver` via PR #168. M2-02 shipped `EventImporter` via PR #170. M2-03 certified event-scoped parent-product discovery via `TickeraCatalogSync`. M2-04A enforced ProductMapping source/Event identity via PR #173. M2-04 enforced parent-product write protection via PR #174. M2-05 certified event-scoped Woo variation discovery via PR #176 (`project_event_variations/2`). M2-06 enforced ProductMapping variation↔TicketType identity via PR #178. M2-07 shipped the durable Event analytics onboarding state machine via PR #180. M2-08 completed Structural Certification via PR #184. M2 is COMPLETE (PASS). M3-01 through M3-08 are COMPLETE (PASS). M4-01 through M4-07 are COMPLETE (PASS) via PR #241 (two-parent merge `5681ffd`). ANALYTICS_READY machinery is implemented and certified by M4. PRE-M5-01A and PRE-M5-01B are COMPLETE (PASS) via PR #243 and PR #244; `GAP-PRE-M5-READY-IX` is CLOSED. PRE-M5-02A metrics conformance specification is COMPLETE in `docs/development/`. Current next is PRE-M5-02 metrics foundation (PRE-M5-02B) — not M5-01. `GAP-PRE-M5-METRICS` and `GAP-PRE-M5-TIME` remain OPEN. M5 is BLOCKED. Do not reopen M2-07 scope. Do not start M5 aggregate implementation until PRE-M5 closes.
 
 ---
 
@@ -852,7 +874,7 @@ PATH 1 — TRUSTED MANAGEMENT ANALYTICS
 ACTIVE
 
 Current Path 1 task:
-PRE-M5 Conformance Gate
+PRE-M5-02 metrics foundation (PRE-M5-02B next)
 
 M3:
 COMPLETE (PASS)
@@ -876,7 +898,7 @@ GAP-PRE-M5-TIME:
 OPEN
 
 GAP-PRE-M5-READY-IX:
-CERTIFICATION_REQUIRED
+CLOSED
 
 P1-00:
 COMPLETE
