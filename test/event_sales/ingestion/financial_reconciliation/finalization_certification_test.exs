@@ -36,6 +36,7 @@ defmodule EventSales.Ingestion.FinancialReconciliation.FinalizationCertification
       SalesHelpers.create_source_system!(%{
         base_url: "https://m407-#{Ecto.UUID.generate()}.example.test"
       })
+
     event = SalesHelpers.create_event!(source, %{name: "M4-07 Finalization"})
     sync_run = FinancialReconciliationHelpers.certified_run!(event)
 
