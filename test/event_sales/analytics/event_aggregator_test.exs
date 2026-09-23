@@ -4,7 +4,7 @@ defmodule EventSales.Analytics.EventAggregatorTest do
   alias EventSales.Analytics.Aggregators.EventAggregator
   alias EventSales.Catalog.Resources.{Event, TicketType}
   alias EventSales.Sales
-  alias EventSales.Sales.Resources.{Order, OrderItem}
+  alias EventSales.Sales.Resources.{Order, OrderItem, Refund, RefundLine}
   alias EventSales.TestSupport.SalesHelpers
 
   setup do
@@ -37,7 +37,7 @@ defmodule EventSales.Analytics.EventAggregatorTest do
       )
 
     pending = create_order!(source, :pending, woo_order_id: 90_002, completed_at: nil)
-    refunded = create_order!(source, :refunded, woo_order_id: 90_003)
+    refunded = create_order!(source, :refunded, woo_order_id: 90_003, completed_at: nil)
     cancelled = create_order!(source, :cancelled, woo_order_id: 90_004)
 
     create_item!(completed, event, ticket,
@@ -113,6 +113,181 @@ defmodule EventSales.Analytics.EventAggregatorTest do
            }
   end
 
+  test "legacy summary_for_event stays completed-only while canonical gross includes historical completion evidence",
+       %{
+         source: source,
+         event: event,
+         ticket: ticket
+       } do
+    cancelled =
+      create_order!(source, :cancelled,
+        woo_order_id: 92_001,
+        completed_at: ~U[2026-05-17 08:00:00.000000Z]
+      )
+
+    create_item!(cancelled, event, ticket,
+      woo_line_item_id: 40,
+      quantity: 1,
+      line_total: Decimal.new("450.00"),
+      line_total_tax: Decimal.new("67.50")
+    )
+
+    assert {:ok, legacy} = EventAggregator.summary_for_event(event.id)
+    assert legacy.total_sold == 0
+    assert Decimal.equal?(legacy.total_revenue, Decimal.new("0"))
+
+    assert {:ok, canonical} = EventAggregator.financial_summaries_for_event(event.id)
+    summary = canonical["ZAR"]
+    assert Decimal.equal?(summary.gross_ticket_quantity, Decimal.new(1))
+    assert Decimal.equal?(summary.gross_ticket_value, Decimal.new("517.50"))
+  end
+
+  test "financial_summaries_for_event returns empty map for only unrecognised pending rows", %{
+    source: source,
+    event: event,
+    ticket: ticket
+  } do
+    pending = create_order!(source, :pending, woo_order_id: 92_010, completed_at: nil)
+
+    create_item!(pending, event, ticket,
+      woo_line_item_id: 41,
+      quantity: 3,
+      line_total: Decimal.new("900.00")
+    )
+
+    assert {:ok, summaries} = EventAggregator.financial_summaries_for_event(event.id)
+    assert summaries == %{}
+  end
+
+  test "refund on never-recognised order does not produce canonical refund primitives", %{
+    source: source,
+    event: event,
+    ticket: ticket
+  } do
+    pending = create_order!(source, :pending, woo_order_id: 92_020, completed_at: nil)
+
+    item =
+      create_item!(pending, event, ticket,
+        woo_line_item_id: 42,
+        quantity: 1,
+        line_total: Decimal.new("80.00"),
+        line_total_tax: Decimal.new("12.00")
+      )
+
+    refund = create_refund!(source, pending, 902)
+    create_refund_line!(refund, item, qty: 1, total: "40.00", tax: "6.00")
+
+    assert {:ok, summaries} = EventAggregator.financial_summaries_for_event(event.id)
+    assert summaries == %{}
+  end
+
+  test "financial_summaries_for_event returns canonical tax-inclusive gross and distinct order count",
+       %{
+         source: source,
+         event: event,
+         ticket: ticket
+       } do
+    order =
+      create_order!(source, :completed,
+        woo_order_id: 91_001,
+        completed_at: ~U[2026-05-17 08:00:00.000000Z]
+      )
+
+    create_item!(order, event, ticket,
+      woo_line_item_id: 11,
+      quantity: 2,
+      line_total: Decimal.new("100.00"),
+      line_total_tax: Decimal.new("15.00")
+    )
+
+    assert {:ok, summaries} = EventAggregator.financial_summaries_for_event(event.id)
+    summary = summaries["ZAR"]
+
+    assert summary.currency == "ZAR"
+    assert Decimal.equal?(summary.gross_ticket_quantity, Decimal.new(2))
+    assert Decimal.equal?(summary.gross_ticket_value, Decimal.new("115.00"))
+    assert summary.recognised_order_count == 1
+    assert Decimal.equal?(summary.net_ticket_value, Decimal.new("115.00"))
+  end
+
+  test "preserves historical gross when current status is refunded but completion evidence exists",
+       %{
+         source: source,
+         event: event,
+         ticket: ticket
+       } do
+    order =
+      create_order!(source, :refunded,
+        woo_order_id: 91_002,
+        completed_at: ~U[2026-05-17 08:00:00.000000Z]
+      )
+
+    create_item!(order, event, ticket,
+      woo_line_item_id: 12,
+      quantity: 2,
+      line_total: Decimal.new("80.00"),
+      line_total_tax: Decimal.new("12.00")
+    )
+
+    assert {:ok, summaries} = EventAggregator.financial_summaries_for_event(event.id)
+    summary = summaries["ZAR"]
+
+    assert Decimal.equal?(summary.gross_ticket_quantity, Decimal.new(2))
+    assert Decimal.equal?(summary.gross_ticket_value, Decimal.new("92.00"))
+  end
+
+  test "summary_for_event returns mixed currency error without choosing a currency", %{
+    source: source,
+    event: event,
+    ticket: ticket
+  } do
+    zar_order = create_order!(source, :completed, woo_order_id: 91_010, currency: "ZAR")
+    usd_order = create_order!(source, :completed, woo_order_id: 91_011, currency: "USD")
+
+    create_item!(zar_order, event, ticket,
+      woo_line_item_id: 20,
+      quantity: 1,
+      line_total: Decimal.new("10.00")
+    )
+
+    create_item!(usd_order, event, ticket,
+      woo_line_item_id: 21,
+      quantity: 1,
+      line_total: Decimal.new("20.00")
+    )
+
+    assert EventAggregator.summary_for_event(event.id) == {:error, :mixed_currency}
+  end
+
+  test "financial_summaries_for_event applies qualifying refunds without changing gross", %{
+    source: source,
+    event: event,
+    ticket: ticket
+  } do
+    order = create_order!(source, :completed, woo_order_id: 91_020)
+
+    item =
+      create_item!(order, event, ticket,
+        woo_line_item_id: 30,
+        quantity: 2,
+        line_total: Decimal.new("80.00"),
+        line_total_tax: Decimal.new("12.00")
+      )
+
+    refund = create_refund!(source, order, 901)
+    create_refund_line!(refund, item, qty: 1, total: "40.00", tax: "6.00")
+
+    assert {:ok, summaries} = EventAggregator.financial_summaries_for_event(event.id)
+    summary = summaries["ZAR"]
+
+    assert Decimal.equal?(summary.gross_ticket_quantity, Decimal.new(2))
+    assert Decimal.equal?(summary.gross_ticket_value, Decimal.new("92.00"))
+    assert Decimal.equal?(summary.refund_ticket_quantity, Decimal.new(1))
+    assert Decimal.equal?(summary.refund_ticket_value, Decimal.new("46.00"))
+    assert Decimal.equal?(summary.net_ticket_quantity, Decimal.new(1))
+    assert Decimal.equal?(summary.net_ticket_value, Decimal.new("46.00"))
+  end
+
   defp create_order!(source, status, attrs) do
     defaults = %{
       source_system_id: source.id,
@@ -152,6 +327,51 @@ defmodule EventSales.Analytics.EventAggregatorTest do
     }
 
     Ash.create!(OrderItem, Map.merge(defaults, Map.new(attrs)),
+      action: :create_normalized,
+      domain: Sales
+    )
+  end
+
+  defp create_refund!(source, order, woo_refund_id) do
+    Ash.create!(
+      Refund,
+      %{
+        source_system_id: source.id,
+        order_id: order.id,
+        woo_order_id: order.woo_order_id,
+        woo_refund_id: woo_refund_id,
+        currency: order.currency,
+        source_state: :active,
+        detail_status: :complete,
+        summary_total_amount: Decimal.new("10"),
+        header_amount: Decimal.new("0"),
+        shipping_refund_amount: Decimal.new("0"),
+        shipping_refund_tax: Decimal.new("0"),
+        fee_refund_amount: Decimal.new("0"),
+        fee_refund_tax: Decimal.new("0"),
+        unallocated_header_amount: Decimal.new("0"),
+        source_created_at: ~U[2026-05-17 09:00:00.000000Z]
+      },
+      action: :create_normalized,
+      domain: Sales
+    )
+  end
+
+  defp create_refund_line!(refund, item, opts) do
+    Ash.create!(
+      RefundLine,
+      %{
+        refund_id: refund.id,
+        order_item_id: item.id,
+        woo_refund_line_item_id: Keyword.get(opts, :line_id, 1),
+        woo_refunded_item_id: item.woo_line_item_id,
+        woo_product_id: item.woo_product_id,
+        woo_variation_id: item.woo_variation_id,
+        refunded_quantity: Keyword.get(opts, :qty, 1),
+        refund_subtotal_amount: Decimal.new(Keyword.get(opts, :total, "10.00")),
+        refund_total_amount: Decimal.new(Keyword.get(opts, :total, "10.00")),
+        refund_total_tax: Decimal.new(Keyword.get(opts, :tax, "0.00"))
+      },
       action: :create_normalized,
       domain: Sales
     )

@@ -54,6 +54,7 @@ defmodule EventSales.Ingestion.CsvLargeImportTest do
     assert Ash.count!(CsvImportRow, domain: Ingestion) == @row_count
 
     assert {:ok, applied} = ApplyImport.apply(batch.id)
+
     assert applied.status == :applied
     assert Ash.count!(Order, domain: Sales) == @row_count
     assert Ash.count!(OrderItem, domain: Sales) == @row_count
