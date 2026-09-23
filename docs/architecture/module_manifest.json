@@ -37,6 +37,7 @@
     "lib/event_sales/analytics/snapshot_store/adapter.ex",
     "lib/event_sales/analytics/snapshot_store/noop_adapter.ex",
     "lib/event_sales/analytics/snapshot_store/redix_adapter.ex",
+    "lib/event_sales/analytics/validations/canonical_snapshot_financials.ex",
     "lib/event_sales/analytics/workers/rebuild_hot_state_worker.ex",
     "lib/event_sales/analytics/workers/refresh_snapshot_worker.ex",
     "lib/event_sales/application.ex",
@@ -1060,6 +1061,27 @@
       ],
       "specs?": true,
       "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.Validations.CanonicalSnapshotFinancials",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/validations/canonical_snapshot_financials.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "init"
+        },
+        {
+          "arity": 3,
+          "name": "validate"
+        }
+      ],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource.Validation"
+      ]
     },
     {
       "docs_count": 0,

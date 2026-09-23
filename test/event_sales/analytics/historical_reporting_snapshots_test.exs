@@ -72,6 +72,104 @@ defmodule EventSales.Analytics.HistoricalReportingSnapshotsTest do
     assert second.source_row_count == 6
     assert second.source_watermark_at == ~U[2026-05-17 08:03:00.000000Z]
     assert second.snapshot_version == 1
+
+    # These storage defaults are not canonical financial truth while the row is v1.
+    assert Map.take(Map.from_struct(second), [
+             :gross_ticket_quantity,
+             :refund_ticket_quantity,
+             :gross_ticket_value,
+             :refund_ticket_value,
+             :recognised_order_count
+           ]) == %{
+             gross_ticket_quantity: 0,
+             refund_ticket_quantity: 0,
+             gross_ticket_value: Decimal.new("0"),
+             refund_ticket_value: Decimal.new("0"),
+             recognised_order_count: 0
+           }
+  end
+
+  test "event snapshot identity allows one projection per currency", %{
+    event: event,
+    other_event: other_event
+  } do
+    assert {:ok, zar} = create_event_snapshot(event.id, %{currency: "ZAR"})
+    assert {:ok, usd} = create_event_snapshot(event.id, %{currency: "USD"})
+
+    assert zar.currency == "ZAR"
+    assert usd.currency == "USD"
+    assert count_event_snapshots(event.id) == 2
+
+    assert {:error, _reason} = create_event_snapshot(event.id, %{currency: "ZAR"})
+    assert count_event_snapshots(event.id) == 2
+
+    assert {:ok, other_event_snapshot} =
+             create_event_snapshot(other_event.id, %{currency: "ZAR"})
+
+    assert other_event_snapshot.event_id == other_event.id
+    assert count_event_snapshots(other_event.id) == 1
+  end
+
+  test "event snapshot v2 stores canonical additive financial primitives", %{event: event} do
+    expected = %{
+      gross_ticket_quantity: 7,
+      refund_ticket_quantity: 2,
+      gross_ticket_value: Decimal.new("1234.56"),
+      refund_ticket_value: Decimal.new("210.45"),
+      recognised_order_count: 3
+    }
+
+    assert {:ok, snapshot} =
+             create_event_snapshot(event.id, Map.merge(expected, %{snapshot_version: 2}))
+
+    assert snapshot.snapshot_version == 2
+    assert Map.take(Map.from_struct(snapshot), Map.keys(expected)) == expected
+  end
+
+  test "event snapshot v2 requires every canonical primitive explicitly", %{event: event} do
+    primitives = %{
+      gross_ticket_quantity: 0,
+      refund_ticket_quantity: 0,
+      gross_ticket_value: Decimal.new("0"),
+      refund_ticket_value: Decimal.new("0"),
+      recognised_order_count: 0
+    }
+
+    Enum.each(primitives, fn {omitted_field, _value} ->
+      attrs = primitives |> Map.delete(omitted_field) |> Map.put(:snapshot_version, 2)
+
+      assert {:error, _reason} = create_event_snapshot(event.id, attrs),
+             "expected snapshot_version 2 to reject omitted #{omitted_field}"
+    end)
+  end
+
+  test "a v1 snapshot cannot be promoted to v2 from compatibility defaults alone", %{
+    event: event
+  } do
+    assert {:ok, legacy} = create_event_snapshot(event.id, %{snapshot_version: 1})
+    assert legacy.snapshot_version == 1
+
+    assert {:error, _reason} =
+             Ash.update(legacy, %{snapshot_version: 2},
+               action: :update_snapshot,
+               domain: EventSales.Analytics
+             )
+
+    assert {:ok, persisted} =
+             Ash.get(EventAggregateSnapshot, legacy.id, domain: EventSales.Analytics)
+
+    assert persisted.snapshot_version == 1
+  end
+
+  test "event snapshot schema does not persist derived net or average fields" do
+    attributes =
+      EventAggregateSnapshot
+      |> Ash.Resource.Info.attributes()
+      |> Enum.map(& &1.name)
+
+    refute :net_ticket_quantity in attributes
+    refute :net_ticket_value in attributes
+    refute :average_ticket_value in attributes
   end
 
   test "daily refresh is idempotent and scoped by event date and timezone", %{
@@ -305,6 +403,28 @@ defmodule EventSales.Analytics.HistoricalReportingSnapshotsTest do
     |> Ash.Query.filter(event_id == ^event_id)
     |> Ash.read!(domain: EventSales.Analytics)
     |> length()
+  end
+
+  defp create_event_snapshot(event_id, attrs) do
+    defaults = %{
+      event_id: event_id,
+      total_sold: 0,
+      total_revenue: Decimal.new("0"),
+      today_sold: 0,
+      today_revenue: Decimal.new("0"),
+      currency: "ZAR",
+      business_timezone: "Africa/Johannesburg",
+      refreshed_at: ~U[2026-05-18 08:00:00.000000Z],
+      source_row_count: 0,
+      snapshot_version: 1
+    }
+
+    Ash.create(
+      EventAggregateSnapshot,
+      Map.merge(defaults, attrs),
+      action: :create_snapshot,
+      domain: EventSales.Analytics
+    )
   end
 
   defp count_daily_snapshots(event_id, business_date, timezone) do

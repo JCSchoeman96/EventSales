@@ -985,6 +985,27 @@
       {
         "docs_count": 0,
         "moduledoc?": true,
+        "name": "EventSales.Analytics.Validations.CanonicalSnapshotFinancials",
+        "parse_error": null,
+        "path": "lib/event_sales/analytics/validations/canonical_snapshot_financials.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "init"
+          },
+          {
+            "arity": 3,
+            "name": "validate"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource.Validation"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
         "name": "EventSales.Ingestion.Validations.AuthorizedFinancialReconciliationStateMutation",
         "parse_error": null,
         "path": "lib/event_sales/ingestion/validations/authorized_financial_reconciliation_state_mutation.ex",
