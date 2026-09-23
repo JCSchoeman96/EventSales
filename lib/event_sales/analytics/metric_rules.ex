@@ -1,12 +1,14 @@
 defmodule EventSales.Analytics.MetricRules do
   @moduledoc """
-  Deterministic completed-only analytics rules.
+  Analytics metric facade for dashboard, cache, and snapshot code.
 
-  These functions are the source of truth for sold-ticket, completed-revenue,
-  status-breakdown, and business-day metric math. Dashboard, cache, and snapshot
-  code must delegate to this module instead of recalculating sales rules.
+  Canonical financial arithmetic lives in `EventSales.Sales.FinancialPrimitives`.
+  This module adds analytics-facing composition, legacy completed-only summaries,
+  and business-day bucketing. Legacy `summarize/2`, `counts_as_sold?/2`, and
+  `completed_revenue/2` retain their existing completed-only compatibility behavior.
   """
 
+  alias EventSales.Sales.FinancialPrimitives
   alias EventSales.Sales.Resources.{Order, OrderItem}
 
   @type summary :: %{
@@ -15,6 +17,18 @@ defmodule EventSales.Analytics.MetricRules do
           today_sold: non_neg_integer(),
           today_revenue: Decimal.t(),
           status_breakdown: %{optional(atom()) => non_neg_integer()}
+        }
+
+  @type financial_summary :: %{
+          currency: String.t(),
+          gross_ticket_quantity: Decimal.t(),
+          refund_ticket_quantity: Decimal.t(),
+          net_ticket_quantity: Decimal.t(),
+          gross_ticket_value: Decimal.t(),
+          refund_ticket_value: Decimal.t(),
+          net_ticket_value: Decimal.t(),
+          recognised_order_count: non_neg_integer(),
+          average_ticket_value: Decimal.t() | nil
         }
 
   @zero Decimal.new("0")
@@ -120,6 +134,78 @@ defmodule EventSales.Analytics.MetricRules do
         :error -> summary
       end
     end)
+  end
+
+  @doc """
+  Derives the canonical financial summary for one currency partition.
+
+  Accepts additive gross/refund primitive totals (typically produced by bounded
+  aggregation in later slices) plus a distinct recognised-order count for the
+  same scope. Net metrics and average ticket value are derived via
+  `FinancialPrimitives`; they are not persisted here.
+  """
+  @spec financial_summary(String.t(), FinancialPrimitives.totals(), non_neg_integer()) ::
+          {:ok, financial_summary()} | {:error, :invalid_currency | :invalid_primitive_totals}
+  def financial_summary(currency, primitive_totals, recognised_order_count)
+      when is_integer(recognised_order_count) and recognised_order_count >= 0 do
+    with :ok <- validate_currency(currency),
+         :ok <- validate_primitive_totals(primitive_totals) do
+      totals = FinancialPrimitives.derive_net_totals(primitive_totals)
+      net_quantity = Map.fetch!(totals, :net_ticket_quantity)
+      net_value = Map.fetch!(totals, :net_ticket_value)
+
+      {:ok,
+       %{
+         currency: currency,
+         gross_ticket_quantity: Map.fetch!(totals, :gross_ticket_quantity),
+         refund_ticket_quantity: Map.fetch!(totals, :refund_ticket_quantity),
+         net_ticket_quantity: net_quantity,
+         gross_ticket_value: Map.fetch!(totals, :gross_ticket_value),
+         refund_ticket_value: Map.fetch!(totals, :refund_ticket_value),
+         net_ticket_value: net_value,
+         recognised_order_count: recognised_order_count,
+         average_ticket_value: average_ticket_value(net_value, net_quantity)
+       }}
+    end
+  end
+
+  defp validate_currency(currency) when is_binary(currency) and byte_size(currency) > 0, do: :ok
+  defp validate_currency(_currency), do: {:error, :invalid_currency}
+
+  defp validate_primitive_totals(%{} = totals) do
+    required_keys = [
+      :gross_ticket_quantity,
+      :refund_ticket_quantity,
+      :gross_ticket_value,
+      :refund_ticket_value
+    ]
+
+    if Enum.all?(required_keys, &Map.has_key?(totals, &1)) do
+      case validate_quantity_primitive(Map.fetch!(totals, :gross_ticket_quantity)) do
+        :ok -> validate_quantity_primitive(Map.fetch!(totals, :refund_ticket_quantity))
+        error -> error
+      end
+    else
+      {:error, :invalid_primitive_totals}
+    end
+  end
+
+  defp validate_primitive_totals(_totals), do: {:error, :invalid_primitive_totals}
+
+  defp validate_quantity_primitive(%Decimal{} = quantity) do
+    if FinancialPrimitives.integral_quantity?(quantity),
+      do: :ok,
+      else: {:error, :invalid_primitive_totals}
+  end
+
+  defp validate_quantity_primitive(_quantity), do: {:error, :invalid_primitive_totals}
+
+  defp average_ticket_value(net_value, %Decimal{} = net_quantity) do
+    if Decimal.equal?(net_quantity, @zero) do
+      nil
+    else
+      Decimal.div(net_value, net_quantity)
+    end
   end
 
   defp empty_summary do

@@ -836,7 +836,7 @@
       ]
     },
     {
-      "docs_count": 9,
+      "docs_count": 10,
       "moduledoc?": true,
       "name": "EventSales.Analytics.MetricRules",
       "parse_error": null,
@@ -877,6 +877,10 @@
         {
           "arity": 2,
           "name": "summarize"
+        },
+        {
+          "arity": 3,
+          "name": "financial_summary"
         }
       ],
       "specs?": true,
