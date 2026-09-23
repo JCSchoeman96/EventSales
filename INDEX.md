@@ -493,8 +493,8 @@ Project root: `.`
 - `EventSales.Analytics.Aggregators.EventAggregator` - `lib/event_sales/analytics/aggregators/event_aggregator.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 1
-  - public_funs: `summary_for_event/2`
+  - docs_count: 2
+  - public_funs: `financial_summaries_for_event/1`, `summary_for_event/2`
   - uses: _none_
 - `EventSales.Analytics.CacheKeys` - `lib/event_sales/analytics/cache_keys.ex`
   - moduledoc?: true

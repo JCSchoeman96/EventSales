@@ -641,12 +641,16 @@
       "uses": []
     },
     {
-      "docs_count": 1,
+      "docs_count": 2,
       "moduledoc?": true,
       "name": "EventSales.Analytics.Aggregators.EventAggregator",
       "parse_error": null,
       "path": "lib/event_sales/analytics/aggregators/event_aggregator.ex",
       "public_funs": [
+        {
+          "arity": 1,
+          "name": "financial_summaries_for_event"
+        },
         {
           "arity": 2,
           "name": "summary_for_event"
