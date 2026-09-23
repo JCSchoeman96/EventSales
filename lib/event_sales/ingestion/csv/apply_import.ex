@@ -103,6 +103,11 @@ defmodule EventSales.Ingestion.Csv.ApplyImport do
     if valid_rows == [] do
       mark_batch_applied(batch)
     else
+      attempt_token = System.system_time(:microsecond)
+
+      opts =
+        Keyword.put(opts, :csv_hot_state_attempt_token, attempt_token)
+
       valid_rows |> grouped_rows() |> apply_groups(batch, event, opts)
     end
   end
@@ -114,19 +119,43 @@ defmodule EventSales.Ingestion.Csv.ApplyImport do
   end
 
   defp apply_groups(groups, batch, event, opts) do
-    groups
-    |> Enum.reduce_while({:ok, batch}, fn {_key, group_rows}, {:ok, current_batch} ->
-      case apply_group(current_batch, event, group_rows, opts) do
-        {:ok, _order} -> {:cont, {:ok, current_batch}}
-        {:error, {:permanent, reason}} -> {:halt, fail_group(current_batch, group_rows, reason)}
-        {:error, reason} -> {:halt, {:error, reason}}
-      end
-    end)
-    |> finalize_groups()
+    result =
+      Enum.reduce_while(groups, {:ok, batch, false}, fn {_key, group_rows},
+                                                        {:ok, current_batch, durable_changed?} ->
+        case apply_group(current_batch, event, group_rows, opts) do
+          {:ok, _order} ->
+            {:cont, {:ok, current_batch, true}}
+
+          {:error, {:permanent, reason}} ->
+            {:halt, {:fail_group, current_batch, group_rows, reason, durable_changed?}}
+
+          {:error, reason} ->
+            {:halt, {:error, reason, durable_changed?}}
+        end
+      end)
+
+    maybe_finalize_csv_hot_state(result, batch, event, opts)
+    finalize_groups(result)
   end
 
-  defp finalize_groups({:ok, batch}), do: mark_batch_applied(batch)
-  defp finalize_groups({:error, reason}), do: {:error, reason}
+  defp maybe_finalize_csv_hot_state(result, batch, event, opts) do
+    if csv_apply_durable_changed?(result) do
+      notifier(opts).finalize_csv_import_hot_state(batch, event.id, opts)
+    end
+
+    :ok
+  end
+
+  defp csv_apply_durable_changed?({:ok, _batch, durable_changed?}), do: durable_changed?
+  defp csv_apply_durable_changed?({:fail_group, _, _, _, durable_changed?}), do: durable_changed?
+  defp csv_apply_durable_changed?({:error, _, durable_changed?}), do: durable_changed?
+
+  defp finalize_groups({:ok, batch, _durable_changed?}), do: mark_batch_applied(batch)
+
+  defp finalize_groups({:fail_group, batch, group_rows, reason, _durable_changed?}),
+    do: fail_group(batch, group_rows, reason)
+
+  defp finalize_groups({:error, reason, _durable_changed?}), do: {:error, reason}
 
   defp apply_group(batch, event, rows, opts) do
     case build_order(rows) do
@@ -138,10 +167,9 @@ defmodule EventSales.Ingestion.Csv.ApplyImport do
     end
   end
 
-  defp apply_built_group(batch, event, rows, normalized_order, opts) do
+  defp apply_built_group(_batch, event, rows, normalized_order, opts) do
     case upsert_group(event.source_system_id, normalized_order, opts) do
       {:ok, order} ->
-        notifier(opts).notify_order_imported(order, batch, event.id, opts)
         mark_group_applied(rows, order, opts)
 
       {:error, {:permanent, reason}} ->

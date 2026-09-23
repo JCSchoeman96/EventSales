@@ -906,8 +906,8 @@
           "name": "notify_order_reconciled"
         },
         {
-          "arity": 4,
-          "name": "notify_order_imported"
+          "arity": 3,
+          "name": "finalize_csv_import_hot_state"
         }
       ],
       "specs?": true,

@@ -183,6 +183,92 @@ defmodule EventSales.Ingestion.Csv.ApplyImportTest do
     assert Ash.get!(CsvImportBatch, batch.id, domain: Ingestion).status == :failed
   end
 
+  test "coalesces hot-state recompute to once per successful multi-order apply", %{
+    admin: admin,
+    event: event
+  } do
+    assert {:ok, batch} =
+             CsvImports.dry_run_file(
+               fixture_path("import_valid.csv"),
+               %{event_id: event.id, source_filename: "import_valid.csv"},
+               actor: admin
+             )
+
+    assert {:ok, applied} =
+             ApplyImport.apply(batch.id, hot_state_aggregator: __MODULE__.CountingHotState)
+
+    assert applied.status == :applied
+    assert Ash.count!(Order, domain: Sales) == 2
+    assert_receive {:csv_hot_state_apply_event, _attrs}, 500
+    refute_receive {:csv_hot_state_apply_event, _attrs}, 100
+  end
+
+  test "recomputes hot state once after partial durable success then failure", %{
+    admin: admin,
+    event: event,
+    ticket: ticket
+  } do
+    batch = create_passed_batch!(event, admin, %{row_count: 2, valid_count: 2})
+
+    create_valid_row!(
+      batch,
+      2,
+      normalized_row(event, ticket, %{
+        "woo_order_id" => 91_001,
+        "order_number" => "CSV-91001",
+        "woo_line_item_id" => 80_001
+      })
+    )
+
+    create_valid_row!(
+      batch,
+      3,
+      normalized_row(event, ticket, %{
+        "woo_order_id" => 91_002,
+        "order_number" => "CSV-91002",
+        "woo_line_item_id" => 80_002,
+        "payment_gateway_transaction_id" => "csv-apply-2"
+      })
+    )
+
+    assert {:error, :row_mark_timeout} =
+             ApplyImport.apply(batch.id,
+               row_marker: __MODULE__.FailSecondGroupRowMarker,
+               hot_state_aggregator: __MODULE__.CountingHotState
+             )
+
+    assert Ash.count!(Order, domain: Sales) == 2
+    assert_receive {:csv_hot_state_apply_event, _attrs}, 500
+    refute_receive {:csv_hot_state_apply_event, _attrs}, 100
+  end
+
+  test "does not recompute hot state when apply attempt makes no durable order changes", %{
+    admin: admin,
+    source: source,
+    event: event,
+    ticket: ticket
+  } do
+    existing =
+      SalesHelpers.create_order_from_fixture!(:order_completed, source)
+
+    batch = create_passed_batch!(event, admin, %{row_count: 1, valid_count: 1})
+
+    stale =
+      normalized_row(event, ticket, %{
+        "woo_order_id" => existing.woo_order_id,
+        "order_number" => existing.order_number,
+        "woo_line_item_id" => 80_001,
+        "updated_at_source" => "2026-05-01T08:00:00"
+      })
+
+    create_valid_row!(batch, 2, stale)
+
+    assert {:error, :stale_noop} =
+             ApplyImport.apply(batch.id, hot_state_aggregator: __MODULE__.CountingHotState)
+
+    refute_receive {:csv_hot_state_apply_event, _attrs}, 100
+  end
+
   test "transient row marking failure leaves batch applying and retry does not duplicate", %{
     admin: admin,
     event: event,
@@ -231,6 +317,15 @@ defmodule EventSales.Ingestion.Csv.ApplyImportTest do
 
     def mark_rows_applied([%{row_number: 3}]), do: {:error, :row_mark_timeout}
     def mark_rows_applied(rows), do: ApplyImport.mark_rows_applied(rows)
+  end
+
+  defmodule CountingHotState do
+    @moduledoc false
+
+    def apply_event(attrs, opts \\ []) do
+      send(self(), {:csv_hot_state_apply_event, attrs})
+      HotStateAggregator.apply_event(attrs, opts)
+    end
   end
 
   defp fixture_path(name), do: Path.join(["test", "fixtures", "csv", name])
