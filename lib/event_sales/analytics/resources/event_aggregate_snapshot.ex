@@ -4,6 +4,11 @@ defmodule EventSales.Analytics.Resources.EventAggregateSnapshot do
 
   This is a derived Postgres read model for reports. Sales order and order item
   rows remain durable source truth.
+
+  Version-1 rows may hold zero defaults in the canonical financial attributes
+  for storage compatibility. Those values are not authoritative financial
+  metrics. Consumers must check `snapshot_version` before treating those
+  attributes as canonical values.
   """
 
   use Ash.Resource,
@@ -36,6 +41,11 @@ defmodule EventSales.Analytics.Resources.EventAggregateSnapshot do
         :total_revenue,
         :today_sold,
         :today_revenue,
+        :gross_ticket_quantity,
+        :refund_ticket_quantity,
+        :gross_ticket_value,
+        :refund_ticket_value,
+        :recognised_order_count,
         :status_breakdown,
         :currency,
         :business_timezone,
@@ -65,6 +75,11 @@ defmodule EventSales.Analytics.Resources.EventAggregateSnapshot do
         :total_revenue,
         :today_sold,
         :today_revenue,
+        :gross_ticket_quantity,
+        :refund_ticket_quantity,
+        :gross_ticket_value,
+        :refund_ticket_value,
+        :recognised_order_count,
         :status_breakdown,
         :currency,
         :business_timezone,
@@ -104,6 +119,41 @@ defmodule EventSales.Analytics.Resources.EventAggregateSnapshot do
     attribute :today_revenue, :decimal do
       allow_nil? false
       default Decimal.new("0")
+      public? true
+    end
+
+    attribute :gross_ticket_quantity, :integer do
+      allow_nil? false
+      default 0
+      constraints min: 0
+      public? true
+    end
+
+    attribute :refund_ticket_quantity, :integer do
+      allow_nil? false
+      default 0
+      constraints min: 0
+      public? true
+    end
+
+    attribute :gross_ticket_value, :decimal do
+      allow_nil? false
+      default Decimal.new("0")
+      constraints min: 0
+      public? true
+    end
+
+    attribute :refund_ticket_value, :decimal do
+      allow_nil? false
+      default Decimal.new("0")
+      constraints min: 0
+      public? true
+    end
+
+    attribute :recognised_order_count, :integer do
+      allow_nil? false
+      default 0
+      constraints min: 0
       public? true
     end
 
@@ -158,6 +208,6 @@ defmodule EventSales.Analytics.Resources.EventAggregateSnapshot do
   end
 
   identities do
-    identity :unique_event, [:event_id]
+    identity :unique_event_currency, [:event_id, :currency]
   end
 end
