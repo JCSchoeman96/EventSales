@@ -25,6 +25,7 @@
     "lib/event_sales/analytics/dashboard_pub_sub.ex",
     "lib/event_sales/analytics/event_detail.ex",
     "lib/event_sales/analytics/event_scoped_dashboard.ex",
+    "lib/event_sales/analytics/event_snapshot_refresh_fence.ex",
     "lib/event_sales/analytics/hot_state_aggregator.ex",
     "lib/event_sales/analytics/metric_rules.ex",
     "lib/event_sales/analytics/order_processed_notifier.ex",
@@ -391,6 +392,7 @@
     "test/support/telemetry_helpers.ex",
     "test/support/tickera_catalog_fixtures.ex",
     "test/support/tickera_sync_test_helpers.ex",
+    "test/support/unboxed_postgres.ex",
     "test/support/woocommerce_webhook_helpers.ex"
   ],
   "generator": "mix project.index",
@@ -642,7 +644,7 @@
       "uses": []
     },
     {
-      "docs_count": 2,
+      "docs_count": 3,
       "moduledoc?": true,
       "name": "EventSales.Analytics.Aggregators.EventAggregator",
       "parse_error": null,
@@ -655,6 +657,10 @@
         {
           "arity": 2,
           "name": "summary_for_event"
+        },
+        {
+          "arity": 2,
+          "name": "operational_status_breakdown_for_event"
         }
       ],
       "specs?": true,
@@ -774,6 +780,21 @@
         {
           "arity": 2,
           "name": "summary"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.EventSnapshotRefreshFence",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/event_snapshot_refresh_fence.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "acquire"
         }
       ],
       "specs?": true,
@@ -9082,6 +9103,25 @@
         {
           "arity": 2,
           "name": "refute_secret_leaks!"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.UnboxedPostgres",
+      "parse_error": null,
+      "path": "test/support/unboxed_postgres.ex",
+      "public_funs": [
+        {
+          "arity": 0,
+          "name": "start_link!"
+        },
+        {
+          "arity": 1,
+          "name": "with_connection"
         }
       ],
       "specs?": false,

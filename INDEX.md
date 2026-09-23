@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-392
+394
 
 ## Files
 
@@ -37,6 +37,7 @@ Project root: `.`
 - `lib/event_sales/analytics/dashboard_pub_sub.ex`
 - `lib/event_sales/analytics/event_detail.ex`
 - `lib/event_sales/analytics/event_scoped_dashboard.ex`
+- `lib/event_sales/analytics/event_snapshot_refresh_fence.ex`
 - `lib/event_sales/analytics/hot_state_aggregator.ex`
 - `lib/event_sales/analytics/metric_rules.ex`
 - `lib/event_sales/analytics/order_processed_notifier.ex`
@@ -403,6 +404,7 @@ Project root: `.`
 - `test/support/telemetry_helpers.ex`
 - `test/support/tickera_catalog_fixtures.ex`
 - `test/support/tickera_sync_test_helpers.ex`
+- `test/support/unboxed_postgres.ex`
 - `test/support/woocommerce_webhook_helpers.ex`
 
 ## Modules
@@ -494,8 +496,8 @@ Project root: `.`
 - `EventSales.Analytics.Aggregators.EventAggregator` - `lib/event_sales/analytics/aggregators/event_aggregator.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 2
-  - public_funs: `financial_summaries_for_event/1`, `summary_for_event/2`
+  - docs_count: 3
+  - public_funs: `financial_summaries_for_event/1`, `summary_for_event/2`, `operational_status_breakdown_for_event/2`
   - uses: _none_
 - `EventSales.Analytics.CacheKeys` - `lib/event_sales/analytics/cache_keys.ex`
   - moduledoc?: true
@@ -526,6 +528,12 @@ Project root: `.`
   - specs?: true
   - docs_count: 1
   - public_funs: `summary/2`
+  - uses: _none_
+- `EventSales.Analytics.EventSnapshotRefreshFence` - `lib/event_sales/analytics/event_snapshot_refresh_fence.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `acquire/1`
   - uses: _none_
 - `EventSales.Analytics.HotStateAggregator` - `lib/event_sales/analytics/hot_state_aggregator.ex`
   - moduledoc?: true
@@ -2722,6 +2730,12 @@ Project root: `.`
   - specs?: false
   - docs_count: 0
   - public_funs: `setup_fake_client/1`, `setup_admin/1`, `attendee/1`, `page_result/1`, `default_page_result/0`, `queue_sync_run!/3`, `start_sync_run!/1`, `queue_running_sync_run!/3`, `put_env!/2`, `refute_secret_leaks!/2`
+  - uses: _none_
+- `EventSales.TestSupport.UnboxedPostgres` - `test/support/unboxed_postgres.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `start_link!/0`, `with_connection/1`
   - uses: _none_
 - `EventSales.TestSupport.WooCommerceWebhookHelpers` - `test/support/woocommerce_webhook_helpers.ex`
   - moduledoc?: true

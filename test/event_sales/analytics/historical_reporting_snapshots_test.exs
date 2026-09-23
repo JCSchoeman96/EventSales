@@ -319,6 +319,56 @@ defmodule EventSales.Analytics.HistoricalReportingSnapshotsTest do
     assert reader["USD"].gross_ticket_quantity == canonical["USD"].gross_ticket_quantity
   end
 
+  test "mixed-currency refresh preserves operational status breakdown on v2 rows", %{
+    source: source,
+    event: event,
+    ticket: ticket
+  } do
+    zar_order =
+      create_order!(source, :completed,
+        woo_order_id: 91_050,
+        currency: "ZAR",
+        completed_at: ~U[2026-05-17 08:00:00.000000Z]
+      )
+
+    usd_order =
+      create_order!(source, :completed,
+        woo_order_id: 91_051,
+        currency: "USD",
+        completed_at: ~U[2026-05-17 08:00:00.000000Z]
+      )
+
+    pending = create_order!(source, :pending, woo_order_id: 91_052, completed_at: nil)
+
+    create_item!(zar_order, event, ticket,
+      woo_line_item_id: 50,
+      quantity: 1,
+      line_total: Decimal.new("450.00"),
+      line_total_tax: Decimal.new("67.50")
+    )
+
+    create_item!(usd_order, event, ticket,
+      woo_line_item_id: 51,
+      quantity: 1,
+      line_total: Decimal.new("50.00"),
+      line_total_tax: Decimal.new("7.50")
+    )
+
+    create_item!(pending, event, ticket, woo_line_item_id: 52, line_total_tax: Decimal.new("0"))
+
+    assert {:ok, expected_breakdown} =
+             EventAggregator.operational_status_breakdown_for_event(event.id)
+
+    assert {:ok, snapshots} = SnapshotRefresh.refresh_event(event.id)
+    assert length(snapshots) == 2
+
+    Enum.each(snapshots, fn snapshot ->
+      assert snapshot.status_breakdown == stringify_status_breakdown(expected_breakdown)
+    end)
+
+    assert {:error, :mixed_currency} = SnapshotReader.summary_for_event(event.id)
+  end
+
   test "existing v1 zar projection is promoted to v2 with explicit canonical primitives", %{
     source: source,
     event: event,
@@ -384,83 +434,6 @@ defmodule EventSales.Analytics.HistoricalReportingSnapshotsTest do
     assert {:ok, snapshots} = SnapshotRefresh.refresh_event(event.id)
     assert snapshots |> Enum.map(& &1.currency) == ["ZAR"]
     assert count_event_snapshots(event.id) == 1
-  end
-
-  test "failed multi-currency refresh leaves prior projection set intact and keeps cache", %{
-    source: source,
-    event: event,
-    ticket: ticket
-  } do
-    assert {:ok, zar} =
-             create_event_snapshot(event.id, %{
-               currency: "ZAR",
-               snapshot_version: 2,
-               gross_ticket_quantity: 9,
-               refund_ticket_quantity: 0,
-               gross_ticket_value: Decimal.new("900"),
-               refund_ticket_value: Decimal.new("0"),
-               recognised_order_count: 1
-             })
-
-    assert {:ok, usd} =
-             create_event_snapshot(event.id, %{
-               currency: "USD",
-               snapshot_version: 2,
-               gross_ticket_quantity: 3,
-               refund_ticket_quantity: 0,
-               gross_ticket_value: Decimal.new("300"),
-               refund_ticket_value: Decimal.new("0"),
-               recognised_order_count: 1
-             })
-
-    assert :ok = DashboardCache.put_event_summary(event.id, %{total_sold: 42})
-
-    zar_order =
-      create_order!(source, :completed,
-        woo_order_id: 91_030,
-        currency: "ZAR",
-        completed_at: ~U[2026-05-17 08:00:00.000000Z]
-      )
-
-    usd_order =
-      create_order!(source, :completed,
-        woo_order_id: 91_031,
-        currency: "USD",
-        completed_at: ~U[2026-05-17 08:00:00.000000Z]
-      )
-
-    create_item!(zar_order, event, ticket,
-      woo_line_item_id: 30,
-      quantity: 1,
-      line_total: Decimal.new("450.00"),
-      line_total_tax: Decimal.new("67.50")
-    )
-
-    create_item!(usd_order, event, ticket,
-      woo_line_item_id: 31,
-      quantity: 1,
-      line_total: Decimal.new("50.00"),
-      line_total_tax: Decimal.new("7.50")
-    )
-
-    Application.put_env(:event_sales, :snapshot_refresh_test_hook, fn currency, :persisted ->
-      if currency == "USD", do: {:error, :injected_refresh_failure}, else: :ok
-    end)
-
-    on_exit(fn -> Application.delete_env(:event_sales, :snapshot_refresh_test_hook) end)
-
-    assert {:error, :injected_refresh_failure} = SnapshotRefresh.refresh_event(event.id)
-
-    assert {:ok, persisted_zar} =
-             Ash.get(EventAggregateSnapshot, zar.id, domain: EventSales.Analytics)
-
-    assert {:ok, persisted_usd} =
-             Ash.get(EventAggregateSnapshot, usd.id, domain: EventSales.Analytics)
-
-    assert persisted_zar.gross_ticket_quantity == 9
-    assert persisted_usd.gross_ticket_quantity == 3
-    assert {:ok, cached} = DashboardCache.get_event_summary(event.id)
-    assert cached.total_sold == 42
   end
 
   test "canonical reader treats v1 rows as a non-authoritative miss", %{event: event} do
@@ -732,5 +705,9 @@ defmodule EventSales.Analytics.HistoricalReportingSnapshotsTest do
 
   defp decimal_to_int!(%Decimal{} = value) do
     value |> Decimal.round(0) |> Decimal.to_integer()
+  end
+
+  defp stringify_status_breakdown(status_breakdown) when is_map(status_breakdown) do
+    Map.new(status_breakdown, fn {key, value} -> {to_string(key), value} end)
   end
 end

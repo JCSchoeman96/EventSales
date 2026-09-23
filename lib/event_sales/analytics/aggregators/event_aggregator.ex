@@ -60,6 +60,36 @@ defmodule EventSales.Analytics.Aggregators.EventAggregator do
     end
   end
 
+  @doc """
+  Returns operational status row counts for one event.
+
+  Uses the same bounded legacy aggregate query as `summary_for_event/2` but
+  does not fail when completed legacy sales span multiple currencies.
+  """
+  @spec operational_status_breakdown_for_event(Ecto.UUID.t(), keyword()) ::
+          {:ok, MetricRules.summary()[:status_breakdown]} | {:error, term()}
+  def operational_status_breakdown_for_event(event_id, opts \\ []) when is_binary(event_id) do
+    with {:ok, event_id} <- cast_event_id(event_id) do
+      event_id
+      |> legacy_summary_aggregate_rows(opts)
+      |> status_breakdown_from_aggregate_rows()
+      |> then(&{:ok, &1})
+    end
+  end
+
+  defp status_breakdown_from_aggregate_rows(rows) do
+    rows
+    |> Enum.group_by(fn {status, _currency, _item_count, _cq, _cr, _tq, _tr} -> status end)
+    |> Map.new(fn {status, status_rows} ->
+      item_count =
+        Enum.reduce(status_rows, 0, fn {_s, _c, count, _cq, _cr, _tq, _tr}, acc ->
+          acc + count
+        end)
+
+      {String.to_existing_atom(status), item_count}
+    end)
+  end
+
   defp cast_event_id(event_id) do
     case Ecto.UUID.cast(event_id) do
       {:ok, uuid} -> {:ok, Ecto.UUID.dump!(uuid)}
@@ -431,17 +461,7 @@ defmodule EventSales.Analytics.Aggregators.EventAggregator do
   end
 
   defp legacy_summary_from_aggregate_rows(rows) do
-    status_breakdown =
-      rows
-      |> Enum.group_by(fn {status, _currency, _item_count, _cq, _cr, _tq, _tr} -> status end)
-      |> Map.new(fn {status, status_rows} ->
-        item_count =
-          Enum.reduce(status_rows, 0, fn {_s, _c, count, _cq, _cr, _tq, _tr}, acc ->
-            acc + count
-          end)
-
-        {String.to_existing_atom(status), item_count}
-      end)
+    status_breakdown = status_breakdown_from_aggregate_rows(rows)
 
     completed_currencies =
       rows

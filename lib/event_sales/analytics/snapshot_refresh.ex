@@ -14,6 +14,7 @@ defmodule EventSales.Analytics.SnapshotRefresh do
   alias EventSales.Analytics
   alias EventSales.Analytics.Aggregators.EventAggregator
   alias EventSales.Analytics.DashboardCache
+  alias EventSales.Analytics.EventSnapshotRefreshFence
   alias EventSales.Analytics.MetricRules
   alias EventSales.Analytics.Resources.{DailySalesAggregateSnapshot, EventAggregateSnapshot}
   alias EventSales.Catalog
@@ -85,10 +86,12 @@ defmodule EventSales.Analytics.SnapshotRefresh do
   defp refresh_event_transaction(event_id, timezone, now, refreshed_at) do
     Repo.transaction(
       fn ->
-        set_repeatable_read_when_allowed!()
-
-        case refresh_event_projection_set!(event_id, timezone, now, refreshed_at) do
-          {:ok, snapshots} -> snapshots
+        with :ok <- EventSnapshotRefreshFence.acquire(event_id),
+             :ok <- set_coherent_source_snapshot_isolation!(),
+             {:ok, snapshots} <-
+               refresh_event_projection_set!(event_id, timezone, now, refreshed_at) do
+          snapshots
+        else
           {:error, reason} -> Repo.rollback(reason)
         end
       end,
@@ -96,23 +99,15 @@ defmodule EventSales.Analytics.SnapshotRefresh do
     )
   end
 
-  defp set_repeatable_read_when_allowed! do
-    if repeatable_read_enabled?() do
+  defp set_coherent_source_snapshot_isolation! do
+    if Repo.config()[:pool] == Ecto.Adapters.SQL.Sandbox do
+      :ok
+    else
       case Ecto.Adapters.SQL.query(Repo, "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ", []) do
         {:ok, _} -> :ok
-        {:error, reason} -> Repo.rollback(reason)
+        {:error, reason} -> {:error, reason}
       end
-    else
-      :ok
     end
-  end
-
-  defp repeatable_read_enabled? do
-    Application.get_env(
-      :event_sales,
-      :snapshot_refresh_repeatable_read,
-      Repo.config()[:pool] != Ecto.Adapters.SQL.Sandbox
-    )
   end
 
   defp refresh_event_projection_set!(event_id, timezone, now, refreshed_at) do
@@ -134,10 +129,27 @@ defmodule EventSales.Analytics.SnapshotRefresh do
   end
 
   defp legacy_summary_for_refresh(event_id, timezone, now) do
-    case EventAggregator.summary_for_event(event_id, timezone: timezone, now: now) do
-      {:ok, summary} -> {:ok, summary}
-      {:error, :mixed_currency} -> {:ok, legacy_summary_defaults()}
-      {:error, reason} -> {:error, reason}
+    opts = [timezone: timezone, now: now]
+
+    case EventAggregator.summary_for_event(event_id, opts) do
+      {:ok, summary} ->
+        {:ok, summary}
+
+      {:error, :mixed_currency} ->
+        with {:ok, status_breakdown} <-
+               EventAggregator.operational_status_breakdown_for_event(event_id, opts) do
+          {:ok,
+           %{
+             total_sold: 0,
+             total_revenue: @zero,
+             today_sold: 0,
+             today_revenue: @zero,
+             status_breakdown: status_breakdown
+           }}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -191,10 +203,8 @@ defmodule EventSales.Analytics.SnapshotRefresh do
   end
 
   defp persist_currency_snapshot!(event_id, currency, attrs) do
-    with {:ok, _snapshot} <- upsert_event_snapshot(event_id, currency, attrs),
-         :ok <- maybe_invoke_test_hook!(currency, :persisted) do
-      {:cont, :ok}
-    else
+    case upsert_event_snapshot(event_id, currency, attrs) do
+      {:ok, _snapshot} -> {:cont, :ok}
       {:error, reason} -> {:halt, {:error, reason}}
     end
   end
@@ -261,16 +271,6 @@ defmodule EventSales.Analytics.SnapshotRefresh do
           status_breakdown: status_breakdown
         }
     end
-  end
-
-  defp legacy_summary_defaults do
-    %{
-      total_sold: 0,
-      total_revenue: @zero,
-      today_sold: 0,
-      today_revenue: @zero,
-      status_breakdown: %{}
-    }
   end
 
   defp purge_obsolete_event_projections!(event_id, canonical_currencies) do
@@ -369,13 +369,6 @@ defmodule EventSales.Analytics.SnapshotRefresh do
     quantity
     |> Decimal.round(0)
     |> Decimal.to_integer()
-  end
-
-  defp maybe_invoke_test_hook!(currency, phase) do
-    case Application.get_env(:event_sales, :snapshot_refresh_test_hook) do
-      fun when is_function(fun, 2) -> fun.(currency, phase)
-      _ -> :ok
-    end
   end
 
   defp fetch_event(event_id) do
