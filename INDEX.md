@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-391
+392
 
 ## Files
 
@@ -49,6 +49,7 @@ Project root: `.`
 - `lib/event_sales/analytics/snapshot_store/adapter.ex`
 - `lib/event_sales/analytics/snapshot_store/noop_adapter.ex`
 - `lib/event_sales/analytics/snapshot_store/redix_adapter.ex`
+- `lib/event_sales/analytics/validations/canonical_snapshot_financials.ex`
 - `lib/event_sales/analytics/workers/rebuild_hot_state_worker.ex`
 - `lib/event_sales/analytics/workers/refresh_snapshot_worker.ex`
 - `lib/event_sales/application.ex`
@@ -598,6 +599,12 @@ Project root: `.`
   - docs_count: 1
   - public_funs: `redix_name/0`, `put/3`, `list_event_summaries/1`
   - uses: _none_
+- `EventSales.Analytics.Validations.CanonicalSnapshotFinancials` - `lib/event_sales/analytics/validations/canonical_snapshot_financials.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `init/1`, `validate/3`
+  - uses: `Ash.Resource.Validation`
 - `EventSales.Analytics.Workers.RebuildHotStateWorker` - `lib/event_sales/analytics/workers/rebuild_hot_state_worker.ex`
   - moduledoc?: true
   - specs?: false
@@ -2797,6 +2804,7 @@ Project root: `.`
 
 ### Validations
 
+- `EventSales.Analytics.Validations.CanonicalSnapshotFinancials` - `lib/event_sales/analytics/validations/canonical_snapshot_financials.ex`
 - `EventSales.Ingestion.Validations.AuthorizedFinancialReconciliationStateMutation` - `lib/event_sales/ingestion/validations/authorized_financial_reconciliation_state_mutation.ex`
 - `EventSales.Ingestion.Validations.AuthorizedTickeraStateMutation` - `lib/event_sales/ingestion/validations/authorized_tickera_state_mutation.ex`
 - `EventSales.Ingestion.Validations.BoundedMetadata` - `lib/event_sales/ingestion/validations/bounded_metadata.ex`

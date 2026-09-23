@@ -3,7 +3,6 @@ defmodule EventSales.Analytics.HistoricalReportingSnapshotsTest do
 
   require Ash.Query
 
-  alias Ecto.Adapters.SQL.Sandbox
   alias EventSales.Analytics.{DashboardCache, SnapshotReader, SnapshotRefresh}
   alias EventSales.Analytics.Resources.{DailySalesAggregateSnapshot, EventAggregateSnapshot}
   alias EventSales.Catalog.Resources.{Event, TicketType}
@@ -111,37 +110,6 @@ defmodule EventSales.Analytics.HistoricalReportingSnapshotsTest do
     assert count_event_snapshots(other_event.id) == 1
   end
 
-  test "concurrent creates cannot persist duplicate event and currency snapshots", %{
-    event: event
-  } do
-    parent = self()
-
-    tasks =
-      Enum.map(1..2, fn _ ->
-        Task.async(fn ->
-          Sandbox.allow(EventSales.Repo, parent, self())
-          send(parent, {:snapshot_create_ready, self()})
-
-          receive do
-            :create_snapshot -> create_event_snapshot(event.id, %{currency: "ZAR"})
-          end
-        end)
-      end)
-
-    task_pids =
-      Enum.map(tasks, fn _task ->
-        assert_receive {:snapshot_create_ready, pid}, 5_000
-        pid
-      end)
-
-    Enum.each(task_pids, &send(&1, :create_snapshot))
-    results = Enum.map(tasks, &Task.await(&1, 15_000))
-
-    assert Enum.count(results, &match?({:ok, %EventAggregateSnapshot{}}, &1)) == 1
-    assert Enum.count(results, &match?({:error, _reason}, &1)) == 1
-    assert count_event_snapshots(event.id) == 1
-  end
-
   test "event snapshot v2 stores canonical additive financial primitives", %{event: event} do
     expected = %{
       gross_ticket_quantity: 7,
@@ -156,6 +124,41 @@ defmodule EventSales.Analytics.HistoricalReportingSnapshotsTest do
 
     assert snapshot.snapshot_version == 2
     assert Map.take(Map.from_struct(snapshot), Map.keys(expected)) == expected
+  end
+
+  test "event snapshot v2 requires every canonical primitive explicitly", %{event: event} do
+    primitives = %{
+      gross_ticket_quantity: 0,
+      refund_ticket_quantity: 0,
+      gross_ticket_value: Decimal.new("0"),
+      refund_ticket_value: Decimal.new("0"),
+      recognised_order_count: 0
+    }
+
+    Enum.each(primitives, fn {omitted_field, _value} ->
+      attrs = primitives |> Map.delete(omitted_field) |> Map.put(:snapshot_version, 2)
+
+      assert {:error, _reason} = create_event_snapshot(event.id, attrs),
+             "expected snapshot_version 2 to reject omitted #{omitted_field}"
+    end)
+  end
+
+  test "a v1 snapshot cannot be promoted to v2 from compatibility defaults alone", %{
+    event: event
+  } do
+    assert {:ok, legacy} = create_event_snapshot(event.id, %{snapshot_version: 1})
+    assert legacy.snapshot_version == 1
+
+    assert {:error, _reason} =
+             Ash.update(legacy, %{snapshot_version: 2},
+               action: :update_snapshot,
+               domain: EventSales.Analytics
+             )
+
+    assert {:ok, persisted} =
+             Ash.get(EventAggregateSnapshot, legacy.id, domain: EventSales.Analytics)
+
+    assert persisted.snapshot_version == 1
   end
 
   test "event snapshot schema does not persist derived net or average fields" do

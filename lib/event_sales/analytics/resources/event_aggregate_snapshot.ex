@@ -1,4 +1,6 @@
 defmodule EventSales.Analytics.Resources.EventAggregateSnapshot do
+  alias EventSales.Analytics.Validations.CanonicalSnapshotFinancials
+
   @moduledoc """
   Durable event-scoped historical reporting snapshot.
 
@@ -67,6 +69,8 @@ defmodule EventSales.Analytics.Resources.EventAggregateSnapshot do
                  :source_row_count,
                  :snapshot_version
                ])
+
+      validate {CanonicalSnapshotFinancials, []}
     end
 
     update :update_snapshot do
@@ -90,6 +94,8 @@ defmodule EventSales.Analytics.Resources.EventAggregateSnapshot do
       ]
 
       require_atomic? false
+
+      validate {CanonicalSnapshotFinancials, []}
     end
   end
 
