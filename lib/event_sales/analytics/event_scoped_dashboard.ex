@@ -84,8 +84,6 @@ defmodule EventSales.Analytics.EventScopedDashboard do
     case HotStateAggregator.summary_for_event(event_id) do
       {:ok, summary} -> {:ok, summary}
       :miss -> snapshot_aggregate_summary(event_id)
-      {:error, :mixed_currency} = error -> error
-      {:error, _} -> snapshot_aggregate_summary(event_id)
     end
   end
 
