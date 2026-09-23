@@ -106,6 +106,17 @@ defmodule EventSales.Analytics.Aggregators.EventAggregator do
       select: %{id: oi.id, order_id: oi.order_id, woo_line_item_id: oi.woo_line_item_id}
   end
 
+  defp refund_primitives_filters do
+    dynamic(
+      [rl, r, o],
+      r.source_state == "active" and r.detail_status == "complete" and
+        (o.status == "completed" or not is_nil(o.completed_at)) and
+        is_nil(rl.binding_reason) and is_nil(rl.validation_reason) and
+        not is_nil(rl.refund_total_amount) and not is_nil(rl.refund_total_tax) and
+        fragment("? IS NOT DISTINCT FROM ?", r.currency, o.currency)
+    )
+  end
+
   defp refund_aggregate_query(event_id) do
     tickets = event_ticket_items_subquery(event_id)
 
@@ -120,12 +131,7 @@ defmodule EventSales.Analytics.Aggregators.EventAggregator do
           parent.id == rl.order_item_id,
       join: ticket in subquery(tickets),
       on: ticket.id == parent.id,
-      where:
-        r.source_state == "active" and r.detail_status == "complete" and
-          (o.status == "completed" or not is_nil(o.completed_at)) and
-          is_nil(rl.binding_reason) and is_nil(rl.validation_reason) and
-          not is_nil(rl.refund_total_amount) and not is_nil(rl.refund_total_tax) and
-          fragment("? IS NOT DISTINCT FROM ?", r.currency, o.currency),
+      where: ^refund_primitives_filters(),
       group_by: o.currency,
       select:
         {o.currency,
