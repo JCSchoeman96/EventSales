@@ -67,7 +67,7 @@ defmodule EventSales.Analytics.Aggregators.EventAggregator do
   does not fail when completed legacy sales span multiple currencies.
   """
   @spec operational_status_breakdown_for_event(Ecto.UUID.t(), keyword()) ::
-          {:ok, MetricRules.summary()[:status_breakdown]} | {:error, term()}
+          {:ok, %{optional(atom()) => non_neg_integer()}} | {:error, term()}
   def operational_status_breakdown_for_event(event_id, opts \\ []) when is_binary(event_id) do
     with {:ok, event_id} <- cast_event_id(event_id) do
       event_id
