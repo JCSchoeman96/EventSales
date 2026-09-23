@@ -100,11 +100,14 @@ defmodule EventSales.Ingestion.Csv.ApplyImport do
   defp apply_rows(batch, event, rows, opts) do
     valid_rows = Enum.filter(rows, &(&1.status == :valid))
     attempt_token = System.unique_integer([:positive, :monotonic])
+    prior_durable_changes? = Enum.any?(rows, &(&1.status == :applied))
 
     if valid_rows == [] do
       finalize_applied_rows_only(batch, event, rows, attempt_token, opts)
     else
-      valid_rows |> grouped_rows() |> apply_groups(batch, event, attempt_token, opts)
+      valid_rows
+      |> grouped_rows()
+      |> apply_groups(batch, event, attempt_token, prior_durable_changes?, opts)
     end
   end
 
@@ -114,7 +117,7 @@ defmodule EventSales.Ingestion.Csv.ApplyImport do
     |> Enum.sort_by(fn {key, _rows} -> key end)
   end
 
-  defp apply_groups(groups, batch, event, attempt_token, opts) do
+  defp apply_groups(groups, batch, event, attempt_token, prior_durable_changes?, opts) do
     result =
       Enum.reduce_while(groups, {:ok, batch, false}, fn {_key, group_rows},
                                                         {:ok, current_batch, durable_changed?} ->
@@ -133,8 +136,11 @@ defmodule EventSales.Ingestion.Csv.ApplyImport do
         end
       end)
 
+    needs_finalize? =
+      prior_durable_changes? or csv_apply_durable_changed?(result)
+
     finalize_result =
-      if csv_apply_durable_changed?(result) do
+      if needs_finalize? do
         finalize_csv_hot_state(batch, event, attempt_token, opts)
       else
         :ok

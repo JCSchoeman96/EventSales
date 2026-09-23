@@ -350,6 +350,77 @@ defmodule EventSales.Ingestion.Csv.ApplyImportTest do
     Process.delete({__MODULE__, :fail_finalize_count})
   end
 
+  test "refreshes prior applied durable rows before terminal failed after failed finalize retry",
+       %{
+         admin: admin,
+         source: source,
+         event: event,
+         ticket: ticket
+       } do
+    Ash.create!(
+      Order,
+      %{
+        source_system_id: source.id,
+        woo_order_id: 91_002,
+        order_number: "CSV-91002",
+        status: :completed,
+        currency: "ZAR",
+        completed_at: ~U[2026-05-21 10:00:00Z],
+        created_at_source: ~U[2026-05-21 09:55:00Z],
+        updated_at_source: ~U[2026-05-21 10:00:00Z],
+        raw_total: Decimal.new("500.00"),
+        raw_discount_total: Decimal.new("0"),
+        raw_tax_total: Decimal.new("0")
+      },
+      action: :create_normalized,
+      domain: Sales
+    )
+
+    batch = create_passed_batch!(event, admin, %{row_count: 2, valid_count: 2})
+
+    create_valid_row!(
+      batch,
+      2,
+      normalized_row(event, ticket, %{
+        "woo_order_id" => 91_001,
+        "order_number" => "CSV-91001",
+        "woo_line_item_id" => 80_001
+      })
+    )
+
+    create_valid_row!(
+      batch,
+      3,
+      normalized_row(event, ticket, %{
+        "woo_order_id" => 91_002,
+        "order_number" => "CSV-91002",
+        "woo_line_item_id" => 80_002,
+        "payment_gateway_transaction_id" => "csv-apply-2",
+        "updated_at_source" => "2026-05-01T08:00:00"
+      })
+    )
+
+    Process.put({__MODULE__, :fail_finalize_count}, 1)
+
+    assert {:error, {:csv_hot_state_finalize_failed, :db_unavailable, during: :stale_noop}} =
+             ApplyImport.apply(batch.id, hot_state_aggregator: __MODULE__.FailFinalizeHotState)
+
+    assert Ash.get!(CsvImportBatch, batch.id, domain: Ingestion).status == :applying
+    assert Enum.map(rows(batch.id), & &1.status) == [:applied, :valid]
+    assert Ash.count!(Order, domain: Sales) == 2
+    assert_receive {:csv_hot_state_apply_event, %{aggregate_event_id: first_id}}, 500
+    refute_receive {:csv_hot_state_apply_event, _attrs}, 100
+
+    assert {:error, :stale_noop} =
+             ApplyImport.apply(batch.id, hot_state_aggregator: __MODULE__.FailFinalizeHotState)
+
+    assert Ash.get!(CsvImportBatch, batch.id, domain: Ingestion).status == :failed
+    assert Enum.map(rows(batch.id), & &1.status) == [:applied, :failed]
+    assert_receive {:csv_hot_state_apply_event, %{aggregate_event_id: second_id}}, 500
+    refute first_id == second_id
+    Process.delete({__MODULE__, :fail_finalize_count})
+  end
+
   test "transient row marking failure leaves batch applying and retry does not duplicate", %{
     admin: admin,
     event: event,
