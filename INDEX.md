@@ -542,7 +542,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: true
   - docs_count: 3
-  - public_funs: `notify_order_processed/3`, `notify_order_reconciled/4`, `notify_order_imported/4`
+  - public_funs: `notify_order_processed/3`, `notify_order_reconciled/4`, `finalize_csv_import_hot_state/4`
   - uses: _none_
 - `EventSales.Analytics.Resources.DailySalesAggregateSnapshot` - `lib/event_sales/analytics/resources/daily_sales_aggregate_snapshot.ex`
   - moduledoc?: true

@@ -63,11 +63,20 @@ defmodule EventSales.Analytics.OrderProcessedNotifier do
   end
 
   @doc """
-  Notifies dashboard hot state that a durable CSV import order upsert completed.
+  Recomputes dashboard hot state once after a CSV import apply attempt changes durable sales.
+
+  Call at most once per apply attempt when at least one order upsert committed.
+  Per-order CSV writes must not call `HotStateAggregator.apply_event/1` directly.
   """
-  @spec notify_order_imported(Order.t(), CsvImportBatch.t(), Ecto.UUID.t(), keyword()) :: :ok
-  def notify_order_imported(%Order{} = order, %CsvImportBatch{} = batch, event_id, opts \\ [])
-      when is_binary(event_id) do
+  @spec finalize_csv_import_hot_state(CsvImportBatch.t(), Ecto.UUID.t(), pos_integer(), keyword()) ::
+          :ok | {:error, term()}
+  def finalize_csv_import_hot_state(
+        %CsvImportBatch{} = batch,
+        event_id,
+        attempt_token,
+        opts \\ []
+      )
+      when is_binary(event_id) and is_integer(attempt_token) and attempt_token > 0 do
     DashboardCache.invalidate_event(event_id, :csv_import_applied)
     CacheInvalidation.emit_for_event(event_id, :csv_import_applied)
 
@@ -77,17 +86,25 @@ defmodule EventSales.Analytics.OrderProcessedNotifier do
       source: :csv
     })
 
-    event = aggregate_csv_import_event(order, batch, event_id)
+    event = aggregate_csv_import_finalize_event(batch, event_id, attempt_token)
     hot_state_aggregator = Keyword.get(opts, :hot_state_aggregator, HotStateAggregator)
 
     case hot_state_aggregator.apply_event(event) do
-      :ok -> :ok
-      {:error, _reason} -> emit_csv_import_failure(:notifier_apply_failed)
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        emit_csv_import_failure(:notifier_apply_failed)
+        {:error, reason}
     end
   rescue
-    _exception -> emit_csv_import_failure(:notifier_apply_failed)
+    exception ->
+      emit_csv_import_failure(:notifier_apply_failed)
+      {:error, exception}
   catch
-    _kind, _reason -> emit_csv_import_failure(:notifier_apply_failed)
+    kind, reason ->
+      emit_csv_import_failure(:notifier_apply_failed)
+      {:error, {kind, reason}}
   end
 
   defp aggregate_reconciliation_event(%Order{} = order, %SyncRun{} = sync_run, event_id) do
@@ -107,44 +124,26 @@ defmodule EventSales.Analytics.OrderProcessedNotifier do
     }
   end
 
-  defp aggregate_csv_import_event(%Order{} = order, %CsvImportBatch{} = batch, event_id) do
-    source_updated_at = order.updated_at_source || DateTime.utc_now()
+  defp aggregate_csv_import_finalize_event(%CsvImportBatch{} = batch, event_id, attempt_token) do
     occurred_at = DateTime.utc_now()
 
     %{
-      aggregate_event_id:
-        aggregate_csv_import_event_id(order, batch, event_id, source_updated_at),
+      aggregate_event_id: aggregate_csv_import_finalize_event_id(batch, event_id, attempt_token),
       event_id: event_id,
       reason: :order_processed,
       occurred_at: occurred_at,
-      source_system_id: order.source_system_id,
-      order_id: order.id,
-      source_updated_at: source_updated_at,
-      payload_hash: "csv_import:#{batch.id}"
+      payload_hash: "csv_import:#{batch.id}:attempt:#{attempt_token}"
     }
   end
 
-  defp aggregate_csv_import_event_id(
-         %Order{} = order,
-         %CsvImportBatch{} = batch,
-         event_id,
-         source_updated_at
-       ) do
-    source_timestamp =
-      case source_updated_at do
-        %DateTime{} = datetime -> DateTime.to_iso8601(datetime)
-        _other -> "unknown"
-      end
-
+  defp aggregate_csv_import_finalize_event_id(%CsvImportBatch{} = batch, event_id, attempt_token) do
     [
-      "order",
-      order.id,
-      "event",
-      event_id,
       "csv_import_batch",
       batch.id,
-      "source",
-      source_timestamp
+      "event",
+      event_id,
+      "attempt",
+      Integer.to_string(attempt_token)
     ]
     |> Enum.join(":")
     |> then(&:crypto.hash(:sha256, &1))

@@ -907,7 +907,7 @@
         },
         {
           "arity": 4,
-          "name": "notify_order_imported"
+          "name": "finalize_csv_import_hot_state"
         }
       ],
       "specs?": true,
