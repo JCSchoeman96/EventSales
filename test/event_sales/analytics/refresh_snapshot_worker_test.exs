@@ -136,7 +136,6 @@ defmodule EventSales.Analytics.RefreshSnapshotWorkerTest do
         quantity: 1,
         line_subtotal: Decimal.new("450.00"),
         line_total: Decimal.new("450.00"),
-        line_total_tax: Decimal.new("0"),
         discount_total: Decimal.new("0"),
         item_kind: :ticket,
         mapping_status: :mapped

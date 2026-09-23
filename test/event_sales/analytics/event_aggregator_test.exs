@@ -104,17 +104,81 @@ defmodule EventSales.Analytics.EventAggregatorTest do
                timezone: "Africa/Johannesburg"
              )
 
-    assert summary.total_sold == 3
-    assert Decimal.equal?(summary.total_revenue, Decimal.new("1350.00"))
-    assert summary.today_sold == 2
-    assert Decimal.equal?(summary.today_revenue, Decimal.new("900.00"))
-
-    assert summary.status_breakdown == %{
-             completed: 3,
-             pending: 1,
-             refunded: 1,
-             cancelled: 1
+    assert summary == %{
+             total_sold: 2,
+             total_revenue: Decimal.new("900.00"),
+             today_sold: 2,
+             today_revenue: Decimal.new("900.00"),
+             status_breakdown: %{completed: 3, pending: 1, refunded: 1, cancelled: 1}
            }
+  end
+
+  test "legacy summary_for_event stays completed-only while canonical gross includes historical completion evidence",
+       %{
+         source: source,
+         event: event,
+         ticket: ticket
+       } do
+    cancelled =
+      create_order!(source, :cancelled,
+        woo_order_id: 92_001,
+        completed_at: ~U[2026-05-17 08:00:00.000000Z]
+      )
+
+    create_item!(cancelled, event, ticket,
+      woo_line_item_id: 40,
+      quantity: 1,
+      line_total: Decimal.new("450.00"),
+      line_total_tax: Decimal.new("67.50")
+    )
+
+    assert {:ok, legacy} = EventAggregator.summary_for_event(event.id)
+    assert legacy.total_sold == 0
+    assert Decimal.equal?(legacy.total_revenue, Decimal.new("0"))
+
+    assert {:ok, canonical} = EventAggregator.financial_summaries_for_event(event.id)
+    summary = canonical["ZAR"]
+    assert Decimal.equal?(summary.gross_ticket_quantity, Decimal.new(1))
+    assert Decimal.equal?(summary.gross_ticket_value, Decimal.new("517.50"))
+  end
+
+  test "financial_summaries_for_event returns empty map for only unrecognised pending rows", %{
+    source: source,
+    event: event,
+    ticket: ticket
+  } do
+    pending = create_order!(source, :pending, woo_order_id: 92_010, completed_at: nil)
+
+    create_item!(pending, event, ticket,
+      woo_line_item_id: 41,
+      quantity: 3,
+      line_total: Decimal.new("900.00")
+    )
+
+    assert {:ok, summaries} = EventAggregator.financial_summaries_for_event(event.id)
+    assert summaries == %{}
+  end
+
+  test "refund on never-recognised order does not produce canonical refund primitives", %{
+    source: source,
+    event: event,
+    ticket: ticket
+  } do
+    pending = create_order!(source, :pending, woo_order_id: 92_020, completed_at: nil)
+
+    item =
+      create_item!(pending, event, ticket,
+        woo_line_item_id: 42,
+        quantity: 1,
+        line_total: Decimal.new("80.00"),
+        line_total_tax: Decimal.new("12.00")
+      )
+
+    refund = create_refund!(source, pending, 902)
+    create_refund_line!(refund, item, qty: 1, total: "40.00", tax: "6.00")
+
+    assert {:ok, summaries} = EventAggregator.financial_summaries_for_event(event.id)
+    assert summaries == %{}
   end
 
   test "financial_summaries_for_event returns canonical tax-inclusive gross and distinct order count",
@@ -183,15 +247,13 @@ defmodule EventSales.Analytics.EventAggregatorTest do
     create_item!(zar_order, event, ticket,
       woo_line_item_id: 20,
       quantity: 1,
-      line_total: Decimal.new("10.00"),
-      line_total_tax: Decimal.new("0")
+      line_total: Decimal.new("10.00")
     )
 
     create_item!(usd_order, event, ticket,
       woo_line_item_id: 21,
       quantity: 1,
-      line_total: Decimal.new("20.00"),
-      line_total_tax: Decimal.new("0")
+      line_total: Decimal.new("20.00")
     )
 
     assert EventAggregator.summary_for_event(event.id) == {:error, :mixed_currency}
@@ -259,7 +321,6 @@ defmodule EventSales.Analytics.EventAggregatorTest do
       quantity: 1,
       line_subtotal: Decimal.new("450.00"),
       line_total: Decimal.new("450.00"),
-      line_total_tax: Decimal.new("0"),
       discount_total: Decimal.new("0"),
       item_kind: :ticket,
       mapping_status: :mapped

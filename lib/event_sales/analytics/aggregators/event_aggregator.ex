@@ -39,22 +39,23 @@ defmodule EventSales.Analytics.Aggregators.EventAggregator do
   @doc """
   Summarizes event-scoped metrics for legacy dashboard compatibility.
 
-  Financial scalars come from bounded canonical aggregation when exactly one
-  currency is present. Operational status breakdown uses a separate bounded
-  query. Today buckets retain legacy completed-only semantics.
+  `total_sold` and `total_revenue` use bounded completed-only PostgreSQL
+  aggregation (`status == completed`, mapped ticket, positive quantity,
+  ex-tax `line_total`). They do not use canonical historical gross.
+
+  Operational `status_breakdown` and today buckets use separate bounded queries.
+  Mixed currency on completed legacy sales returns `{:error, :mixed_currency}`.
   """
   @spec summary_for_event(Ecto.UUID.t(), keyword()) ::
           {:ok, MetricRules.summary()} | {:error, term()}
   def summary_for_event(event_id, opts \\ []) when is_binary(event_id) do
-    with {:ok, summaries} <- financial_summaries_for_event(event_id),
-         {:ok, event_id} <- cast_event_id(event_id) do
-      case map_size(summaries) do
-        0 ->
+    with {:ok, event_id} <- cast_event_id(event_id) do
+      case Repo.all(legacy_completed_currencies_query(event_id)) do
+        [] ->
           {:ok, legacy_empty_summary(event_id, opts)}
 
-        1 ->
-          {_currency, canonical} = summaries |> Map.to_list() |> List.first()
-          {:ok, legacy_summary_from_canonical(event_id, canonical, opts)}
+        [currency] ->
+          {:ok, legacy_summary_for_currency(event_id, currency, opts)}
 
         _ ->
           {:error, :mixed_currency}
@@ -121,6 +122,7 @@ defmodule EventSales.Analytics.Aggregators.EventAggregator do
       on: ticket.id == parent.id,
       where:
         r.source_state == "active" and r.detail_status == "complete" and
+          (o.status == "completed" or not is_nil(o.completed_at)) and
           is_nil(rl.binding_reason) and is_nil(rl.validation_reason) and
           not is_nil(rl.refund_total_amount) and not is_nil(rl.refund_total_tax) and
           fragment("? IS NOT DISTINCT FROM ?", r.currency, o.currency),
@@ -148,41 +150,19 @@ defmodule EventSales.Analytics.Aggregators.EventAggregator do
       select: {o.currency, count(o.id, :distinct)}
   end
 
-  defp build_financial_summaries(event_id, gross_rows, refund_rows, order_count_rows) do
-    event_id
-    |> currency_keys(gross_rows, refund_rows, order_count_rows)
-    |> Enum.reduce_while({:ok, %{}}, fn currency, {:ok, acc} ->
-      case build_financial_summary(currency, gross_rows, refund_rows, order_count_rows) do
-        {:ok, summary} -> {:cont, {:ok, Map.put(acc, currency, summary)}}
-        {:error, reason} -> {:halt, {:error, reason}}
-      end
-    end)
-  end
-
-  defp currency_keys(event_id, gross_rows, refund_rows, order_count_rows) do
+  defp build_financial_summaries(_event_id, gross_rows, refund_rows, order_count_rows) do
     gross_rows
     |> Enum.map(&elem(&1, 0))
     |> Kernel.++(Enum.map(refund_rows, &elem(&1, 0)))
     |> Kernel.++(Enum.map(order_count_rows, &elem(&1, 0)))
     |> Enum.uniq()
     |> Enum.sort()
-    |> case do
-      [] -> list_order_currencies(event_id)
-      currencies -> currencies
-    end
-  end
-
-  defp list_order_currencies(event_id) do
-    query =
-      from oi in "sales_order_items",
-        join: o in "sales_orders",
-        on: oi.order_id == o.id,
-        where: oi.event_id == ^event_id,
-        distinct: o.currency,
-        order_by: o.currency,
-        select: o.currency
-
-    Repo.all(query)
+    |> Enum.reduce_while({:ok, %{}}, fn currency, {:ok, acc} ->
+      case build_financial_summary(currency, gross_rows, refund_rows, order_count_rows) do
+        {:ok, summary} -> {:cont, {:ok, Map.put(acc, currency, summary)}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
   end
 
   defp build_financial_summary(currency, gross_rows, refund_rows, order_count_rows) do
@@ -214,13 +194,41 @@ defmodule EventSales.Analytics.Aggregators.EventAggregator do
     end
   end
 
-  defp legacy_summary_from_canonical(event_id, canonical, opts) do
+  defp legacy_completed_currencies_query(event_id) do
+    from oi in "sales_order_items",
+      join: o in "sales_orders",
+      on: oi.order_id == o.id,
+      where:
+        oi.event_id == ^event_id and o.status == "completed" and
+          oi.mapping_status == "mapped" and oi.item_kind == "ticket" and oi.quantity > 0,
+      distinct: o.currency,
+      order_by: o.currency,
+      select: o.currency
+  end
+
+  defp legacy_completed_totals_query(event_id) do
+    from oi in "sales_order_items",
+      join: o in "sales_orders",
+      on: oi.order_id == o.id,
+      where:
+        oi.event_id == ^event_id and o.status == "completed" and
+          oi.mapping_status == "mapped" and oi.item_kind == "ticket" and oi.quantity > 0,
+      select: {sum(oi.quantity), sum(oi.line_total)}
+  end
+
+  defp legacy_summary_for_currency(event_id, _currency, opts) do
     status_breakdown = status_breakdown_for_event(event_id)
     today = legacy_today_totals(event_id, opts)
 
+    {total_sold, total_revenue} =
+      case Repo.one(legacy_completed_totals_query(event_id)) do
+        {sold, revenue} -> {int!(sold), decimal!(revenue)}
+        nil -> {0, Decimal.new(0)}
+      end
+
     %{
-      total_sold: decimal_to_nonneg_int(canonical.gross_ticket_quantity),
-      total_revenue: canonical.gross_ticket_value,
+      total_sold: total_sold,
+      total_revenue: total_revenue,
       today_sold: today.today_sold,
       today_revenue: today.today_revenue,
       status_breakdown: status_breakdown
