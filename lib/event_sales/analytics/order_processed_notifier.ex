@@ -68,9 +68,15 @@ defmodule EventSales.Analytics.OrderProcessedNotifier do
   Call at most once per apply attempt when at least one order upsert committed.
   Per-order CSV writes must not call `HotStateAggregator.apply_event/1` directly.
   """
-  @spec finalize_csv_import_hot_state(CsvImportBatch.t(), Ecto.UUID.t(), keyword()) :: :ok
-  def finalize_csv_import_hot_state(%CsvImportBatch{} = batch, event_id, opts \\ [])
-      when is_binary(event_id) do
+  @spec finalize_csv_import_hot_state(CsvImportBatch.t(), Ecto.UUID.t(), pos_integer(), keyword()) ::
+          :ok | {:error, term()}
+  def finalize_csv_import_hot_state(
+        %CsvImportBatch{} = batch,
+        event_id,
+        attempt_token,
+        opts \\ []
+      )
+      when is_binary(event_id) and is_integer(attempt_token) and attempt_token > 0 do
     DashboardCache.invalidate_event(event_id, :csv_import_applied)
     CacheInvalidation.emit_for_event(event_id, :csv_import_applied)
 
@@ -80,17 +86,25 @@ defmodule EventSales.Analytics.OrderProcessedNotifier do
       source: :csv
     })
 
-    event = aggregate_csv_import_finalize_event(batch, event_id, opts)
+    event = aggregate_csv_import_finalize_event(batch, event_id, attempt_token)
     hot_state_aggregator = Keyword.get(opts, :hot_state_aggregator, HotStateAggregator)
 
     case hot_state_aggregator.apply_event(event) do
-      :ok -> :ok
-      {:error, _reason} -> emit_csv_import_failure(:notifier_apply_failed)
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        emit_csv_import_failure(:notifier_apply_failed)
+        {:error, reason}
     end
   rescue
-    _exception -> emit_csv_import_failure(:notifier_apply_failed)
+    exception ->
+      emit_csv_import_failure(:notifier_apply_failed)
+      {:error, exception}
   catch
-    _kind, _reason -> emit_csv_import_failure(:notifier_apply_failed)
+    kind, reason ->
+      emit_csv_import_failure(:notifier_apply_failed)
+      {:error, {kind, reason}}
   end
 
   defp aggregate_reconciliation_event(%Order{} = order, %SyncRun{} = sync_run, event_id) do
@@ -110,8 +124,7 @@ defmodule EventSales.Analytics.OrderProcessedNotifier do
     }
   end
 
-  defp aggregate_csv_import_finalize_event(%CsvImportBatch{} = batch, event_id, opts) do
-    attempt_token = Keyword.fetch!(opts, :csv_hot_state_attempt_token)
+  defp aggregate_csv_import_finalize_event(%CsvImportBatch{} = batch, event_id, attempt_token) do
     occurred_at = DateTime.utc_now()
 
     %{

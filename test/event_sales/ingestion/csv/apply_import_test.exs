@@ -203,6 +203,36 @@ defmodule EventSales.Ingestion.Csv.ApplyImportTest do
     refute_receive {:csv_hot_state_apply_event, _attrs}, 100
   end
 
+  test "recomputes hot state once when first group durable commit succeeds but row marking fails",
+       %{
+         admin: admin,
+         event: event,
+         ticket: ticket
+       } do
+    batch = create_passed_batch!(event, admin, %{row_count: 1, valid_count: 1})
+
+    create_valid_row!(
+      batch,
+      2,
+      normalized_row(event, ticket, %{
+        "woo_order_id" => 91_001,
+        "order_number" => "CSV-91001",
+        "woo_line_item_id" => 80_001
+      })
+    )
+
+    assert {:error, :row_mark_timeout} =
+             ApplyImport.apply(batch.id,
+               row_marker: __MODULE__.FailFirstGroupRowMarker,
+               hot_state_aggregator: __MODULE__.CountingHotState
+             )
+
+    assert Ash.count!(Order, domain: Sales) == 1
+    assert Ash.count!(OrderItem, domain: Sales) == 1
+    assert_receive {:csv_hot_state_apply_event, _attrs}, 500
+    refute_receive {:csv_hot_state_apply_event, _attrs}, 100
+  end
+
   test "recomputes hot state once after partial durable success then failure", %{
     admin: admin,
     event: event,
@@ -269,6 +299,57 @@ defmodule EventSales.Ingestion.Csv.ApplyImportTest do
     refute_receive {:csv_hot_state_apply_event, _attrs}, 100
   end
 
+  test "does not mark batch applied when CSV hot-state finalization fails and retry can complete",
+       %{admin: admin, event: event} do
+    assert {:ok, batch} =
+             CsvImports.dry_run_file(
+               fixture_path("import_valid.csv"),
+               %{event_id: event.id, source_filename: "import_valid.csv"},
+               actor: admin
+             )
+
+    Process.put({__MODULE__, :fail_finalize_count}, 1)
+
+    assert {:error, {:csv_hot_state_finalize_failed, :db_unavailable}} =
+             ApplyImport.apply(batch.id, hot_state_aggregator: __MODULE__.FailFinalizeHotState)
+
+    assert Ash.get!(CsvImportBatch, batch.id, domain: Ingestion).status == :applying
+    assert Enum.all?(rows(batch.id), &(&1.status == :applied))
+    assert Ash.count!(Order, domain: Sales) == 2
+
+    assert {:ok, applied} =
+             ApplyImport.apply(batch.id, hot_state_aggregator: __MODULE__.FailFinalizeHotState)
+
+    assert applied.status == :applied
+    Process.delete({__MODULE__, :fail_finalize_count})
+  end
+
+  test "retry hot-state finalization uses a distinct aggregate event id per attempt", %{
+    admin: admin,
+    event: event
+  } do
+    assert {:ok, batch} =
+             CsvImports.dry_run_file(
+               fixture_path("import_valid.csv"),
+               %{event_id: event.id, source_filename: "import_valid.csv"},
+               actor: admin
+             )
+
+    Process.put({__MODULE__, :fail_finalize_count}, 1)
+
+    assert {:error, {:csv_hot_state_finalize_failed, :db_unavailable}} =
+             ApplyImport.apply(batch.id, hot_state_aggregator: __MODULE__.FailFinalizeHotState)
+
+    assert_receive {:csv_hot_state_apply_event, %{aggregate_event_id: first_id}}, 500
+
+    assert {:ok, _} =
+             ApplyImport.apply(batch.id, hot_state_aggregator: __MODULE__.FailFinalizeHotState)
+
+    assert_receive {:csv_hot_state_apply_event, %{aggregate_event_id: second_id}}, 500
+    refute first_id == second_id
+    Process.delete({__MODULE__, :fail_finalize_count})
+  end
+
   test "transient row marking failure leaves batch applying and retry does not duplicate", %{
     admin: admin,
     event: event,
@@ -312,11 +393,35 @@ defmodule EventSales.Ingestion.Csv.ApplyImportTest do
     assert Ash.count!(OrderItem, domain: Sales) == 2
   end
 
+  defmodule FailFirstGroupRowMarker do
+    @moduledoc false
+
+    def mark_rows_applied([%{row_number: 2}]), do: {:error, :row_mark_timeout}
+    def mark_rows_applied(rows), do: ApplyImport.mark_rows_applied(rows)
+  end
+
   defmodule FailSecondGroupRowMarker do
     @moduledoc false
 
     def mark_rows_applied([%{row_number: 3}]), do: {:error, :row_mark_timeout}
     def mark_rows_applied(rows), do: ApplyImport.mark_rows_applied(rows)
+  end
+
+  defmodule FailFinalizeHotState do
+    @moduledoc false
+
+    def apply_event(attrs, opts \\ []) do
+      send(self(), {:csv_hot_state_apply_event, attrs})
+
+      case Process.get({EventSales.Ingestion.Csv.ApplyImportTest, :fail_finalize_count}) do
+        n when is_integer(n) and n > 0 ->
+          Process.put({EventSales.Ingestion.Csv.ApplyImportTest, :fail_finalize_count}, n - 1)
+          {:error, :db_unavailable}
+
+        _ ->
+          HotStateAggregator.apply_event(attrs, opts)
+      end
+    end
   end
 
   defmodule CountingHotState do

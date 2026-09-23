@@ -99,16 +99,12 @@ defmodule EventSales.Ingestion.Csv.ApplyImport do
 
   defp apply_rows(batch, event, rows, opts) do
     valid_rows = Enum.filter(rows, &(&1.status == :valid))
+    attempt_token = System.unique_integer([:positive, :monotonic])
 
     if valid_rows == [] do
-      mark_batch_applied(batch)
+      finalize_applied_rows_only(batch, event, rows, attempt_token, opts)
     else
-      attempt_token = System.system_time(:microsecond)
-
-      opts =
-        Keyword.put(opts, :csv_hot_state_attempt_token, attempt_token)
-
-      valid_rows |> grouped_rows() |> apply_groups(batch, event, opts)
+      valid_rows |> grouped_rows() |> apply_groups(batch, event, attempt_token, opts)
     end
   end
 
@@ -118,13 +114,16 @@ defmodule EventSales.Ingestion.Csv.ApplyImport do
     |> Enum.sort_by(fn {key, _rows} -> key end)
   end
 
-  defp apply_groups(groups, batch, event, opts) do
+  defp apply_groups(groups, batch, event, attempt_token, opts) do
     result =
       Enum.reduce_while(groups, {:ok, batch, false}, fn {_key, group_rows},
                                                         {:ok, current_batch, durable_changed?} ->
         case apply_group(current_batch, event, group_rows, opts) do
           {:ok, _order} ->
             {:cont, {:ok, current_batch, true}}
+
+          {:error, reason, :durable_committed} ->
+            {:halt, {:error, reason, true}}
 
           {:error, {:permanent, reason}} ->
             {:halt, {:fail_group, current_batch, group_rows, reason, durable_changed?}}
@@ -134,28 +133,62 @@ defmodule EventSales.Ingestion.Csv.ApplyImport do
         end
       end)
 
-    maybe_finalize_csv_hot_state(result, batch, event, opts)
-    finalize_groups(result)
+    finalize_result =
+      if csv_apply_durable_changed?(result) do
+        finalize_csv_hot_state(batch, event, attempt_token, opts)
+      else
+        :ok
+      end
+
+    complete_apply_attempt(result, finalize_result)
   end
 
-  defp maybe_finalize_csv_hot_state(result, batch, event, opts) do
-    if csv_apply_durable_changed?(result) do
-      notifier(opts).finalize_csv_import_hot_state(batch, event.id, opts)
+  defp finalize_applied_rows_only(batch, event, rows, attempt_token, opts) do
+    if Enum.any?(rows, &(&1.status == :applied)) do
+      case finalize_csv_hot_state(batch, event, attempt_token, opts) do
+        :ok -> mark_batch_applied(batch)
+        {:error, reason} -> {:error, {:csv_hot_state_finalize_failed, reason}}
+      end
+    else
+      mark_batch_applied(batch)
     end
+  end
 
-    :ok
+  defp finalize_csv_hot_state(batch, event, attempt_token, opts) do
+    notifier(opts).finalize_csv_import_hot_state(batch, event.id, attempt_token, opts)
   end
 
   defp csv_apply_durable_changed?({:ok, _batch, durable_changed?}), do: durable_changed?
   defp csv_apply_durable_changed?({:fail_group, _, _, _, durable_changed?}), do: durable_changed?
   defp csv_apply_durable_changed?({:error, _, durable_changed?}), do: durable_changed?
 
-  defp finalize_groups({:ok, batch, _durable_changed?}), do: mark_batch_applied(batch)
+  defp complete_apply_attempt(apply_result, finalize_result) do
+    case finalize_result do
+      {:error, finalize_reason} ->
+        {:error, csv_apply_failure_after_finalize(apply_result, finalize_reason)}
 
-  defp finalize_groups({:fail_group, batch, group_rows, reason, _durable_changed?}),
+      :ok ->
+        complete_apply_attempt_after_finalize(apply_result)
+    end
+  end
+
+  defp complete_apply_attempt_after_finalize({:ok, batch, _durable_changed?}),
+    do: mark_batch_applied(batch)
+
+  defp complete_apply_attempt_after_finalize({:fail_group, batch, group_rows, reason, _}),
     do: fail_group(batch, group_rows, reason)
 
-  defp finalize_groups({:error, reason, _durable_changed?}), do: {:error, reason}
+  defp complete_apply_attempt_after_finalize({:error, reason, _durable_changed?}),
+    do: {:error, reason}
+
+  defp csv_apply_failure_after_finalize({:ok, _batch, _}, finalize_reason),
+    do: {:csv_hot_state_finalize_failed, finalize_reason}
+
+  defp csv_apply_failure_after_finalize({:error, apply_reason, _}, finalize_reason),
+    do: {:csv_hot_state_finalize_failed, finalize_reason, during: apply_reason}
+
+  defp csv_apply_failure_after_finalize({:fail_group, _, _, apply_reason, _}, finalize_reason),
+    do: {:csv_hot_state_finalize_failed, finalize_reason, during: apply_reason}
 
   defp apply_group(batch, event, rows, opts) do
     case build_order(rows) do
@@ -170,7 +203,10 @@ defmodule EventSales.Ingestion.Csv.ApplyImport do
   defp apply_built_group(_batch, event, rows, normalized_order, opts) do
     case upsert_group(event.source_system_id, normalized_order, opts) do
       {:ok, order} ->
-        mark_group_applied(rows, order, opts)
+        case mark_group_applied(rows, order, opts) do
+          {:ok, order} -> {:ok, order}
+          {:error, reason} -> {:error, reason, :durable_committed}
+        end
 
       {:error, {:permanent, reason}} ->
         {:error, {:permanent, reason}}

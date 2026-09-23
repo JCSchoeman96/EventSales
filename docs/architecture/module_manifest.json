@@ -906,7 +906,7 @@
           "name": "notify_order_reconciled"
         },
         {
-          "arity": 3,
+          "arity": 4,
           "name": "finalize_csv_import_hot_state"
         }
       ],
