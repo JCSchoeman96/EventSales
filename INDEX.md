@@ -535,8 +535,8 @@ Project root: `.`
 - `EventSales.Analytics.MetricRules` - `lib/event_sales/analytics/metric_rules.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 9
-  - public_funs: `business_timezone/0`, `business_date/2`, `same_business_date?/3`, `counts_as_sold?/2`, `sold_quantity/2`, `completed_revenue/2`, `visible_in_status_breakdown?/2`, `status_bucket/1`, `summarize/2`
+  - docs_count: 10
+  - public_funs: `business_timezone/0`, `business_date/2`, `same_business_date?/3`, `counts_as_sold?/2`, `sold_quantity/2`, `completed_revenue/2`, `visible_in_status_breakdown?/2`, `status_bucket/1`, `summarize/2`, `financial_summary/3`
   - uses: _none_
 - `EventSales.Analytics.OrderProcessedNotifier` - `lib/event_sales/analytics/order_processed_notifier.ex`
   - moduledoc?: true

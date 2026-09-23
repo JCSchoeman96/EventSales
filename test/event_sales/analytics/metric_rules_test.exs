@@ -2,6 +2,7 @@ defmodule EventSales.Analytics.MetricRulesTest do
   use ExUnit.Case, async: true
 
   alias EventSales.Analytics.MetricRules
+  alias EventSales.Sales.FinancialPrimitives
   alias EventSales.Sales.Resources.{Order, OrderItem}
 
   @non_completed_statuses [:pending, :processing, :on_hold, :cancelled, :refunded, :failed]
@@ -112,6 +113,120 @@ defmodule EventSales.Analytics.MetricRulesTest do
     assert summary.total_sold == 2
     assert summary.today_sold == 0
     assert summary.today_revenue == Decimal.new("0")
+  end
+
+  describe "financial_summary/3" do
+    test "derives tax-inclusive canonical summary from primitive totals and order count" do
+      primitives =
+        FinancialPrimitives.empty_totals()
+        |> Map.merge(%{
+          gross_ticket_quantity: Decimal.new(2),
+          gross_ticket_value: FinancialPrimitives.gross_ticket_value("100.00", "15.00"),
+          refund_ticket_quantity: Decimal.new(1),
+          refund_ticket_value: FinancialPrimitives.refund_ticket_value("50.00", "7.50")
+        })
+
+      assert {:ok, summary} = MetricRules.financial_summary("ZAR", primitives, 1)
+
+      assert summary.currency == "ZAR"
+      assert summary.gross_ticket_quantity == Decimal.new(2)
+      assert summary.gross_ticket_value == Decimal.new("115.00")
+      assert summary.refund_ticket_quantity == Decimal.new(1)
+      assert summary.refund_ticket_value == Decimal.new("57.50")
+      assert summary.net_ticket_quantity == Decimal.new(1)
+      assert summary.net_ticket_value == Decimal.new("57.50")
+      assert summary.recognised_order_count == 1
+      assert summary.average_ticket_value == Decimal.new("57.50")
+    end
+
+    test "preserves gross components when refunds reduce net only" do
+      primitives =
+        FinancialPrimitives.empty_totals()
+        |> Map.merge(%{
+          gross_ticket_quantity: Decimal.new(3),
+          gross_ticket_value: Decimal.new("300.00"),
+          refund_ticket_quantity: Decimal.new(1),
+          refund_ticket_value: Decimal.new("100.00")
+        })
+
+      assert {:ok, summary} = MetricRules.financial_summary("ZAR", primitives, 2)
+
+      assert summary.gross_ticket_quantity == Decimal.new(3)
+      assert summary.gross_ticket_value == Decimal.new("300.00")
+      assert summary.refund_ticket_quantity == Decimal.new(1)
+      assert summary.refund_ticket_value == Decimal.new("100.00")
+      assert summary.net_ticket_quantity == Decimal.new(2)
+      assert summary.net_ticket_value == Decimal.new("200.00")
+      assert summary.recognised_order_count == 2
+    end
+
+    test "over-refund preserves negative net without clamping" do
+      primitives =
+        FinancialPrimitives.empty_totals()
+        |> Map.merge(%{
+          gross_ticket_quantity: Decimal.new(1),
+          gross_ticket_value: Decimal.new("50.00"),
+          refund_ticket_quantity: Decimal.new(2),
+          refund_ticket_value: Decimal.new("120.00")
+        })
+
+      assert {:ok, summary} = MetricRules.financial_summary("ZAR", primitives, 1)
+
+      assert summary.net_ticket_quantity == Decimal.new("-1")
+      assert summary.net_ticket_value == Decimal.new("-70.00")
+      assert summary.average_ticket_value == Decimal.new("70.00")
+    end
+
+    test "zero net ticket quantity yields undefined average ticket value" do
+      primitives =
+        FinancialPrimitives.empty_totals()
+        |> Map.merge(%{
+          gross_ticket_quantity: Decimal.new(2),
+          gross_ticket_value: Decimal.new("200.00"),
+          refund_ticket_quantity: Decimal.new(2),
+          refund_ticket_value: Decimal.new("200.00")
+        })
+
+      assert {:ok, summary} = MetricRules.financial_summary("ZAR", primitives, 1)
+
+      assert Decimal.equal?(summary.net_ticket_quantity, Decimal.new(0))
+      assert Decimal.equal?(summary.net_ticket_value, Decimal.new(0))
+      assert summary.average_ticket_value == nil
+    end
+
+    test "rejects missing or blank currency" do
+      primitives = FinancialPrimitives.empty_totals()
+
+      assert MetricRules.financial_summary("", primitives, 0) == {:error, :invalid_currency}
+      assert MetricRules.financial_summary(nil, primitives, 0) == {:error, :invalid_currency}
+    end
+
+    test "rejects non-integral quantity primitives" do
+      primitives =
+        FinancialPrimitives.empty_totals()
+        |> Map.put(:gross_ticket_quantity, Decimal.new("1.5"))
+
+      assert MetricRules.financial_summary("ZAR", primitives, 1) ==
+               {:error, :invalid_primitive_totals}
+    end
+
+    test "historical gross totals remain when refund adjustment facts are present" do
+      primitives =
+        FinancialPrimitives.empty_totals()
+        |> Map.merge(%{
+          gross_ticket_quantity: Decimal.new(2),
+          gross_ticket_value: Decimal.new("230.00"),
+          refund_ticket_quantity: Decimal.new(2),
+          refund_ticket_value: Decimal.new("230.00")
+        })
+
+      assert {:ok, summary} = MetricRules.financial_summary("ZAR", primitives, 1)
+
+      assert summary.gross_ticket_quantity == Decimal.new(2)
+      assert summary.gross_ticket_value == Decimal.new("230.00")
+      assert summary.net_ticket_quantity == Decimal.new(0)
+      assert summary.average_ticket_value == nil
+    end
   end
 
   defp order(status, attrs \\ %{}) do
