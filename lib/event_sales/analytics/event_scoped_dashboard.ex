@@ -41,8 +41,9 @@ defmodule EventSales.Analytics.EventScopedDashboard do
   def summary(event_id, opts \\ []) when is_binary(event_id) do
     with {:ok, event_id} <- cast_uuid(event_id),
          :ok <- authorize(Keyword.get(opts, :actor), event_id),
-         {:ok, true} <- event_exists?(event_id) do
-      {:ok, build_summary(event_id, Keyword.get(opts, :actor))}
+         {:ok, true} <- event_exists?(event_id),
+         {:ok, summary} <- build_summary(event_id, Keyword.get(opts, :actor)) do
+      {:ok, summary}
     else
       {:ok, false} -> :not_found
       {:error, reason} -> {:error, reason}
@@ -71,23 +72,30 @@ defmodule EventSales.Analytics.EventScopedDashboard do
   end
 
   defp build_summary(event_id, actor) do
-    event_id
-    |> aggregate_summary()
-    |> normalize_summary(event_id)
-    |> apply_revenue_visibility(actor, event_id)
+    with {:ok, raw_summary} <- aggregate_summary(event_id) do
+      raw_summary
+      |> normalize_summary(event_id)
+      |> apply_revenue_visibility(actor, event_id)
+      |> then(&{:ok, &1})
+    end
   end
 
   defp aggregate_summary(event_id) do
     case HotStateAggregator.summary_for_event(event_id) do
-      {:ok, summary} ->
-        summary
+      {:ok, summary} -> {:ok, summary}
+      :miss -> snapshot_aggregate_summary(event_id)
+      {:error, :mixed_currency} = error -> error
+      {:error, _} -> snapshot_aggregate_summary(event_id)
+    end
+  end
 
-      :miss ->
-        case SnapshotReader.summary_for_event(event_id) do
-          {:ok, summary} -> summary
-          :miss -> empty_summary()
-          {:error, _reason} -> empty_summary()
-        end
+  defp snapshot_aggregate_summary(event_id) do
+    case SnapshotReader.summary_for_event(event_id) do
+      {:ok, summary} -> {:ok, summary}
+      :miss -> {:ok, empty_summary()}
+      {:error, :mixed_currency} = error -> error
+      {:error, :ambiguous_legacy_snapshots} = error -> error
+      {:error, _} -> {:ok, empty_summary()}
     end
   end
 

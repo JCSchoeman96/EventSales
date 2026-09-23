@@ -973,12 +973,20 @@
       "uses": []
     },
     {
-      "docs_count": 2,
+      "docs_count": 4,
       "moduledoc?": true,
       "name": "EventSales.Analytics.SnapshotReader",
       "parse_error": null,
       "path": "lib/event_sales/analytics/snapshot_reader.ex",
       "public_funs": [
+        {
+          "arity": 1,
+          "name": "financial_summaries_for_event"
+        },
+        {
+          "arity": 2,
+          "name": "financial_summary_for_event"
+        },
         {
           "arity": 1,
           "name": "summary_for_event"

@@ -572,8 +572,8 @@ Project root: `.`
 - `EventSales.Analytics.SnapshotReader` - `lib/event_sales/analytics/snapshot_reader.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 2
-  - public_funs: `summary_for_event/1`, `daily_summary_for_event/3`
+  - docs_count: 4
+  - public_funs: `financial_summaries_for_event/1`, `financial_summary_for_event/2`, `summary_for_event/1`, `daily_summary_for_event/3`
   - uses: _none_
 - `EventSales.Analytics.SnapshotRefresh` - `lib/event_sales/analytics/snapshot_refresh.ex`
   - moduledoc?: true

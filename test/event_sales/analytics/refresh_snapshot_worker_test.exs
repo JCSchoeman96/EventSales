@@ -37,7 +37,7 @@ defmodule EventSales.Analytics.RefreshSnapshotWorkerTest do
                args: %{"scope" => "event", "event_id" => event.id}
              })
 
-    assert {:ok, %EventAggregateSnapshot{total_sold: 1}} =
+    assert {:ok, %EventAggregateSnapshot{total_sold: 1, snapshot_version: 2}} =
              Ash.read_one(EventAggregateSnapshot, domain: EventSales.Analytics)
   end
 
@@ -136,6 +136,7 @@ defmodule EventSales.Analytics.RefreshSnapshotWorkerTest do
         quantity: 1,
         line_subtotal: Decimal.new("450.00"),
         line_total: Decimal.new("450.00"),
+        line_total_tax: Decimal.new("0"),
         discount_total: Decimal.new("0"),
         item_kind: :ticket,
         mapping_status: :mapped

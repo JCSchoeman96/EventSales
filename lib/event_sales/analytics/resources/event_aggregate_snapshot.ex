@@ -97,6 +97,11 @@ defmodule EventSales.Analytics.Resources.EventAggregateSnapshot do
 
       validate {CanonicalSnapshotFinancials, []}
     end
+
+    destroy :destroy_snapshot do
+      primary? true
+      accept []
+    end
   end
 
   attributes do

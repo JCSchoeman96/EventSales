@@ -240,6 +240,33 @@ defmodule EventSales.Analytics.EventScopedDashboardTest do
     refute summary |> Map.keys() |> Enum.any?(&(to_string(&1) =~ "raw"))
   end
 
+  test "mixed-currency snapshot compatibility does not collapse into zero revenue", %{
+    event: event,
+    admin: admin
+  } do
+    create_snapshot!(event, %{
+      currency: "ZAR",
+      snapshot_version: 2,
+      gross_ticket_quantity: 1,
+      refund_ticket_quantity: 0,
+      gross_ticket_value: Decimal.new("10"),
+      refund_ticket_value: Decimal.new("0"),
+      recognised_order_count: 1
+    })
+
+    create_snapshot!(event, %{
+      currency: "USD",
+      snapshot_version: 2,
+      gross_ticket_quantity: 1,
+      refund_ticket_quantity: 0,
+      gross_ticket_value: Decimal.new("10"),
+      refund_ticket_value: Decimal.new("0"),
+      recognised_order_count: 1
+    })
+
+    assert {:error, :mixed_currency} = EventScopedDashboard.summary(event.id, actor: admin)
+  end
+
   test "invalid event id returns invalid uuid error before authorization" do
     assert {:error, {:invalid_uuid, :event_id}} =
              EventScopedDashboard.summary("not-a-uuid", actor: nil)
@@ -324,10 +351,30 @@ defmodule EventSales.Analytics.EventScopedDashboardTest do
       refreshed_at: ~U[2026-05-22 08:00:00.000000Z],
       source_watermark_at: ~U[2026-05-22 07:55:00.000000Z],
       source_row_count: 0,
-      snapshot_version: 1
+      snapshot_version: 1,
+      gross_ticket_quantity: 0,
+      refund_ticket_quantity: 0,
+      gross_ticket_value: Decimal.new("0"),
+      refund_ticket_value: Decimal.new("0"),
+      recognised_order_count: 0
     }
 
-    Ash.create!(EventAggregateSnapshot, Map.merge(defaults, Map.new(attrs)),
+    attrs = Map.new(attrs)
+
+    defaults =
+      if Map.get(attrs, :snapshot_version) == 2 do
+        defaults
+      else
+        Map.drop(defaults, [
+          :gross_ticket_quantity,
+          :refund_ticket_quantity,
+          :gross_ticket_value,
+          :refund_ticket_value,
+          :recognised_order_count
+        ])
+      end
+
+    Ash.create!(EventAggregateSnapshot, Map.merge(defaults, attrs),
       action: :create_snapshot,
       domain: EventSales.Analytics
     )
