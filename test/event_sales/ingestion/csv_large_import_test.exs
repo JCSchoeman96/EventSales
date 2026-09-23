@@ -53,7 +53,11 @@ defmodule EventSales.Ingestion.CsvLargeImportTest do
     assert batch.status == :dry_run_passed
     assert Ash.count!(CsvImportRow, domain: Ingestion) == @row_count
 
-    assert {:ok, applied} = ApplyImport.apply(batch.id)
+    assert {:ok, applied} =
+             ApplyImport.apply(batch.id,
+               order_processed_notifier: __MODULE__.NoopOrderProcessedNotifier
+             )
+
     assert applied.status == :applied
     assert Ash.count!(Order, domain: Sales) == @row_count
     assert Ash.count!(OrderItem, domain: Sales) == @row_count
@@ -122,5 +126,10 @@ defmodule EventSales.Ingestion.CsvLargeImportTest do
       action: :create,
       domain: Catalog
     )
+  end
+
+  defmodule NoopOrderProcessedNotifier do
+    @moduledoc false
+    def notify_order_imported(_order, _batch, _event_id, _opts), do: :ok
   end
 end

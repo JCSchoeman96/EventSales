@@ -217,6 +217,7 @@ defmodule EventSales.Analytics.RebuildHotStateWorkerTest do
         quantity: Map.fetch!(attrs, :quantity),
         line_subtotal: Map.fetch!(attrs, :line_total),
         line_total: Map.fetch!(attrs, :line_total),
+        line_total_tax: Map.get(attrs, :line_total_tax, Decimal.new("0")),
         discount_total: Decimal.new("0"),
         item_kind: :ticket,
         mapping_status: :mapped

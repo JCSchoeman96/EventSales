@@ -272,6 +272,7 @@ defmodule EventSales.Ingestion.Csv.ApplyImport do
            quantity: quantity,
            line_subtotal: line_subtotal,
            line_total: line_total,
+           line_total_tax: Decimal.new("0"),
            discount_total: discount_total,
            event_id: event_id,
            ticket_type_id: ticket_type_id,

@@ -27,13 +27,12 @@ defmodule EventSales.Analytics.Aggregators.EventAggregator do
           {:ok, financial_summaries()} | {:error, term()}
   def financial_summaries_for_event(event_id) when is_binary(event_id) do
     with {:ok, event_id} <- cast_event_id(event_id),
-         :ok <- assert_gross_lines_complete(event_id),
-         gross_rows <- Repo.all(gross_aggregate_query(event_id)),
-         refund_rows <- Repo.all(refund_aggregate_query(event_id)),
-         order_count_rows <- Repo.all(recognised_order_count_query(event_id)),
-         {:ok, summaries} <-
-           build_financial_summaries(event_id, gross_rows, refund_rows, order_count_rows) do
-      {:ok, summaries}
+         :ok <- assert_gross_lines_complete(event_id) do
+      gross_rows = Repo.all(gross_aggregate_query(event_id))
+      refund_rows = Repo.all(refund_aggregate_query(event_id))
+      order_count_rows = Repo.all(recognised_order_count_query(event_id))
+
+      build_financial_summaries(event_id, gross_rows, refund_rows, order_count_rows)
     end
   end
 
@@ -258,18 +257,18 @@ defmodule EventSales.Analytics.Aggregators.EventAggregator do
     now = Keyword.get_lazy(opts, :now, &DateTime.utc_now/0)
     timezone = Keyword.get_lazy(opts, :timezone, &MetricRules.business_timezone/0)
 
-    with {:ok, business_date} <- MetricRules.business_date(now, timezone) do
-      query =
-        legacy_today_query(event_id, business_date, timezone)
+    case MetricRules.business_date(now, timezone) do
+      {:ok, business_date} ->
+        query = legacy_today_query(event_id, business_date, timezone)
 
-      case Repo.one(query) do
-        {sold, revenue} ->
-          %{today_sold: int!(sold), today_revenue: decimal!(revenue)}
+        case Repo.one(query) do
+          {sold, revenue} ->
+            %{today_sold: int!(sold), today_revenue: decimal!(revenue)}
 
-        nil ->
-          %{today_sold: 0, today_revenue: Decimal.new(0)}
-      end
-    else
+          nil ->
+            %{today_sold: 0, today_revenue: Decimal.new(0)}
+        end
+
       {:error, :invalid_timezone} ->
         %{today_sold: 0, today_revenue: Decimal.new(0)}
     end
