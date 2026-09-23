@@ -43,22 +43,19 @@ defmodule EventSales.Analytics.Aggregators.EventAggregator do
   aggregation (`status == completed`, mapped ticket, positive quantity,
   ex-tax `line_total`). They do not use canonical historical gross.
 
-  Operational `status_breakdown` and today buckets use separate bounded queries.
-  Mixed currency on completed legacy sales returns `{:error, :mixed_currency}`.
+  Operational `status_breakdown` and today buckets are derived from the same
+  bounded aggregate query as completed totals. Mixed currency on completed legacy
+  sales returns `{:error, :mixed_currency}`.
   """
   @spec summary_for_event(Ecto.UUID.t(), keyword()) ::
           {:ok, MetricRules.summary()} | {:error, term()}
   def summary_for_event(event_id, opts \\ []) when is_binary(event_id) do
     with {:ok, event_id} <- cast_event_id(event_id) do
-      case Repo.all(legacy_completed_currencies_query(event_id)) do
-        [] ->
-          {:ok, legacy_empty_summary(event_id, opts)}
+      rows = legacy_summary_aggregate_rows(event_id, opts)
 
-        [currency] ->
-          {:ok, legacy_summary_for_currency(event_id, currency, opts)}
-
-        _ ->
-          {:error, :mixed_currency}
+      case legacy_summary_from_aggregate_rows(rows) do
+        {:ok, summary} -> {:ok, summary}
+        {:error, reason} -> {:error, reason}
       end
     end
   end
@@ -200,128 +197,308 @@ defmodule EventSales.Analytics.Aggregators.EventAggregator do
     end
   end
 
-  defp legacy_completed_currencies_query(event_id) do
-    from oi in "sales_order_items",
-      join: o in "sales_orders",
-      on: oi.order_id == o.id,
-      where:
-        oi.event_id == ^event_id and o.status == "completed" and
-          oi.mapping_status == "mapped" and oi.item_kind == "ticket" and oi.quantity > 0,
-      distinct: o.currency,
-      order_by: o.currency,
-      select: o.currency
-  end
-
-  defp legacy_completed_totals_query(event_id) do
-    from oi in "sales_order_items",
-      join: o in "sales_orders",
-      on: oi.order_id == o.id,
-      where:
-        oi.event_id == ^event_id and o.status == "completed" and
-          oi.mapping_status == "mapped" and oi.item_kind == "ticket" and oi.quantity > 0,
-      select: {sum(oi.quantity), sum(oi.line_total)}
-  end
-
-  defp legacy_summary_for_currency(event_id, _currency, opts) do
-    status_breakdown = status_breakdown_for_event(event_id)
-    today = legacy_today_totals(event_id, opts)
-
-    {total_sold, total_revenue} =
-      case Repo.one(legacy_completed_totals_query(event_id)) do
-        {sold, revenue} -> {int!(sold), decimal!(revenue)}
-        nil -> {0, Decimal.new(0)}
-      end
-
-    %{
-      total_sold: total_sold,
-      total_revenue: total_revenue,
-      today_sold: today.today_sold,
-      today_revenue: today.today_revenue,
-      status_breakdown: status_breakdown
-    }
-  end
-
-  defp legacy_empty_summary(event_id, opts) do
-    today = legacy_today_totals(event_id, opts)
-
-    %{
-      total_sold: 0,
-      total_revenue: Decimal.new(0),
-      today_sold: today.today_sold,
-      today_revenue: today.today_revenue,
-      status_breakdown: status_breakdown_for_event(event_id)
-    }
-  end
-
-  defp status_breakdown_for_event(event_id) do
-    query =
-      from oi in "sales_order_items",
-        join: o in "sales_orders",
-        on: oi.order_id == o.id,
-        where: oi.event_id == ^event_id,
-        group_by: o.status,
-        select: {o.status, count(oi.id)}
-
-    query
-    |> Repo.all()
-    |> Map.new(fn {status, count} -> {String.to_existing_atom(status), count} end)
-  end
-
-  defp legacy_today_totals(event_id, opts) do
+  defp legacy_summary_aggregate_rows(event_id, opts) do
     now = Keyword.get_lazy(opts, :now, &DateTime.utc_now/0)
     timezone = Keyword.get_lazy(opts, :timezone, &MetricRules.business_timezone/0)
 
     case MetricRules.business_date(now, timezone) do
       {:ok, business_date} ->
-        query = legacy_today_query(event_id, business_date, timezone)
-
-        case Repo.one(query) do
-          {sold, revenue} ->
-            %{today_sold: int!(sold), today_revenue: decimal!(revenue)}
-
-          nil ->
-            %{today_sold: 0, today_revenue: Decimal.new(0)}
-        end
+        event_id
+        |> legacy_summary_aggregate_query(business_date, timezone)
+        |> Repo.all()
 
       {:error, :invalid_timezone} ->
-        %{today_sold: 0, today_revenue: Decimal.new(0)}
+        event_id
+        |> legacy_summary_aggregate_query(nil, timezone)
+        |> Repo.all()
     end
   end
 
-  defp legacy_today_query(event_id, business_date, "Africa/Johannesburg") do
+  defp legacy_summary_aggregate_query(event_id, nil, _timezone) do
     from oi in "sales_order_items",
       join: o in "sales_orders",
       on: oi.order_id == o.id,
-      where:
-        oi.event_id == ^event_id and o.status == "completed" and
-          oi.mapping_status == "mapped" and oi.item_kind == "ticket" and oi.quantity > 0 and
-          not is_nil(o.completed_at) and
-          fragment("date(? + interval '2 hours') = ?", o.completed_at, ^business_date),
-      select: {sum(oi.quantity), sum(oi.line_total)}
+      where: oi.event_id == ^event_id,
+      group_by: [o.status, o.currency],
+      select: {
+        o.status,
+        o.currency,
+        count(oi.id),
+        sum(
+          fragment(
+            "CASE WHEN ? = 'completed' AND ? = 'mapped' AND ? = 'ticket' AND ? > 0 THEN ? ELSE 0 END",
+            o.status,
+            oi.mapping_status,
+            oi.item_kind,
+            oi.quantity,
+            oi.quantity
+          )
+        ),
+        sum(
+          fragment(
+            "CASE WHEN ? = 'completed' AND ? = 'mapped' AND ? = 'ticket' AND ? > 0 THEN ? ELSE 0 END",
+            o.status,
+            oi.mapping_status,
+            oi.item_kind,
+            oi.quantity,
+            oi.line_total
+          )
+        ),
+        sum(fragment("0")),
+        sum(fragment("0"))
+      }
   end
 
-  defp legacy_today_query(event_id, business_date, timezone)
+  defp legacy_summary_aggregate_query(event_id, business_date, "Africa/Johannesburg") do
+    from oi in "sales_order_items",
+      join: o in "sales_orders",
+      on: oi.order_id == o.id,
+      where: oi.event_id == ^event_id,
+      group_by: [o.status, o.currency],
+      select: {
+        o.status,
+        o.currency,
+        count(oi.id),
+        sum(
+          fragment(
+            "CASE WHEN ? = 'completed' AND ? = 'mapped' AND ? = 'ticket' AND ? > 0 THEN ? ELSE 0 END",
+            o.status,
+            oi.mapping_status,
+            oi.item_kind,
+            oi.quantity,
+            oi.quantity
+          )
+        ),
+        sum(
+          fragment(
+            "CASE WHEN ? = 'completed' AND ? = 'mapped' AND ? = 'ticket' AND ? > 0 THEN ? ELSE 0 END",
+            o.status,
+            oi.mapping_status,
+            oi.item_kind,
+            oi.quantity,
+            oi.line_total
+          )
+        ),
+        sum(
+          fragment(
+            "CASE WHEN ? = 'completed' AND ? = 'mapped' AND ? = 'ticket' AND ? > 0 AND ? IS NOT NULL AND date(? + interval '2 hours') = ? THEN ? ELSE 0 END",
+            o.status,
+            oi.mapping_status,
+            oi.item_kind,
+            oi.quantity,
+            o.completed_at,
+            o.completed_at,
+            ^business_date,
+            oi.quantity
+          )
+        ),
+        sum(
+          fragment(
+            "CASE WHEN ? = 'completed' AND ? = 'mapped' AND ? = 'ticket' AND ? > 0 AND ? IS NOT NULL AND date(? + interval '2 hours') = ? THEN ? ELSE 0 END",
+            o.status,
+            oi.mapping_status,
+            oi.item_kind,
+            oi.quantity,
+            o.completed_at,
+            o.completed_at,
+            ^business_date,
+            oi.line_total
+          )
+        )
+      }
+  end
+
+  defp legacy_summary_aggregate_query(event_id, business_date, timezone)
        when timezone in ["UTC", "Etc/UTC"] do
     from oi in "sales_order_items",
       join: o in "sales_orders",
       on: oi.order_id == o.id,
-      where:
-        oi.event_id == ^event_id and o.status == "completed" and
-          oi.mapping_status == "mapped" and oi.item_kind == "ticket" and oi.quantity > 0 and
-          not is_nil(o.completed_at) and fragment("date(?) = ?", o.completed_at, ^business_date),
-      select: {sum(oi.quantity), sum(oi.line_total)}
+      where: oi.event_id == ^event_id,
+      group_by: [o.status, o.currency],
+      select: {
+        o.status,
+        o.currency,
+        count(oi.id),
+        sum(
+          fragment(
+            "CASE WHEN ? = 'completed' AND ? = 'mapped' AND ? = 'ticket' AND ? > 0 THEN ? ELSE 0 END",
+            o.status,
+            oi.mapping_status,
+            oi.item_kind,
+            oi.quantity,
+            oi.quantity
+          )
+        ),
+        sum(
+          fragment(
+            "CASE WHEN ? = 'completed' AND ? = 'mapped' AND ? = 'ticket' AND ? > 0 THEN ? ELSE 0 END",
+            o.status,
+            oi.mapping_status,
+            oi.item_kind,
+            oi.quantity,
+            oi.line_total
+          )
+        ),
+        sum(
+          fragment(
+            "CASE WHEN ? = 'completed' AND ? = 'mapped' AND ? = 'ticket' AND ? > 0 AND ? IS NOT NULL AND date(?) = ? THEN ? ELSE 0 END",
+            o.status,
+            oi.mapping_status,
+            oi.item_kind,
+            oi.quantity,
+            o.completed_at,
+            o.completed_at,
+            ^business_date,
+            oi.quantity
+          )
+        ),
+        sum(
+          fragment(
+            "CASE WHEN ? = 'completed' AND ? = 'mapped' AND ? = 'ticket' AND ? > 0 AND ? IS NOT NULL AND date(?) = ? THEN ? ELSE 0 END",
+            o.status,
+            oi.mapping_status,
+            oi.item_kind,
+            oi.quantity,
+            o.completed_at,
+            o.completed_at,
+            ^business_date,
+            oi.line_total
+          )
+        )
+      }
   end
 
-  defp legacy_today_query(event_id, business_date, timezone) when is_binary(timezone) do
+  defp legacy_summary_aggregate_query(event_id, business_date, timezone)
+       when is_binary(timezone) do
     from oi in "sales_order_items",
       join: o in "sales_orders",
       on: oi.order_id == o.id,
-      where:
-        oi.event_id == ^event_id and o.status == "completed" and
-          oi.mapping_status == "mapped" and oi.item_kind == "ticket" and oi.quantity > 0 and
-          not is_nil(o.completed_at) and
-          fragment("date(? AT TIME ZONE ?) = ?", o.completed_at, ^timezone, ^business_date),
-      select: {sum(oi.quantity), sum(oi.line_total)}
+      where: oi.event_id == ^event_id,
+      group_by: [o.status, o.currency],
+      select: {
+        o.status,
+        o.currency,
+        count(oi.id),
+        sum(
+          fragment(
+            "CASE WHEN ? = 'completed' AND ? = 'mapped' AND ? = 'ticket' AND ? > 0 THEN ? ELSE 0 END",
+            o.status,
+            oi.mapping_status,
+            oi.item_kind,
+            oi.quantity,
+            oi.quantity
+          )
+        ),
+        sum(
+          fragment(
+            "CASE WHEN ? = 'completed' AND ? = 'mapped' AND ? = 'ticket' AND ? > 0 THEN ? ELSE 0 END",
+            o.status,
+            oi.mapping_status,
+            oi.item_kind,
+            oi.quantity,
+            oi.line_total
+          )
+        ),
+        sum(
+          fragment(
+            "CASE WHEN ? = 'completed' AND ? = 'mapped' AND ? = 'ticket' AND ? > 0 AND ? IS NOT NULL AND date(? AT TIME ZONE ?) = ? THEN ? ELSE 0 END",
+            o.status,
+            oi.mapping_status,
+            oi.item_kind,
+            oi.quantity,
+            o.completed_at,
+            o.completed_at,
+            ^timezone,
+            ^business_date,
+            oi.quantity
+          )
+        ),
+        sum(
+          fragment(
+            "CASE WHEN ? = 'completed' AND ? = 'mapped' AND ? = 'ticket' AND ? > 0 AND ? IS NOT NULL AND date(? AT TIME ZONE ?) = ? THEN ? ELSE 0 END",
+            o.status,
+            oi.mapping_status,
+            oi.item_kind,
+            oi.quantity,
+            o.completed_at,
+            o.completed_at,
+            ^timezone,
+            ^business_date,
+            oi.line_total
+          )
+        )
+      }
+  end
+
+  defp legacy_summary_from_aggregate_rows(rows) do
+    status_breakdown =
+      rows
+      |> Enum.group_by(fn {status, _currency, _item_count, _cq, _cr, _tq, _tr} -> status end)
+      |> Map.new(fn {status, status_rows} ->
+        item_count =
+          Enum.reduce(status_rows, 0, fn {_s, _c, count, _cq, _cr, _tq, _tr}, acc ->
+            acc + count
+          end)
+
+        {String.to_existing_atom(status), item_count}
+      end)
+
+    completed_currencies =
+      rows
+      |> Enum.group_by(fn {_status, currency, _ic, _cq, _cr, _tq, _tr} -> currency end)
+      |> Enum.flat_map(fn {currency, currency_rows} ->
+        {qty, revenue} =
+          Enum.reduce(currency_rows, {Decimal.new(0), Decimal.new(0)}, fn
+            {_s, _c, _ic, cq, cr, _tq, _tr}, {q_acc, r_acc} ->
+              {Decimal.add(q_acc, decimal!(cq)), Decimal.add(r_acc, decimal!(cr))}
+          end)
+
+        if Decimal.compare(qty, 0) == :gt or Decimal.compare(revenue, 0) == :gt do
+          [{currency, qty, revenue}]
+        else
+          []
+        end
+      end)
+      |> Enum.map(fn {currency, _qty, _rev} -> currency end)
+      |> Enum.uniq()
+      |> Enum.sort()
+
+    {today_sold, today_revenue} =
+      Enum.reduce(rows, {0, Decimal.new(0)}, fn {_s, _c, _ic, _cq, _cr, tq, tr},
+                                                {sold_acc, rev_acc} ->
+        {sold_acc + int!(tq), Decimal.add(rev_acc, decimal!(tr))}
+      end)
+
+    case completed_currencies do
+      [] ->
+        {:ok,
+         %{
+           total_sold: 0,
+           total_revenue: Decimal.new(0),
+           today_sold: today_sold,
+           today_revenue: today_revenue,
+           status_breakdown: status_breakdown
+         }}
+
+      [_single] ->
+        {total_sold, total_revenue} =
+          Enum.reduce(rows, {0, Decimal.new(0)}, fn {_s, _c, _ic, cq, cr, _tq, _tr},
+                                                    {sold_acc, rev_acc} ->
+            {sold_acc + int!(cq), Decimal.add(rev_acc, decimal!(cr))}
+          end)
+
+        {:ok,
+         %{
+           total_sold: total_sold,
+           total_revenue: total_revenue,
+           today_sold: today_sold,
+           today_revenue: today_revenue,
+           status_breakdown: status_breakdown
+         }}
+
+      _ ->
+        {:error, :mixed_currency}
+    end
   end
 
   defp decimal!(%Decimal{} = value), do: value
