@@ -11,9 +11,10 @@ defmodule EventSales.Analytics.EventSnapshotRefreshConcurrencyTest do
   alias EventSales.Repo
   alias EventSales.Sales
   alias EventSales.Sales.Resources.{Order, OrderItem}
+  alias EventSales.TestSupport.EventSnapshotRefreshTestSupport
   alias EventSales.TestSupport.{SalesHelpers, UnboxedPostgres}
 
-  test "concurrent refresh_event calls serialize on the same event" do
+  test "concurrent refresh_event calls block on the PostgreSQL session fence" do
     fixture = create_committed_fixture!()
     on_exit(fn -> cleanup_committed_fixture!(fixture) end)
 
@@ -21,37 +22,41 @@ defmodule EventSales.Analytics.EventSnapshotRefreshConcurrencyTest do
 
     holder =
       Task.async(fn ->
-        with_unboxed_connection(fn ->
-          Repo.transaction(fn ->
-            assert :ok = EventSnapshotRefreshFence.acquire(fixture.event_id)
-            send(parent, {:refresh_fence_held, self()})
+        UnboxedPostgres.with_connection(fn ->
+          EventSnapshotRefreshFence.with_serial_event_refresh(fixture.event_id, fn ->
+            send(parent, {:holder_backend, EventSnapshotRefreshFence.connection_backend_pid()})
 
             receive do
-              :release_refresh_fence -> :ok
+              :release_session_fence -> :ok
             after
-              15_000 -> Repo.rollback(:refresh_fence_release_timeout)
+              15_000 -> :timeout
             end
           end)
         end)
       end)
 
-    assert_receive {:refresh_fence_held, _holder_pid}, 5_000
+    assert_receive {:holder_backend, holder_backend}, 5_000
 
     waiter =
       Task.async(fn ->
-        with_unboxed_connection(fn ->
-          result = SnapshotRefresh.refresh_event(fixture.event_id)
-          send(parent, {:waiter_refresh, result})
-          result
+        UnboxedPostgres.with_connection(fn ->
+          waiter_backend = EventSnapshotRefreshFence.connection_backend_pid()
+          send(parent, {:waiter_backend, waiter_backend})
+          SnapshotRefresh.refresh_event(fixture.event_id)
         end)
       end)
 
-    refute_receive {:waiter_refresh, _}, 250
-    send(holder.pid, :release_refresh_fence)
+    assert_receive {:waiter_backend, waiter_backend}, 5_000
+    assert waiter_backend != holder_backend
+
+    EventSnapshotRefreshTestSupport.wait_for_advisory_lock_wait!(waiter_backend)
+    refute_receive {:waiter_done, _}, 200
+
+    send(holder.pid, :release_session_fence)
 
     assert {:ok, snapshots} = Task.await(waiter, 15_000)
-    assert is_list(snapshots)
-    assert {:ok, :ok} = Task.await(holder, 15_000)
+    assert length(snapshots) == 2
+    assert :ok = Task.await(holder, 15_000)
   end
 
   test "each successful refresh replaces the full event v2 set without leaving stale currencies" do
@@ -59,21 +64,26 @@ defmodule EventSales.Analytics.EventSnapshotRefreshConcurrencyTest do
     on_exit(fn -> cleanup_committed_fixture!(fixture) end)
 
     assert {:ok, snapshots} =
-             with_unboxed_connection(fn -> SnapshotRefresh.refresh_event(fixture.event_id) end)
+             UnboxedPostgres.with_connection(fn ->
+               SnapshotRefresh.refresh_event(fixture.event_id)
+             end)
 
     assert Enum.map(snapshots, & &1.currency) |> Enum.sort() == ["USD", "ZAR"]
 
-    with_unboxed_connection(fn ->
+    UnboxedPostgres.with_connection(fn ->
       delete_items_for_order!(fixture.usd_order_id)
     end)
 
     assert {:ok, [only_zar]} =
-             with_unboxed_connection(fn -> SnapshotRefresh.refresh_event(fixture.event_id) end)
+             UnboxedPostgres.with_connection(fn ->
+               SnapshotRefresh.refresh_event(fixture.event_id)
+             end)
 
     assert only_zar.currency == "ZAR"
+    assert only_zar.gross_ticket_quantity == 1
 
     currencies =
-      with_unboxed_connection(fn ->
+      UnboxedPostgres.with_connection(fn ->
         EventAggregateSnapshot
         |> Ash.Query.filter(event_id == ^fixture.event_id and snapshot_version == 2)
         |> Ash.read!(domain: EventSales.Analytics)
@@ -83,7 +93,7 @@ defmodule EventSales.Analytics.EventSnapshotRefreshConcurrencyTest do
     assert currencies == ["ZAR"]
   end
 
-  test "overlapping refreshes with different canonical currency sets cannot commit a mixed union" do
+  test "overlapping refresh_event uses source facts visible after acquiring the session fence" do
     fixture = create_committed_fixture!()
     on_exit(fn -> cleanup_committed_fixture!(fixture) end)
 
@@ -91,67 +101,172 @@ defmodule EventSales.Analytics.EventSnapshotRefreshConcurrencyTest do
 
     holder =
       Task.async(fn ->
-        with_unboxed_connection(fn ->
-          Repo.transaction(fn ->
-            assert :ok = EventSnapshotRefreshFence.acquire(fixture.event_id)
-            send(parent, {:refresh_fence_held, self()})
+        UnboxedPostgres.with_connection(fn ->
+          EventSnapshotRefreshFence.with_serial_event_refresh(fixture.event_id, fn ->
+            send(parent, {:holder_backend, EventSnapshotRefreshFence.connection_backend_pid()})
 
             receive do
-              :release_refresh_fence -> :ok
+              :release_session_fence -> :ok
             after
-              15_000 -> Repo.rollback(:refresh_fence_release_timeout)
+              20_000 -> :timeout
             end
           end)
         end)
       end)
 
-    assert_receive {:refresh_fence_held, _holder_pid}, 5_000
-
-    with_unboxed_connection(fn ->
-      delete_items_for_order!(fixture.usd_order_id)
-    end)
+    assert_receive {:holder_backend, _holder_backend}, 5_000
 
     waiter =
       Task.async(fn ->
-        with_unboxed_connection(fn ->
+        UnboxedPostgres.with_connection(fn ->
+          waiter_backend = EventSnapshotRefreshFence.connection_backend_pid()
+          send(parent, {:waiter_backend, waiter_backend})
           SnapshotRefresh.refresh_event(fixture.event_id)
         end)
       end)
 
-    refute_receive {:waiter_refresh, _}, 250
-    send(holder.pid, :release_refresh_fence)
+    assert_receive {:waiter_backend, waiter_backend}, 5_000
+    EventSnapshotRefreshTestSupport.wait_for_advisory_lock_wait!(waiter_backend)
 
-    assert {:ok, [zar_snapshot]} = Task.await(waiter, 15_000)
+    UnboxedPostgres.with_connection(fn ->
+      delete_items_for_order!(fixture.usd_order_id)
+    end)
+
+    send(holder.pid, :release_session_fence)
+
+    assert {:ok, [zar_snapshot]} = Task.await(waiter, 20_000)
     assert zar_snapshot.currency == "ZAR"
-    assert {:ok, :ok} = Task.await(holder, 15_000)
+    assert zar_snapshot.gross_ticket_quantity == 1
+    assert zar_snapshot.gross_ticket_value |> Decimal.compare(Decimal.new("0")) == :gt
 
-    restore_usd_line_item!(fixture)
-
-    assert {:ok, [usd_snapshot]} =
-             with_unboxed_connection(fn ->
-               delete_items_for_order!(fixture.zar_order_id)
-               SnapshotRefresh.refresh_event(fixture.event_id)
-             end)
-
-    assert usd_snapshot.currency == "USD"
-
-    durable_currencies =
-      with_unboxed_connection(fn ->
-        EventAggregateSnapshot
-        |> Ash.Query.filter(event_id == ^fixture.event_id and snapshot_version == 2)
-        |> Ash.Query.sort(currency: :asc)
-        |> Ash.read!(domain: EventSales.Analytics)
-        |> Enum.map(& &1.currency)
+    durable =
+      UnboxedPostgres.with_connection(fn ->
+        Ash.read!(
+          EventAggregateSnapshot
+          |> Ash.Query.filter(event_id == ^fixture.event_id and snapshot_version == 2),
+          domain: EventSales.Analytics
+        )
       end)
 
-    assert durable_currencies == ["USD"]
-    refute durable_currencies == ["USD", "ZAR"]
+    assert length(durable) == 1
+    assert hd(durable).currency == "ZAR"
+    refute Enum.map(durable, & &1.currency) |> Enum.sort() == ["USD", "ZAR"]
+  end
+
+  test "two overlapping refresh_event calls serialize without leaving a mixed currency set" do
+    fixture = create_committed_fixture!()
+    on_exit(fn -> cleanup_committed_fixture!(fixture) end)
+
+    parent = self()
+
+    holder =
+      Task.async(fn ->
+        UnboxedPostgres.with_connection(fn ->
+          EventSnapshotRefreshFence.with_serial_event_refresh(fixture.event_id, fn ->
+            send(parent, :holder_ready)
+
+            receive do
+              :release_session_fence -> :ok
+            after
+              20_000 -> :timeout
+            end
+          end)
+        end)
+      end)
+
+    assert_receive :holder_ready, 5_000
+
+    UnboxedPostgres.with_connection(fn ->
+      delete_items_for_order!(fixture.usd_order_id)
+    end)
+
+    first_refresh =
+      Task.async(fn ->
+        UnboxedPostgres.with_connection(fn ->
+          backend = EventSnapshotRefreshFence.connection_backend_pid()
+          send(parent, {:refresh_waiter, backend})
+          SnapshotRefresh.refresh_event(fixture.event_id)
+        end)
+      end)
+
+    second_refresh =
+      Task.async(fn ->
+        UnboxedPostgres.with_connection(fn ->
+          backend = EventSnapshotRefreshFence.connection_backend_pid()
+          send(parent, {:refresh_waiter, backend})
+          SnapshotRefresh.refresh_event(fixture.event_id)
+        end)
+      end)
+
+    assert_receive {:refresh_waiter, first_backend}, 5_000
+    assert_receive {:refresh_waiter, second_backend}, 5_000
+    assert first_backend != second_backend
+
+    EventSnapshotRefreshTestSupport.wait_for_advisory_lock_wait!(first_backend)
+    EventSnapshotRefreshTestSupport.wait_for_advisory_lock_wait!(second_backend)
+
+    send(holder.pid, :release_session_fence)
+
+    assert {:ok, first_result} = Task.await(first_refresh, 20_000)
+    assert {:ok, second_result} = Task.await(second_refresh, 20_000)
+
+    assert Enum.map(first_result, & &1.currency) == ["ZAR"]
+    assert Enum.map(second_result, & &1.currency) == ["ZAR"]
+
+    durable =
+      UnboxedPostgres.with_connection(fn ->
+        Ash.read!(
+          EventAggregateSnapshot
+          |> Ash.Query.filter(event_id == ^fixture.event_id and snapshot_version == 2),
+          domain: EventSales.Analytics
+        )
+      end)
+
+    assert length(durable) == 1
+    assert hd(durable).currency == "ZAR"
+    assert hd(durable).gross_ticket_quantity == 1
+    refute Enum.map(durable, & &1.currency) == ["USD", "ZAR"]
+  end
+
+  test "two concurrent refresh_event calls on the same source leave one coherent projection set" do
+    fixture = create_committed_fixture!()
+    on_exit(fn -> cleanup_committed_fixture!(fixture) end)
+
+    first =
+      Task.async(fn ->
+        UnboxedPostgres.with_connection(fn -> SnapshotRefresh.refresh_event(fixture.event_id) end)
+      end)
+
+    second =
+      Task.async(fn ->
+        UnboxedPostgres.with_connection(fn -> SnapshotRefresh.refresh_event(fixture.event_id) end)
+      end)
+
+    assert {:ok, first_snapshots} = Task.await(first, 20_000)
+    assert {:ok, second_snapshots} = Task.await(second, 20_000)
+
+    assert Enum.map(first_snapshots, & &1.currency) |> Enum.sort() == ["USD", "ZAR"]
+    assert Enum.map(second_snapshots, & &1.currency) |> Enum.sort() == ["USD", "ZAR"]
+
+    durable =
+      UnboxedPostgres.with_connection(fn ->
+        Ash.read!(
+          EventAggregateSnapshot
+          |> Ash.Query.filter(event_id == ^fixture.event_id and snapshot_version == 2)
+          |> Ash.Query.sort(currency: :asc),
+          domain: EventSales.Analytics
+        )
+      end)
+
+    assert length(durable) == 2
+    assert Enum.map(durable, & &1.currency) == ["USD", "ZAR"]
+    refute Enum.any?(durable, fn row -> row.gross_ticket_quantity != 1 end)
   end
 
   defp create_committed_fixture! do
     suffix = System.unique_integer([:positive])
 
-    with_unboxed_connection(fn ->
+    UnboxedPostgres.with_exclusive_setup(fn ->
       source =
         SalesHelpers.create_source_system!(%{
           name: "Refresh race source #{suffix}",
@@ -249,7 +364,7 @@ defmodule EventSales.Analytics.EventSnapshotRefreshConcurrencyTest do
   end
 
   defp cleanup_committed_fixture!(%{event_id: event_id, source_id: source_id}) do
-    with_unboxed_connection(fn ->
+    UnboxedPostgres.with_exclusive_setup(fn ->
       Repo.delete_all(
         from(snapshot in EventAggregateSnapshot, where: snapshot.event_id == ^event_id)
       )
@@ -262,29 +377,10 @@ defmodule EventSales.Analytics.EventSnapshotRefreshConcurrencyTest do
     end)
   end
 
-  defp with_unboxed_connection(fun), do: UnboxedPostgres.with_connection(fun)
-
   defp delete_items_for_order!(order_id) do
     Repo.query!(
       "DELETE FROM sales_order_items WHERE order_id = $1",
       [Ecto.UUID.dump!(order_id)]
     )
-  end
-
-  defp restore_usd_line_item!(fixture) do
-    with_unboxed_connection(fn ->
-      event = Ash.get!(Event, fixture.event_id, domain: EventSales.Catalog)
-      ticket = Ash.get!(TicketType, fixture.ticket_type_id, domain: EventSales.Catalog)
-      order = Ash.get!(Order, fixture.usd_order_id, domain: Sales)
-
-      delete_items_for_order!(fixture.usd_order_id)
-
-      create_item!(order, event, ticket,
-        woo_line_item_id: 2,
-        quantity: 1,
-        line_total: Decimal.new("50.00"),
-        line_total_tax: Decimal.new("7.50")
-      )
-    end)
   end
 end

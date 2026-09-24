@@ -1,58 +1,85 @@
 defmodule EventSales.Analytics.EventSnapshotRefreshFenceTest do
-  use EventSales.DataCase, async: false
+  use ExUnit.Case, async: false
 
   alias EventSales.Analytics.EventSnapshotRefreshFence
   alias EventSales.Repo
+  alias EventSales.TestSupport.EventSnapshotRefreshTestSupport
   alias EventSales.TestSupport.UnboxedPostgres
 
-  test "requires an active PostgreSQL transaction" do
-    assert {:error, :event_snapshot_refresh_fence_transaction_required} =
-             EventSnapshotRefreshFence.acquire(Ecto.UUID.generate())
+  test "unboxed refresh transaction uses repeatable read after the session fence" do
+    event_id = Ecto.UUID.generate()
+
+    UnboxedPostgres.with_connection(fn ->
+      assert EventSnapshotRefreshFence.use_repeatable_read_isolation?()
+
+      EventSnapshotRefreshFence.with_serial_event_refresh(event_id, fn ->
+        transaction_opts =
+          [timeout: 30_000] ++ EventSnapshotRefreshFence.coherent_transaction_opts()
+
+        assert {:ok, :ok} =
+                 Repo.transaction(
+                   fn ->
+                     level = EventSnapshotRefreshTestSupport.transaction_isolation_level()
+                     assert String.downcase(level) == "repeatable read"
+                     :ok
+                   end,
+                   transaction_opts
+                 )
+      end)
+    end)
   end
 
-  test "rejects malformed event ids" do
-    assert {:ok, {:error, :invalid_event_id}} =
-             Repo.transaction(fn -> EventSnapshotRefreshFence.acquire("not-a-uuid") end)
-  end
-
-  test "holds the refresh fence until the physical transaction commits" do
+  test "session fence blocks a second connection until the holder releases the lock" do
     event_id = Ecto.UUID.generate()
     parent = self()
 
     holder =
       Task.async(fn ->
-        with_unboxed_connection(fn ->
-          Repo.transaction(fn ->
-            assert :ok = EventSnapshotRefreshFence.acquire(event_id)
-            send(parent, :refresh_fence_held)
+        UnboxedPostgres.with_connection(fn ->
+          holder_backend = EventSnapshotRefreshFence.connection_backend_pid()
+
+          EventSnapshotRefreshFence.with_serial_event_refresh(event_id, fn ->
+            send(parent, {:holder_ready, holder_backend})
 
             receive do
-              :release_refresh_fence -> :ok
+              :release_session_fence -> :ok
+            after
+              15_000 -> :timeout
             end
           end)
         end)
       end)
 
-    assert_receive :refresh_fence_held, 5_000
+    assert_receive {:holder_ready, holder_backend}, 5_000
 
     waiter =
       Task.async(fn ->
-        with_unboxed_connection(fn ->
-          Repo.transaction(fn ->
-            assert :ok = EventSnapshotRefreshFence.acquire(event_id)
+        UnboxedPostgres.with_connection(fn ->
+          waiter_backend = EventSnapshotRefreshFence.connection_backend_pid()
+          send(parent, {:waiter_backend, waiter_backend})
+
+          EventSnapshotRefreshFence.with_serial_event_refresh(event_id, fn ->
             send(parent, :waiter_acquired)
             :ok
           end)
         end)
       end)
 
-    refute_receive :waiter_acquired, 250
-    send(holder.pid, :release_refresh_fence)
+    assert_receive {:waiter_backend, waiter_backend}, 5_000
+    assert waiter_backend != holder_backend
+
+    EventSnapshotRefreshTestSupport.wait_for_advisory_lock_wait!(waiter_backend)
+    refute_receive :waiter_acquired, 200
+
+    send(holder.pid, :release_session_fence)
     assert_receive :waiter_acquired, 5_000
 
-    assert {:ok, :ok} = Task.await(holder, 5_000)
-    assert {:ok, :ok} = Task.await(waiter, 5_000)
+    assert :ok = Task.await(holder, 5_000)
+    assert :ok = Task.await(waiter, 5_000)
   end
 
-  defp with_unboxed_connection(fun), do: UnboxedPostgres.with_connection(fun)
+  test "rejects malformed event ids" do
+    assert {:error, :invalid_event_id} =
+             EventSnapshotRefreshFence.with_serial_event_refresh("not-a-uuid", fn -> :ok end)
+  end
 end

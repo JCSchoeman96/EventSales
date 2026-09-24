@@ -84,30 +84,23 @@ defmodule EventSales.Analytics.SnapshotRefresh do
   def refresh_daily(_event_id, _business_date, _opts), do: {:error, :invalid_event_id}
 
   defp refresh_event_transaction(event_id, timezone, now, refreshed_at) do
-    Repo.transaction(
-      fn ->
-        with :ok <- EventSnapshotRefreshFence.acquire(event_id),
-             :ok <- set_coherent_source_snapshot_isolation!(),
-             {:ok, snapshots} <-
-               refresh_event_projection_set!(event_id, timezone, now, refreshed_at) do
-          snapshots
-        else
-          {:error, reason} -> Repo.rollback(reason)
-        end
-      end,
-      timeout: 120_000
-    )
-  end
+    EventSnapshotRefreshFence.with_serial_event_refresh(event_id, fn ->
+      transaction_opts =
+        [timeout: 120_000] ++ EventSnapshotRefreshFence.coherent_transaction_opts()
 
-  defp set_coherent_source_snapshot_isolation! do
-    if Repo.config()[:pool] == Ecto.Adapters.SQL.Sandbox do
-      :ok
-    else
-      case Ecto.Adapters.SQL.query(Repo, "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ", []) do
-        {:ok, _} -> :ok
-        {:error, reason} -> {:error, reason}
-      end
-    end
+      Repo.transaction(
+        fn ->
+          case refresh_event_projection_set!(event_id, timezone, now, refreshed_at) do
+            {:ok, snapshots} ->
+              snapshots
+
+            {:error, reason} ->
+              Repo.rollback(reason)
+          end
+        end,
+        transaction_opts
+      )
+    end)
   end
 
   defp refresh_event_projection_set!(event_id, timezone, now, refreshed_at) do

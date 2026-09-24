@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-394
+395
 
 ## Files
 
@@ -390,6 +390,7 @@ Project root: `.`
 - `test/support/conn_case.ex`
 - `test/support/data_case.ex`
 - `test/support/db_topology_helpers.ex`
+- `test/support/event_snapshot_refresh_test_support.ex`
 - `test/support/fakes/fake_tickera_attendee_client.ex`
 - `test/support/financial_reconciliation_helpers.ex`
 - `test/support/fixture_helpers.ex`
@@ -532,8 +533,8 @@ Project root: `.`
 - `EventSales.Analytics.EventSnapshotRefreshFence` - `lib/event_sales/analytics/event_snapshot_refresh_fence.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 0
-  - public_funs: `acquire/1`
+  - docs_count: 5
+  - public_funs: `with_serial_event_refresh/2`, `coherent_transaction_opts/0`, `use_repeatable_read_isolation?/0`, `connection_backend_pid/0`, `lock_key/1`
   - uses: _none_
 - `EventSales.Analytics.HotStateAggregator` - `lib/event_sales/analytics/hot_state_aggregator.ex`
   - moduledoc?: true
@@ -2641,6 +2642,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: _none_
   - uses: _none_
+- `EventSales.TestSupport.EventSnapshotRefreshTestSupport` - `test/support/event_snapshot_refresh_test_support.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 3
+  - public_funs: `wait_for_advisory_lock_wait!/2`, `advisory_lock_wait?/1`, `transaction_isolation_level/0`
+  - uses: _none_
 - `EventSales.TestSupport.Fakes.FakeTickeraAttendeeClient` - `test/support/fakes/fake_tickera_attendee_client.ex`
   - moduledoc?: true
   - specs?: false
@@ -2734,8 +2741,8 @@ Project root: `.`
 - `EventSales.TestSupport.UnboxedPostgres` - `test/support/unboxed_postgres.ex`
   - moduledoc?: true
   - specs?: false
-  - docs_count: 0
-  - public_funs: `start_link!/0`, `with_connection/1`
+  - docs_count: 2
+  - public_funs: `start_link!/0`, `with_connection/1`, `with_exclusive_setup/1`
   - uses: _none_
 - `EventSales.TestSupport.WooCommerceWebhookHelpers` - `test/support/woocommerce_webhook_helpers.ex`
   - moduledoc?: true
