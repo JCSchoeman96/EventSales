@@ -11,16 +11,9 @@ defmodule EventSales.Analytics.EventSnapshotRefreshFence do
   @spec with_serial_event_refresh(Ecto.UUID.t() | String.t(), (-> result)) :: result
         when result: var
   def with_serial_event_refresh(event_id, fun) when is_binary(event_id) and is_function(fun, 0) do
-    with {:ok, key} <- lock_key(event_id) do
-      Repo.checkout(fn ->
-        with :ok <- take_session_lock(key) do
-          try do
-            fun.()
-          after
-            release_session_lock!(key)
-          end
-        end
-      end)
+    with {:ok, key} <- lock_key(event_id),
+         {:ok, result} <- checkout_with_session_lock(key, fun) do
+      result
     end
   rescue
     _error -> {:error, :event_snapshot_refresh_fence_failed}
@@ -65,6 +58,30 @@ defmodule EventSales.Analytics.EventSnapshotRefreshFence do
 
       :error ->
         {:error, :invalid_event_id}
+    end
+  end
+
+  defp checkout_with_session_lock(key, fun) do
+    result =
+      Repo.checkout(fn ->
+        with :ok <- take_session_lock(key) do
+          {:ok, run_while_holding_lock(key, fun)}
+        end
+      end)
+
+    case result do
+      :ok = ok -> ok
+      {:ok, _} = ok -> ok
+      {:error, _} = error -> error
+      other -> other
+    end
+  end
+
+  defp run_while_holding_lock(key, fun) do
+    try do
+      fun.()
+    after
+      release_session_lock!(key)
     end
   end
 

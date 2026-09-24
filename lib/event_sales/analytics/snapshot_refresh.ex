@@ -85,22 +85,25 @@ defmodule EventSales.Analytics.SnapshotRefresh do
 
   defp refresh_event_transaction(event_id, timezone, now, refreshed_at) do
     EventSnapshotRefreshFence.with_serial_event_refresh(event_id, fn ->
-      transaction_opts =
-        [timeout: 120_000] ++ EventSnapshotRefreshFence.coherent_transaction_opts()
-
-      Repo.transaction(
-        fn ->
-          case refresh_event_projection_set!(event_id, timezone, now, refreshed_at) do
-            {:ok, snapshots} ->
-              snapshots
-
-            {:error, reason} ->
-              Repo.rollback(reason)
-          end
-        end,
-        transaction_opts
-      )
+      refresh_event_in_coherent_transaction(event_id, timezone, now, refreshed_at)
     end)
+  end
+
+  defp refresh_event_in_coherent_transaction(event_id, timezone, now, refreshed_at) do
+    transaction_opts =
+      [timeout: 120_000] ++ EventSnapshotRefreshFence.coherent_transaction_opts()
+
+    Repo.transaction(
+      fn -> refresh_event_projection_or_rollback(event_id, timezone, now, refreshed_at) end,
+      transaction_opts
+    )
+  end
+
+  defp refresh_event_projection_or_rollback(event_id, timezone, now, refreshed_at) do
+    case refresh_event_projection_set!(event_id, timezone, now, refreshed_at) do
+      {:ok, snapshots} -> snapshots
+      {:error, reason} -> Repo.rollback(reason)
+    end
   end
 
   defp refresh_event_projection_set!(event_id, timezone, now, refreshed_at) do
