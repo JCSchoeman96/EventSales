@@ -78,11 +78,9 @@ defmodule EventSales.Analytics.EventSnapshotRefreshFence do
   end
 
   defp run_while_holding_lock(key, fun) do
-    try do
-      fun.()
-    after
-      release_session_lock!(key)
-    end
+    fun.()
+  after
+    release_session_lock!(key)
   end
 
   defp take_session_lock(key) do
