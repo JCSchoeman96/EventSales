@@ -3,8 +3,8 @@
 | Field | Value |
 | --- | --- |
 | Plan ID | PRE-M5-02F |
-| Version | v1 |
-| Status | Certification artifact (pre-merge) |
+| Version | v2 |
+| Status | Certification artifact (pre-merge; PR #251 stopped pending Gate A + Gate B) |
 | Scope | MG2 + MG4–MG8 against locked PRE-M5 metric contract |
 | Baseline SHA | `5efc9638f231d6b944bc52c739906d3ff83d1b41` |
 | Post-merge CI authority (baseline) | CI #647 / run 36101298078 |
@@ -14,8 +14,13 @@
 ### Revision log
 
 - `v1` — Initial acceptance matrix, query-path certification, M4 parity, lifecycle evidence, and verdict table.
+- `v2` — Gate B: selective bulk fixture (800 noise lines), `ANALYZE`, telemetry `EXPLAIN (FORMAT JSON)` with index-scan proof; Gate A dependency path documented (PR #252); plural-reader citation fix.
 
 Authority: this file is the 02F evidence artifact. Programme closeout wording in `docs/path-1/path-1-phase-breakdown.md` and `docs/roadmap/current-state-and-path-handoff.md` stays unchanged until this PR merges and post-merge CI passes on the merge SHA.
+
+### External prerequisite (Gate A)
+
+PR #251 must rebase onto a `main` that includes dependency remediation **PR #252** (`mix.lock` only: `ash` 3.33.11, `lazy_html` 0.1.13) so `lint_security` / `mix hex.audit` pass. CI #648 on `f44daa6` failed only `lint_security` on baseline advisories; 02F does not upgrade or suppress advisories.
 
 ---
 
@@ -55,18 +60,28 @@ EventScopedDashboard.summary/2
 
 ### EventAggregator canonical SQL paths
 
-Captured via Ecto telemetry during `EventAggregator.financial_summaries_for_event/1` in `EventSales.Analytics.EventAggregatorFinancialQueryPlanTest` (representative seeded Postgres data).
+Fixture: `EventSales.TestSupport.Analytics.EventAggregatorQueryPlanFixture` (test-only `insert_all`).
 
-| Purpose | Bounded predicate | Joins / grouping | Index use (typical local plan) | Seq scan notes | Verdict |
+| Population | Count |
+| --- | --- |
+| Noise event completed ticket lines (other `event_id`) | 800 orders + 800 `sales_order_items` |
+| Target event financial row | 1 order, 1 ticket line, 1 refund, 1 refund line |
+| Post-load stats | `ANALYZE sales_orders`, `sales_order_items`, `sales_refunds`, `sales_refund_lines` |
+
+SQL captured via Ecto telemetry during `EventAggregator.financial_summaries_for_event/1`. Each statement must include an `event_id` predicate **and** bind the requested event UUID in query parameters (`EventAggregatorFinancialQueryPlanTest`).
+
+Automated proof: `EXPLAIN (FORMAT JSON)` on captured SQL; for `sales_order_items` on guard/gross/order-count paths, **Index Scan** (or bitmap index scan) on `sales_order_items_event_id_idx` or `sales_order_items_event_mapping_status_idx` is required (no seq scan on `sales_order_items` for those paths).
+
+Observed plans (local test DB after `ANALYZE`, selective fixture):
+
+| Path | Purpose | Event predicate | Plan nodes (relation → access → index) | Seq scans | Verdict |
 | --- | --- | --- | --- | --- | --- |
-| Incomplete gross primitive guard | `oi.event_id = $1` + recognition + mapped ticket | `sales_order_items` ⋈ `sales_orders` | `sales_order_items_event_id_idx` or filter on `event_id` | Small-table seq scan acceptable on empty guard path | PASS |
-| Gross aggregate | `oi.event_id = $1` | Group by `o.currency` | `sales_order_items_event_id_idx` | Fixture-scale seq scan on `sales_orders` acceptable | PASS |
-| Refund aggregate | Subquery of ticket lines for `event_id`, then join refund facts | `sales_refund_lines` ⋈ `sales_refunds` ⋈ `sales_orders` ⋈ parent line ⋈ ticket subquery | `sales_refund_lines_order_item_id_idx`, `sales_refunds_order_id_idx` | Bounded via event ticket subquery, not full history | PASS |
-| Recognised order count | `oi.event_id = $1` | `count(o.id, distinct)` per currency | `sales_order_items_event_id_idx` | Same as gross path | PASS |
+| `incomplete_primitive_guard` | Block canonical read when gross tax primitives missing | `s0.event_id = $1` (+ mapped ticket filters) | `sales_order_items` → **Index Scan** → `sales_order_items_event_id_idx` (`Index Cond`: `event_id = $uuid`); `sales_orders` → **Index Scan** → `sales_orders_pkey` (PK lookup by `order_id`, not a fact-table scan) | No seq scan on `sales_order_items` | PASS |
+| `gross_aggregate` | Tax-inclusive gross by currency | `s0.event_id = $1` | `sales_order_items` → **Index Scan** → `sales_order_items_event_id_idx`; `sales_orders` → **Index Scan** → `sales_orders_pkey` | No seq scan on `sales_order_items` | PASS |
+| `recognised_order_count` | `count(DISTINCT order_id)` by currency | `s0.event_id = $1` | Same `sales_order_items` index access as gross | No seq scan on `sales_order_items` | PASS |
+| `refund_aggregate` | Qualifying refund primitives | Event ticket subquery `ss0.event_id = $1` | Event-bounded `sales_order_items` via **Index Scan** with `event_id` predicate (observed: `sales_order_items_event_id_idx` or `sales_order_items_pkey` + `Filter event_id = $uuid`); `sales_refund_lines` → **Index Scan** → `sales_refund_lines_order_item_id_idx`; `sales_orders` → **Index Scan** → `sales_orders_pkey`; `sales_refunds` may **Seq Scan** at 1 row in fixture | `sales_refunds` seq scan acceptable at fixture cardinality only | PASS |
 
 Legacy operational/status aggregation for snapshot refresh (`legacy_summary_aggregate_query/3`) remains event-scoped (`where: oi.event_id == ^event_id`) and is exercised in `EventAggregatorTest` and snapshot refresh tests.
-
-Automated gate: `event_aggregator_financial_query_plan_test.exs` asserts every fact-table query includes an `event_id` binding and rejects unbounded seq scans on fact tables without an `event_id` filter in the plan node.
 
 No new indexes were added in 02F (certification only).
 
@@ -122,7 +137,7 @@ Chain: `FinancialPrimitives` → `MetricRules` → `EventAggregator` → `Snapsh
 
 | Invariant | Evidence |
 | --- | --- |
-| Canonical plural reader partitions by currency | `HistoricalReportingSnapshotsTest` — `"explicit currency canonical reader returns derived net and average ticket value"` |
+| Canonical plural reader partitions by currency | `HistoricalReportingSnapshotsTest` — `"event refresh writes one v2 projection per canonical currency"` (`SnapshotReader.financial_summaries_for_event/1` keys `["USD", "ZAR"]`) |
 | Mixed currency legacy scalar fails closed | `"legacy reader fails closed when multiple v2 currencies exist"` |
 | Dashboard mixed-currency fails closed | `EventScopedDashboardTest` — `"mixed-currency snapshot compatibility does not collapse into zero revenue"` |
 | Authorization before existence | `"unassigned valid UUID is forbidden before event existence is revealed"` |
@@ -174,5 +189,8 @@ mix test test/event_sales/analytics/event_aggregator_financial_query_plan_test.e
 mix ash.codegen --check
 mix quality.fast
 mix quality.pr
+mix credo --strict
 git diff --check
 ```
+
+Dependency remediation (merge before 02F): PR #252 — `mix.lock` only.

@@ -370,6 +370,7 @@
     "lib/project_index/scanner.ex",
     "rel/overlays/.gitkeep",
     "test/support/analytics/error_event_aggregator.ex",
+    "test/support/analytics/event_aggregator_query_plan_fixture.ex",
     "test/support/analytics/memory_event_aggregator.ex",
     "test/support/analytics/memory_snapshot_store_adapter.ex",
     "test/support/analytics/selective_event_aggregator.ex",
@@ -8428,6 +8429,21 @@
         }
       ],
       "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.Analytics.EventAggregatorQueryPlanFixture",
+      "parse_error": null,
+      "path": "test/support/analytics/event_aggregator_query_plan_fixture.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "seed!"
+        }
+      ],
+      "specs?": true,
       "uses": []
     },
     {
