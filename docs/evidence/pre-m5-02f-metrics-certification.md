@@ -3,11 +3,12 @@
 | Field | Value |
 | --- | --- |
 | Plan ID | PRE-M5-02F |
-| Version | v2 |
-| Status | Certification artifact (pre-merge; PR #251 stopped pending Gate A + Gate B) |
+| Version | v3 |
+| Status | Certification artifact (pre-merge; PR #251) |
 | Scope | MG2 + MG4–MG8 against locked PRE-M5 metric contract |
-| Baseline SHA | `5efc9638f231d6b944bc52c739906d3ff83d1b41` |
-| Post-merge CI authority (baseline) | CI #647 / run 36101298078 |
+| Certified programme base (post #252) | `ab46cb6f65de2fb80aaf01444eba670895c3fea6` |
+| Post-merge CI authority (#252) | push run `36164776038` (6/6 on `ab46cb6`) |
+| Prior metrics base (#250) | `5efc9638f231d6b944bc52c739906d3ff83d1b41` |
 | Branch | `path1/pre-m5-02f-metrics-certification` |
 | Last updated | 2026-09-25 |
 
@@ -15,12 +16,13 @@
 
 - `v1` — Initial acceptance matrix, query-path certification, M4 parity, lifecycle evidence, and verdict table.
 - `v2` — Gate B: selective bulk fixture (800 noise lines), `ANALYZE`, telemetry `EXPLAIN (FORMAT JSON)` with index-scan proof; Gate A dependency path documented (PR #252); plural-reader citation fix.
+- `v3` — Gate A merged (#252 / `ab46cb6`); 800 noise refund facts; strict event-first `sales_order_items` indexes on guard/gross/order-count; refund-path boundedness proof; three-iteration planner stability test.
 
 Authority: this file is the 02F evidence artifact. Programme closeout wording in `docs/path-1/path-1-phase-breakdown.md` and `docs/roadmap/current-state-and-path-handoff.md` stays unchanged until this PR merges and post-merge CI passes on the merge SHA.
 
-### External prerequisite (Gate A)
+### Gate A (dependency security) — satisfied on programme base
 
-PR #251 must rebase onto a `main` that includes dependency remediation **PR #252** (`mix.lock` only: `ash` 3.33.11, `lazy_html` 0.1.13) so `lint_security` / `mix hex.audit` pass. CI #648 on `f44daa6` failed only `lint_security` on baseline advisories; 02F does not upgrade or suppress advisories.
+**PR #252** merged as `ab46cb6f65de2fb80aaf01444eba670895c3fea6`. Post-merge push CI run `36164776038`: 6/6 PASS. `mix.lock` on `main` includes `ash` 3.33.11, `lazy_html` 0.1.13, transitive `hpax` 1.1.0, `multigraph` 0.16.1-mg.5. **PR #251** rebases onto `ab46cb6` with no `mix.lock` delta.
 
 ---
 
@@ -64,22 +66,20 @@ Fixture: `EventSales.TestSupport.Analytics.EventAggregatorQueryPlanFixture` (tes
 
 | Population | Count |
 | --- | --- |
-| Noise event completed ticket lines (other `event_id`) | 800 orders + 800 `sales_order_items` |
-| Target event financial row | 1 order, 1 ticket line, 1 refund, 1 refund line |
-| Post-load stats | `ANALYZE sales_orders`, `sales_order_items`, `sales_refunds`, `sales_refund_lines` |
+| Noise event (other `event_id`) | 800 orders, 800 `sales_order_items`, 800 `sales_refunds`, 800 `sales_refund_lines` |
+| Target event financial row | 1 order, 1 ticket line, 1 refund, 1 refund line (known ZAR summary: gross 92.00, refund 46.00, net 46.00, order count 1) |
+| Post-load stats | `ANALYZE` on all four financial fact tables |
 
-SQL captured via Ecto telemetry during `EventAggregator.financial_summaries_for_event/1`. Each statement must include an `event_id` predicate **and** bind the requested event UUID in query parameters (`EventAggregatorFinancialQueryPlanTest`).
+SQL captured via Ecto telemetry during `EventAggregator.financial_summaries_for_event/1`. Each statement must include an `event_id` predicate **and** bind the requested event UUID in query parameters. Proof runs **three** fresh fixture iterations per test (`EventAggregatorFinancialQueryPlanTest`).
 
-Automated proof: `EXPLAIN (FORMAT JSON)` on captured SQL; for `sales_order_items` on guard/gross/order-count paths, **Index Scan** (or bitmap index scan) on `sales_order_items_event_id_idx` or `sales_order_items_event_mapping_status_idx` is required (no seq scan on `sales_order_items` for those paths).
+Observed plans (local test DB after `ANALYZE`, selective fixture; all three iterations):
 
-Observed plans (local test DB after `ANALYZE`, selective fixture):
-
-| Path | Purpose | Event predicate | Plan nodes (relation → access → index) | Seq scans | Verdict |
-| --- | --- | --- | --- | --- | --- |
-| `incomplete_primitive_guard` | Block canonical read when gross tax primitives missing | `s0.event_id = $1` (+ mapped ticket filters) | `sales_order_items` → **Index Scan** → `sales_order_items_event_id_idx` (`Index Cond`: `event_id = $uuid`); `sales_orders` → **Index Scan** → `sales_orders_pkey` (PK lookup by `order_id`, not a fact-table scan) | No seq scan on `sales_order_items` | PASS |
-| `gross_aggregate` | Tax-inclusive gross by currency | `s0.event_id = $1` | `sales_order_items` → **Index Scan** → `sales_order_items_event_id_idx`; `sales_orders` → **Index Scan** → `sales_orders_pkey` | No seq scan on `sales_order_items` | PASS |
-| `recognised_order_count` | `count(DISTINCT order_id)` by currency | `s0.event_id = $1` | Same `sales_order_items` index access as gross | No seq scan on `sales_order_items` | PASS |
-| `refund_aggregate` | Qualifying refund primitives | Event ticket subquery `ss0.event_id = $1` | Event-bounded `sales_order_items` via **Index Scan** with `event_id` predicate (observed: `sales_order_items_event_id_idx` or `sales_order_items_pkey` + `Filter event_id = $uuid`); `sales_refund_lines` → **Index Scan** → `sales_refund_lines_order_item_id_idx`; `sales_orders` → **Index Scan** → `sales_orders_pkey`; `sales_refunds` may **Seq Scan** at 1 row in fixture | `sales_refunds` seq scan acceptable at fixture cardinality only | PASS |
+| Path | Purpose | Event predicate | `sales_order_items` | Other relations | Seq scans | Verdict |
+| --- | --- | --- | --- | --- | --- | --- |
+| `incomplete_primitive_guard` | Incomplete gross primitive guard | `s0.event_id = $1` | **Index Scan** on `sales_order_items_event_id_idx` (`Index Cond` = target `event_id`); every `sales_order_items` node uses only `sales_order_items_event_id_idx` or `sales_order_items_event_mapping_status_idx` | `sales_orders` → **Index Scan** on `sales_orders_pkey` (single-row PK join) | None on `sales_order_items` | PASS |
+| `gross_aggregate` | Tax-inclusive gross by currency | `s0.event_id = $1` | **Index Scan** on `sales_order_items_event_id_idx` | `sales_orders` → **Index Scan** on `sales_orders_pkey` | None on `sales_order_items` | PASS |
+| `recognised_order_count` | Distinct order count by currency | `s0.event_id = $1` | **Index Scan** on `sales_order_items_event_id_idx` | `sales_orders` → **Index Scan** on `sales_orders_pkey` | None on `sales_order_items` | PASS |
+| `refund_aggregate` | Qualifying refund primitives | Subquery `ss0.event_id = $1` | At least one **Index Scan** on `sales_order_items_event_id_idx` for the event-bounded ticket subquery; additional `sales_order_items` nodes may use `sales_order_items_pkey` or `sales_order_items_order_id_idx` for parent-line identity joins | `sales_refund_lines` → **Index Scan** on `sales_refund_lines_order_item_id_idx`; `sales_orders` → **Index Scan** on `sales_orders_pkey`; `sales_refunds` → **Index Scan** on `sales_refunds_order_id_idx` when present | No `Seq Scan` on `sales_refund_lines` or `sales_refunds` with `Plan Rows` > 25 | PASS |
 
 Legacy operational/status aggregation for snapshot refresh (`legacy_summary_aggregate_query/3`) remains event-scoped (`where: oi.event_id == ^event_id`) and is exercised in `EventAggregatorTest` and snapshot refresh tests.
 

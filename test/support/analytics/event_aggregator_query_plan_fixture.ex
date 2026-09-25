@@ -8,7 +8,8 @@ defmodule EventSales.TestSupport.Analytics.EventAggregatorQueryPlanFixture do
 
   @doc """
   Seeds a selective financial fixture: one target event row plus many noise
-  order lines on a different event for query-plan certification.
+  order lines (and matching refund facts) on a different event for query-plan
+  certification.
   """
   @spec seed!(keyword()) :: %{
           source: term(),
@@ -16,6 +17,7 @@ defmodule EventSales.TestSupport.Analytics.EventAggregatorQueryPlanFixture do
           target_ticket: term(),
           noise_event_id: Ecto.UUID.t(),
           noise_line_count: pos_integer(),
+          noise_refund_count: pos_integer(),
           target_order_id: Ecto.UUID.t(),
           target_item_id: Ecto.UUID.t()
         }
@@ -34,7 +36,8 @@ defmodule EventSales.TestSupport.Analytics.EventAggregatorQueryPlanFixture do
 
     noise_ticket = SalesHelpers.create_ticket_type!(noise_event, %{name: "Noise Ticket"})
 
-    bulk_insert_completed_lines!(source.id, noise_event.id, noise_ticket.id, noise_count)
+    {noise_line_count, noise_refund_count} =
+      bulk_insert_completed_lines!(source.id, noise_event.id, noise_ticket.id, noise_count)
 
     {target_order_id, target_item_id} =
       insert_target_financial_row!(source.id, target_event.id, target_ticket.id)
@@ -46,7 +49,8 @@ defmodule EventSales.TestSupport.Analytics.EventAggregatorQueryPlanFixture do
       target_event: target_event,
       target_ticket: target_ticket,
       noise_event_id: noise_event.id,
-      noise_line_count: noise_count,
+      noise_line_count: noise_line_count,
+      noise_refund_count: noise_refund_count,
       target_order_id: target_order_id,
       target_item_id: target_item_id
     }
@@ -64,6 +68,8 @@ defmodule EventSales.TestSupport.Analytics.EventAggregatorQueryPlanFixture do
     zero = Decimal.new("0")
     line_total = Decimal.new("10.00")
     line_tax = Decimal.new("1.50")
+    refund_total = Decimal.new("5.00")
+    refund_tax = Decimal.new("0.75")
 
     source_id = Ecto.UUID.dump!(source_id)
     event_id = Ecto.UUID.dump!(event_id)
@@ -116,6 +122,55 @@ defmodule EventSales.TestSupport.Analytics.EventAggregatorQueryPlanFixture do
       end)
 
     Repo.insert_all("sales_order_items", item_rows)
+
+    refund_rows =
+      Enum.map(order_rows, fn order ->
+        %{
+          id: Ecto.UUID.generate() |> Ecto.UUID.dump!(),
+          source_system_id: source_id,
+          order_id: order.id,
+          woo_order_id: order.woo_order_id,
+          woo_refund_id: order.woo_order_id + 10_000_000,
+          currency: "ZAR",
+          source_state: "active",
+          detail_status: "complete",
+          summary_total_amount: refund_total,
+          header_amount: zero,
+          shipping_refund_amount: zero,
+          shipping_refund_tax: zero,
+          fee_refund_amount: zero,
+          fee_refund_tax: zero,
+          unallocated_header_amount: zero,
+          source_created_at: ts,
+          inserted_at: ts,
+          updated_at: ts
+        }
+      end)
+
+    Repo.insert_all("sales_refunds", refund_rows)
+
+    refund_line_rows =
+      Enum.zip(refund_rows, item_rows)
+      |> Enum.map(fn {refund, item} ->
+        %{
+          id: Ecto.UUID.generate() |> Ecto.UUID.dump!(),
+          refund_id: refund.id,
+          order_item_id: item.id,
+          woo_refund_line_item_id: 1,
+          woo_refunded_item_id: item.woo_line_item_id,
+          woo_product_id: item.woo_product_id,
+          refunded_quantity: 1,
+          refund_subtotal_amount: refund_total,
+          refund_total_amount: refund_total,
+          refund_total_tax: refund_tax,
+          inserted_at: ts,
+          updated_at: ts
+        }
+      end)
+
+    Repo.insert_all("sales_refund_lines", refund_line_rows)
+
+    {count, count}
   end
 
   defp insert_target_financial_row!(source_id, event_id, ticket_type_id) do
