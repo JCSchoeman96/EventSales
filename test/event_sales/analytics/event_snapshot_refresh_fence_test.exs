@@ -82,4 +82,60 @@ defmodule EventSales.Analytics.EventSnapshotRefreshFenceTest do
     assert {:error, :invalid_event_id} =
              EventSnapshotRefreshFence.with_serial_event_refresh("not-a-uuid", fn -> :ok end)
   end
+
+  test "successful fenced callback releases the session lock" do
+    event_id = Ecto.UUID.generate()
+    assert {:ok, key} = EventSnapshotRefreshFence.lock_key(event_id)
+
+    UnboxedPostgres.with_connection(fn ->
+      assert :ok =
+               EventSnapshotRefreshFence.with_serial_event_refresh(event_id, fn -> :ok end)
+
+      assert session_lock_available?(key)
+    end)
+  end
+
+  test "raised fenced callback still releases the session lock for another backend" do
+    event_id = Ecto.UUID.generate()
+    assert {:ok, key} = EventSnapshotRefreshFence.lock_key(event_id)
+
+    UnboxedPostgres.with_connection(fn ->
+      assert {:error, :event_snapshot_refresh_fence_failed} =
+               EventSnapshotRefreshFence.with_serial_event_refresh(event_id, fn ->
+                 raise "boom"
+               end)
+
+      assert session_lock_available?(key)
+    end)
+
+    parent = self()
+
+    releaser =
+      Task.async(fn ->
+        UnboxedPostgres.with_connection(fn ->
+          backend = EventSnapshotRefreshFence.connection_backend_pid()
+          send(parent, {:releaser_backend, backend})
+
+          EventSnapshotRefreshFence.with_serial_event_refresh(event_id, fn ->
+            send(parent, :reacquired)
+            :ok
+          end)
+        end)
+      end)
+
+    assert_receive {:releaser_backend, _backend}, 5_000
+    assert_receive :reacquired, 5_000
+    assert :ok = Task.await(releaser, 5_000)
+  end
+
+  defp session_lock_available?(key) do
+    case Repo.query("SELECT pg_try_advisory_lock($1::bigint)", [key]) do
+      {:ok, %{rows: [[true]]}} ->
+        Repo.query!("SELECT pg_advisory_unlock($1::bigint)", [key])
+        true
+
+      _ ->
+        false
+    end
+  end
 end

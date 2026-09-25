@@ -96,11 +96,49 @@ defmodule EventSales.Analytics.EventSnapshotRefreshFence do
         :ok
 
       {:ok, %{rows: [[false]]}} ->
-        Repo.query!("SELECT pg_advisory_unlock_all()")
+        ensure_session_unlocked!(:unlock_returned_false)
+
+      {:ok, other} ->
+        ensure_session_unlocked!({:unexpected_unlock_result, other})
+
+      {:error, reason} ->
+        ensure_session_unlocked!(reason)
+    end
+  end
+
+  defp ensure_session_unlocked!(unlock_detail) do
+    case Repo.query("SELECT pg_advisory_unlock_all()") do
+      {:ok, _} ->
         :ok
 
       {:error, reason} ->
-        raise "event snapshot refresh fence unlock failed: #{inspect(reason)}"
+        discard_locked_checkout_connection!(unlock_detail, reason)
+    end
+  end
+
+  defp discard_locked_checkout_connection!(unlock_detail, unlock_all_reason) do
+    message =
+      "event snapshot refresh fence could not release session advisory lock: " <>
+        inspect(%{unlock: unlock_detail, unlock_all: unlock_all_reason})
+
+    exception = DBConnection.ConnectionError.exception(message: message)
+
+    case checkout_pool_ref() do
+      :none ->
+        raise exception
+
+      pool_ref ->
+        :ok = DBConnection.Holder.disconnect(pool_ref, exception)
+        raise exception
+    end
+  end
+
+  defp checkout_pool_ref do
+    %{pid: pool} = Ecto.Adapter.lookup_meta(Repo.get_dynamic_repo())
+
+    case Process.get({Ecto.Adapters.SQL, pool}) do
+      %DBConnection{pool_ref: pool_ref} -> pool_ref
+      _ -> :none
     end
   end
 end
