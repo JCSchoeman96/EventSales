@@ -6,10 +6,31 @@ defmodule EventSales.Analytics.SnapshotBoundariesTest do
 
     refute source =~ "EventAggregator"
     refute source =~ "sales_order_items"
+    refute source =~ "sales_orders"
+    refute source =~ "sales_refunds"
+    refute source =~ "sales_refund_lines"
     refute source =~ "OrderItem"
+    refute source =~ "Order"
+    refute source =~ "RefundLine"
+    refute source =~ "Refund"
     refute source =~ "WooCommerce"
     refute source =~ "SnapshotStore"
     refute source =~ "Redix"
+
+    assert source =~ "EventAggregateSnapshot"
+  end
+
+  test "EventScopedDashboard uses hot-state and snapshot readers only" do
+    source = File.read!("lib/event_sales/analytics/event_scoped_dashboard.ex")
+
+    assert source =~ "HotStateAggregator"
+    assert source =~ "SnapshotReader"
+    refute source =~ "EventAggregator"
+    refute source =~ "sales_order_items"
+    refute source =~ "sales_orders"
+    refute source =~ "sales_refunds"
+    refute source =~ "sales_refund_lines"
+    refute source =~ "OrderItem"
   end
 
   test "future dashboard live code does not scan sales rows directly" do
