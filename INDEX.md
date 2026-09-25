@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-392
+395
 
 ## Files
 
@@ -37,6 +37,7 @@ Project root: `.`
 - `lib/event_sales/analytics/dashboard_pub_sub.ex`
 - `lib/event_sales/analytics/event_detail.ex`
 - `lib/event_sales/analytics/event_scoped_dashboard.ex`
+- `lib/event_sales/analytics/event_snapshot_refresh_fence.ex`
 - `lib/event_sales/analytics/hot_state_aggregator.ex`
 - `lib/event_sales/analytics/metric_rules.ex`
 - `lib/event_sales/analytics/order_processed_notifier.ex`
@@ -389,6 +390,7 @@ Project root: `.`
 - `test/support/conn_case.ex`
 - `test/support/data_case.ex`
 - `test/support/db_topology_helpers.ex`
+- `test/support/event_snapshot_refresh_test_support.ex`
 - `test/support/fakes/fake_tickera_attendee_client.ex`
 - `test/support/financial_reconciliation_helpers.ex`
 - `test/support/fixture_helpers.ex`
@@ -403,6 +405,7 @@ Project root: `.`
 - `test/support/telemetry_helpers.ex`
 - `test/support/tickera_catalog_fixtures.ex`
 - `test/support/tickera_sync_test_helpers.ex`
+- `test/support/unboxed_postgres.ex`
 - `test/support/woocommerce_webhook_helpers.ex`
 
 ## Modules
@@ -494,8 +497,8 @@ Project root: `.`
 - `EventSales.Analytics.Aggregators.EventAggregator` - `lib/event_sales/analytics/aggregators/event_aggregator.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 2
-  - public_funs: `financial_summaries_for_event/1`, `summary_for_event/2`
+  - docs_count: 3
+  - public_funs: `financial_summaries_for_event/1`, `summary_for_event/2`, `operational_status_breakdown_for_event/2`
   - uses: _none_
 - `EventSales.Analytics.CacheKeys` - `lib/event_sales/analytics/cache_keys.ex`
   - moduledoc?: true
@@ -526,6 +529,12 @@ Project root: `.`
   - specs?: true
   - docs_count: 1
   - public_funs: `summary/2`
+  - uses: _none_
+- `EventSales.Analytics.EventSnapshotRefreshFence` - `lib/event_sales/analytics/event_snapshot_refresh_fence.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 5
+  - public_funs: `with_serial_event_refresh/2`, `coherent_transaction_opts/0`, `use_repeatable_read_isolation?/0`, `connection_backend_pid/0`, `lock_key/1`
   - uses: _none_
 - `EventSales.Analytics.HotStateAggregator` - `lib/event_sales/analytics/hot_state_aggregator.ex`
   - moduledoc?: true
@@ -572,8 +581,8 @@ Project root: `.`
 - `EventSales.Analytics.SnapshotReader` - `lib/event_sales/analytics/snapshot_reader.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 2
-  - public_funs: `summary_for_event/1`, `daily_summary_for_event/3`
+  - docs_count: 4
+  - public_funs: `financial_summaries_for_event/1`, `financial_summary_for_event/2`, `summary_for_event/1`, `daily_summary_for_event/3`
   - uses: _none_
 - `EventSales.Analytics.SnapshotRefresh` - `lib/event_sales/analytics/snapshot_refresh.ex`
   - moduledoc?: true
@@ -2633,6 +2642,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: _none_
   - uses: _none_
+- `EventSales.TestSupport.EventSnapshotRefreshTestSupport` - `test/support/event_snapshot_refresh_test_support.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 3
+  - public_funs: `wait_for_advisory_lock_wait!/2`, `advisory_lock_wait?/1`, `transaction_isolation_level/0`
+  - uses: _none_
 - `EventSales.TestSupport.Fakes.FakeTickeraAttendeeClient` - `test/support/fakes/fake_tickera_attendee_client.ex`
   - moduledoc?: true
   - specs?: false
@@ -2722,6 +2737,12 @@ Project root: `.`
   - specs?: false
   - docs_count: 0
   - public_funs: `setup_fake_client/1`, `setup_admin/1`, `attendee/1`, `page_result/1`, `default_page_result/0`, `queue_sync_run!/3`, `start_sync_run!/1`, `queue_running_sync_run!/3`, `put_env!/2`, `refute_secret_leaks!/2`
+  - uses: _none_
+- `EventSales.TestSupport.UnboxedPostgres` - `test/support/unboxed_postgres.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 2
+  - public_funs: `start_link!/0`, `with_connection/1`, `with_exclusive_setup/1`
   - uses: _none_
 - `EventSales.TestSupport.WooCommerceWebhookHelpers` - `test/support/woocommerce_webhook_helpers.ex`
   - moduledoc?: true

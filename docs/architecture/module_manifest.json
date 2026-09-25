@@ -25,6 +25,7 @@
     "lib/event_sales/analytics/dashboard_pub_sub.ex",
     "lib/event_sales/analytics/event_detail.ex",
     "lib/event_sales/analytics/event_scoped_dashboard.ex",
+    "lib/event_sales/analytics/event_snapshot_refresh_fence.ex",
     "lib/event_sales/analytics/hot_state_aggregator.ex",
     "lib/event_sales/analytics/metric_rules.ex",
     "lib/event_sales/analytics/order_processed_notifier.ex",
@@ -377,6 +378,7 @@
     "test/support/conn_case.ex",
     "test/support/data_case.ex",
     "test/support/db_topology_helpers.ex",
+    "test/support/event_snapshot_refresh_test_support.ex",
     "test/support/fakes/fake_tickera_attendee_client.ex",
     "test/support/financial_reconciliation_helpers.ex",
     "test/support/fixture_helpers.ex",
@@ -391,6 +393,7 @@
     "test/support/telemetry_helpers.ex",
     "test/support/tickera_catalog_fixtures.ex",
     "test/support/tickera_sync_test_helpers.ex",
+    "test/support/unboxed_postgres.ex",
     "test/support/woocommerce_webhook_helpers.ex"
   ],
   "generator": "mix project.index",
@@ -642,7 +645,7 @@
       "uses": []
     },
     {
-      "docs_count": 2,
+      "docs_count": 3,
       "moduledoc?": true,
       "name": "EventSales.Analytics.Aggregators.EventAggregator",
       "parse_error": null,
@@ -655,6 +658,10 @@
         {
           "arity": 2,
           "name": "summary_for_event"
+        },
+        {
+          "arity": 2,
+          "name": "operational_status_breakdown_for_event"
         }
       ],
       "specs?": true,
@@ -774,6 +781,37 @@
         {
           "arity": 2,
           "name": "summary"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 5,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.EventSnapshotRefreshFence",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/event_snapshot_refresh_fence.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "with_serial_event_refresh"
+        },
+        {
+          "arity": 0,
+          "name": "coherent_transaction_opts"
+        },
+        {
+          "arity": 0,
+          "name": "use_repeatable_read_isolation?"
+        },
+        {
+          "arity": 0,
+          "name": "connection_backend_pid"
+        },
+        {
+          "arity": 1,
+          "name": "lock_key"
         }
       ],
       "specs?": true,
@@ -973,12 +1011,20 @@
       "uses": []
     },
     {
-      "docs_count": 2,
+      "docs_count": 4,
       "moduledoc?": true,
       "name": "EventSales.Analytics.SnapshotReader",
       "parse_error": null,
       "path": "lib/event_sales/analytics/snapshot_reader.ex",
       "public_funs": [
+        {
+          "arity": 1,
+          "name": "financial_summaries_for_event"
+        },
+        {
+          "arity": 2,
+          "name": "financial_summary_for_event"
+        },
         {
           "arity": 1,
           "name": "summary_for_event"
@@ -8612,6 +8658,29 @@
       "uses": []
     },
     {
+      "docs_count": 3,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.EventSnapshotRefreshTestSupport",
+      "parse_error": null,
+      "path": "test/support/event_snapshot_refresh_test_support.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "wait_for_advisory_lock_wait!"
+        },
+        {
+          "arity": 1,
+          "name": "advisory_lock_wait?"
+        },
+        {
+          "arity": 0,
+          "name": "transaction_isolation_level"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
       "docs_count": 0,
       "moduledoc?": true,
       "name": "EventSales.TestSupport.Fakes.FakeTickeraAttendeeClient",
@@ -9074,6 +9143,29 @@
         {
           "arity": 2,
           "name": "refute_secret_leaks!"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 2,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.UnboxedPostgres",
+      "parse_error": null,
+      "path": "test/support/unboxed_postgres.ex",
+      "public_funs": [
+        {
+          "arity": 0,
+          "name": "start_link!"
+        },
+        {
+          "arity": 1,
+          "name": "with_connection"
+        },
+        {
+          "arity": 1,
+          "name": "with_exclusive_setup"
         }
       ],
       "specs?": false,
