@@ -93,6 +93,7 @@ defmodule EventSales.Telemetry do
   @catalog_change_dispatch_queued [:event_sales, :catalog_change, :dispatch, :queued]
   @catalog_change_dispatch_settled [:event_sales, :catalog_change, :dispatch, :settled]
   @catalog_change_dispatch_failed [:event_sales, :catalog_change, :dispatch, :failed]
+  @source_freshness_clock_skew [:event_sales, :source_freshness, :clock_skew]
 
   @doc """
   Returns every custom EventSales telemetry event name defined in Slice 0.8.
@@ -161,7 +162,8 @@ defmodule EventSales.Telemetry do
       catalog_change_dispatch_deferred(),
       catalog_change_dispatch_queued(),
       catalog_change_dispatch_settled(),
-      catalog_change_dispatch_failed()
+      catalog_change_dispatch_failed(),
+      source_freshness_clock_skew()
     ]
   end
 
@@ -389,6 +391,10 @@ defmodule EventSales.Telemetry do
   def catalog_change_dispatch_queued, do: @catalog_change_dispatch_queued
   def catalog_change_dispatch_settled, do: @catalog_change_dispatch_settled
   def catalog_change_dispatch_failed, do: @catalog_change_dispatch_failed
+
+  @doc "Source-freshness anchor is ahead of observation time (clock skew clamp)."
+  @spec source_freshness_clock_skew() :: event_name()
+  def source_freshness_clock_skew, do: @source_freshness_clock_skew
 
   @doc "Returns the low-cardinality product metadata cache event for the cache outcome."
   @spec product_metadata_cache_event(:hit | :miss | :put) :: event_name()

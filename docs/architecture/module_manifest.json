@@ -31,6 +31,7 @@
     "lib/event_sales/analytics/order_processed_notifier.ex",
     "lib/event_sales/analytics/resources/daily_sales_aggregate_snapshot.ex",
     "lib/event_sales/analytics/resources/event_aggregate_snapshot.ex",
+    "lib/event_sales/analytics/resources/event_source_freshness_snapshot.ex",
     "lib/event_sales/analytics/snapshot_codec.ex",
     "lib/event_sales/analytics/snapshot_queries.ex",
     "lib/event_sales/analytics/snapshot_reader.ex",
@@ -38,6 +39,7 @@
     "lib/event_sales/analytics/snapshot_store/adapter.ex",
     "lib/event_sales/analytics/snapshot_store/noop_adapter.ex",
     "lib/event_sales/analytics/snapshot_store/redix_adapter.ex",
+    "lib/event_sales/analytics/source_freshness.ex",
     "lib/event_sales/analytics/time_rules.ex",
     "lib/event_sales/analytics/validations/canonical_snapshot_financials.ex",
     "lib/event_sales/analytics/workers/rebuild_hot_state_worker.ex",
@@ -983,6 +985,18 @@
       ]
     },
     {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.Resources.EventSourceFreshnessSnapshot",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/resources/event_source_freshness_snapshot.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": [
+        "Ash.Resource"
+      ]
+    },
+    {
       "docs_count": 2,
       "moduledoc?": true,
       "name": "EventSales.Analytics.SnapshotCodec",
@@ -1109,6 +1123,21 @@
         {
           "arity": 1,
           "name": "list_event_summaries"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.SourceFreshness",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/source_freshness.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "for_event"
         }
       ],
       "specs?": true,
@@ -6502,7 +6531,7 @@
       "uses": []
     },
     {
-      "docs_count": 57,
+      "docs_count": 58,
       "moduledoc?": true,
       "name": "EventSales.Telemetry",
       "parse_error": null,
@@ -6759,6 +6788,10 @@
         {
           "arity": 0,
           "name": "catalog_change_dispatch_failed"
+        },
+        {
+          "arity": 0,
+          "name": "source_freshness_clock_skew"
         },
         {
           "arity": 1,

@@ -357,6 +357,18 @@
       {
         "docs_count": 0,
         "moduledoc?": true,
+        "name": "EventSales.Analytics.Resources.EventSourceFreshnessSnapshot",
+        "parse_error": null,
+        "path": "lib/event_sales/analytics/resources/event_source_freshness_snapshot.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
         "name": "EventSales.AshBaseline.Resources.AuthUser",
         "parse_error": null,
         "path": "lib/event_sales/ash_baseline/resources/auth_user.ex",
