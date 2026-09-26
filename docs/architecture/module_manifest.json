@@ -1176,25 +1176,6 @@
     {
       "docs_count": 0,
       "moduledoc?": true,
-      "name": "EventSales.Analytics.TimeRules.IanaTimeZoneDatabase",
-      "parse_error": null,
-      "path": "lib/event_sales/analytics/time_rules.ex",
-      "public_funs": [
-        {
-          "arity": 2,
-          "name": "time_zone_period_from_utc_iso_days"
-        },
-        {
-          "arity": 2,
-          "name": "time_zone_periods_from_wall_datetime"
-        }
-      ],
-      "specs?": false,
-      "uses": []
-    },
-    {
-      "docs_count": 0,
-      "moduledoc?": true,
       "name": "Freshness",
       "parse_error": null,
       "path": "lib/event_sales/analytics/time_rules.ex",
