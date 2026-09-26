@@ -503,14 +503,23 @@ defmodule EventSales.Analytics.Aggregators.EventAggregator do
     end
   end
 
+  defp legacy_today_period(timezone, now) when is_binary(timezone) do
+    case TimeRules.today_bounds(timezone, now) do
+      {:ok, period} -> period
+      {:error, :invalid_timezone} -> nil
+    end
+  end
+
+  defp legacy_today_period(_timezone, _now), do: nil
+
   defp legacy_summary_aggregate_rows(event_id, opts) do
     now = Keyword.get_lazy(opts, :now, &DateTime.utc_now/0)
     timezone = Keyword.get_lazy(opts, :timezone, &MetricRules.business_timezone/0)
 
     query =
-      case TimeRules.today_bounds(timezone, now) do
-        {:ok, period} -> legacy_summary_aggregate_query(event_id, period)
-        {:error, :invalid_timezone} -> legacy_summary_aggregate_query(event_id, nil)
+      case legacy_today_period(timezone, now) do
+        %Period{} = period -> legacy_summary_aggregate_query(event_id, period)
+        nil -> legacy_summary_aggregate_query(event_id, nil)
       end
 
     Repo.all(query)

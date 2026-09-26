@@ -254,6 +254,34 @@ defmodule EventSales.Analytics.EventAggregatorTest do
       assert summary.status_breakdown == %{pending: 1}
     end
 
+    test "nil timezone preserves totals and zeroes today", %{
+      source: source,
+      event: event,
+      ticket: ticket
+    } do
+      order =
+        create_order!(source, :completed,
+          woo_order_id: 93_007,
+          paid_at: nil,
+          completed_at: ~U[2026-06-01 10:00:00.000000Z]
+        )
+
+      create_item!(order, event, ticket,
+        woo_line_item_id: 86,
+        quantity: 1,
+        line_total: Decimal.new("100.00")
+      )
+
+      assert {:ok, summary} =
+               EventAggregator.summary_for_event(event.id, now: @now, timezone: nil)
+
+      assert summary.total_sold == 1
+      assert Decimal.equal?(summary.total_revenue, Decimal.new("100.00"))
+      assert summary.today_sold == 0
+      assert Decimal.equal?(summary.today_revenue, Decimal.new("0"))
+      assert summary.status_breakdown == %{completed: 1}
+    end
+
     test "invalid timezone preserves totals and zeroes today", %{
       source: source,
       event: event,

@@ -113,11 +113,7 @@ defmodule EventSales.Analytics.MetricRules do
     now = Keyword.get_lazy(opts, :now, &DateTime.utc_now/0)
     timezone = Keyword.get_lazy(opts, :timezone, &business_timezone/0)
 
-    today_period =
-      case TimeRules.today_bounds(timezone, now) do
-        {:ok, period} -> period
-        {:error, :invalid_timezone} -> nil
-      end
+    today_period = legacy_today_period(timezone, now)
 
     rows
     |> Enum.reduce(empty_summary(), fn row, summary ->
@@ -220,6 +216,15 @@ defmodule EventSales.Analytics.MetricRules do
     |> add_today_totals(today?, sold, revenue)
     |> add_status_breakdown(order, item)
   end
+
+  defp legacy_today_period(timezone, now) when is_binary(timezone) do
+    case TimeRules.today_bounds(timezone, now) do
+      {:ok, period} -> period
+      {:error, :invalid_timezone} -> nil
+    end
+  end
+
+  defp legacy_today_period(_timezone, _now), do: nil
 
   defp sale_effective_in_period?(_order, nil), do: false
 

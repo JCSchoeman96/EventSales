@@ -243,6 +243,27 @@ defmodule EventSales.Analytics.MetricRulesTest do
       assert summary.today_revenue == Decimal.new("50.00")
     end
 
+    test "nil timezone preserves totals and zeroes today" do
+      order =
+        order(:completed, %{
+          paid_at: nil,
+          completed_at: ~U[2026-06-01 10:00:00.000000Z]
+        })
+
+      summary =
+        MetricRules.summarize(
+          [%{order: order, item: ticket_item(%{quantity: 1, line_total: Decimal.new("100.00")})}],
+          now: @now,
+          timezone: nil
+        )
+
+      assert summary.total_sold == 1
+      assert summary.total_revenue == Decimal.new("100.00")
+      assert summary.today_sold == 0
+      assert summary.today_revenue == Decimal.new("0")
+      assert summary.status_breakdown == %{completed: 1}
+    end
+
     test "invalid timezone preserves totals and zeroes today" do
       order =
         order(:completed, %{
