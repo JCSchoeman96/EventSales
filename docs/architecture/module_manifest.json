@@ -6531,7 +6531,7 @@
       "uses": []
     },
     {
-      "docs_count": 57,
+      "docs_count": 58,
       "moduledoc?": true,
       "name": "EventSales.Telemetry",
       "parse_error": null,
@@ -6788,6 +6788,10 @@
         {
           "arity": 0,
           "name": "catalog_change_dispatch_failed"
+        },
+        {
+          "arity": 0,
+          "name": "source_freshness_clock_skew"
         },
         {
           "arity": 1,

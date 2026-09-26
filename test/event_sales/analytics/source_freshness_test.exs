@@ -10,6 +10,7 @@ defmodule EventSales.Analytics.SourceFreshnessTest do
   alias EventSales.Analytics.SourceFreshness
   alias EventSales.Catalog.Resources.{Event, SourceSystem}
   alias EventSales.Repo
+  alias EventSales.Telemetry, as: EventSalesTelemetry
   alias EventSales.TestSupport.SalesHelpers
 
   @upsert_opts [return_skipped_upsert?: true, domain: EventSales.Analytics]
@@ -28,7 +29,29 @@ defmodule EventSales.Analytics.SourceFreshnessTest do
       assert SourceFreshness.for_event(event.id) == {:error, :missing_source_freshness_anchor}
     end
 
+    test "row with all nil component watermarks returns missing anchor error", %{event: event} do
+      refreshed = ~U[2026-05-01 10:00:00.000000Z]
+
+      {1, _} =
+        Repo.insert_all("analytics_event_source_freshness_snapshots", [
+          %{
+            id: Ecto.UUID.bingenerate(),
+            event_id: Ecto.UUID.dump!(event.id),
+            projection_refreshed_at: refreshed,
+            projection_version: 1,
+            inserted_at: refreshed,
+            updated_at: refreshed
+          }
+        ])
+
+      assert SourceFreshness.for_event(event.id, now: refreshed) ==
+               {:error, :missing_source_freshness_anchor}
+    end
+
     test "classifies using TimeRules boundaries", %{event: event} do
+      handler_id = telemetry_handler_id()
+      attach_clock_skew_handler(handler_id)
+
       anchor = ~U[2026-05-01 10:00:00.000000Z]
       now = DateTime.add(anchor, 4, :minute)
 
@@ -36,9 +59,16 @@ defmodule EventSales.Analytics.SourceFreshnessTest do
 
       assert {:ok, %{classification: :normal, anchor_at: ^anchor, age_ms: 240_000}} =
                SourceFreshness.for_event(event.id, now: now)
+
+      refute_receive {:source_freshness_clock_skew, _, _}, 50
     end
 
-    test "future anchor clamps to normal per TimeRules", %{event: event} do
+    test "future anchor clamps to normal per TimeRules and emits clock-skew telemetry", %{
+      event: event
+    } do
+      handler_id = telemetry_handler_id()
+      attach_clock_skew_handler(handler_id)
+
       now = ~U[2026-05-01 10:00:00.000000Z]
       anchor = DateTime.add(now, 30, :second)
 
@@ -46,6 +76,10 @@ defmodule EventSales.Analytics.SourceFreshnessTest do
 
       assert {:ok, %{classification: :normal, anchor_at: ^anchor, age_ms: 0}} =
                SourceFreshness.for_event(event.id, now: now)
+
+      assert_receive {:source_freshness_clock_skew,
+                      [:event_sales, :source_freshness, :clock_skew], %{count: 1},
+                      %{scope: :event}}
     end
 
     test "anchor is max of present components", %{event: event} do
@@ -344,6 +378,26 @@ defmodule EventSales.Analytics.SourceFreshnessTest do
 
   defp unique_slug(prefix) do
     "#{prefix}-#{System.unique_integer([:positive])}"
+  end
+
+  defp telemetry_handler_id do
+    "source-freshness-telemetry-#{System.unique_integer([:positive])}"
+  end
+
+  defp attach_clock_skew_handler(handler_id) do
+    test_pid = self()
+
+    :ok =
+      :telemetry.attach(
+        handler_id,
+        EventSalesTelemetry.source_freshness_clock_skew(),
+        fn event_name, measurements, metadata, _config ->
+          send(test_pid, {:source_freshness_clock_skew, event_name, measurements, metadata})
+        end,
+        nil
+      )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
   end
 
   defp create_committed_event! do

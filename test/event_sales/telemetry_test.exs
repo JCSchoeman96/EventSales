@@ -38,6 +38,10 @@ defmodule EventSales.TelemetryTest do
     assert EventSalesTelemetry.csv_import_apply_exception() in EventSalesTelemetry.event_names()
   end
 
+  test "source freshness clock skew telemetry event is named" do
+    assert EventSalesTelemetry.source_freshness_clock_skew() in EventSalesTelemetry.event_names()
+  end
+
   test "webhook accepted and rejected counters are defined" do
     assert_metric(%Counter{
       name: [:event_sales, :webhook, :accepted, :count],

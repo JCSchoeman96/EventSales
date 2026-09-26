@@ -13,6 +13,8 @@ defmodule EventSales.Analytics.SourceFreshness do
 
   alias EventSales.Analytics.Resources.EventSourceFreshnessSnapshot
   alias EventSales.Analytics.TimeRules
+  alias EventSales.Analytics.TimeRules.Freshness
+  alias EventSales.Telemetry
 
   @type classification :: :normal | :aging | :stale
 
@@ -36,6 +38,7 @@ defmodule EventSales.Analytics.SourceFreshness do
       case source_freshness_anchor_at(snapshot) do
         %DateTime{} = anchor_at ->
           freshness = TimeRules.classify_source_freshness(anchor_at, now)
+          emit_clock_skew_telemetry(freshness)
 
           {:ok,
            %{
@@ -59,6 +62,12 @@ defmodule EventSales.Analytics.SourceFreshness do
       {:error, reason} -> {:error, reason}
     end
   end
+
+  defp emit_clock_skew_telemetry(%Freshness{clock_skew?: true}) do
+    Telemetry.emit(Telemetry.source_freshness_clock_skew(), %{count: 1}, %{scope: :event})
+  end
+
+  defp emit_clock_skew_telemetry(%Freshness{clock_skew?: false}), do: :ok
 
   defp source_freshness_anchor_at(%EventSourceFreshnessSnapshot{} = snapshot) do
     snapshot
