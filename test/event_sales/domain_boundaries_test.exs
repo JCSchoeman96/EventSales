@@ -58,7 +58,8 @@ defmodule EventSales.DomainBoundariesTest do
   ]
   @analytics_resources [
     EventSales.Analytics.Resources.EventAggregateSnapshot,
-    EventSales.Analytics.Resources.DailySalesAggregateSnapshot
+    EventSales.Analytics.Resources.DailySalesAggregateSnapshot,
+    EventSales.Analytics.Resources.EventSourceFreshnessSnapshot
   ]
   @audit_resources [
     EventSales.Audit.Resources.AuditLog

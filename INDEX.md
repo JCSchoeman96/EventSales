@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-397
+399
 
 ## Files
 
@@ -43,6 +43,7 @@ Project root: `.`
 - `lib/event_sales/analytics/order_processed_notifier.ex`
 - `lib/event_sales/analytics/resources/daily_sales_aggregate_snapshot.ex`
 - `lib/event_sales/analytics/resources/event_aggregate_snapshot.ex`
+- `lib/event_sales/analytics/resources/event_source_freshness_snapshot.ex`
 - `lib/event_sales/analytics/snapshot_codec.ex`
 - `lib/event_sales/analytics/snapshot_queries.ex`
 - `lib/event_sales/analytics/snapshot_reader.ex`
@@ -50,6 +51,7 @@ Project root: `.`
 - `lib/event_sales/analytics/snapshot_store/adapter.ex`
 - `lib/event_sales/analytics/snapshot_store/noop_adapter.ex`
 - `lib/event_sales/analytics/snapshot_store/redix_adapter.ex`
+- `lib/event_sales/analytics/source_freshness.ex`
 - `lib/event_sales/analytics/time_rules.ex`
 - `lib/event_sales/analytics/validations/canonical_snapshot_financials.ex`
 - `lib/event_sales/analytics/workers/rebuild_hot_state_worker.ex`
@@ -568,6 +570,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: _none_
   - uses: `Ash.Resource`
+- `EventSales.Analytics.Resources.EventSourceFreshnessSnapshot` - `lib/event_sales/analytics/resources/event_source_freshness_snapshot.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
 - `EventSales.Analytics.SnapshotCodec` - `lib/event_sales/analytics/snapshot_codec.ex`
   - moduledoc?: true
   - specs?: true
@@ -609,6 +617,12 @@ Project root: `.`
   - specs?: true
   - docs_count: 1
   - public_funs: `redix_name/0`, `put/3`, `list_event_summaries/1`
+  - uses: _none_
+- `EventSales.Analytics.SourceFreshness` - `lib/event_sales/analytics/source_freshness.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `for_event/2`
   - uses: _none_
 - `EventSales.Analytics.TimeRules` - `lib/event_sales/analytics/time_rules.ex`
   - moduledoc?: true
@@ -2787,6 +2801,7 @@ Project root: `.`
 - `EventSales.Accounts.Resources.UserRole` - `lib/event_sales/accounts/resources/user_role.ex`
 - `EventSales.Analytics.Resources.DailySalesAggregateSnapshot` - `lib/event_sales/analytics/resources/daily_sales_aggregate_snapshot.ex`
 - `EventSales.Analytics.Resources.EventAggregateSnapshot` - `lib/event_sales/analytics/resources/event_aggregate_snapshot.ex`
+- `EventSales.Analytics.Resources.EventSourceFreshnessSnapshot` - `lib/event_sales/analytics/resources/event_source_freshness_snapshot.ex`
 - `EventSales.AshBaseline.Resources.AuthUser` - `lib/event_sales/ash_baseline/resources/auth_user.ex`
 - `EventSales.AshBaseline.Resources.PaperTrailProof` - `lib/event_sales/ash_baseline/resources/paper_trail_proof.ex`
 - `EventSales.AshBaseline.Resources.StateMachineProof` - `lib/event_sales/ash_baseline/resources/state_machine_proof.ex`

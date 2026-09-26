@@ -10,5 +10,6 @@ defmodule EventSales.Analytics do
   resources do
     resource EventSales.Analytics.Resources.EventAggregateSnapshot
     resource EventSales.Analytics.Resources.DailySalesAggregateSnapshot
+    resource EventSales.Analytics.Resources.EventSourceFreshnessSnapshot
   end
 end

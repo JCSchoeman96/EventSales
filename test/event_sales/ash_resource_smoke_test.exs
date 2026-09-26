@@ -60,7 +60,8 @@ defmodule EventSales.AshResourceSmokeTest do
     ],
     EventSales.Analytics => [
       EventSales.Analytics.Resources.EventAggregateSnapshot,
-      EventSales.Analytics.Resources.DailySalesAggregateSnapshot
+      EventSales.Analytics.Resources.DailySalesAggregateSnapshot,
+      EventSales.Analytics.Resources.EventSourceFreshnessSnapshot
     ],
     EventSales.Audit => [
       EventSales.Audit.Resources.AuditLog
