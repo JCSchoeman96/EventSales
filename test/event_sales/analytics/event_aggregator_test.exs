@@ -115,6 +115,177 @@ defmodule EventSales.Analytics.EventAggregatorTest do
            }
   end
 
+  describe "legacy summary_for_event today uses sale effective time" do
+    @now ~U[2026-06-01 12:00:00.000000Z]
+    @timezone "Africa/Johannesburg"
+
+    test "paid_at inside today wins over completed_at outside today", %{
+      source: source,
+      event: event,
+      ticket: ticket
+    } do
+      order =
+        create_order!(source, :completed,
+          woo_order_id: 93_001,
+          paid_at: ~U[2026-06-01 10:00:00.000000Z],
+          completed_at: ~U[2026-05-31 10:00:00.000000Z]
+        )
+
+      create_item!(order, event, ticket,
+        woo_line_item_id: 80,
+        quantity: 1,
+        line_total: Decimal.new("100.00")
+      )
+
+      assert {:ok, summary} =
+               EventAggregator.summary_for_event(event.id, now: @now, timezone: @timezone)
+
+      assert summary.total_sold == 1
+      assert summary.today_sold == 1
+      assert Decimal.equal?(summary.today_revenue, Decimal.new("100.00"))
+      assert summary.status_breakdown == %{completed: 1}
+    end
+
+    test "paid_at outside today excludes row even when completed_at is inside today", %{
+      source: source,
+      event: event,
+      ticket: ticket
+    } do
+      order =
+        create_order!(source, :completed,
+          woo_order_id: 93_002,
+          paid_at: ~U[2026-05-31 10:00:00.000000Z],
+          completed_at: ~U[2026-06-01 10:00:00.000000Z]
+        )
+
+      create_item!(order, event, ticket,
+        woo_line_item_id: 81,
+        quantity: 1,
+        line_total: Decimal.new("100.00")
+      )
+
+      assert {:ok, summary} =
+               EventAggregator.summary_for_event(event.id, now: @now, timezone: @timezone)
+
+      assert summary.total_sold == 1
+      assert Decimal.equal?(summary.total_revenue, Decimal.new("100.00"))
+      assert summary.today_sold == 0
+      assert Decimal.equal?(summary.today_revenue, Decimal.new("0"))
+      assert summary.status_breakdown == %{completed: 1}
+    end
+
+    test "falls back to completed_at when paid_at is nil", %{
+      source: source,
+      event: event,
+      ticket: ticket
+    } do
+      order =
+        create_order!(source, :completed,
+          woo_order_id: 93_003,
+          paid_at: nil,
+          completed_at: ~U[2026-06-01 10:00:00.000000Z]
+        )
+
+      create_item!(order, event, ticket,
+        woo_line_item_id: 82,
+        quantity: 2,
+        line_total: Decimal.new("200.00")
+      )
+
+      assert {:ok, summary} =
+               EventAggregator.summary_for_event(event.id, now: @now, timezone: @timezone)
+
+      assert summary.today_sold == 2
+      assert Decimal.equal?(summary.today_revenue, Decimal.new("200.00"))
+    end
+
+    test "completed row with both clocks nil keeps totals but excludes today", %{
+      source: source,
+      event: event,
+      ticket: ticket
+    } do
+      order =
+        create_order!(source, :completed,
+          woo_order_id: 93_004,
+          paid_at: nil,
+          completed_at: nil
+        )
+
+      create_item!(order, event, ticket,
+        woo_line_item_id: 83,
+        quantity: 2,
+        line_total: Decimal.new("200.00")
+      )
+
+      assert {:ok, summary} =
+               EventAggregator.summary_for_event(event.id, now: @now, timezone: @timezone)
+
+      assert summary.total_sold == 2
+      assert Decimal.equal?(summary.total_revenue, Decimal.new("200.00"))
+      assert summary.today_sold == 0
+      assert Decimal.equal?(summary.today_revenue, Decimal.new("0"))
+    end
+
+    test "pending row with paid_at inside today does not count toward totals or today", %{
+      source: source,
+      event: event,
+      ticket: ticket
+    } do
+      order =
+        create_order!(source, :pending,
+          woo_order_id: 93_005,
+          paid_at: ~U[2026-06-01 10:00:00.000000Z],
+          completed_at: nil
+        )
+
+      create_item!(order, event, ticket,
+        woo_line_item_id: 84,
+        quantity: 1,
+        line_total: Decimal.new("100.00")
+      )
+
+      assert {:ok, summary} =
+               EventAggregator.summary_for_event(event.id, now: @now, timezone: @timezone)
+
+      assert summary.total_sold == 0
+      assert Decimal.equal?(summary.total_revenue, Decimal.new("0"))
+      assert summary.today_sold == 0
+      assert Decimal.equal?(summary.today_revenue, Decimal.new("0"))
+      assert summary.status_breakdown == %{pending: 1}
+    end
+
+    test "invalid timezone preserves totals and zeroes today", %{
+      source: source,
+      event: event,
+      ticket: ticket
+    } do
+      order =
+        create_order!(source, :completed,
+          woo_order_id: 93_006,
+          paid_at: nil,
+          completed_at: ~U[2026-06-01 10:00:00.000000Z]
+        )
+
+      create_item!(order, event, ticket,
+        woo_line_item_id: 85,
+        quantity: 1,
+        line_total: Decimal.new("100.00")
+      )
+
+      assert {:ok, summary} =
+               EventAggregator.summary_for_event(event.id,
+                 now: @now,
+                 timezone: "Invalid/Timezone"
+               )
+
+      assert summary.total_sold == 1
+      assert Decimal.equal?(summary.total_revenue, Decimal.new("100.00"))
+      assert summary.today_sold == 0
+      assert Decimal.equal?(summary.today_revenue, Decimal.new("0"))
+      assert summary.status_breakdown == %{completed: 1}
+    end
+  end
+
   test "legacy summary_for_event stays completed-only while canonical gross includes historical completion evidence",
        %{
          source: source,

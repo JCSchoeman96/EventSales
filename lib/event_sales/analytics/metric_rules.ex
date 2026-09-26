@@ -9,6 +9,7 @@ defmodule EventSales.Analytics.MetricRules do
   """
 
   alias EventSales.Analytics.TimeRules
+  alias EventSales.Analytics.TimeRules.Period
   alias EventSales.Sales.FinancialPrimitives
   alias EventSales.Sales.Resources.{Order, OrderItem}
 
@@ -112,10 +113,16 @@ defmodule EventSales.Analytics.MetricRules do
     now = Keyword.get_lazy(opts, :now, &DateTime.utc_now/0)
     timezone = Keyword.get_lazy(opts, :timezone, &business_timezone/0)
 
+    today_period =
+      case TimeRules.today_bounds(timezone, now) do
+        {:ok, period} -> period
+        {:error, :invalid_timezone} -> nil
+      end
+
     rows
     |> Enum.reduce(empty_summary(), fn row, summary ->
       case normalize_row(row) do
-        {:ok, order, item} -> add_row(summary, order, item, now, timezone)
+        {:ok, order, item} -> add_row(summary, order, item, today_period)
         :error -> summary
       end
     end)
@@ -203,15 +210,24 @@ defmodule EventSales.Analytics.MetricRules do
     }
   end
 
-  defp add_row(summary, %Order{} = order, %OrderItem{} = item, now, timezone) do
+  defp add_row(summary, %Order{} = order, %OrderItem{} = item, today_period) do
     sold = sold_quantity(order, item)
     revenue = completed_revenue(order, item)
-    today? = sold > 0 and same_business_date?(order.completed_at, now, timezone)
+    today? = sold > 0 and sale_effective_in_period?(order, today_period)
 
     summary
     |> add_totals(sold, revenue)
     |> add_today_totals(today?, sold, revenue)
     |> add_status_breakdown(order, item)
+  end
+
+  defp sale_effective_in_period?(_order, nil), do: false
+
+  defp sale_effective_in_period?(%Order{} = order, %Period{} = period) do
+    case TimeRules.sale_effective_at(order) do
+      {:ok, effective_at} -> TimeRules.period_contains?(period, effective_at)
+      {:error, :missing_sale_effective_time} -> false
+    end
   end
 
   defp add_totals(summary, sold, revenue) do

@@ -115,6 +115,156 @@ defmodule EventSales.Analytics.MetricRulesTest do
     assert summary.today_revenue == Decimal.new("0")
   end
 
+  describe "legacy summarize today uses sale effective time" do
+    @now ~U[2026-06-01 12:00:00.000000Z]
+    @timezone "Africa/Johannesburg"
+
+    test "paid_at inside today wins over completed_at outside today" do
+      order =
+        order(:completed, %{
+          paid_at: ~U[2026-06-01 10:00:00.000000Z],
+          completed_at: ~U[2026-05-31 10:00:00.000000Z]
+        })
+
+      summary =
+        MetricRules.summarize(
+          [%{order: order, item: ticket_item(%{quantity: 1, line_total: Decimal.new("100.00")})}],
+          now: @now,
+          timezone: @timezone
+        )
+
+      assert summary.total_sold == 1
+      assert summary.today_sold == 1
+      assert summary.today_revenue == Decimal.new("100.00")
+      assert summary.status_breakdown == %{completed: 1}
+    end
+
+    test "paid_at outside today excludes row even when completed_at is inside today" do
+      order =
+        order(:completed, %{
+          paid_at: ~U[2026-05-31 10:00:00.000000Z],
+          completed_at: ~U[2026-06-01 10:00:00.000000Z]
+        })
+
+      summary =
+        MetricRules.summarize(
+          [%{order: order, item: ticket_item(%{quantity: 1, line_total: Decimal.new("100.00")})}],
+          now: @now,
+          timezone: @timezone
+        )
+
+      assert summary.total_sold == 1
+      assert summary.total_revenue == Decimal.new("100.00")
+      assert summary.today_sold == 0
+      assert summary.today_revenue == Decimal.new("0")
+      assert summary.status_breakdown == %{completed: 1}
+    end
+
+    test "falls back to completed_at when paid_at is nil" do
+      order =
+        order(:completed, %{
+          paid_at: nil,
+          completed_at: ~U[2026-06-01 10:00:00.000000Z]
+        })
+
+      summary =
+        MetricRules.summarize(
+          [%{order: order, item: ticket_item(%{quantity: 2, line_total: Decimal.new("200.00")})}],
+          now: @now,
+          timezone: @timezone
+        )
+
+      assert summary.today_sold == 2
+      assert summary.today_revenue == Decimal.new("200.00")
+    end
+
+    test "completed row with both clocks nil keeps totals but excludes today" do
+      order = order(:completed, %{paid_at: nil, completed_at: nil})
+
+      summary =
+        MetricRules.summarize(
+          [%{order: order, item: ticket_item(%{quantity: 2, line_total: Decimal.new("200.00")})}],
+          now: @now,
+          timezone: @timezone
+        )
+
+      assert summary.total_sold == 2
+      assert summary.total_revenue == Decimal.new("200.00")
+      assert summary.today_sold == 0
+      assert summary.today_revenue == Decimal.new("0")
+    end
+
+    test "pending row with paid_at inside today does not count toward totals or today" do
+      order =
+        order(:pending, %{
+          paid_at: ~U[2026-06-01 10:00:00.000000Z],
+          completed_at: nil
+        })
+
+      summary =
+        MetricRules.summarize(
+          [%{order: order, item: ticket_item(%{quantity: 1, line_total: Decimal.new("100.00")})}],
+          now: @now,
+          timezone: @timezone
+        )
+
+      assert summary.total_sold == 0
+      assert summary.total_revenue == Decimal.new("0")
+      assert summary.today_sold == 0
+      assert summary.today_revenue == Decimal.new("0")
+      assert summary.status_breakdown == %{pending: 1}
+    end
+
+    test "Johannesburg civil boundary uses sale effective completed_at fallback" do
+      inside_today =
+        order(:completed, %{paid_at: nil, completed_at: ~U[2026-05-31 22:30:00.000000Z]})
+
+      previous_day =
+        order(:completed, %{paid_at: nil, completed_at: ~U[2026-05-31 21:30:00.000000Z]})
+
+      now = ~U[2026-06-01 10:00:00.000000Z]
+
+      summary =
+        MetricRules.summarize(
+          [
+            %{
+              order: inside_today,
+              item: ticket_item(%{quantity: 1, line_total: Decimal.new("50.00")})
+            },
+            {previous_day, ticket_item(%{quantity: 1, line_total: Decimal.new("25.00")})}
+          ],
+          now: now,
+          timezone: @timezone
+        )
+
+      assert summary.total_sold == 2
+      assert summary.total_revenue == Decimal.new("75.00")
+      assert summary.today_sold == 1
+      assert summary.today_revenue == Decimal.new("50.00")
+    end
+
+    test "invalid timezone preserves totals and zeroes today" do
+      order =
+        order(:completed, %{
+          paid_at: nil,
+          completed_at: ~U[2026-06-01 10:00:00.000000Z]
+        })
+
+      summary =
+        MetricRules.summarize(
+          [%{order: order, item: ticket_item(%{quantity: 1, line_total: Decimal.new("100.00")})}],
+          now: @now,
+          timezone: "Invalid/Timezone"
+        )
+
+      assert summary.total_sold == 1
+      assert summary.total_revenue == Decimal.new("100.00")
+      assert summary.today_sold == 0
+      assert summary.today_revenue == Decimal.new("0")
+      assert summary.status_breakdown == %{completed: 1}
+    end
+  end
+
   describe "financial_summary/3" do
     test "derives tax-inclusive canonical summary from primitive totals and order count" do
       primitives =
