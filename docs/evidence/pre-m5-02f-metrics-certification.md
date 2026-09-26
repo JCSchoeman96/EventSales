@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | Plan ID | PRE-M5-02F |
-| Version | v3 |
+| Version | v4 |
 | Status | Certification artifact (pre-merge; PR #251) |
 | Scope | MG2 + MG4–MG8 against locked PRE-M5 metric contract |
 | Certified programme base (post #252) | `ab46cb6f65de2fb80aaf01444eba670895c3fea6` |
@@ -17,6 +17,7 @@
 - `v1` — Initial acceptance matrix, query-path certification, M4 parity, lifecycle evidence, and verdict table.
 - `v2` — Gate B: selective bulk fixture (800 noise lines), `ANALYZE`, telemetry `EXPLAIN (FORMAT JSON)` with index-scan proof; Gate A dependency path documented (PR #252); plural-reader citation fix.
 - `v3` — Gate A merged (#252 / `ab46cb6`); 800 noise refund facts; strict event-first `sales_order_items` indexes on guard/gross/order-count; refund-path boundedness proof; three-iteration planner stability test.
+- `v4` — Refund certification: zero tolerance for `Seq Scan` on `sales_refunds` / `sales_refund_lines` under 800-noise fixture; indexed `sales_refunds` header access required.
 
 Authority: this file is the 02F evidence artifact. Programme closeout wording in `docs/path-1/path-1-phase-breakdown.md` and `docs/roadmap/current-state-and-path-handoff.md` stays unchanged until this PR merges and post-merge CI passes on the merge SHA.
 
@@ -79,7 +80,7 @@ Observed plans (local test DB after `ANALYZE`, selective fixture; all three iter
 | `incomplete_primitive_guard` | Incomplete gross primitive guard | `s0.event_id = $1` | **Index Scan** on `sales_order_items_event_id_idx` (`Index Cond` = target `event_id`); every `sales_order_items` node uses only `sales_order_items_event_id_idx` or `sales_order_items_event_mapping_status_idx` | `sales_orders` → **Index Scan** on `sales_orders_pkey` (single-row PK join) | None on `sales_order_items` | PASS |
 | `gross_aggregate` | Tax-inclusive gross by currency | `s0.event_id = $1` | **Index Scan** on `sales_order_items_event_id_idx` | `sales_orders` → **Index Scan** on `sales_orders_pkey` | None on `sales_order_items` | PASS |
 | `recognised_order_count` | Distinct order count by currency | `s0.event_id = $1` | **Index Scan** on `sales_order_items_event_id_idx` | `sales_orders` → **Index Scan** on `sales_orders_pkey` | None on `sales_order_items` | PASS |
-| `refund_aggregate` | Qualifying refund primitives | Subquery `ss0.event_id = $1` | At least one **Index Scan** on `sales_order_items_event_id_idx` for the event-bounded ticket subquery; additional `sales_order_items` nodes may use `sales_order_items_pkey` or `sales_order_items_order_id_idx` for parent-line identity joins | `sales_refund_lines` → **Index Scan** on `sales_refund_lines_order_item_id_idx`; `sales_orders` → **Index Scan** on `sales_orders_pkey`; `sales_refunds` → **Index Scan** on `sales_refunds_order_id_idx` when present | No `Seq Scan` on `sales_refund_lines` or `sales_refunds` with `Plan Rows` > 25 | PASS |
+| `refund_aggregate` | Qualifying refund primitives | Subquery `ss0.event_id = $1` | Event-bounded subquery: **Index Scan** on `sales_order_items_event_id_idx` (required); parent line joins may use `sales_order_items_pkey` or `sales_order_items_order_id_idx` | `sales_refund_lines` → **Index Scan** on `sales_refund_lines_order_item_id_idx`; `sales_refunds` → **Index Scan** on `sales_refunds_pkey` (observed local EXPLAIN probe); `sales_orders` → **Index Scan** on `sales_orders_pkey` | **Zero** `Seq Scan` nodes on `sales_refund_lines` and `sales_refunds` across all certification iterations (801 refund headers/lines in fixture; enforced by test) | PASS |
 
 Legacy operational/status aggregation for snapshot refresh (`legacy_summary_aggregate_query/3`) remains event-scoped (`where: oi.event_id == ^event_id`) and is exercised in `EventAggregatorTest` and snapshot refresh tests.
 

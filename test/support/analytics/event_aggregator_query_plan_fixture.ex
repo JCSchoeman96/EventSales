@@ -24,6 +24,8 @@ defmodule EventSales.TestSupport.Analytics.EventAggregatorQueryPlanFixture do
   def seed!(opts \\ []) do
     noise_count = Keyword.get(opts, :noise_line_count, @noise_line_count)
 
+    truncate_sales_financial_facts!()
+
     source = SalesHelpers.create_source_system!()
 
     target_event =
@@ -54,6 +56,20 @@ defmodule EventSales.TestSupport.Analytics.EventAggregatorQueryPlanFixture do
       target_order_id: target_order_id,
       target_item_id: target_item_id
     }
+  end
+
+  defp truncate_sales_financial_facts! do
+    {:ok, _} =
+      Repo.query("""
+      TRUNCATE TABLE
+        sales_refund_lines,
+        sales_refunds,
+        sales_order_items,
+        sales_orders
+      RESTART IDENTITY CASCADE
+      """)
+
+    :ok
   end
 
   defp analyze_financial_tables! do

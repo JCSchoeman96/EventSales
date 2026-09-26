@@ -18,7 +18,13 @@ defmodule EventSales.Analytics.EventAggregatorFinancialQueryPlanTest do
     :recognised_order_count
   ]
 
-  @max_tiny_seq_scan_rows 25
+  @refund_index_access_types ["Index Scan", "Bitmap Index Scan", "Index Only Scan"]
+
+  @allowed_refund_header_indexes [
+    "sales_refunds_order_id_idx",
+    "sales_refunds_pkey",
+    "sales_refunds_unique_source_order_refund_index"
+  ]
 
   test "financial_summaries_for_event uses indexed event-scoped plans under selective data" do
     for iteration <- 1..3 do
@@ -147,8 +153,8 @@ defmodule EventSales.Analytics.EventAggregatorFinancialQueryPlanTest do
     assert event_first_nodes != [],
            "#{path} iteration #{iteration}: missing event-first sales_order_items index scan, got #{inspect(plan_summary(plan))}"
 
-    assert_no_high_volume_seq_scan!(plan, "sales_refund_lines", path, iteration)
-    assert_no_high_volume_seq_scan!(plan, "sales_refunds", path, iteration)
+    assert_no_seq_scan!(plan, "sales_refund_lines", path, iteration)
+    assert_no_seq_scan!(plan, "sales_refunds", path, iteration)
 
     refund_line_nodes = relation_nodes(plan, "sales_refund_lines")
 
@@ -157,21 +163,33 @@ defmodule EventSales.Analytics.EventAggregatorFinancialQueryPlanTest do
 
     assert Enum.any?(refund_line_nodes, &refund_line_index_access?/1),
            "#{path} iteration #{iteration}: expected sales_refund_lines_order_item_id_idx access, got #{inspect(plan_summary(plan))}"
+
+    refund_nodes = relation_nodes(plan, "sales_refunds")
+
+    assert refund_nodes != [],
+           "#{path} iteration #{iteration}: expected sales_refunds in refund aggregate plan"
+
+    assert Enum.any?(refund_nodes, &refund_header_index_access?/1),
+           "#{path} iteration #{iteration}: expected bounded indexed sales_refunds access, got #{inspect(plan_summary(plan))}"
   end
 
   defp refund_line_index_access?(node) do
-    node["Node Type"] in ["Index Scan", "Bitmap Index Scan", "Index Only Scan"] and
+    node["Node Type"] in @refund_index_access_types and
       node["Index Name"] == "sales_refund_lines_order_item_id_idx"
   end
 
-  defp assert_no_high_volume_seq_scan!(plan, relation, path, iteration) do
-    for node <- relation_nodes(plan, relation),
-        node["Node Type"] == "Seq Scan" do
-      rows = node["Plan Rows"] || 0
+  defp refund_header_index_access?(node) do
+    node["Node Type"] in @refund_index_access_types and
+      node["Index Name"] in @allowed_refund_header_indexes
+  end
 
-      assert rows <= @max_tiny_seq_scan_rows,
-             "#{path} iteration #{iteration}: unbounded seq scan on #{relation} (plan rows #{rows}): #{inspect(node)}"
-    end
+  defp assert_no_seq_scan!(plan, relation, path, iteration) do
+    seq_nodes =
+      relation_nodes(plan, relation)
+      |> Enum.filter(&(Map.get(&1, "Node Type") == "Seq Scan"))
+
+    assert seq_nodes == [],
+           "#{path} iteration #{iteration}: seq scan forbidden on #{relation} with representative refund noise: #{inspect(seq_nodes)}"
   end
 
   defp relation_nodes(plan, relation) do
