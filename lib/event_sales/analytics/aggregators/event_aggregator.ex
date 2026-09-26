@@ -12,8 +12,13 @@ defmodule EventSales.Analytics.Aggregators.EventAggregator do
   import Ecto.Query
 
   alias EventSales.Analytics.MetricRules
+  alias EventSales.Analytics.TimeRules.Period
   alias EventSales.Repo
   alias EventSales.Sales.FinancialPrimitives
+
+  @supported_financial_period_kinds [:today, :yesterday, {:rolling_days, 7}, {:rolling_days, 30}]
+  @johannesburg_timezone "Africa/Johannesburg"
+  @day_seconds 24 * 60 * 60
 
   @type financial_summaries :: %{String.t() => MetricRules.financial_summary()}
 
@@ -31,6 +36,37 @@ defmodule EventSales.Analytics.Aggregators.EventAggregator do
       gross_rows = Repo.all(gross_aggregate_query(event_id))
       refund_rows = Repo.all(refund_aggregate_query(event_id))
       order_count_rows = Repo.all(recognised_order_count_query(event_id))
+
+      build_financial_summaries(event_id, gross_rows, refund_rows, order_count_rows)
+    end
+  end
+
+  @doc """
+  Returns canonical financial summaries keyed by currency for one event and reporting period.
+
+  Only supports preset period kinds (`:today`, `:yesterday`, rolling 7d/30d). Gross and refund
+  facts are placed by sale-effective `COALESCE(paid_at, completed_at)` and refund
+  `source_created_at` respectively inside the half-open UTC window `[start_utc, end_utc)`.
+  """
+  @spec financial_summaries_for_event_period(Ecto.UUID.t(), Period.t()) ::
+          {:ok, financial_summaries()}
+          | {:error,
+             :invalid_event_id
+             | :invalid_period
+             | :unsupported_period_kind
+             | :missing_sale_effective_time
+             | :missing_refund_effective_time
+             | :incomplete_financial_primitives}
+  def financial_summaries_for_event_period(event_id, %Period{} = period)
+      when is_binary(event_id) do
+    with {:ok, event_id} <- cast_event_id(event_id),
+         :ok <- validate_financial_period(period),
+         :ok <- assert_no_missing_sale_effective_time(event_id),
+         :ok <- assert_no_missing_refund_effective_time(event_id),
+         :ok <- assert_gross_lines_complete_for_period(event_id, period) do
+      gross_rows = Repo.all(gross_aggregate_query(event_id, period))
+      refund_rows = Repo.all(refund_aggregate_query(event_id, period))
+      order_count_rows = Repo.all(recognised_order_count_query(event_id, period))
 
       build_financial_summaries(event_id, gross_rows, refund_rows, order_count_rows)
     end
@@ -103,24 +139,221 @@ defmodule EventSales.Analytics.Aggregators.EventAggregator do
         join: o in "sales_orders",
         on: oi.order_id == o.id,
         where:
-          oi.event_id == ^event_id and
-            (o.status == "completed" or not is_nil(o.completed_at)) and
-            oi.mapping_status == "mapped" and oi.item_kind == "ticket" and oi.quantity > 0 and
-            (is_nil(oi.line_total) or is_nil(oi.line_total_tax)),
+          ^dynamic(
+            [oi, o],
+            ^recognised_sale_item_filters(event_id) and
+              (is_nil(oi.line_total) or is_nil(oi.line_total_tax))
+          ),
         select: 1,
         limit: 1
 
     if Repo.one(query), do: {:error, :incomplete_financial_primitives}, else: :ok
   end
 
-  defp gross_aggregate_query(event_id) do
+  defp validate_financial_period(%Period{
+         kind: kind,
+         start_utc: start_utc,
+         end_utc: end_utc,
+         timezone: timezone
+       }) do
+    cond do
+      not supported_financial_period_kind?(kind) ->
+        {:error, :unsupported_period_kind}
+
+      not valid_utc_period_bounds?(start_utc, end_utc) ->
+        {:error, :invalid_period}
+
+      true ->
+        validate_supported_period_semantics(kind, start_utc, end_utc, timezone)
+    end
+  end
+
+  defp validate_supported_period_semantics(:today, start_utc, end_utc, timezone) do
+    validate_johannesburg_civil_day_period(start_utc, end_utc, timezone)
+  end
+
+  defp validate_supported_period_semantics(:yesterday, start_utc, end_utc, timezone) do
+    validate_johannesburg_civil_day_period(start_utc, end_utc, timezone)
+  end
+
+  defp validate_supported_period_semantics({:rolling_days, days}, start_utc, end_utc, timezone)
+       when days in [7, 30] do
+    validate_exact_rolling_period(days, start_utc, end_utc, timezone)
+  end
+
+  defp validate_johannesburg_civil_day_period(start_utc, end_utc, timezone) do
+    if timezone != @johannesburg_timezone,
+      do: {:error, :invalid_period},
+      else: validate_johannesburg_civil_shape(start_utc, end_utc)
+  end
+
+  defp validate_johannesburg_civil_shape(start_utc, end_utc) do
+    case shift_both_to_johannesburg(start_utc, end_utc) do
+      {:ok, start_local, end_local} ->
+        if johannesburg_civil_day_shape?(start_local, end_local),
+          do: :ok,
+          else: {:error, :invalid_period}
+
+      :error ->
+        {:error, :invalid_period}
+    end
+  end
+
+  defp shift_both_to_johannesburg(start_utc, end_utc) do
+    with {:ok, start_local} <- DateTime.shift_zone(start_utc, @johannesburg_timezone),
+         {:ok, end_local} <- DateTime.shift_zone(end_utc, @johannesburg_timezone) do
+      {:ok, start_local, end_local}
+    else
+      _ -> :error
+    end
+  end
+
+  defp johannesburg_civil_day_shape?(start_local, end_local) do
+    local_midnight?(start_local) and local_midnight?(end_local) and
+      Date.add(DateTime.to_date(start_local), 1) == DateTime.to_date(end_local)
+  end
+
+  defp local_midnight?(%DateTime{} = datetime) do
+    datetime.hour == 0 and datetime.minute == 0 and datetime.second == 0 and
+      elem(datetime.microsecond, 0) == 0
+  end
+
+  defp validate_exact_rolling_period(days, start_utc, end_utc, timezone) do
+    if timezone != nil or DateTime.diff(end_utc, start_utc, :second) != days * @day_seconds do
+      {:error, :invalid_period}
+    else
+      :ok
+    end
+  end
+
+  defp supported_financial_period_kind?(kind) do
+    kind in @supported_financial_period_kinds
+  end
+
+  defp valid_utc_period_bounds?(%DateTime{} = start_utc, %DateTime{} = end_utc) do
+    utc_instant?(start_utc) and utc_instant?(end_utc) and
+      DateTime.compare(start_utc, end_utc) == :lt
+  end
+
+  defp valid_utc_period_bounds?(_, _), do: false
+
+  defp utc_instant?(%DateTime{time_zone: tz, utc_offset: 0, std_offset: 0})
+       when tz in ["Etc/UTC", "UTC"],
+       do: true
+
+  defp utc_instant?(_), do: false
+
+  defp assert_no_missing_sale_effective_time(event_id) do
+    query =
+      from oi in "sales_order_items",
+        join: o in "sales_orders",
+        on: oi.order_id == o.id,
+        where:
+          ^dynamic(
+            [oi, o],
+            ^recognised_sale_item_filters(event_id) and is_nil(o.paid_at) and
+              is_nil(o.completed_at)
+          ),
+        select: 1,
+        limit: 1
+
+    if Repo.one(query), do: {:error, :missing_sale_effective_time}, else: :ok
+  end
+
+  defp assert_no_missing_refund_effective_time(event_id) do
+    tickets = event_ticket_items_subquery(event_id)
+
+    query =
+      from rl in "sales_refund_lines",
+        join: r in "sales_refunds",
+        on: rl.refund_id == r.id,
+        join: o in "sales_orders",
+        on: r.order_id == o.id,
+        join: parent in "sales_order_items",
+        on:
+          parent.order_id == o.id and parent.woo_line_item_id == rl.woo_refunded_item_id and
+            parent.id == rl.order_item_id,
+        join: ticket in subquery(tickets),
+        on: ticket.id == parent.id,
+        where: ^dynamic([rl, r, o], ^refund_primitives_filters() and is_nil(r.source_created_at)),
+        select: 1,
+        limit: 1
+
+    if Repo.one(query), do: {:error, :missing_refund_effective_time}, else: :ok
+  end
+
+  defp assert_gross_lines_complete_for_period(event_id, %Period{
+         start_utc: start_utc,
+         end_utc: end_utc
+       }) do
+    query =
+      from oi in "sales_order_items",
+        join: o in "sales_orders",
+        on: oi.order_id == o.id,
+        where:
+          ^dynamic(
+            [oi, o],
+            ^recognised_sale_item_filters(event_id) and
+              ^sale_effective_in_period?(start_utc, end_utc) and
+              (is_nil(oi.line_total) or is_nil(oi.line_total_tax))
+          ),
+        select: 1,
+        limit: 1
+
+    if Repo.one(query), do: {:error, :incomplete_financial_primitives}, else: :ok
+  end
+
+  defp recognised_sale_item_filters(event_id) do
+    dynamic(
+      [oi, o],
+      oi.event_id == ^event_id and
+        (o.status == "completed" or not is_nil(o.completed_at)) and
+        oi.mapping_status == "mapped" and oi.item_kind == "ticket" and oi.quantity > 0
+    )
+  end
+
+  defp sale_effective_in_period?(start_utc, end_utc) do
+    dynamic(
+      [_oi, o],
+      fragment(
+        "? <= COALESCE(?, ?) AND COALESCE(?, ?) < ?",
+        ^start_utc,
+        o.paid_at,
+        o.completed_at,
+        o.paid_at,
+        o.completed_at,
+        ^end_utc
+      )
+    )
+  end
+
+  defp refund_effective_in_period?(start_utc, end_utc) do
+    dynamic(
+      [_rl, r, _o],
+      fragment("? <= ? AND ? < ?", ^start_utc, r.source_created_at, r.source_created_at, ^end_utc)
+    )
+  end
+
+  defp gross_aggregate_query(event_id, %Period{start_utc: start_utc, end_utc: end_utc} = _period) do
     from oi in "sales_order_items",
       join: o in "sales_orders",
       on: oi.order_id == o.id,
       where:
-        oi.event_id == ^event_id and
-          (o.status == "completed" or not is_nil(o.completed_at)) and
-          oi.mapping_status == "mapped" and oi.item_kind == "ticket" and oi.quantity > 0,
+        ^dynamic(
+          [oi, o],
+          ^recognised_sale_item_filters(event_id) and
+            ^sale_effective_in_period?(start_utc, end_utc)
+        ),
+      group_by: o.currency,
+      select:
+        {o.currency, sum(oi.quantity), sum(fragment("? + ?", oi.line_total, oi.line_total_tax))}
+  end
+
+  defp gross_aggregate_query(event_id) do
+    from oi in "sales_order_items",
+      join: o in "sales_orders",
+      on: oi.order_id == o.id,
+      where: ^recognised_sale_item_filters(event_id),
       group_by: o.currency,
       select:
         {o.currency, sum(oi.quantity), sum(fragment("? + ?", oi.line_total, oi.line_total_tax))}
@@ -142,6 +375,37 @@ defmodule EventSales.Analytics.Aggregators.EventAggregator do
         not is_nil(rl.refund_total_amount) and not is_nil(rl.refund_total_tax) and
         fragment("? IS NOT DISTINCT FROM ?", r.currency, o.currency)
     )
+  end
+
+  defp refund_aggregate_query(event_id, %Period{start_utc: start_utc, end_utc: end_utc}) do
+    tickets = event_ticket_items_subquery(event_id)
+
+    from rl in "sales_refund_lines",
+      join: r in "sales_refunds",
+      on: rl.refund_id == r.id,
+      join: o in "sales_orders",
+      on: r.order_id == o.id,
+      join: parent in "sales_order_items",
+      on:
+        parent.order_id == o.id and parent.woo_line_item_id == rl.woo_refunded_item_id and
+          parent.id == rl.order_item_id,
+      join: ticket in subquery(tickets),
+      on: ticket.id == parent.id,
+      where:
+        ^dynamic(
+          [rl, r, o],
+          ^refund_primitives_filters() and ^refund_effective_in_period?(start_utc, end_utc)
+        ),
+      group_by: o.currency,
+      select:
+        {o.currency,
+         sum(
+           fragment(
+             "CASE WHEN ? > 0 THEN ? ELSE 0 END",
+             rl.refunded_quantity,
+             rl.refunded_quantity
+           )
+         ), sum(fragment("? + ?", rl.refund_total_amount, rl.refund_total_tax))}
   end
 
   defp refund_aggregate_query(event_id) do
@@ -171,14 +435,25 @@ defmodule EventSales.Analytics.Aggregators.EventAggregator do
          ), sum(fragment("? + ?", rl.refund_total_amount, rl.refund_total_tax))}
   end
 
-  defp recognised_order_count_query(event_id) do
+  defp recognised_order_count_query(event_id, %Period{start_utc: start_utc, end_utc: end_utc}) do
     from oi in "sales_order_items",
       join: o in "sales_orders",
       on: oi.order_id == o.id,
       where:
-        oi.event_id == ^event_id and
-          (o.status == "completed" or not is_nil(o.completed_at)) and
-          oi.mapping_status == "mapped" and oi.item_kind == "ticket" and oi.quantity > 0,
+        ^dynamic(
+          [oi, o],
+          ^recognised_sale_item_filters(event_id) and
+            ^sale_effective_in_period?(start_utc, end_utc)
+        ),
+      group_by: o.currency,
+      select: {o.currency, count(o.id, :distinct)}
+  end
+
+  defp recognised_order_count_query(event_id) do
+    from oi in "sales_order_items",
+      join: o in "sales_orders",
+      on: oi.order_id == o.id,
+      where: ^recognised_sale_item_filters(event_id),
       group_by: o.currency,
       select: {o.currency, count(o.id, :distinct)}
   end
