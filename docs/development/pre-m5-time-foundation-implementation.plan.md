@@ -1,17 +1,18 @@
 ---
 Plan ID: pre-m5-time-foundation-implementation
-Plan version: v1
+Plan version: v2
 Status: active execution plan (PRE-M5-TIME-A docs-only baseline)
 Scope: PRE-M5-TIME-B through PRE-M5-TIME-G sequencing; M1-07 physical conformance on certified main
 Authority: M1-07 T1–T31 = semantic authority; this PRE-M5-TIME plan = current physical/repository implementation authority
 Historical context: `docs/path-1/m1-07-timestamp-johannesburg-period-and-freshness-contract.md` (locked semantics; repository observations superseded here)
 Last updated: 2026-09-26
-Change summary (v1): Initial current-repo reconciliation and implementation plan from certified PR #253 merge baseline
+Change summary (v2): Sync freshness from terminal catch-up `source_observed_at`; missing-anchor API consistency; M5 deferral typo; owner-decision gates before TIME-C/TIME-F
 ---
 
 ### Revision log
 
 - v1 — PRE-M5-TIME-A current-repo reconciliation + physical implementation plan at merge `5746edb8a2c272b1e6c0ce16153f9063c8e78925`
+- v2 — PR #254 review: separate sync source-observed watermark from historical coverage; remove fourth freshness enum; fix M5/M6 typo; lock owner-decision deadlines
 
 # PRE-M5-TIME — Time, period and source-freshness foundation
 
@@ -91,7 +92,7 @@ M1-07 at `8b0d82c` stated `date_paid_gmt` was absent. **Current main disproves t
 | Topic | Classification |
 | --- | --- |
 | M1-07 T1–T31 semantic table | **NOT_APPLICABLE** to implement (locked); referenced everywhere |
-| M5 hourly/daily aggregate tables | **DEFERRED_TO_M6** / M5 scope (T30 handoff) |
+| M5 hourly/daily aggregate tables | **DEFERRED_TO_M5** (T30 handoff; M6 owns dashboard UX only) |
 | Stale banner UX copy | **DEFERRED_TO_M6** (M6-06); backend classification owned here |
 | Corrected effective-time audit history | **DEFERRED** (`GAP-OPT-TIME-AUDIT`) |
 
@@ -124,14 +125,48 @@ Per M1-07 T10, per event scope:
 ```text
 order_source_watermark_at      ← max durable Order.updated_at_source applied for event’s orders
 refund_source_watermark_at     ← max Refund.source_created_at applied for event’s refunds (active facts)
-sync_covered_through_at        ← bounded catch-up progress (sales + refunds components; see TIME-E)
+sync_source_observed_at        ← terminal bounded catch-up source high-water (see below; TIME-E)
 ```
 
 **Anchor (derived, recommended):**
 
 ```text
-source_freshness_anchor_at = max(order_wm, refund_wm, sync_wm)   -- component-wise max of present components
+source_freshness_anchor_at = max(order_wm, refund_wm, sync_observed_wm)
+  -- component-wise max of present components
 ```
+
+### Sync freshness vs historical coverage (locked)
+
+Repository evidence shows **historical completeness boundaries** and **catch-up source observation** are different clocks:
+
+```text
+HistoricalCoverageCertifier summary (certified run):
+  sales_covered_through   = SyncRun.date_to          -- historical coverage boundary
+  refunds_covered_through = catchup.source_observed_at   -- aliases catch-up high-water in that summary only
+```
+
+Catch-up machinery durably carries source high-water separately:
+
+```text
+HistoricalCatchupEvidence.source_observed_at
+  -- terminal bounded catch-up source-observed timestamp (lib/event_sales/ingestion/historical_catchup_evidence.ex)
+```
+
+M1-07 T10 requires freshness from **successful bounded catch-up source-modified / source-observed progress**, not from BACKFILL coverage bounds.
+
+**Locked TIME-E rule:** a successful bounded catch-up may advance `sync_source_observed_at` only from explicit durable **terminal** catch-up source high-water (`HistoricalCatchupEvidence.source_observed_at` after successful terminal completion, or an equivalently named freshness watermark persisted at that boundary).
+
+**Do NOT derive source freshness from:**
+
+```text
+SyncRun.date_to
+sales_covered_through
+refunds_covered_through   (as a coverage field — even when it currently equals catchup.source_observed_at in certifier output)
+historical coverage_start / coverage_certified_at
+SyncRun.finished_at or job wall-clock completion
+```
+
+Do not treat incidental equality between `refunds_covered_through` and `source_observed_at` in today's certifier summary as the freshness contract. Consume explicit terminal catch-up evidence (or a dedicated freshness watermark written at terminal catch-up success).
 
 Do **not** substitute: snapshot `refreshed_at`, Redis/ETS `updated_at`, `HotStateAggregator.last_fresh_at`, `inserted_at`, PubSub delivery time.
 
@@ -171,7 +206,20 @@ Future anchor (`anchor > now`): clamp age to 0 → NORMAL + low-cardinality tele
 
 M1-07 does **not** authorize a fourth persisted programme state such as `UNKNOWN`.
 
-**Plan decision:** expose classification as `{:ok, classification}` when anchor exists; `{:error, :missing_source_freshness_anchor}` when no component has ever advanced (event with zero applied source rows and no sync coverage). Dashboards may show read-model warming separately. If product requires a visible “no source data yet” label, that is **OWNER_DECISION_REQUIRED** for M6 copy only; backend stays typed missing, not a fourth freshness enum.
+**Plan decision (single API contract):** backend source-freshness classification is exactly `:normal | :aging | :stale` when an anchor exists. Missing anchor is a typed absence, not a fourth programme classification:
+
+```text
+{:ok,
+ %{
+   classification: :normal | :aging | :stale,
+   anchor_at: DateTime.t(),
+   age_ms: non_neg_integer()
+ }}
+
+{:error, :missing_source_freshness_anchor}
+```
+
+Exact public result structs may be finalized in TIME-D/F, but the plan **prohibits** `:anchor_missing`, `:unknown`, or equivalent as backend source-freshness classifications. M6 presentation may show “no source freshness available” using read-model metadata or error handling without extending the three-state contract.
 
 ## Freshness projection lifecycle (durable row)
 
@@ -190,7 +238,9 @@ Keep existing `:warming | :ready | :stale` as **read-model health**, renamed in 
 
 ```text
 read_model: %{lifecycle: :warming | :ready | :degraded, generated_at: ..., rebuild_in_flight?: ...}
-source:     %{classification: :normal | :aging | :stale | :anchor_missing, anchor_at: ..., age_ms: ...}
+source_freshness:
+  {:ok, %{classification: :normal | :aging | :stale, anchor_at: ..., age_ms: ...}}
+  | {:error, :missing_source_freshness_anchor}
 ```
 
 ## Refresh job lifecycle
@@ -218,7 +268,7 @@ May remain as **financial snapshot metadata** (order rows touched in refresh), n
 - Webhook order applies and refund applies also advance freshness.
 - Catch-up is one input, not the whole anchor.
 
-Sync fields remain **inputs** to `sync_covered_through_at` on the projection.
+`SyncRun.date_to`, `sales_covered_through`, and coverage certifier fields are **historical completeness**, not sync freshness inputs. Only terminal catch-up **source_observed_at** (or equivalent terminal freshness watermark) may advance `sync_source_observed_at`.
 
 ## Option C — dedicated event freshness projection (recommended)
 
@@ -237,7 +287,7 @@ Durable fields (proposal):
 event_id
 order_source_watermark_at        :utc_datetime_usec | nil
 refund_source_watermark_at       :utc_datetime_usec | nil
-sync_covered_through_at          :utc_datetime_usec | nil   -- composite policy in TIME-E
+sync_source_observed_at          :utc_datetime_usec | nil   -- monotonic; TIME-E from terminal catch-up evidence only
 projection_version               :integer
 projection_refreshed_at          :utc_datetime_usec          -- row metadata, not source anchor
 ```
@@ -264,7 +314,16 @@ M1-07 anchor for a scope is **max** of latest applies (portfolio “when did we 
 - Event-scoped dashboards use **that event’s** projection row.
 - All-events management view must not hide per-event STALE behind a global max without an explicit rule.
 
-**OWNER_DECISION_REQUIRED:** all-events banner uses (a) worst classification across events with readiness, (b) max anchor only, or (c) both signals (worst for STALE banner, max for “last portfolio apply”). Default recommendation for safety: **worst event classification** for STALE/AGING banner; expose max anchor as supplementary telemetry. Document choice in TIME-G certification.
+**ALL_EVENTS_FRESHNESS_POLICY — OWNER_DECISION_REQUIRED** (must be locked **before TIME-F** changes `AdminDashboard` all-events freshness behavior):
+
+```text
+Options (owners choose one; TIME-F must STOP rather than pick):
+  (a) worst event classification across in-scope events with readiness
+  (b) max anchor only (portfolio “last apply” — may hide per-event STALE)
+  (c) combined signals (e.g. worst for STALE banner, max for telemetry)
+```
+
+TIME-D/E may implement per-event durable projection independently. TIME-G **certifies** the chosen rule; TIME-G must not be where the policy is first selected.
 
 ---
 
@@ -273,9 +332,9 @@ M1-07 anchor for a scope is **max** of latest applies (portfolio “when did we 
 | Producer | Current behavior | Planned owner (TIME-E) |
 | --- | --- | --- |
 | Order webhook apply | `OrderProcessedNotifier` → `HotStateAggregator.apply_event` with `source_updated_at`; GenServer `latest_source_updated_at` map only | Post-commit: `SourceFreshness.advance_order/2` with `order.updated_at_source` for each affected `event_id` |
-| Order reconciliation apply | Same via `notify_order_reconciled/4` | Same advance path; optionally bump `sync_covered_through_at` when sync run completes with advanced coverage |
+| Order reconciliation apply | Same via `notify_order_reconciled/4` | Post-commit `advance_order/2` on `order.updated_at_source`; sync component only when same flow completes with terminal catch-up evidence (below) |
 | Refund upsert | `RefundUpserter.finalize_refund_mutation/2` → coverage invalidation only; **no** analytics notifier | New `RefundProcessedNotifier` (or extend Sales post-commit hook) calling `SourceFreshness.advance_refund/2` with `refund.source_created_at` mapped to event(s) via order items |
-| Sync / catch-up success | `SyncRun.sales_covered_through` / `refunds_covered_through` persisted on certified runs | On successful terminal sync for event scope: `SourceFreshness.advance_sync_coverage/2` with `max(sales_covered_through, refunds_covered_through)` or separate components if reconciliation requires |
+| Bounded catch-up terminal success | `HistoricalCatchupEvidence` terminal metadata + `source_observed_at` on successful bounded catch-up | Post-commit `SourceFreshness.advance_sync_source_observed/2` with terminal `HistoricalCatchupEvidence.source_observed_at` for the event scope — **never** from `SyncRun.date_to` or `sales_covered_through` |
 | CSV import finalize | `finalize_csv_import_hot_state/4` — no `source_updated_at` on aggregate event | **OWNER_DECISION_REQUIRED:** exclude CSV from source anchor unless batch carries authoritative Woo modified time; default **exclude** from freshness anchor (read-model recompute only) until product says otherwise |
 | Manual hot rebuild | `RebuildHotStateWorker` → `last_fresh_at = now` | Must **not** call freshness advance |
 | Snapshot refresh | Updates `source_watermark_at` on currency rows | Does not replace projection; may optionally reconcile order component max as audit-only compare |
@@ -407,19 +466,34 @@ Remove use of read-model age for programme STALE. Deprecate overloading `state: 
 
 ### `AdminDashboard.snapshot/1` / `EventScopedDashboard`
 
-Attach `source_freshness` from `SourceFreshness` reader (classification + anchor + age_ms). Keep `refreshed_at` / summary `updated_at` as read-model metadata.
+Attach `source_freshness` from `SourceFreshness` reader using the `{:ok, map()} | {:error, :missing_source_freshness_anchor}` contract (never `:anchor_missing` as classification). Keep `refreshed_at` / summary `updated_at` as read-model metadata.
 
 ### `StaleDataBanner`
 
-M6 owns copy; TIME-F passes structured fields so banner can bind to `source_freshness.classification in [:aging, :stale]` without reading `HotStateAggregator` lifecycle.
+M6 owns copy; TIME-F passes structured fields so banner can bind when `{:ok, %{classification: c}}` and `c in [:aging, :stale]` without reading `HotStateAggregator` lifecycle.
 
 **Invariant:** manual rebuild from old Postgres → read-model `ready` while source classification remains `STALE`.
 
 ---
 
-# 11. Custom-range maximum — owner decision
+# 11. Owner decisions — unresolved values and deadlines
+
+## 11.1 Custom-range maximum (`CUSTOM_RANGE_MAX`)
 
 **OWNER_DECISION_REQUIRED** — no numeric cap in M1-07 or product decisions today.
+
+**Gate (locked sequencing):**
+
+```text
+CUSTOM_RANGE_MAX owner decision:
+  does NOT block TIME-B (pure bounds / classification kernel)
+  MUST be resolved before TIME-C exposes custom-range financial querying
+  until resolved, TIME-C may implement and test only locked presets:
+    Today, Yesterday, rolling 7d, rolling 30d
+  custom-range querying stays unavailable or returns {:error, :custom_range_max_undecided}
+```
+
+Do not authorize unlimited custom periods merely because start/end timestamps are finite.
 
 Options for owners (do not implement until chosen):
 
@@ -427,9 +501,13 @@ Options for owners (do not implement until chosen):
 | --- | --- |
 | Cap at 90 Johannesburg civil days | Matches common quarter-style reporting; bounded index range scans |
 | Cap at 365 days | Year-style management reports; heavier worst-case queries |
-| Cap at max(rolling presets) = 30 days until M5 | Smallest backend surface; may block some custom reports until M6 |
+| Cap at max(rolling presets) = 30 days until M5 | Smallest backend surface; may block some custom reports until owner extends cap |
 
-May block PRE-M5-TIME **closeout** if backend API requires hard validation before M5. Does **not** block TIME-A/B planning.
+May block PRE-M5-TIME **closeout** if backend API requires hard validation before M5.
+
+## 11.2 All-events freshness policy
+
+See §4 **ALL_EVENTS_FRESHNESS_POLICY** — must be locked before TIME-F integrates all-events `AdminDashboard` freshness. Does not block TIME-B/C/D/E per-event work.
 
 ---
 
@@ -464,7 +542,8 @@ STOP:      invent custom range max; persist freshness classification
 Outcome:   EventAggregator.financial_summaries_for_event_period/2
 Files:     event_aggregator.ex, tests, query plan fixture extensions
 Predicates: COALESCE(paid_at, completed_at), refund source_created_at, [start,end)
-STOP:      unbounded scans; peak-time LiveView queries
+Presets:   Today, Yesterday, rolling 7d, rolling 30d only until CUSTOM_RANGE_MAX is locked
+STOP:      unbounded scans; peak-time LiveView queries; custom-range API without owner max
 ```
 
 ## PRE-M5-TIME-C-IDX — Index migration (conditional)
@@ -482,17 +561,17 @@ Outcome:   EventSourceFreshnessSnapshot resource, SourceFreshness reader
 Files:     new resource, domain registration, reader module, read tests
 Concurrency: monotonic update tests
 PubSub:    notify only after commit
-STOP:      Redis-only truth; EventAggregateSnapshot as sole owner
+STOP:      Redis-only truth; EventAggregateSnapshot as sole owner; coverage bounds as sync freshness
 ```
 
 ## PRE-M5-TIME-E — Advancement paths
 
 ```text
 Outcome:   post-commit order/refund/sync advances; idempotent replay tests
-Files:     order_processed_notifier.ex (or sibling), new refund notifier, sync completion hook
-           source_freshness.ex (advance_*)
-STOP:      advance before commit; refund path missing
-Sub-PRs:   E1 orders, E2 refunds, E3 sync coverage
+Files:     order_processed_notifier.ex (or sibling), new refund notifier, catch-up terminal hook
+           source_freshness.ex (advance_order, advance_refund, advance_sync_source_observed)
+STOP:      advance before commit; refund path missing; SyncRun.date_to or sales_covered_through as sync clock
+Sub-PRs:   E1 orders, E2 refunds, E3 terminal catch-up source_observed_at
 ```
 
 ## PRE-M5-TIME-F — Hot-state / dashboard integration
@@ -502,7 +581,8 @@ Outcome:   separated read_model vs source_freshness in status/snapshot APIs
 Files:     hot_state_aggregator.ex, admin_dashboard.ex, event_scoped_dashboard.ex
            stale_data_banner.ex (assigns only; copy still M6)
 Config:    remove programme stale binding to stale_after_ms for source (may retain for read-model degraded)
-STOP:      manual rebuild clears source STALE
+STOP:      manual rebuild clears source STALE; all-events policy undecided; fourth freshness enum
+           TIME-F must not choose ALL_EVENTS_FRESHNESS_POLICY — owner decision required first
 ```
 
 ## PRE-M5-TIME-G — Certification + programme closeout
@@ -511,7 +591,7 @@ STOP:      manual rebuild clears source STALE
 Outcome:   GAP-PRE-M5-TIME CLOSED; handoff doc updates; evidence bundle
 Tests:     integration tests crossing order+refund+sync freshness; period + classification
 Docs:      current-state-and-path-handoff.md revision (v24+) when authorized
-STOP:      M5 aggregate work; numeric custom max without owner sign-off
+STOP:      M5 aggregate work; numeric custom max without owner sign-off; certifying undecided ALL_EVENTS_FRESHNESS_POLICY
 ```
 
 ---
@@ -541,7 +621,7 @@ Repo stack unchanged: Hot ETS, warm Redis optional, cold Postgres, PubSub notify
 | Refund replay | Same refund identity; watermark monotonic on `source_created_at` |
 | Conflicting refund `source_created_at` | Source version / upsert rules; do not lower watermark without durable correction policy |
 | Concurrent order + refund same event | Row-level atomic monotonic updates on separate columns |
-| Concurrent sync coverage | Monotonic `sync_covered_through_at` |
+| Concurrent catch-up terminal writes | Monotonic `sync_source_observed_at`; never from coverage certifier fields |
 | Transaction rollback | No freshness advance |
 | Process restart | Postgres projection survives; hot state restores read model only |
 | Redis loss | Source freshness from Postgres |
@@ -618,13 +698,13 @@ Do not combine D + E + F into one PR.
 
 ```text
 TimeRules is the sole effective-time and period-bound authority
-EventSourceFreshnessSnapshot holds durable monotonic components
-Source NORMAL/AGING/STALE derived from anchor, not rebuild time
+EventSourceFreshnessSnapshot holds durable monotonic components (including sync_source_observed_at from terminal catch-up evidence)
+Source NORMAL/AGING/STALE derived from anchor; missing anchor returns :missing_source_freshness_anchor error, not a fourth enum
 EventAggregator period queries use sale/refund effective clocks with [start,end)
 Index strategy backed by EXPLAIN evidence
 Daily v1 explicitly non-canonical for M5 periods
 HotState status exposes read_model vs source_freshness separately
-Custom range max documented as owner decision or implemented per owner choice
+CUSTOM_RANGE_MAX locked before custom-range TIME-C API; ALL_EVENTS_FRESHNESS_POLICY locked before TIME-F
 M1-07 T1–T31 unchanged; physical gaps closed
 ```
 
