@@ -1,7 +1,7 @@
 defmodule EventSales.Analytics.AdminDashboardTest do
   use EventSales.DataCase, async: false
 
-  alias EventSales.Analytics.{AdminDashboard, DashboardCache, HotStateAggregator}
+  alias EventSales.Analytics.{AdminDashboard, DashboardCache, HotStateAggregator, SnapshotRefresh}
   alias EventSales.Catalog.Resources.{Event, TicketType}
   alias EventSales.Sales
   alias EventSales.Sales.Resources.{Order, OrderItem}
@@ -31,6 +31,48 @@ defmodule EventSales.Analytics.AdminDashboardTest do
       vip: vip,
       other_ticket: other_ticket
     }
+  end
+
+  test "event row keeps hot today metrics when daily v1 snapshot disagrees on sale-effective time",
+       %{
+         source: source,
+         event: event,
+         ga: ga
+       } do
+    now = ~U[2026-06-01 12:00:00.000000Z]
+    business_date = ~D[2026-06-01]
+
+    completed =
+      create_order!(source, :completed,
+        woo_order_id: 111,
+        paid_at: ~U[2026-06-01 10:00:00.000000Z],
+        completed_at: ~U[2026-05-31 10:00:00.000000Z]
+      )
+
+    create_item!(completed, event, ga,
+      woo_line_item_id: 11,
+      quantity: 1,
+      line_total: Decimal.new("100.00")
+    )
+
+    assert {:ok, daily} = SnapshotRefresh.refresh_daily(event.id, business_date, now: now)
+    assert daily.today_sold == 0
+    assert Decimal.equal?(daily.today_revenue, Decimal.new("0"))
+
+    DashboardCache.put_event_summary(event.id, %{
+      total_sold: 1,
+      total_revenue: Decimal.new("100.00"),
+      today_sold: 1,
+      today_revenue: Decimal.new("100.00"),
+      status_breakdown: %{"completed" => 1},
+      currency: "ZAR"
+    })
+
+    assert {:ok, row} = AdminDashboard.event_row(event.id, now: now)
+
+    assert row.today_sold == 1
+    assert Decimal.equal?(row.today_revenue, Decimal.new("100.00"))
+    assert row.total_sold == 1
   end
 
   test "hot event summary contributes to dashboard totals", %{

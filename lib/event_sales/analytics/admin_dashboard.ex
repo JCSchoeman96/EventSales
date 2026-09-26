@@ -8,7 +8,7 @@ defmodule EventSales.Analytics.AdminDashboard do
 
   require Ash.Query
 
-  alias EventSales.Analytics.{HotStateAggregator, MetricRules, SnapshotReader}
+  alias EventSales.Analytics.{HotStateAggregator, SnapshotReader}
   alias EventSales.Catalog
   alias EventSales.Catalog.EventLifecycle
   alias EventSales.Catalog.Resources.Event
@@ -120,10 +120,7 @@ defmodule EventSales.Analytics.AdminDashboard do
   end
 
   defp build_event_row(%Event{} = event, opts) do
-    summary =
-      event.id
-      |> summary_for_event(opts)
-      |> merge_daily_summary(event.id, opts)
+    summary = summary_for_event(event.id, opts)
 
     %{
       event_id: event.id,
@@ -157,23 +154,6 @@ defmodule EventSales.Analytics.AdminDashboard do
       {:ok, summary} -> normalize_summary(summary)
       :miss -> empty_summary()
       {:error, _reason} -> empty_summary()
-    end
-  end
-
-  defp merge_daily_summary(summary, event_id, opts) do
-    now = Keyword.get_lazy(opts, :now, &DateTime.utc_now/0)
-    timezone = MetricRules.business_timezone()
-
-    with {:ok, business_date} <- MetricRules.business_date(now, timezone),
-         {:ok, daily_summary} <-
-           SnapshotReader.daily_summary_for_event(event_id, business_date,
-             business_timezone: timezone
-           ) do
-      summary
-      |> Map.put(:today_sold, daily_summary.today_sold)
-      |> Map.put(:today_revenue, daily_summary.today_revenue)
-    else
-      _other -> summary
     end
   end
 

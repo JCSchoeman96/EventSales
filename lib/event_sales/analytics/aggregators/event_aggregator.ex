@@ -12,6 +12,7 @@ defmodule EventSales.Analytics.Aggregators.EventAggregator do
   import Ecto.Query
 
   alias EventSales.Analytics.MetricRules
+  alias EventSales.Analytics.TimeRules
   alias EventSales.Analytics.TimeRules.Period
   alias EventSales.Repo
   alias EventSales.Sales.FinancialPrimitives
@@ -502,24 +503,29 @@ defmodule EventSales.Analytics.Aggregators.EventAggregator do
     end
   end
 
+  defp legacy_today_period(timezone, now) when is_binary(timezone) do
+    case TimeRules.today_bounds(timezone, now) do
+      {:ok, period} -> period
+      {:error, :invalid_timezone} -> nil
+    end
+  end
+
+  defp legacy_today_period(_timezone, _now), do: nil
+
   defp legacy_summary_aggregate_rows(event_id, opts) do
     now = Keyword.get_lazy(opts, :now, &DateTime.utc_now/0)
     timezone = Keyword.get_lazy(opts, :timezone, &MetricRules.business_timezone/0)
 
-    case MetricRules.business_date(now, timezone) do
-      {:ok, business_date} ->
-        event_id
-        |> legacy_summary_aggregate_query(business_date, timezone)
-        |> Repo.all()
+    query =
+      case legacy_today_period(timezone, now) do
+        %Period{} = period -> legacy_summary_aggregate_query(event_id, period)
+        nil -> legacy_summary_aggregate_query(event_id, nil)
+      end
 
-      {:error, :invalid_timezone} ->
-        event_id
-        |> legacy_summary_aggregate_query(nil, timezone)
-        |> Repo.all()
-    end
+    Repo.all(query)
   end
 
-  defp legacy_summary_aggregate_query(event_id, nil, _timezone) do
+  defp legacy_summary_aggregate_query(event_id, nil) do
     from oi in "sales_order_items",
       join: o in "sales_orders",
       on: oi.order_id == o.id,
@@ -554,7 +560,7 @@ defmodule EventSales.Analytics.Aggregators.EventAggregator do
       }
   end
 
-  defp legacy_summary_aggregate_query(event_id, business_date, "Africa/Johannesburg") do
+  defp legacy_summary_aggregate_query(event_id, %Period{start_utc: start_utc, end_utc: end_utc}) do
     from oi in "sales_order_items",
       join: o in "sales_orders",
       on: oi.order_id == o.id,
@@ -586,149 +592,47 @@ defmodule EventSales.Analytics.Aggregators.EventAggregator do
         ),
         sum(
           fragment(
-            "CASE WHEN ? = 'completed' AND ? = 'mapped' AND ? = 'ticket' AND ? > 0 AND ? IS NOT NULL AND date(? + interval '2 hours') = ? THEN ? ELSE 0 END",
+            """
+            CASE WHEN ? = 'completed' AND ? = 'mapped' AND ? = 'ticket' AND ? > 0
+                 AND COALESCE(?, ?) IS NOT NULL
+                 AND ? <= COALESCE(?, ?) AND COALESCE(?, ?) < ?
+            THEN ? ELSE 0 END
+            """,
             o.status,
             oi.mapping_status,
             oi.item_kind,
             oi.quantity,
+            o.paid_at,
             o.completed_at,
+            ^start_utc,
+            o.paid_at,
             o.completed_at,
-            ^business_date,
+            o.paid_at,
+            o.completed_at,
+            ^end_utc,
             oi.quantity
           )
         ),
         sum(
           fragment(
-            "CASE WHEN ? = 'completed' AND ? = 'mapped' AND ? = 'ticket' AND ? > 0 AND ? IS NOT NULL AND date(? + interval '2 hours') = ? THEN ? ELSE 0 END",
+            """
+            CASE WHEN ? = 'completed' AND ? = 'mapped' AND ? = 'ticket' AND ? > 0
+                 AND COALESCE(?, ?) IS NOT NULL
+                 AND ? <= COALESCE(?, ?) AND COALESCE(?, ?) < ?
+            THEN ? ELSE 0 END
+            """,
             o.status,
             oi.mapping_status,
             oi.item_kind,
             oi.quantity,
+            o.paid_at,
             o.completed_at,
+            ^start_utc,
+            o.paid_at,
             o.completed_at,
-            ^business_date,
-            oi.line_total
-          )
-        )
-      }
-  end
-
-  defp legacy_summary_aggregate_query(event_id, business_date, timezone)
-       when timezone in ["UTC", "Etc/UTC"] do
-    from oi in "sales_order_items",
-      join: o in "sales_orders",
-      on: oi.order_id == o.id,
-      where: oi.event_id == ^event_id,
-      group_by: [o.status, o.currency],
-      select: {
-        o.status,
-        o.currency,
-        count(oi.id),
-        sum(
-          fragment(
-            "CASE WHEN ? = 'completed' AND ? = 'mapped' AND ? = 'ticket' AND ? > 0 THEN ? ELSE 0 END",
-            o.status,
-            oi.mapping_status,
-            oi.item_kind,
-            oi.quantity,
-            oi.quantity
-          )
-        ),
-        sum(
-          fragment(
-            "CASE WHEN ? = 'completed' AND ? = 'mapped' AND ? = 'ticket' AND ? > 0 THEN ? ELSE 0 END",
-            o.status,
-            oi.mapping_status,
-            oi.item_kind,
-            oi.quantity,
-            oi.line_total
-          )
-        ),
-        sum(
-          fragment(
-            "CASE WHEN ? = 'completed' AND ? = 'mapped' AND ? = 'ticket' AND ? > 0 AND ? IS NOT NULL AND date(?) = ? THEN ? ELSE 0 END",
-            o.status,
-            oi.mapping_status,
-            oi.item_kind,
-            oi.quantity,
+            o.paid_at,
             o.completed_at,
-            o.completed_at,
-            ^business_date,
-            oi.quantity
-          )
-        ),
-        sum(
-          fragment(
-            "CASE WHEN ? = 'completed' AND ? = 'mapped' AND ? = 'ticket' AND ? > 0 AND ? IS NOT NULL AND date(?) = ? THEN ? ELSE 0 END",
-            o.status,
-            oi.mapping_status,
-            oi.item_kind,
-            oi.quantity,
-            o.completed_at,
-            o.completed_at,
-            ^business_date,
-            oi.line_total
-          )
-        )
-      }
-  end
-
-  defp legacy_summary_aggregate_query(event_id, business_date, timezone)
-       when is_binary(timezone) do
-    from oi in "sales_order_items",
-      join: o in "sales_orders",
-      on: oi.order_id == o.id,
-      where: oi.event_id == ^event_id,
-      group_by: [o.status, o.currency],
-      select: {
-        o.status,
-        o.currency,
-        count(oi.id),
-        sum(
-          fragment(
-            "CASE WHEN ? = 'completed' AND ? = 'mapped' AND ? = 'ticket' AND ? > 0 THEN ? ELSE 0 END",
-            o.status,
-            oi.mapping_status,
-            oi.item_kind,
-            oi.quantity,
-            oi.quantity
-          )
-        ),
-        sum(
-          fragment(
-            "CASE WHEN ? = 'completed' AND ? = 'mapped' AND ? = 'ticket' AND ? > 0 THEN ? ELSE 0 END",
-            o.status,
-            oi.mapping_status,
-            oi.item_kind,
-            oi.quantity,
-            oi.line_total
-          )
-        ),
-        sum(
-          fragment(
-            "CASE WHEN ? = 'completed' AND ? = 'mapped' AND ? = 'ticket' AND ? > 0 AND ? IS NOT NULL AND date(? AT TIME ZONE ?) = ? THEN ? ELSE 0 END",
-            o.status,
-            oi.mapping_status,
-            oi.item_kind,
-            oi.quantity,
-            o.completed_at,
-            o.completed_at,
-            ^timezone,
-            ^business_date,
-            oi.quantity
-          )
-        ),
-        sum(
-          fragment(
-            "CASE WHEN ? = 'completed' AND ? = 'mapped' AND ? = 'ticket' AND ? > 0 AND ? IS NOT NULL AND date(? AT TIME ZONE ?) = ? THEN ? ELSE 0 END",
-            o.status,
-            oi.mapping_status,
-            oi.item_kind,
-            oi.quantity,
-            o.completed_at,
-            o.completed_at,
-            ^timezone,
-            ^business_date,
+            ^end_utc,
             oi.line_total
           )
         )
