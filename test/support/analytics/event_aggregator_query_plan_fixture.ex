@@ -1,6 +1,7 @@
 defmodule EventSales.TestSupport.Analytics.EventAggregatorQueryPlanFixture do
   @moduledoc false
 
+  alias EventSales.Analytics.TimeRules.Period
   alias EventSales.Repo
   alias EventSales.TestSupport.SalesHelpers
 
@@ -15,6 +16,7 @@ defmodule EventSales.TestSupport.Analytics.EventAggregatorQueryPlanFixture do
           source: term(),
           target_event: term(),
           target_ticket: term(),
+          target_period: Period.t(),
           noise_event_id: Ecto.UUID.t(),
           noise_line_count: pos_integer(),
           noise_refund_count: pos_integer(),
@@ -38,11 +40,27 @@ defmodule EventSales.TestSupport.Analytics.EventAggregatorQueryPlanFixture do
 
     noise_ticket = SalesHelpers.create_ticket_type!(noise_event, %{name: "Noise Ticket"})
 
+    period_start = ~U[2026-06-10 00:00:00.000000Z]
+    period_end = ~U[2026-06-11 00:00:00.000000Z]
+
     {noise_line_count, noise_refund_count} =
-      bulk_insert_completed_lines!(source.id, noise_event.id, noise_ticket.id, noise_count)
+      bulk_insert_completed_lines!(
+        source.id,
+        noise_event.id,
+        noise_ticket.id,
+        noise_count,
+        period_end
+      )
+
+    target_period = %Period{
+      start_utc: period_start,
+      end_utc: period_end,
+      kind: :today,
+      timezone: "Africa/Johannesburg"
+    }
 
     {target_order_id, target_item_id} =
-      insert_target_financial_row!(source.id, target_event.id, target_ticket.id)
+      insert_target_financial_row!(source.id, target_event.id, target_ticket.id, target_period)
 
     analyze_financial_tables!()
 
@@ -50,6 +68,7 @@ defmodule EventSales.TestSupport.Analytics.EventAggregatorQueryPlanFixture do
       source: source,
       target_event: target_event,
       target_ticket: target_ticket,
+      target_period: target_period,
       noise_event_id: noise_event.id,
       noise_line_count: noise_line_count,
       noise_refund_count: noise_refund_count,
@@ -78,9 +97,10 @@ defmodule EventSales.TestSupport.Analytics.EventAggregatorQueryPlanFixture do
     end
   end
 
-  defp bulk_insert_completed_lines!(source_id, event_id, ticket_type_id, count)
+  defp bulk_insert_completed_lines!(source_id, event_id, ticket_type_id, count, period_end)
        when is_integer(count) and count > 0 do
     ts = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+    noise_sale = DateTime.add(period_end, 2, :day)
     zero = Decimal.new("0")
     line_total = Decimal.new("10.00")
     line_tax = Decimal.new("1.50")
@@ -100,7 +120,8 @@ defmodule EventSales.TestSupport.Analytics.EventAggregatorQueryPlanFixture do
           order_number: "qp-noise-#{i}",
           status: "completed",
           currency: "ZAR",
-          completed_at: ts,
+          paid_at: noise_sale,
+          completed_at: noise_sale,
           created_at_source: ts,
           updated_at_source: ts,
           raw_total: zero,
@@ -157,7 +178,7 @@ defmodule EventSales.TestSupport.Analytics.EventAggregatorQueryPlanFixture do
           fee_refund_amount: zero,
           fee_refund_tax: zero,
           unallocated_header_amount: zero,
-          source_created_at: ts,
+          source_created_at: noise_sale,
           inserted_at: ts,
           updated_at: ts
         }
@@ -189,7 +210,12 @@ defmodule EventSales.TestSupport.Analytics.EventAggregatorQueryPlanFixture do
     {count, count}
   end
 
-  defp insert_target_financial_row!(source_id, event_id, ticket_type_id) do
+  defp insert_target_financial_row!(source_id, event_id, ticket_type_id, %Period{
+         start_utc: period_start,
+         end_utc: _period_end
+       }) do
+    sale_effective = DateTime.add(period_start, 4, :hour)
+    refund_effective = DateTime.add(period_start, 6, :hour)
     ts = DateTime.utc_now() |> DateTime.truncate(:microsecond)
     zero = Decimal.new("0")
     order_id = Ecto.UUID.generate() |> Ecto.UUID.dump!()
@@ -207,7 +233,8 @@ defmodule EventSales.TestSupport.Analytics.EventAggregatorQueryPlanFixture do
         order_number: "qp-target-1",
         status: "completed",
         currency: "ZAR",
-        completed_at: ts,
+        paid_at: sale_effective,
+        completed_at: sale_effective,
         created_at_source: ts,
         updated_at_source: ts,
         raw_total: zero,
@@ -256,7 +283,7 @@ defmodule EventSales.TestSupport.Analytics.EventAggregatorQueryPlanFixture do
         fee_refund_amount: zero,
         fee_refund_tax: zero,
         unallocated_header_amount: zero,
-        source_created_at: ts,
+        source_created_at: refund_effective,
         inserted_at: ts,
         updated_at: ts
       }

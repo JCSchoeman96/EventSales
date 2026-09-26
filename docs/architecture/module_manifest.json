@@ -647,7 +647,7 @@
       "uses": []
     },
     {
-      "docs_count": 3,
+      "docs_count": 4,
       "moduledoc?": true,
       "name": "EventSales.Analytics.Aggregators.EventAggregator",
       "parse_error": null,
@@ -656,6 +656,10 @@
         {
           "arity": 1,
           "name": "financial_summaries_for_event"
+        },
+        {
+          "arity": 2,
+          "name": "financial_summaries_for_event_period"
         },
         {
           "arity": 2,
