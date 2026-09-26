@@ -20,10 +20,12 @@ defmodule EventSales.Analytics.TimeRules do
     @enforce_keys [:start_utc, :end_utc]
     defstruct [:start_utc, :end_utc, :kind, :timezone]
 
+    @type kind :: :today | :yesterday | :custom | {:rolling_days, pos_integer()}
+
     @type t :: %__MODULE__{
             start_utc: DateTime.t(),
             end_utc: DateTime.t(),
-            kind: atom() | nil,
+            kind: kind() | nil,
             timezone: String.t() | nil
           }
   end
@@ -254,6 +256,7 @@ defmodule EventSales.Analytics.TimeRules do
       else: {:error, :invalid_period_bounds}
   end
 
+  @spec normalize_utc(DateTime.t()) :: DateTime.t()
   defp normalize_utc(%DateTime{} = datetime) do
     {microsecond, _} = datetime.microsecond
     %{datetime | microsecond: {microsecond, 6}}
