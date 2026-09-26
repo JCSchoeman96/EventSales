@@ -182,18 +182,20 @@ defmodule EventSales.Analytics.Aggregators.EventAggregator do
   end
 
   defp validate_johannesburg_civil_day_period(start_utc, end_utc, timezone) do
-    if timezone != @johannesburg_timezone do
-      {:error, :invalid_period}
-    else
-      case shift_both_to_johannesburg(start_utc, end_utc) do
-        {:ok, start_local, end_local} ->
-          if johannesburg_civil_day_shape?(start_local, end_local),
-            do: :ok,
-            else: {:error, :invalid_period}
+    if timezone != @johannesburg_timezone,
+      do: {:error, :invalid_period},
+      else: validate_johannesburg_civil_shape(start_utc, end_utc)
+  end
 
-        :error ->
-          {:error, :invalid_period}
-      end
+  defp validate_johannesburg_civil_shape(start_utc, end_utc) do
+    case shift_both_to_johannesburg(start_utc, end_utc) do
+      {:ok, start_local, end_local} ->
+        if johannesburg_civil_day_shape?(start_local, end_local),
+          do: :ok,
+          else: {:error, :invalid_period}
+
+      :error ->
+        {:error, :invalid_period}
     end
   end
 
