@@ -11,7 +11,16 @@ defmodule EventSales.Analytics.EventAggregatorFinancialQueryPlanTest do
     "sales_order_items_event_mapping_status_idx"
   ]
 
-  @canonical_paths [
+  @all_time_paths [
+    :incomplete_primitive_guard,
+    :gross_aggregate,
+    :refund_aggregate,
+    :recognised_order_count
+  ]
+
+  @period_paths [
+    :missing_sale_effective_guard,
+    :missing_refund_effective_guard,
     :incomplete_primitive_guard,
     :gross_aggregate,
     :refund_aggregate,
@@ -65,13 +74,14 @@ defmodule EventSales.Analytics.EventAggregatorFinancialQueryPlanTest do
     assert Decimal.equal?(summary.net_ticket_value, Decimal.new("46.00"))
 
     classified = classify_queries(queries)
+    required_paths = if mode == :period, do: @period_paths, else: @all_time_paths
 
-    for path <- @canonical_paths do
+    for path <- required_paths do
       assert Map.has_key?(classified, path),
              "iteration #{iteration}: missing #{path}; got #{inspect(Map.keys(classified))}"
     end
 
-    for path <- @canonical_paths, {sql, params} <- classified[path] do
+    for path <- required_paths, {sql, params} <- classified[path] do
       certify_classified_path!(
         path,
         sql,
@@ -98,6 +108,12 @@ defmodule EventSales.Analytics.EventAggregatorFinancialQueryPlanTest do
     assert is_map(plan), "iteration #{iteration}: expected EXPLAIN JSON for #{path}"
 
     case path do
+      :missing_sale_effective_guard ->
+        assert_event_first_order_item_indexes!(plan, path, iteration)
+
+      :missing_refund_effective_guard ->
+        assert_refund_path_index_use!(plan, path, iteration)
+
       :incomplete_primitive_guard ->
         assert_event_first_order_item_indexes!(plan, path, iteration)
 
@@ -111,14 +127,14 @@ defmodule EventSales.Analytics.EventAggregatorFinancialQueryPlanTest do
         assert_refund_path_index_use!(plan, path, iteration)
     end
 
-    assert_period_sales_orders_bounded!(mode, path, plan, iteration)
+    assert_period_sales_orders_bounded!(mode, plan, path, iteration)
   end
 
-  defp assert_period_sales_orders_bounded!(:period, path, plan, iteration) do
+  defp assert_period_sales_orders_bounded!(:period, plan, path, iteration) do
     assert_no_seq_scan!(plan, "sales_orders", path, iteration)
   end
 
-  defp assert_period_sales_orders_bounded!(_mode, _path, _plan, _iteration), do: :ok
+  defp assert_period_sales_orders_bounded!(_mode, _plan, _path, _iteration), do: :ok
 
   defp classify_queries(queries) do
     queries
@@ -150,28 +166,50 @@ defmodule EventSales.Analytics.EventAggregatorFinancialQueryPlanTest do
   end
 
   defp classify_non_refund_query(sql) do
+    classify_sale_query_kind(sql) || :other
+  end
+
+  defp classify_sale_query_kind(sql) do
     cond do
       String.match?(sql, ~r/count\s*\(\s*DISTINCT/i) ->
         :recognised_order_count
 
-      String.contains?(sql, "SELECT TRUE") and String.contains?(sql, "LIMIT 1") ->
+      missing_sale_effective_guard?(sql) ->
+        :missing_sale_effective_guard
+
+      incomplete_primitive_guard?(sql) ->
         :incomplete_primitive_guard
 
       String.contains?(sql, "sales_order_items") and String.contains?(sql, "sum(") ->
         :gross_aggregate
 
       true ->
-        :other
+        nil
     end
+  end
+
+  defp incomplete_primitive_guard?(sql) do
+    String.contains?(sql, "SELECT TRUE") and String.contains?(sql, "LIMIT 1")
+  end
+
+  defp missing_sale_effective_guard?(sql) do
+    String.contains?(sql, "SELECT TRUE") and String.contains?(sql, "LIMIT 1") and
+      String.match?(sql, ~r/"paid_at" IS NULL/i) and
+      String.match?(sql, ~r/"completed_at" IS NULL/i) and not String.contains?(sql, "COALESCE")
   end
 
   defp assert_period_sql_evidence!(sql, params, path, period) do
     case path do
+      path
+      when path in [
+             :missing_sale_effective_guard,
+             :missing_refund_effective_guard
+           ] ->
+        :ok
+
       :incomplete_primitive_guard ->
-        if String.contains?(sql, "COALESCE") do
-          assert_period_bounds_in_sql!(sql, params, period)
-          assert_sale_path_period_sql!(sql)
-        end
+        assert_period_bounds_in_sql!(sql, params, period)
+        assert_sale_path_period_sql!(sql)
 
       path when path in [:gross_aggregate, :recognised_order_count] ->
         assert_period_bounds_in_sql!(sql, params, period)
@@ -220,12 +258,13 @@ defmodule EventSales.Analytics.EventAggregatorFinancialQueryPlanTest do
   end
 
   defp period_bound_params_present?(params, period) do
-    start_dumped = period.start_utc
-    end_dumped = period.end_utc
+    period_param_present?(params, period.start_utc) and
+      period_param_present?(params, period.end_utc)
+  end
 
+  defp period_param_present?(params, %DateTime{} = bound) do
     Enum.any?(params, fn param ->
-      param == start_dumped or param == end_dumped or
-        param == DateTime.to_iso8601(start_dumped) or param == DateTime.to_iso8601(end_dumped)
+      param == bound or param == DateTime.to_iso8601(bound)
     end)
   end
 

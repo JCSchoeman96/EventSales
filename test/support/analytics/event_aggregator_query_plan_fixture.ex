@@ -1,6 +1,7 @@
 defmodule EventSales.TestSupport.Analytics.EventAggregatorQueryPlanFixture do
   @moduledoc false
 
+  alias EventSales.Analytics.TimeRules
   alias EventSales.Analytics.TimeRules.Period
   alias EventSales.Repo
   alias EventSales.TestSupport.SalesHelpers
@@ -40,8 +41,11 @@ defmodule EventSales.TestSupport.Analytics.EventAggregatorQueryPlanFixture do
 
     noise_ticket = SalesHelpers.create_ticket_type!(noise_event, %{name: "Noise Ticket"})
 
-    period_start = ~U[2026-06-10 00:00:00.000000Z]
-    period_end = ~U[2026-06-11 00:00:00.000000Z]
+    {:ok, target_period} =
+      TimeRules.today_bounds(
+        "Africa/Johannesburg",
+        civil_noon_utc(~D[2026-06-10])
+      )
 
     {noise_line_count, noise_refund_count} =
       bulk_insert_completed_lines!(
@@ -49,15 +53,8 @@ defmodule EventSales.TestSupport.Analytics.EventAggregatorQueryPlanFixture do
         noise_event.id,
         noise_ticket.id,
         noise_count,
-        period_end
+        target_period.end_utc
       )
-
-    target_period = %Period{
-      start_utc: period_start,
-      end_utc: period_end,
-      kind: :today,
-      timezone: "Africa/Johannesburg"
-    }
 
     {target_order_id, target_item_id} =
       insert_target_financial_row!(source.id, target_event.id, target_ticket.id, target_period)
@@ -208,6 +205,12 @@ defmodule EventSales.TestSupport.Analytics.EventAggregatorQueryPlanFixture do
     Repo.insert_all("sales_refund_lines", refund_line_rows)
 
     {count, count}
+  end
+
+  defp civil_noon_utc(%Date{} = date) do
+    {:ok, local_noon} = DateTime.new(date, ~T[12:00:00.000000], "Africa/Johannesburg")
+    {:ok, utc_noon} = DateTime.shift_zone(local_noon, "Etc/UTC")
+    utc_noon
   end
 
   defp insert_target_financial_row!(source_id, event_id, ticket_type_id, %Period{

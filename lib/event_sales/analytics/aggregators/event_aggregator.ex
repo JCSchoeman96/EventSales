@@ -17,6 +17,8 @@ defmodule EventSales.Analytics.Aggregators.EventAggregator do
   alias EventSales.Sales.FinancialPrimitives
 
   @supported_financial_period_kinds [:today, :yesterday, {:rolling_days, 7}, {:rolling_days, 30}]
+  @johannesburg_timezone "Africa/Johannesburg"
+  @day_seconds 24 * 60 * 60
 
   @type financial_summaries :: %{String.t() => MetricRules.financial_summary()}
 
@@ -148,7 +150,12 @@ defmodule EventSales.Analytics.Aggregators.EventAggregator do
     if Repo.one(query), do: {:error, :incomplete_financial_primitives}, else: :ok
   end
 
-  defp validate_financial_period(%Period{kind: kind, start_utc: start_utc, end_utc: end_utc}) do
+  defp validate_financial_period(%Period{
+         kind: kind,
+         start_utc: start_utc,
+         end_utc: end_utc,
+         timezone: timezone
+       }) do
     cond do
       not supported_financial_period_kind?(kind) ->
         {:error, :unsupported_period_kind}
@@ -157,7 +164,63 @@ defmodule EventSales.Analytics.Aggregators.EventAggregator do
         {:error, :invalid_period}
 
       true ->
-        :ok
+        validate_supported_period_semantics(kind, start_utc, end_utc, timezone)
+    end
+  end
+
+  defp validate_supported_period_semantics(:today, start_utc, end_utc, timezone) do
+    validate_johannesburg_civil_day_period(start_utc, end_utc, timezone)
+  end
+
+  defp validate_supported_period_semantics(:yesterday, start_utc, end_utc, timezone) do
+    validate_johannesburg_civil_day_period(start_utc, end_utc, timezone)
+  end
+
+  defp validate_supported_period_semantics({:rolling_days, days}, start_utc, end_utc, timezone)
+       when days in [7, 30] do
+    validate_exact_rolling_period(days, start_utc, end_utc, timezone)
+  end
+
+  defp validate_johannesburg_civil_day_period(start_utc, end_utc, timezone) do
+    if timezone != @johannesburg_timezone do
+      {:error, :invalid_period}
+    else
+      case shift_both_to_johannesburg(start_utc, end_utc) do
+        {:ok, start_local, end_local} ->
+          if johannesburg_civil_day_shape?(start_local, end_local),
+            do: :ok,
+            else: {:error, :invalid_period}
+
+        :error ->
+          {:error, :invalid_period}
+      end
+    end
+  end
+
+  defp shift_both_to_johannesburg(start_utc, end_utc) do
+    with {:ok, start_local} <- DateTime.shift_zone(start_utc, @johannesburg_timezone),
+         {:ok, end_local} <- DateTime.shift_zone(end_utc, @johannesburg_timezone) do
+      {:ok, start_local, end_local}
+    else
+      _ -> :error
+    end
+  end
+
+  defp johannesburg_civil_day_shape?(start_local, end_local) do
+    local_midnight?(start_local) and local_midnight?(end_local) and
+      Date.add(DateTime.to_date(start_local), 1) == DateTime.to_date(end_local)
+  end
+
+  defp local_midnight?(%DateTime{} = datetime) do
+    datetime.hour == 0 and datetime.minute == 0 and datetime.second == 0 and
+      elem(datetime.microsecond, 0) == 0
+  end
+
+  defp validate_exact_rolling_period(days, start_utc, end_utc, timezone) do
+    if timezone != nil or DateTime.diff(end_utc, start_utc, :second) != days * @day_seconds do
+      {:error, :invalid_period}
+    else
+      :ok
     end
   end
 

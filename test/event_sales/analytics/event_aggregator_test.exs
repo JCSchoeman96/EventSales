@@ -2,6 +2,7 @@ defmodule EventSales.Analytics.EventAggregatorTest do
   use EventSales.DataCase, async: true
 
   alias EventSales.Analytics.Aggregators.EventAggregator
+  alias EventSales.Analytics.TimeRules
   alias EventSales.Analytics.TimeRules.Period
   alias EventSales.Catalog.Resources.{Event, TicketType}
   alias EventSales.Sales
@@ -303,7 +304,7 @@ defmodule EventSales.Analytics.EventAggregatorTest do
       event: event,
       ticket: ticket
     } do
-      period = period!(~U[2026-06-01 00:00:00.000000Z], ~U[2026-06-02 00:00:00.000000Z], :today)
+      period = jhb_today_period!(~D[2026-06-01])
 
       paid_inside =
         create_order!(source, :completed,
@@ -346,7 +347,7 @@ defmodule EventSales.Analytics.EventAggregatorTest do
       event: event,
       ticket: ticket
     } do
-      period = period!(~U[2026-06-01 00:00:00.000000Z], ~U[2026-06-02 00:00:00.000000Z], :today)
+      period = jhb_today_period!(~D[2026-06-01])
 
       order =
         create_order!(source, :completed,
@@ -373,7 +374,7 @@ defmodule EventSales.Analytics.EventAggregatorTest do
       event: event,
       ticket: ticket
     } do
-      period = period!(~U[2026-06-01 00:00:00.000000Z], ~U[2026-06-02 00:00:00.000000Z], :today)
+      period = jhb_today_period!(~D[2026-06-01])
 
       order =
         create_order!(source, :refunded,
@@ -400,9 +401,9 @@ defmodule EventSales.Analytics.EventAggregatorTest do
       event: event,
       ticket: ticket
     } do
-      start = ~U[2026-06-01 00:00:00.000000Z]
-      ending = ~U[2026-06-02 00:00:00.000000Z]
-      period = period!(start, ending, :today)
+      period = jhb_today_period!(~D[2026-06-01])
+      start = period.start_utc
+      ending = period.end_utc
 
       at_start =
         create_order!(source, :completed,
@@ -443,7 +444,7 @@ defmodule EventSales.Analytics.EventAggregatorTest do
       event: event,
       ticket: ticket
     } do
-      period = period!(~U[2026-06-01 00:00:00.000000Z], ~U[2026-06-02 00:00:00.000000Z], :today)
+      period = jhb_today_period!(~D[2026-06-01])
 
       sale_outside =
         create_order!(source, :completed,
@@ -511,9 +512,9 @@ defmodule EventSales.Analytics.EventAggregatorTest do
       event: event,
       ticket: ticket
     } do
-      start = ~U[2026-06-01 00:00:00.000000Z]
-      ending = ~U[2026-06-02 00:00:00.000000Z]
-      period = period!(start, ending, :today)
+      period = jhb_today_period!(~D[2026-06-01])
+      start = period.start_utc
+      ending = period.end_utc
 
       order =
         create_order!(source, :completed,
@@ -562,7 +563,7 @@ defmodule EventSales.Analytics.EventAggregatorTest do
       event: event,
       ticket: ticket
     } do
-      period = period!(~U[2026-06-01 00:00:00.000000Z], ~U[2026-06-02 00:00:00.000000Z], :today)
+      period = jhb_today_period!(~D[2026-06-01])
 
       order =
         create_order!(source, :completed,
@@ -588,7 +589,7 @@ defmodule EventSales.Analytics.EventAggregatorTest do
            event: event,
            ticket: ticket
          } do
-      period = period!(~U[2026-06-01 00:00:00.000000Z], ~U[2026-06-02 00:00:00.000000Z], :today)
+      period = jhb_today_period!(~D[2026-06-01])
 
       order =
         create_order!(source, :completed,
@@ -617,7 +618,7 @@ defmodule EventSales.Analytics.EventAggregatorTest do
       event: event,
       ticket: ticket
     } do
-      period = period!(~U[2026-06-01 00:00:00.000000Z], ~U[2026-06-02 00:00:00.000000Z], :today)
+      period = jhb_today_period!(~D[2026-06-01])
 
       complete_inside =
         create_order!(source, :completed,
@@ -675,7 +676,7 @@ defmodule EventSales.Analytics.EventAggregatorTest do
       event: event,
       ticket: ticket
     } do
-      period = period!(~U[2026-06-01 00:00:00.000000Z], ~U[2026-06-02 00:00:00.000000Z], :today)
+      period = jhb_today_period!(~D[2026-06-01])
 
       order =
         create_order!(source, :completed,
@@ -709,7 +710,7 @@ defmodule EventSales.Analytics.EventAggregatorTest do
       event: event,
       ticket: ticket
     } do
-      period = period!(~U[2026-06-01 00:00:00.000000Z], ~U[2026-06-02 00:00:00.000000Z], :today)
+      period = jhb_today_period!(~D[2026-06-01])
 
       zar =
         create_order!(source, :completed,
@@ -751,10 +752,10 @@ defmodule EventSales.Analytics.EventAggregatorTest do
 
     test "rejects unsupported period kinds before aggregation", %{event: event} do
       custom_period =
-        period!(~U[2026-06-01 00:00:00.000000Z], ~U[2026-06-02 00:00:00.000000Z], :custom)
+        forged_period!(~U[2026-06-01 00:00:00.000000Z], ~U[2026-06-02 00:00:00.000000Z], :custom)
 
       rolling_8 =
-        period!(
+        forged_period!(
           ~U[2026-06-01 00:00:00.000000Z],
           ~U[2026-06-09 00:00:00.000000Z],
           {:rolling_days, 8}
@@ -765,6 +766,74 @@ defmodule EventSales.Analytics.EventAggregatorTest do
 
       assert EventAggregator.financial_summaries_for_event_period(event.id, rolling_8) ==
                {:error, :unsupported_period_kind}
+    end
+
+    test "rejects spoofed supported period semantics", %{event: event} do
+      decade_today = %Period{
+        kind: :today,
+        start_utc: ~U[2020-01-01 00:00:00.000000Z],
+        end_utc: ~U[2030-01-01 00:00:00.000000Z],
+        timezone: "Africa/Johannesburg"
+      }
+
+      assert EventAggregator.financial_summaries_for_event_period(event.id, decade_today) ==
+               {:error, :invalid_period}
+
+      wrong_zone_today = %Period{
+        kind: :today,
+        start_utc: ~U[2026-06-01 00:00:00.000000Z],
+        end_utc: ~U[2026-06-02 00:00:00.000000Z],
+        timezone: "UTC"
+      }
+
+      assert EventAggregator.financial_summaries_for_event_period(event.id, wrong_zone_today) ==
+               {:error, :invalid_period}
+
+      non_midnight_today = %Period{
+        kind: :today,
+        start_utc: ~U[2026-06-01 01:00:00.000000Z],
+        end_utc: ~U[2026-06-02 01:00:00.000000Z],
+        timezone: "Africa/Johannesburg"
+      }
+
+      assert EventAggregator.financial_summaries_for_event_period(event.id, non_midnight_today) ==
+               {:error, :invalid_period}
+
+      eight_day_rolling = %Period{
+        kind: {:rolling_days, 7},
+        start_utc: ~U[2026-06-01 00:00:00.000000Z],
+        end_utc: ~U[2026-06-09 00:00:00.000000Z],
+        timezone: nil
+      }
+
+      assert EventAggregator.financial_summaries_for_event_period(event.id, eight_day_rolling) ==
+               {:error, :invalid_period}
+
+      wrong_rolling_span = %Period{
+        kind: {:rolling_days, 30},
+        start_utc: ~U[2026-06-01 00:00:00.000000Z],
+        end_utc: ~U[2026-06-15 00:00:00.000000Z],
+        timezone: nil
+      }
+
+      assert EventAggregator.financial_summaries_for_event_period(event.id, wrong_rolling_span) ==
+               {:error, :invalid_period}
+    end
+
+    test "accepts genuine TimeRules preset periods", %{event: event} do
+      now = civil_noon_utc(~D[2026-06-10])
+
+      assert {:ok, today} = TimeRules.today_bounds("Africa/Johannesburg", now)
+      assert {:ok, _} = EventAggregator.financial_summaries_for_event_period(event.id, today)
+
+      assert {:ok, yesterday} = TimeRules.yesterday_bounds("Africa/Johannesburg", now)
+      assert {:ok, _} = EventAggregator.financial_summaries_for_event_period(event.id, yesterday)
+
+      assert {:ok, rolling_7} = TimeRules.last_7_days_bounds(now)
+      assert {:ok, _} = EventAggregator.financial_summaries_for_event_period(event.id, rolling_7)
+
+      assert {:ok, rolling_30} = TimeRules.last_30_days_bounds(now)
+      assert {:ok, _} = EventAggregator.financial_summaries_for_event_period(event.id, rolling_30)
     end
 
     test "rejects invalid period bounds", %{event: event} do
@@ -781,16 +850,19 @@ defmodule EventSales.Analytics.EventAggregatorTest do
       assert EventAggregator.financial_summaries_for_event_period(event.id, invalid) ==
                {:error, :invalid_period}
 
-      reversed =
-        period!(~U[2026-06-02 00:00:00.000000Z], ~U[2026-06-01 00:00:00.000000Z], :today)
+      reversed = %Period{
+        kind: :today,
+        start_utc: ~U[2026-06-02 00:00:00.000000Z],
+        end_utc: ~U[2026-06-01 00:00:00.000000Z],
+        timezone: "Africa/Johannesburg"
+      }
 
       assert EventAggregator.financial_summaries_for_event_period(event.id, reversed) ==
                {:error, :invalid_period}
     end
 
     test "returns empty map for supported period with no qualifying facts", %{event: event} do
-      period =
-        period!(~U[2026-01-01 00:00:00.000000Z], ~U[2026-01-02 00:00:00.000000Z], :yesterday)
+      period = jhb_yesterday_period!(~D[2026-01-01])
 
       assert EventAggregator.financial_summaries_for_event_period(event.id, period) == {:ok, %{}}
     end
@@ -869,12 +941,39 @@ defmodule EventSales.Analytics.EventAggregatorTest do
     )
   end
 
-  defp period!(start_utc, end_utc, kind) do
+  defp jhb_today_period!(%Date{} = civil_date) do
+    {:ok, period} = TimeRules.today_bounds("Africa/Johannesburg", civil_noon_utc(civil_date))
+    period
+  end
+
+  defp jhb_yesterday_period!(%Date{} = civil_date) do
+    {:ok, period} =
+      TimeRules.yesterday_bounds(
+        "Africa/Johannesburg",
+        civil_noon_utc(Date.add(civil_date, 1))
+      )
+
+    period
+  end
+
+  defp civil_noon_utc(%Date{} = date) do
+    {:ok, local_noon} = DateTime.new(date, ~T[12:00:00.000000], "Africa/Johannesburg")
+    {:ok, utc_noon} = DateTime.shift_zone(local_noon, "Etc/UTC")
+    utc_noon
+  end
+
+  defp forged_period!(start_utc, end_utc, kind) do
+    timezone =
+      case kind do
+        {:rolling_days, _} -> nil
+        _ -> "Africa/Johannesburg"
+      end
+
     %Period{
       start_utc: start_utc,
       end_utc: end_utc,
       kind: kind,
-      timezone: "Africa/Johannesburg"
+      timezone: timezone
     }
   end
 
