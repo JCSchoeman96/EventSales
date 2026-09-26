@@ -8,6 +8,7 @@ defmodule EventSales.Analytics.MetricRules do
   `completed_revenue/2` retain their existing completed-only compatibility behavior.
   """
 
+  alias EventSales.Analytics.TimeRules
   alias EventSales.Sales.FinancialPrimitives
   alias EventSales.Sales.Resources.{Order, OrderItem}
 
@@ -45,25 +46,9 @@ defmodule EventSales.Analytics.MetricRules do
   Converts a UTC datetime into a date in the configured business timezone.
   """
   @spec business_date(DateTime.t(), String.t()) :: {:ok, Date.t()} | {:error, :invalid_timezone}
-  def business_date(%DateTime{} = datetime, "Africa/Johannesburg") do
-    datetime
-    |> DateTime.add(2, :hour)
-    |> DateTime.to_date()
-    |> then(&{:ok, &1})
+  def business_date(%DateTime{} = datetime, timezone) do
+    TimeRules.business_date(datetime, timezone)
   end
-
-  def business_date(%DateTime{} = datetime, timezone) when timezone in ["Etc/UTC", "UTC"] do
-    {:ok, DateTime.to_date(datetime)}
-  end
-
-  def business_date(%DateTime{} = datetime, timezone) when is_binary(timezone) do
-    case DateTime.shift_zone(datetime, timezone) do
-      {:ok, shifted} -> {:ok, DateTime.to_date(shifted)}
-      {:error, _reason} -> {:error, :invalid_timezone}
-    end
-  end
-
-  def business_date(%DateTime{}, _timezone), do: {:error, :invalid_timezone}
 
   @doc """
   Returns true when both datetimes land on the same business date.
