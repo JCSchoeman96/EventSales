@@ -266,3 +266,32 @@ defmodule EventSales.Analytics.TimeRules do
   defp classify_age_microseconds(age_us) when age_us <= @ten_minutes_us, do: :aging
   defp classify_age_microseconds(_age_us), do: :stale
 end
+
+defmodule EventSales.Analytics.TimeRules.IanaTimeZoneDatabase do
+  @moduledoc false
+
+  @behaviour Calendar.TimeZoneDatabase
+
+  @johannesburg "Africa/Johannesburg"
+  @johannesburg_period %{std_offset: 0, utc_offset: 2 * 60 * 60, zone_abbr: "SAST"}
+  @utc_period %{std_offset: 0, utc_offset: 0, zone_abbr: "UTC"}
+
+  @impl true
+  def time_zone_period_from_utc_iso_days(_iso_days, zone)
+      when zone in ["Etc/UTC", "UTC", @johannesburg] do
+    {:ok, period_for_zone(zone)}
+  end
+
+  def time_zone_period_from_utc_iso_days(_iso_days, _zone), do: {:error, :time_zone_not_found}
+
+  @impl true
+  def time_zone_periods_from_wall_datetime(_naive, zone)
+      when zone in ["Etc/UTC", "UTC", @johannesburg] do
+    {:ok, period_for_zone(zone)}
+  end
+
+  def time_zone_periods_from_wall_datetime(_naive, _zone), do: {:error, :time_zone_not_found}
+
+  defp period_for_zone("Africa/Johannesburg"), do: @johannesburg_period
+  defp period_for_zone(_utc), do: @utc_period
+end

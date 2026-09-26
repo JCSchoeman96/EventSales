@@ -7,7 +7,7 @@
 # General application configuration
 import Config
 
-config :elixir, :time_zone_database, Tzdata.TimeZoneDatabase
+config :elixir, :time_zone_database, EventSales.Analytics.TimeRules.IanaTimeZoneDatabase
 
 config :ash, default_string_length_count: :codepoints
 
