@@ -4,7 +4,7 @@
 | --- | --- |
 | Document | Canonical Path 1 execution roadmap |
 | Plan ID | `path-1-phase-breakdown` |
-| Plan version | `v22` |
+| Plan version | `v23` |
 | Status | ACTIVE — repository-native execution contract |
 | Scope | Path 1 M1–M7 gated implementation sequence |
 | Authority | This file wins for Path 1 task sequencing and physical ownership assumptions |
@@ -21,7 +21,7 @@
 | Historical planning source | Supplied `EVENTSALES_PATH_1_UPDATED_PHASE_BREAKDOWN.md` (v1 conceptual plan; superseded for physical assumptions) |
 | Path 2 / Phase 5E | PAUSED |
 | Prepared | 2026-08-09 |
-| Last updated | 2026-09-22 |
+| Last updated | 2026-09-26 |
 | Audit base HEAD | `a90f4a6d991510684dde80a538c0847635de2ee9` |
 
 ### Revision log
@@ -48,6 +48,7 @@
 - `v20` — M3-01 through M3-08 COMPLETE (PASS); durable bounded coverage evidence, Postgres fact certification, and atomic certified/blocked/retry terminal handling implemented; next = M4 Financial Reconciliation
 - `v21` — M4-01 through M4-07 COMPLETE (PASS); PR #241 two-parent merge (`fa71fef` / merge `5681ffd`); `AnalyticsReadinessResolver` and financial reconciliation machinery certified on main; next = PRE-M5 Conformance Gate; M5 BLOCKED until PRE-M5 gaps close
 - `v22` — PRE-M5-01A/01B COMPLETE (PASS); PR #243 + PR #244; `GAP-PRE-M5-READY-IX` CLOSED; PRE-M5-02A metrics plans landed; next = PRE-M5-02 metrics foundation (PRE-M5-02B); METRICS/TIME OPEN; M5 BLOCKED
+- `v23` — PRE-M5-02B through PRE-M5-02F COMPLETE (PASS); PR #251 metrics certification merged and post-merge CI passed; `GAP-PRE-M5-METRICS` CLOSED; `GAP-PRE-M5-TIME` remains OPEN; M5 remains BLOCKED; next = PRE-M5-TIME
 
 ### Conflict rule
 
@@ -133,7 +134,7 @@ M1-08: COMPLETE (PASS)
 M1-08 contract: docs/path-1/m1-08-backfill-completeness-reconciliation-and-analytics-ready-contract.md
 M1-09: COMPLETE (PASS_WITH_PRE_M2_IMPLEMENTATION_GATE)
 M1-09 certification: docs/path-1/m1-09-m1-certification-and-pre-m2-gate.md
-TAX-INCLUSIVE REVENUE CONTRACT: IMPLEMENTATION_CHANGE_REQUIRED
+TAX-INCLUSIVE REVENUE CONTRACT: IMPLEMENTED / CERTIFIED BY PRE-M5-02F (MG2)
 FRESHNESS / STALE CONTRACT: LOCKED (`age > 10m` STALE; `<5m` NORMAL; `5m–10m` AGING)
 HotStateAggregator 5m stale_after_ms: IMPLEMENTATION_CHANGE_REQUIRED
 ANALYTICS_READY CONTRACT: LOCKED (derived from durable evidence; ≠ freshness)
@@ -176,11 +177,14 @@ PRE-M5-01B evidence: PR #244; approved head 9485e4c8e81cede0c99d7bba7d7d86840f34
 PRE-M5-02A: COMPLETE (conformance specification; `docs/development/pre-m5-02-metrics-foundation.plan.md`)
 Metrics implementation plan: `docs/development/pre-m5-02-metrics-foundation-implementation.plan.md`
 ANALYTICS_READY_MACHINERY: IMPLEMENTED / CERTIFIED BY M4 (`AnalyticsReadinessResolver`; financial reconciliation path)
-Current Path 1 task: PRE-M5-02 metrics foundation (next PRE-M5-02B; not M5-01)
+PRE-M5-02: COMPLETE (PASS)
+PRE-M5-02B..02F: COMPLETE (PASS)
+PRE-M5-02F evidence: PR #251; approved head `44e9d2350886a58bea605e3b4421d4c98d6dc665`; merge `bd916712be4657555c7a17cfe604e69cdf790729`; post-merge CI #654 / 36228450299 PASS
+Current Path 1 task: PRE-M5-TIME (next; not started)
 M5 AUTHORIZATION: BLOCKED
-GAP-PRE-M5-METRICS: OPEN
+GAP-PRE-M5-METRICS: CLOSED
 GAP-PRE-M5-TIME: OPEN
-GAP-PRE-M5-READY-IX: CLOSED
+GAP-PRE-M5-READY-IX: CLOSED (UNCHANGED)
 ```
 
 ---
@@ -786,8 +790,7 @@ Post-merge CI run 35715870420 / #612 PASS.
 
 ANALYTICS_READY derivation machinery and gate behaviour are implemented and certified by M4.
 Per-event readiness remains a runtime-derived state from the current M3 certificate and bound M4 reconciliation evidence.
-M4 completion closed `GAP-PRE-M5-READY-IX` via PRE-M5-01A/01B (PR #243, PR #244). `GAP-PRE-M5-METRICS` and `GAP-PRE-M5-TIME` remain OPEN.
-Next programme step: PRE-M5-02 metrics foundation (PRE-M5-02B next) — not M5-01.
+At the M4 closeout, before PRE-M5-02B began, `GAP-PRE-M5-METRICS` and `GAP-PRE-M5-TIME` remained OPEN. The next programme step at that checkpoint was PRE-M5-02 metrics foundation (PRE-M5-02B), not M5-01.
 M5 remains BLOCKED until remaining PRE-M5 gaps are closed and certified.
 ```
 
@@ -1063,9 +1066,12 @@ P1-00 COMPLETE
 → PRE-M5-01A COMPLETE (PASS; PR #243)
 → PRE-M5-01B COMPLETE (PASS; PR #244)
 → PRE-M5-02A COMPLETE (metrics conformance specification)
-→ PRE-M5-02B NEXT (metrics foundation)
-→ GAP-PRE-M5-METRICS / TIME remain OPEN
+→ PRE-M5-02B..02F COMPLETE (PASS; PR #251 metrics certification)
+→ GAP-PRE-M5-READY-IX CLOSED (UNCHANGED)
+→ GAP-PRE-M5-METRICS CLOSED
+→ GAP-PRE-M5-TIME OPEN
 → M5 BLOCKED
+→ PRE-M5-TIME NEXT
 → M6
 → M7
 ```
@@ -1134,7 +1140,7 @@ M1-09 certification:
 docs/path-1/m1-09-m1-certification-and-pre-m2-gate.md
 
 TAX-INCLUSIVE REVENUE CONTRACT:
-IMPLEMENTATION_CHANGE_REQUIRED
+IMPLEMENTED / CERTIFIED BY PRE-M5-02F (MG2)
 
 FRESHNESS / STALE CONTRACT:
 LOCKED (`age > 10m` STALE on source age; HotStateAggregator 5m = IMPLEMENTATION_CHANGE_REQUIRED)
@@ -1161,7 +1167,16 @@ FINANCIAL RECONCILIATION CONTRACT:
 LOCKED (concept C; exact Decimal; ticket-scoped)
 
 Current Path 1 task:
-PRE-M5-02 metrics foundation (PRE-M5-02B next)
+PRE-M5-TIME (next; not started)
+
+PRE-M5-02:
+COMPLETE (PASS)
+
+PRE-M5-02B..02F:
+COMPLETE (PASS)
+
+PRE-M5-02F evidence:
+PR #251; approved head 44e9d2350886a58bea605e3b4421d4c98d6dc665; merge bd916712be4657555c7a17cfe604e69cdf790729; post-merge CI #654 / 36228450299 PASS
 
 M3:
 COMPLETE (PASS)
@@ -1200,13 +1215,16 @@ M5 AUTHORIZATION:
 BLOCKED
 
 GAP-PRE-M5-METRICS:
-OPEN
+CLOSED
 
 GAP-PRE-M5-TIME:
 OPEN
 
 GAP-PRE-M5-READY-IX:
-CLOSED
+CLOSED (UNCHANGED)
+
+NEXT:
+PRE-M5-TIME
 
 M1-C:
 COMPLETE (PASS)
@@ -1307,7 +1325,13 @@ M2-08 COMPLETE (PASS); PR #184.
 M2-08 IMPLEMENTATION: COMPLETE (PASS).
 M3 IMPLEMENTATION: COMPLETE (PASS).
 M4 IMPLEMENTATION: COMPLETE (PASS); PR #241.
-NEXT = PRE-M5-02 metrics foundation (PRE-M5-02B next; not M5-01).
+PRE-M5-02: COMPLETE (PASS).
+PRE-M5-02B..02F: COMPLETE (PASS).
+GAP-PRE-M5-READY-IX = CLOSED (UNCHANGED).
+GAP-PRE-M5-METRICS = CLOSED.
+GAP-PRE-M5-TIME = OPEN.
+M5 AUTHORIZATION = BLOCKED.
+NEXT = PRE-M5-TIME.
 M5: BLOCKED.
 DO NOT REOPEN M2-07 SCOPE.
 DO NOT START M5-01 UNTIL PRE-M5 GATE CLOSES.

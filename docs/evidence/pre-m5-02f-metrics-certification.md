@@ -3,14 +3,20 @@
 | Field | Value |
 | --- | --- |
 | Plan ID | PRE-M5-02F |
-| Version | v4 |
-| Status | Certification artifact (pre-merge; PR #251) |
+| Version | v5 |
+| Status | Merged and certified; PR #251 |
 | Scope | MG2 + MG4–MG8 against locked PRE-M5 metric contract |
 | Certified programme base (post #252) | `ab46cb6f65de2fb80aaf01444eba670895c3fea6` |
 | Post-merge CI authority (#252) | push run `36164776038` (6/6 on `ab46cb6`) |
 | Prior metrics base (#250) | `5efc9638f231d6b944bc52c739906d3ff83d1b41` |
 | Branch | `path1/pre-m5-02f-metrics-certification` |
-| Last updated | 2026-09-25 |
+| Certification PR | #251 |
+| Approved head | `44e9d2350886a58bea605e3b4421d4c98d6dc665` |
+| Merge SHA | `bd916712be4657555c7a17cfe604e69cdf790729` |
+| Merge tree | `bf0513350ef6fe7323d441f038b9d8bb2140f2e5` |
+| Post-merge push CI (#654) | `36228450299` (6/6 PASS on the merge SHA) |
+| Post-merge jobs | `playwright_unit`, `dialyzer`, `ash_codegen`, `format_compile`, `test`, `lint_security` — all PASS |
+| Last updated | 2026-09-26 |
 
 ### Revision log
 
@@ -18,8 +24,9 @@
 - `v2` — Gate B: selective bulk fixture (800 noise lines), `ANALYZE`, telemetry `EXPLAIN (FORMAT JSON)` with index-scan proof; Gate A dependency path documented (PR #252); plural-reader citation fix.
 - `v3` — Gate A merged (#252 / `ab46cb6`); 800 noise refund facts; strict event-first `sales_order_items` indexes on guard/gross/order-count; refund-path boundedness proof; three-iteration planner stability test.
 - `v4` — Refund certification: zero tolerance for `Seq Scan` on `sales_refunds` / `sales_refund_lines` under 800-noise fixture; indexed `sales_refunds` header access required.
+- `v5` — PR #251 merged at `bd916712be4657555c7a17cfe604e69cdf790729`; post-merge push CI #654 / `36228450299` passed all six jobs; certification is integrated on main and `GAP-PRE-M5-METRICS` is CLOSED.
 
-Authority: this file is the 02F evidence artifact. Programme closeout wording in `docs/path-1/path-1-phase-breakdown.md` and `docs/roadmap/current-state-and-path-handoff.md` stays unchanged until this PR merges and post-merge CI passes on the merge SHA.
+Authority: this file is the PRE-M5-02F evidence artifact. PR #251 and its exact post-merge CI have passed; the programme closeout state is recorded below.
 
 ### Gate A (dependency security) — satisfied on programme base
 
@@ -163,13 +170,11 @@ Chain: `FinancialPrimitives` → `MetricRules` → `EventAggregator` → `Snapsh
 | SNAPSHOT_CONTRACT | PASS |
 | CONCURRENCY_ATOMICITY | PASS |
 
-All required metric and performance gates passed on branch evidence. No production code changes were required.
+All required metric and performance gates passed on branch evidence. PR #251 then merged, and all six post-merge CI jobs passed on its merge SHA. No production code changes were required.
 
 ```text
-GAP-PRE-M5-METRICS = ELIGIBLE FOR CLOSEOUT
+GAP-PRE-M5-METRICS = CLOSED
 ```
-
-`GAP-PRE-M5-METRICS = CLOSED` is reserved for the post-merge closeout after this PR’s merge SHA passes CI.
 
 ---
 
