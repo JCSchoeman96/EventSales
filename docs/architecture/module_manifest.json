@@ -38,6 +38,7 @@
     "lib/event_sales/analytics/snapshot_store/adapter.ex",
     "lib/event_sales/analytics/snapshot_store/noop_adapter.ex",
     "lib/event_sales/analytics/snapshot_store/redix_adapter.ex",
+    "lib/event_sales/analytics/time_rules.ex",
     "lib/event_sales/analytics/validations/canonical_snapshot_financials.ex",
     "lib/event_sales/analytics/workers/rebuild_hot_state_worker.ex",
     "lib/event_sales/analytics/workers/refresh_snapshot_worker.ex",
@@ -1107,6 +1108,89 @@
         }
       ],
       "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 13,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.TimeRules",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/time_rules.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "sale_effective_at"
+        },
+        {
+          "arity": 1,
+          "name": "refund_effective_at"
+        },
+        {
+          "arity": 2,
+          "name": "business_date"
+        },
+        {
+          "arity": 2,
+          "name": "today_bounds"
+        },
+        {
+          "arity": 2,
+          "name": "yesterday_bounds"
+        },
+        {
+          "arity": 2,
+          "name": "rolling_bounds"
+        },
+        {
+          "arity": 1,
+          "name": "last_7_days_bounds"
+        },
+        {
+          "arity": 1,
+          "name": "last_30_days_bounds"
+        },
+        {
+          "arity": 3,
+          "name": "custom_civil_bounds"
+        },
+        {
+          "arity": 2,
+          "name": "period_contains?"
+        },
+        {
+          "arity": 2,
+          "name": "source_age_microseconds"
+        },
+        {
+          "arity": 2,
+          "name": "classify_source_freshness"
+        },
+        {
+          "arity": 2,
+          "name": "freshness_classification"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "Freshness",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/time_rules.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "Period",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/time_rules.ex",
+      "public_funs": [],
+      "specs?": false,
       "uses": []
     },
     {

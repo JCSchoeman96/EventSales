@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-396
+397
 
 ## Files
 
@@ -50,6 +50,7 @@ Project root: `.`
 - `lib/event_sales/analytics/snapshot_store/adapter.ex`
 - `lib/event_sales/analytics/snapshot_store/noop_adapter.ex`
 - `lib/event_sales/analytics/snapshot_store/redix_adapter.ex`
+- `lib/event_sales/analytics/time_rules.ex`
 - `lib/event_sales/analytics/validations/canonical_snapshot_financials.ex`
 - `lib/event_sales/analytics/workers/rebuild_hot_state_worker.ex`
 - `lib/event_sales/analytics/workers/refresh_snapshot_worker.ex`
@@ -608,6 +609,24 @@ Project root: `.`
   - specs?: true
   - docs_count: 1
   - public_funs: `redix_name/0`, `put/3`, `list_event_summaries/1`
+  - uses: _none_
+- `EventSales.Analytics.TimeRules` - `lib/event_sales/analytics/time_rules.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 13
+  - public_funs: `sale_effective_at/1`, `refund_effective_at/1`, `business_date/2`, `today_bounds/2`, `yesterday_bounds/2`, `rolling_bounds/2`, `last_7_days_bounds/1`, `last_30_days_bounds/1`, `custom_civil_bounds/3`, `period_contains?/2`, `source_age_microseconds/2`, `classify_source_freshness/2`, `freshness_classification/2`
+  - uses: _none_
+- `Freshness` - `lib/event_sales/analytics/time_rules.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `Period` - `lib/event_sales/analytics/time_rules.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
   - uses: _none_
 - `EventSales.Analytics.Validations.CanonicalSnapshotFinancials` - `lib/event_sales/analytics/validations/canonical_snapshot_financials.ex`
   - moduledoc?: true
