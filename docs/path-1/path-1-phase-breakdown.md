@@ -134,7 +134,7 @@ M1-08: COMPLETE (PASS)
 M1-08 contract: docs/path-1/m1-08-backfill-completeness-reconciliation-and-analytics-ready-contract.md
 M1-09: COMPLETE (PASS_WITH_PRE_M2_IMPLEMENTATION_GATE)
 M1-09 certification: docs/path-1/m1-09-m1-certification-and-pre-m2-gate.md
-TAX-INCLUSIVE REVENUE CONTRACT: IMPLEMENTATION_CHANGE_REQUIRED
+TAX-INCLUSIVE REVENUE CONTRACT: IMPLEMENTED / CERTIFIED BY PRE-M5-02F (MG2)
 FRESHNESS / STALE CONTRACT: LOCKED (`age > 10m` STALE; `<5m` NORMAL; `5m–10m` AGING)
 HotStateAggregator 5m stale_after_ms: IMPLEMENTATION_CHANGE_REQUIRED
 ANALYTICS_READY CONTRACT: LOCKED (derived from durable evidence; ≠ freshness)
@@ -1140,7 +1140,7 @@ M1-09 certification:
 docs/path-1/m1-09-m1-certification-and-pre-m2-gate.md
 
 TAX-INCLUSIVE REVENUE CONTRACT:
-IMPLEMENTATION_CHANGE_REQUIRED
+IMPLEMENTED / CERTIFIED BY PRE-M5-02F (MG2)
 
 FRESHNESS / STALE CONTRACT:
 LOCKED (`age > 10m` STALE on source age; HotStateAggregator 5m = IMPLEMENTATION_CHANGE_REQUIRED)
