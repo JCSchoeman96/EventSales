@@ -151,6 +151,25 @@ defmodule EventSales.Analytics.TimeRulesTest do
       refute rolling.start_utc == today.start_utc
       refute rolling.end_utc == today.end_utc
     end
+
+    test "rolling bounds from a Johannesburg DateTime return Etc/UTC period fields" do
+      utc_instant = ~U[2026-06-10 12:00:00.000000Z]
+      {:ok, johannesburg_now} = DateTime.shift_zone(utc_instant, @johannesburg)
+
+      assert johannesburg_now.time_zone == @johannesburg
+
+      assert {:ok, period} = TimeRules.last_7_days_bounds(johannesburg_now)
+      assert_period_etc_utc(period)
+      assert DateTime.compare(period.end_utc, utc_instant) == :eq
+
+      expected_start = DateTime.add(utc_instant, -7 * 24 * 60 * 60, :second)
+      assert DateTime.compare(period.start_utc, expected_start) == :eq
+
+      assert {:ok, rolling} = TimeRules.rolling_bounds(7, johannesburg_now)
+      assert_period_etc_utc(rolling)
+      assert DateTime.compare(rolling.end_utc, period.end_utc) == :eq
+      assert DateTime.compare(rolling.start_utc, period.start_utc) == :eq
+    end
   end
 
   describe "custom_civil_bounds/3" do
@@ -270,6 +289,14 @@ defmodule EventSales.Analytics.TimeRulesTest do
   end
 
   defp classify(anchor, now), do: TimeRules.classify_source_freshness(anchor, now)
+
+  defp assert_period_etc_utc(%Period{start_utc: start_utc, end_utc: end_utc}) do
+    for field <- [start_utc, end_utc] do
+      assert field.time_zone == "Etc/UTC"
+      assert field.utc_offset == 0
+      assert field.std_offset == 0
+    end
+  end
 
   defp order(attrs) do
     struct!(

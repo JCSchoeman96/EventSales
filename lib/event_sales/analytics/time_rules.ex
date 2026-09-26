@@ -115,12 +115,13 @@ defmodule EventSales.Analytics.TimeRules do
   """
   @spec rolling_bounds(pos_integer(), DateTime.t()) :: {:ok, Period.t()}
   def rolling_bounds(days, %DateTime{} = now) when is_integer(days) and days > 0 do
-    start_utc = normalize_utc(DateTime.add(now, -days * @day_seconds, :second))
+    end_utc = to_utc(now)
+    start_utc = DateTime.add(end_utc, -days * @day_seconds, :second)
 
     {:ok,
      %Period{
-       start_utc: start_utc,
-       end_utc: normalize_utc(now),
+       start_utc: to_utc(start_utc),
+       end_utc: end_utc,
        kind: {:rolling_days, days},
        timezone: nil
      }}
@@ -152,8 +153,8 @@ defmodule EventSales.Analytics.TimeRules do
          :ok <- validate_ordered(start_utc, end_utc) do
       {:ok,
        %Period{
-         start_utc: normalize_utc(start_utc),
-         end_utc: normalize_utc(end_utc),
+         start_utc: to_utc(start_utc),
+         end_utc: to_utc(end_utc),
          kind: :custom,
          timezone: timezone
        }}
@@ -212,8 +213,8 @@ defmodule EventSales.Analytics.TimeRules do
          :ok <- validate_ordered(start_utc, end_utc) do
       {:ok,
        %Period{
-         start_utc: normalize_utc(start_utc),
-         end_utc: normalize_utc(end_utc),
+         start_utc: to_utc(start_utc),
+         end_utc: to_utc(end_utc),
          kind: kind,
          timezone: timezone
        }}
@@ -256,10 +257,11 @@ defmodule EventSales.Analytics.TimeRules do
       else: {:error, :invalid_period_bounds}
   end
 
-  @spec normalize_utc(DateTime.t()) :: DateTime.t()
-  defp normalize_utc(%DateTime{} = datetime) do
-    {microsecond, _} = datetime.microsecond
-    %{datetime | microsecond: {microsecond, 6}}
+  @spec to_utc(DateTime.t()) :: DateTime.t()
+  defp to_utc(%DateTime{} = datetime) do
+    {:ok, utc} = DateTime.shift_zone(datetime, "Etc/UTC")
+    {microsecond, _} = utc.microsecond
+    %{utc | microsecond: {microsecond, 6}, utc_offset: 0, std_offset: 0}
   end
 
   defp classify_age_microseconds(age_us) when age_us < @five_minutes_us, do: :normal
