@@ -259,6 +259,43 @@ defmodule EventSales.Analytics.EventAggregatorTest do
     assert EventAggregator.summary_for_event(event.id) == {:error, :mixed_currency}
   end
 
+  test "recognised order count stays one per event when one order spans overlapping events", %{
+    source: source,
+    event: event,
+    other_event: other_event,
+    ticket: ticket,
+    other_ticket: other_ticket
+  } do
+    order =
+      create_order!(source, :completed,
+        woo_order_id: 91_030,
+        completed_at: ~U[2026-05-17 08:00:00.000000Z]
+      )
+
+    create_item!(order, event, ticket,
+      woo_line_item_id: 31,
+      quantity: 1,
+      line_total: Decimal.new("100.00"),
+      line_total_tax: Decimal.new("15.00")
+    )
+
+    create_item!(order, other_event, other_ticket,
+      woo_line_item_id: 32,
+      quantity: 1,
+      line_total: Decimal.new("200.00"),
+      line_total_tax: Decimal.new("30.00")
+    )
+
+    assert {:ok, event_a} = EventAggregator.financial_summaries_for_event(event.id)
+    assert {:ok, event_b} = EventAggregator.financial_summaries_for_event(other_event.id)
+
+    assert event_a["ZAR"].recognised_order_count == 1
+    assert event_b["ZAR"].recognised_order_count == 1
+
+    # Contract: event-scoped counts are not additive into a global total (M1-06 §14).
+    refute event_a["ZAR"].recognised_order_count + event_b["ZAR"].recognised_order_count == 1
+  end
+
   test "financial_summaries_for_event applies qualifying refunds without changing gross", %{
     source: source,
     event: event,

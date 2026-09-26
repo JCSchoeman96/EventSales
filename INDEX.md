@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-395
+396
 
 ## Files
 
@@ -382,6 +382,7 @@ Project root: `.`
 - `lib/project_index/scanner.ex`
 - `rel/overlays/.gitkeep`
 - `test/support/analytics/error_event_aggregator.ex`
+- `test/support/analytics/event_aggregator_query_plan_fixture.ex`
 - `test/support/analytics/memory_event_aggregator.ex`
 - `test/support/analytics/memory_snapshot_store_adapter.ex`
 - `test/support/analytics/selective_event_aggregator.ex`
@@ -2593,6 +2594,12 @@ Project root: `.`
   - specs?: false
   - docs_count: 0
   - public_funs: `summary_for_event/2`
+  - uses: _none_
+- `EventSales.TestSupport.Analytics.EventAggregatorQueryPlanFixture` - `test/support/analytics/event_aggregator_query_plan_fixture.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `seed!/1`
   - uses: _none_
 - `EventSales.TestSupport.Analytics.MemoryEventAggregator` - `test/support/analytics/memory_event_aggregator.ex`
   - moduledoc?: true
