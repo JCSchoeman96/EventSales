@@ -77,6 +77,73 @@ official package documentation
 explicit user direction
 ```
 
+## Local Infrastructure and Docker Contract
+
+Workstation shared infrastructure is externally owned by the local
+`dev-core` stack. Project code MUST NOT create, start, stop, recreate,
+or delete workstation shared PostgreSQL or Redis services.
+
+Approved workstation endpoints:
+
+PostgreSQL DEV: 127.0.0.1:55432
+PostgreSQL TEST: 127.0.0.1:55433
+Redis DEV: 127.0.0.1:56379
+Redis TEST: 127.0.0.1:56380
+
+PostgreSQL 18 is the current project baseline unless this repository has
+an explicit documented exception.
+
+EventSales development uses the `eventsales_dev` role and `event_sales_dev`
+database. Tests use the separate `eventsales_test` role and `event_sales_test`
+database on the TEST cluster.
+
+Development and test are separate infrastructure boundaries.
+Tests MUST NOT connect to or mutate development data.
+
+Shared PostgreSQL means a shared PostgreSQL server, never a shared
+project database. Each project/environment owns its database and role.
+
+Shared Redis requires project- and environment-scoped key namespaces.
+FLUSHALL and FLUSHDB are prohibited against shared Redis.
+Destructive, load, performance, or otherwise unsafe Redis workloads must
+use project-isolated infrastructure.
+
+Performance/load database infrastructure remains project-isolated when
+the project's architecture or test plan requires it.
+
+Every independently deployable application MUST maintain a canonical,
+repository-owned `compose.yaml`.
+
+The repository Compose definition is the deployment contract. It MUST NOT
+duplicate workstation shared DEV/TEST infrastructure.
+
+Portainer is an observation/administration surface, not the project's
+configuration authority.
+
+Dockge owns only stacks intentionally assigned to Dockge. The discovery
+of an existing Compose stack does not transfer ownership.
+
+A workload must have exactly one configuration/lifecycle owner.
+
+Do not publish PostgreSQL, Redis, or other internal service ports unless
+host access is explicitly required.
+
+Avoid explicit `container_name` unless a documented integration requires
+a globally stable Docker container name.
+
+Secrets MUST NOT be committed. Commit only safe templates such as
+`.env.example`.
+
+Before completing infrastructure changes:
+- validate Compose configuration;
+- verify service connectivity and health;
+- run migrations from a clean supported database where applicable;
+- run the relevant full test suite;
+- verify DEV/TEST isolation;
+- verify Redis key isolation where applicable;
+- verify no secrets were committed;
+- preserve existing data until the migration has been independently proven.
+
 Use `rg` for broad text search.
 
 Use `ast-grep run` or `ast-grep scan` when structural code discovery is materially better than text search.
@@ -96,12 +163,12 @@ the canonical setup script from the repository root:
 bash scripts/dev_local.sh
 ```
 
-This single command verifies local WordPress, safely starts PostgreSQL and
-Redis, applies migrations, loads the local catalogue secret without printing
-it, and starts native Phoenix. Agents must not replace this workflow with
-manual `source`, secret-export, Compose, migration, or Phoenix startup commands
-unless they are performing a narrowly scoped diagnostic that the script does
-not support.
+This command verifies local WordPress and the shared DEV services, applies
+development migrations, loads the local catalogue secret without printing it,
+and starts native Phoenix. It never starts or stops PostgreSQL or Redis.
+Agents must not replace this workflow with manual `source`, secret-export,
+migration, or Phoenix startup commands unless they are performing a narrowly
+scoped diagnostic that the script does not support.
 
 Before changing local-runtime configuration or diagnosing startup failures, use:
 
@@ -111,7 +178,7 @@ bash scripts/dev_local.sh status
 bash scripts/dev_local.sh catalogue-dry-run
 ```
 
-When a task is finished and the local services are no longer needed, use:
+When a task is finished and native Phoenix is no longer needed, use:
 
 ```bash
 bash scripts/dev_local.sh stop
@@ -132,9 +199,11 @@ http://localhost:10059
 Native Phoenix / EventSales
 http://127.0.0.1:4001
         ↓
-Docker Compose infrastructure
-PostgreSQL: 127.0.0.1:5432
-Redis:      127.0.0.1:6379
+Workstation Dockge `dev-core` shared infrastructure
+PostgreSQL DEV: 127.0.0.1:55432
+PostgreSQL TEST: 127.0.0.1:55433
+Redis DEV:      127.0.0.1:56379
+Redis TEST:     127.0.0.1:56380
 ```
 
 Agent access flow:
@@ -297,20 +366,23 @@ Do not turn a focused implementation task into another architecture, security, i
 
 Run Phoenix natively on Kubuntu.
 
-Use Docker Compose for local PostgreSQL and Redis.
+Use the externally owned Dockge `dev-core` PostgreSQL and Redis services.
 
-Agents must start the integrated local runtime with
-`bash scripts/dev_local.sh`. Do not manually reproduce its setup sequence
-during normal development. Use its `doctor`, `status`, and `stop` commands for
-the corresponding lifecycle operations.
+Agents must start native Phoenix with `bash scripts/dev_local.sh`. This script
+connects to shared infrastructure but never starts or stops it. Use its
+`doctor`, `status`, and `stop` commands for configuration checks, observation,
+and native Phoenix lifecycle only. Use `bash scripts/dev_local.sh test` for
+local tests so they use an isolated PostgreSQL TEST database.
 
 Expected services:
 
 ```text
 WordPress:  http://localhost:10059
 Phoenix:    http://127.0.0.1:4001
-PostgreSQL: 127.0.0.1:5432
-Redis:      127.0.0.1:6379
+PostgreSQL DEV:  127.0.0.1:55432
+PostgreSQL TEST: 127.0.0.1:55433
+Redis DEV:       127.0.0.1:56379
+Redis TEST:      127.0.0.1:56380
 ```
 
 PostgreSQL and Redis must bind to loopback only.
@@ -465,7 +537,7 @@ Catalogue change receivers, live cutover flags, and copied WordPress webhooks mu
 During implementation, prefer:
 
 ```bash
-mix test path/to/focused_test.exs
+bash scripts/dev_local.sh test test/path/to/focused_test.exs
 mix compile --warnings-as-errors
 mix format
 ```
@@ -476,8 +548,8 @@ After UI or asset changes, run only the relevant checks:
 mix format
 mix compile --warnings-as-errors
 mix assets.build
-mix test test/event_sales/assets_pipeline_config_test.exs
-mix test path/to/directly_affected_test.exs
+bash scripts/dev_local.sh test test/event_sales/assets_pipeline_config_test.exs
+bash scripts/dev_local.sh test test/path/to/directly_affected_test.exs
 ```
 
 At vertical-slice completion:
@@ -489,10 +561,12 @@ mix quality.fast
 Before meaningful merge or review:
 
 ```bash
-mix quality.pr
+bash scripts/local_ci.sh
 ```
 
-Use `mix quality.ci` only when required by:
+Run the `mix quality.ci` gate through `bash scripts/dev_local.sh quality-ci`
+so tests use a unique PostgreSQL TEST database. Do not run the raw Mix alias
+against the shared base TEST database. Use the CI gate only when required by:
 
 ```text
 the release process
@@ -584,6 +658,9 @@ Local infrastructure:
 bash scripts/dev_local.sh
 bash scripts/dev_local.sh status
 bash scripts/dev_local.sh doctor
+bash scripts/dev_local.sh test
+bash scripts/dev_local.sh quality-pr
+bash scripts/dev_local.sh quality-ci
 bash scripts/dev_local.sh catalogue-dry-run
 bash scripts/dev_local.sh catalogue-dry-run --fresh
 bash scripts/dev_local.sh stop
@@ -600,20 +677,20 @@ variation mapping while its source dry run remains ready: validate the exact
 run, hash, and variation, revoke the plan first, and run `--fresh` after the
 explicit mapping change. Never Apply during local mapping certification.
 
-Do not use `docker compose down -v` during normal development.
+Do not use any repository Compose command to manage workstation shared
+PostgreSQL or Redis. Do not use `docker compose down -v` during development.
 
-`scripts/dev_local.sh` is the canonical local startup workflow. It must use
-`docker compose --env-file /dev/null` so Compose never reads the root `.env`.
-All coding agents must use this script whenever their task needs the integrated
-local runtime. Direct Compose or Mix lifecycle commands are reserved for
-focused diagnostics, validation explicitly required by a slice, or maintenance
-that `scripts/dev_local.sh` does not provide.
+`scripts/dev_local.sh` is the canonical local application workflow. It does
+not call Docker Compose. The root `compose.yaml` is the deployment contract;
+it does not define workstation shared DEV/TEST services.
 
 Do not require GitHub synchronisation before beginning local implementation.
 
 Use `scripts/sync_with_origin_main.sh` only when intentionally synchronising with remote `main`.
 
-Once root `compose.yaml` is established, use it as the canonical PostgreSQL and Redis workflow instead of `scripts/dev_postgres.sh`.
+Do not use `scripts/dev_postgres.sh` for normal development. Its legacy
+container and volume are preserved while the shared infrastructure migration
+is verified.
 
 Do not use Railway smoke-test or deployment scripts during normal local development.
 

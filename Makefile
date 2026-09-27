@@ -31,11 +31,11 @@ catalogue-dry-run:
 catalogue-dry-run-fresh:
 	@bash scripts/dev_local.sh catalogue-dry-run --fresh
 
-ready: doctor sync toolchain deps infra db db-test quality test
+ready: doctor toolchain deps infra db quality test
 	@echo ""
-	@echo "🚀 EventSales workspace synced, validated, and ready for the agent."
+	@echo "🚀 EventSales workspace validated and ready for the agent."
 
-ready-local: doctor toolchain deps infra db db-test quality test
+ready-local: doctor toolchain deps infra db quality test
 	@echo ""
 	@echo "🚀 EventSales local workspace validated. No git sync was performed."
 
@@ -44,7 +44,6 @@ doctor:
 	@command -v git >/dev/null || { echo "Missing: git"; exit 1; }
 	@command -v bash >/dev/null || { echo "Missing: bash"; exit 1; }
 	@command -v mise >/dev/null || { echo "Missing: mise"; exit 1; }
-	@command -v docker >/dev/null || { echo "Missing: docker"; exit 1; }
 
 sync:
 	@echo ""
@@ -79,20 +78,18 @@ deps:
 
 infra:
 	@echo ""
-	@echo "=== 7. Starting EventSales PostgreSQL and Redis ==="
-	@docker compose --env-file /dev/null up -d --wait
+	@echo "=== 7. Checking workstation shared infrastructure ==="
+	@bash scripts/dev_local.sh doctor
 
 db:
 	@echo ""
 	@echo "=== 9. Preparing Development Database ==="
-	@$(MIX) ecto.create
-	@$(MIX) ecto.migrate
+	@bash scripts/dev_local.sh migrate
 
 db-test:
 	@echo ""
-	@echo "=== 10. Preparing Test Database ==="
-	@MIX_ENV=test $(MIX) ecto.create
-	@MIX_ENV=test $(MIX) ecto.migrate
+	@echo "=== Test databases are prepared by the isolated local test runner ==="
+	@echo "Run make test to create and migrate a unique database on PostgreSQL TEST."
 
 quality:
 	@echo ""
@@ -102,7 +99,7 @@ quality:
 test:
 	@echo ""
 	@echo "=== 12. Running Full Test Suite ==="
-	@$(MIX) test
+	@bash scripts/dev_local.sh test
 
 index:
 	@$(MIX) project.index
@@ -112,14 +109,15 @@ index-check:
 
 reset-db:
 	@echo ""
-	@echo "=== Resetting EventSales Dev Postgres ==="
+	@echo "=== EventSales development database reset is disabled ==="
 	@echo "Use an explicitly approved database maintenance workflow; no reset is provided here."
 	@exit 1
 
 stop-db:
 	@echo ""
-	@echo "=== Stopping EventSales PostgreSQL and Redis ==="
-	@docker compose --env-file /dev/null down
+	@echo "=== Shared PostgreSQL and Redis are externally owned ==="
+	@echo "No workstation infrastructure was stopped."
 
 logs-db:
-	@docker compose --env-file /dev/null logs postgres
+	@echo "Database container logs are owned by the workstation dev-core stack."
+	@echo "This repository does not control that lifecycle."

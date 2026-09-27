@@ -1,14 +1,20 @@
 import Config
 
-# Configure your database
+# Development connects only to the workstation PostgreSQL DEV cluster.
 config :event_sales, EventSales.Repo,
-  username: "postgres",
-  password: "postgres",
-  hostname: "localhost",
+  username: System.get_env("EVENTSALES_DEV_DATABASE_USERNAME", "eventsales_dev"),
+  password: System.get_env("EVENTSALES_DEV_DATABASE_PASSWORD", ""),
+  hostname: "127.0.0.1",
+  port: 55_432,
   database: "event_sales_dev",
   stacktrace: true,
-  show_sensitive_data_on_connection_error: true,
+  show_sensitive_data_on_connection_error: false,
   pool_size: 10
+
+config :event_sales, :webhook_intake_rate_limit,
+  redis_url:
+    System.get_env("WEBHOOK_RATE_LIMIT_REDIS_URL") ||
+      System.get_env("REDIS_URL", "redis://127.0.0.1:56379/0")
 
 # For development, we disable any cache and enable
 # debugging and code reloading.

@@ -3,6 +3,8 @@ defmodule EventSales.TestSupport.Analytics.MemorySnapshotStoreAdapter do
 
   @behaviour EventSales.Analytics.SnapshotStore.Adapter
 
+  alias EventSales.Analytics.CacheKeys
+
   @key {__MODULE__, :state}
 
   @impl true
@@ -82,14 +84,14 @@ defmodule EventSales.TestSupport.Analytics.MemorySnapshotStoreAdapter do
     :persistent_term.put(@key, state)
   end
 
-  defp event_id_from_key("eventsales:analytics:hot_state:v1:event:" <> rest) do
-    if String.ends_with?(rest, ":summary") do
-      event_id = String.replace_suffix(rest, ":summary", "")
+  defp event_id_from_key(key) do
+    prefix = CacheKeys.redis_event_snapshot_prefix()
+
+    if String.starts_with?(key, prefix) and String.ends_with?(key, ":summary") do
+      event_id = key |> String.replace_prefix(prefix, "") |> String.replace_suffix(":summary", "")
       if event_id == "", do: {:error, :malformed_key}, else: {:ok, event_id}
     else
       {:error, :malformed_key}
     end
   end
-
-  defp event_id_from_key(_key), do: {:error, :malformed_key}
 end

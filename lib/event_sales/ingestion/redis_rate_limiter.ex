@@ -71,7 +71,11 @@ defmodule EventSales.Ingestion.RedisRateLimiter do
        [
          window_ms: window_ms,
          max_requests: max_requests,
-         key_prefix: config_value(:key_prefix, "eventsales:webhook_rate_limit:v1")
+         key_prefix:
+           config_value(
+             :key_prefix,
+             "#{Application.get_env(:event_sales, :redis_namespace, "eventsales:unknown")}:webhook_rate_limit:v1"
+           )
        ] ++ overrides}
     else
       {:error, :disabled}

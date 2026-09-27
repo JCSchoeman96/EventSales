@@ -10,8 +10,10 @@ Slice `0.2` established the Postgres-backed test baseline required for `EventSal
   - Runs `mix compile --warnings-as-errors`
   - Verifies `mix.lock` has no unused dependencies with `mix deps.unlock --check-unused`
   - Runs `./scripts/check_no_web_woocommerce_refs.sh`
-- `mix quality.pr`
-  - Minimum gate before opening or updating a meaningful PR
+- `bash scripts/dev_local.sh quality-pr`
+  - Local PR gate
+  - Creates a uniquely named database on PostgreSQL TEST and runs the
+    `mix quality.pr` alias with that isolated database configured
   - Runs `mix format --check-formatted`
   - Runs `mix compile --warnings-as-errors`
   - Verifies `mix.lock` has no unused dependencies with `mix deps.unlock --check-unused`
@@ -19,12 +21,15 @@ Slice `0.2` established the Postgres-backed test baseline required for `EventSal
   - Runs `mix ash.codegen --dry-run`
   - Verifies Ash-generated migrations and resource snapshots are unchanged
   - Runs `mix credo --strict`
-  - Runs `mix test`
+  - Runs the full `mix test` suite
+- `bash scripts/dev_local.sh quality-ci`
+  - Runs the full `mix quality.ci` alias with a unique PostgreSQL TEST database
 - `mix quality`
   - Runs `mix quality.fast`
   - Runs `mix credo --strict`
   - Runs `mix sobelow`
-- `mix quality.ci`
+- `mix quality.ci` (invoked locally only through `bash scripts/dev_local.sh quality-ci`)
+  - Do not run directly against the shared base TEST database
   - Final CI-equivalent gate before marking a PR ready for review or pre-merge
   - Runs `mix deps.get --check-locked`
   - Runs `mix format --check-formatted`
@@ -51,31 +56,33 @@ bash scripts/local_ci.sh
 The script runs these steps in order:
 
 1. `git diff --check`
-2. `mix format --check-formatted`
-3. `mix compile --warnings-as-errors`
-4. `bash scripts/check_no_web_woocommerce_refs.sh`
-5. `MIX_ENV=test mix ash.codegen --dry-run`
-6. `git diff --exit-code priv/repo/migrations priv/resource_snapshots`
-7. `mix quality.pr`
-8. `mix dialyzer`
+2. `bash scripts/dev_local.sh quality-ci`
+   - Creates and migrates one unique database on PostgreSQL TEST
+   - Runs formatting, compilation, dependency and security audits, Ash codegen,
+     static checks, Credo, the full test suite, and Dialyzer in that environment
 
 **When to use it:** before opening or updating a meaningful PR on GitHub.
 
-**When not to use it:** during active coding. Prefer `mix quality.fast` and focused `mix test path/to/relevant_test.exs` for quick feedback.
+**When not to use it:** during active coding. Prefer `mix quality.fast` and
+`bash scripts/dev_local.sh test path/to/relevant_test.exs` for quick feedback.
 
-**What it covers:** the core GitHub jobs `format_compile`, `test`, `ash_codegen`, and `dialyzer`. It does not run Sobelow, `mix deps.audit`, or `mix hex.audit` (those are in `mix quality.ci` and the CI `lint_security` job).
+**What it covers:** the local equivalent of the formatting, compilation,
+dependency, security, test, codegen, and Dialyzer gates.
 
-**Still required before merge-ready:** `mix quality.ci` (full local CI parity). The pre-push hook runs `mix quality.ci` when repo hooks are installed.
+For local checks, use `bash scripts/dev_local.sh quality-ci`. The raw
+`mix quality.ci` alias is for CI or another job-owned isolated TEST environment.
 
-Steps 2–6 partially overlap with step 7 (`mix quality.pr`) so failures surface with clear section labels before the full PR alias runs.
-
-Postgres must be reachable for Ash codegen, tests, and Dialyzer. Start local Postgres with `bash scripts/dev_postgres.sh start` when needed.
+The workstation `dev-core` PostgreSQL TEST service must be reachable for the
+local test and Ash codegen gates. Run `bash scripts/dev_local.sh doctor` to
+check the locked endpoints. The repository does not start or stop PostgreSQL
+or Redis. Use `bash scripts/dev_local.sh test` for focused or full tests and
+`bash scripts/dev_local.sh quality-pr` for the full local PR gate.
 
 ## Slice 0.4 Ash Baseline Checks
 
 Slice `0.4` adds proof-only Ash verification on top of the existing local commands:
 
-- `MIX_ENV=test mix ash.codegen --dry-run`
+- `mix ash.codegen --dry-run` (included in `bash scripts/dev_local.sh quality-pr`)
   - Confirms the Ash/AshPostgres proof resources and snapshots are in sync
   - Is required as part of Slice `0.4` verification
   - Is enforced by `mix quality.ci`
@@ -85,22 +92,24 @@ Slice `0.4` adds proof-only Ash verification on top of the existing local comman
   - Confirms Ash-related checks did not leave generated migrations or resource snapshots unstaged
   - Is enforced by `mix quality.ci`
   - Is enforced after Ash dry-run in both the CI `test` and `ash_codegen` jobs
-- Focused proof tests:
-  - `mix test test/event_sales/ash_baseline/auth_user_support_test.exs`
-  - `mix test test/event_sales/ash_baseline/state_machine_proof_test.exs`
-  - `mix test test/event_sales/ash_baseline/paper_trail_proof_test.exs`
-  - `mix test test/event_sales_web/ash_admin_access_test.exs`
-  - `mix test test/event_sales/ash_resource_smoke_test.exs`
+- Focused proof tests use the isolated TEST database wrapper:
+  - `bash scripts/dev_local.sh test test/event_sales/ash_baseline/auth_user_support_test.exs`
+  - `bash scripts/dev_local.sh test test/event_sales/ash_baseline/state_machine_proof_test.exs`
+  - `bash scripts/dev_local.sh test test/event_sales/ash_baseline/paper_trail_proof_test.exs`
+  - `bash scripts/dev_local.sh test test/event_sales_web/ash_admin_access_test.exs`
+  - `bash scripts/dev_local.sh test test/event_sales/ash_resource_smoke_test.exs`
 
 These checks prove ecosystem readiness only. They do not mean the real Accounts, Catalog, Sales, Ingestion, or Audit resources have shipped.
 
 Pre-launch certification gate:
 
 ```bash
-mix test --only launch_certification
+bash scripts/dev_local.sh test --only launch_certification
 ```
 
-Because the app now starts `EventSales.Repo` and Oban in `:test`, any command that runs `mix test`, `mix ash.codegen --dry-run`, or a test-only smoke check requires a reachable Postgres instance.
+Because the app starts `EventSales.Repo` and Oban in `:test`, test and Ash
+codegen checks must use PostgreSQL TEST, never PostgreSQL DEV. The local wrapper
+creates a unique database for the run and preserves partition suffixes.
 
 `mix sobelow` currently runs without a custom Sobelow config file. Add a config later only if the project needs one.
 
@@ -148,14 +157,14 @@ Install the repo-local hooks with:
 Hook behavior:
 
 - Pre-commit runs `mix quality.fast`
-- Pre-push runs `mix quality.ci`
+- Pre-push runs `bash scripts/dev_local.sh quality-ci`
 
 PR behavior:
 
 - Do not push a meaningful PR update until `bash scripts/local_ci.sh` passes.
-- Do not open or update a meaningful PR until `mix quality.pr` passes (included in `local_ci.sh`).
-- Do not mark a PR ready for review until `mix quality.ci` passes.
-- Do not claim “all checks pass” unless Credo ran explicitly or through `mix quality`, `mix quality.pr`, or `mix quality.ci`.
+- Do not open or update a meaningful PR until `bash scripts/local_ci.sh` passes.
+- Do not mark a PR ready for review until `bash scripts/dev_local.sh quality-ci` passes.
+- Do not claim “all checks pass” unless Credo ran explicitly or through `mix quality`, `bash scripts/dev_local.sh quality-pr`, or `bash scripts/dev_local.sh quality-ci`.
 
 The installer sets `core.hooksPath` for this repository only.
 Because Git worktrees share repository config, that repository-level hooks path also applies to sibling worktrees for the same repo.

@@ -507,8 +507,8 @@ Project root: `.`
 - `EventSales.Analytics.CacheKeys` - `lib/event_sales/analytics/cache_keys.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 2
-  - public_funs: `event_summary/1`, `redis_event_snapshot/1`
+  - docs_count: 3
+  - public_funs: `event_summary/1`, `redis_event_snapshot/1`, `redis_event_snapshot_prefix/0`
   - uses: _none_
 - `EventSales.Analytics.DashboardCache` - `lib/event_sales/analytics/dashboard_cache.ex`
   - moduledoc?: true

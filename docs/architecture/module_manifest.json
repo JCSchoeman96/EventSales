@@ -676,7 +676,7 @@
       "uses": []
     },
     {
-      "docs_count": 2,
+      "docs_count": 3,
       "moduledoc?": true,
       "name": "EventSales.Analytics.CacheKeys",
       "parse_error": null,
@@ -689,6 +689,10 @@
         {
           "arity": 1,
           "name": "redis_event_snapshot"
+        },
+        {
+          "arity": 0,
+          "name": "redis_event_snapshot_prefix"
         }
       ],
       "specs?": true,

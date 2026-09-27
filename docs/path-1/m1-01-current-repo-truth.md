@@ -608,7 +608,7 @@ durable Order / OrderItem (cold Postgres)
 | --- | --- |
 | Cold / durable truth | `sales_orders` / `sales_order_items` + Ash Sales resources |
 | Hot | ETS table owned by HotStateAggregator; facade `DashboardCache` (`dashboard_cache.ex:1-25`) |
-| Warm | Redis key `eventsales:analytics:hot_state:v1:event:{id}:summary` (`cache_keys.ex:14-18`) |
+| Warm | Redis key `eventsales:<environment>:analytics:hot_state:v1:event:{id}:summary` (`cache_keys.ex`) |
 | Cold derived snapshots | `EventAggregateSnapshot`, `DailySalesAggregateSnapshot` |
 | Rebuild SoT | Postgres via EventAggregator in `RebuildHotStateWorker` |
 | Single-flight | Aggregator `rebuild_in_flight?` + Oban unique scope hot_state (~300s) |

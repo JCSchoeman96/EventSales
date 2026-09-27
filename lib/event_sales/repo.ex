@@ -6,6 +6,6 @@ defmodule EventSales.Repo do
   end
 
   def min_pg_version do
-    Version.parse!("16.0.0")
+    Version.parse!("18.0.0")
   end
 end

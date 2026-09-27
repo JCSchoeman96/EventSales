@@ -29,7 +29,8 @@ defmodule EventSales.Ingestion.RedisWebhookBuffer do
   @doc false
   @spec key(String.t()) :: String.t()
   def key(suffix) when is_binary(suffix) do
-    prefix = config() |> Keyword.get(:key_prefix, "eventsales:webhook_buffer:v1")
+    namespace = Application.get_env(:event_sales, :redis_namespace, "eventsales:unknown")
+    prefix = config() |> Keyword.get(:key_prefix, "#{namespace}:webhook_buffer:v1")
     "#{prefix}:#{suffix}"
   end
 

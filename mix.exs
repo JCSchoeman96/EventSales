@@ -99,7 +99,6 @@ defmodule EventSales.MixProject do
     [
       setup: ["deps.get", "ecto.setup", "assets.build"],
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
-      "ecto.reset": ["ecto.drop", "ecto.setup"],
       "assets.build": ["tailwind event_sales", "esbuild event_sales"],
       "assets.deploy": [
         "tailwind event_sales --minify",

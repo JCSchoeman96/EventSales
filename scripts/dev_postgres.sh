@@ -3,14 +3,13 @@ set -euo pipefail
 
 readonly CONTAINER_NAME="eventsales-postgres-dev"
 readonly VOLUME_NAME="eventsales-postgres-dev-data"
-readonly IMAGE_NAME="postgres:16-alpine"
 readonly POSTGRES_USER_VALUE="postgres"
-readonly POSTGRES_PASSWORD_VALUE="postgres"
 readonly POSTGRES_DB_VALUE="event_sales_test"
-readonly PORT_MAPPING="5432:5432"
+readonly PORT_MAPPING="127.0.0.1:5432:5432"
 
 usage() {
-  echo "Usage: scripts/dev_postgres.sh {start|stop|reset|status|logs}"
+  echo "Usage: scripts/dev_postgres.sh {start|stop|status|logs}"
+  echo "Legacy reset and creation of new containers are disabled; existing data is preserved."
 }
 
 container_exists() {
@@ -35,17 +34,8 @@ start_container() {
     return 0
   fi
 
-  docker run -d \
-    --name "${CONTAINER_NAME}" \
-    -e POSTGRES_USER="${POSTGRES_USER_VALUE}" \
-    -e POSTGRES_PASSWORD="${POSTGRES_PASSWORD_VALUE}" \
-    -e POSTGRES_DB="${POSTGRES_DB_VALUE}" \
-    -p "${PORT_MAPPING}" \
-    -v "${VOLUME_NAME}:/var/lib/postgresql/data" \
-    "${IMAGE_NAME}" >/dev/null
-
-  echo "Started new dev Postgres container."
-  wait_for_ready
+  echo "Legacy container creation is disabled; only an existing container can be started." >&2
+  return 2
 }
 
 wait_for_ready() {
@@ -70,17 +60,16 @@ stop_container() {
     return 0
   fi
 
-  docker rm -f "${CONTAINER_NAME}" >/dev/null
-  echo "Stopped and removed dev Postgres container."
+  if container_running; then
+    docker stop "${CONTAINER_NAME}" >/dev/null
+  fi
+
+  echo "Stopped dev Postgres container; container and volume are retained."
 }
 
 reset_container() {
-  if container_exists; then
-    docker rm -f "${CONTAINER_NAME}" >/dev/null
-  fi
-
-  docker volume rm -f "${VOLUME_NAME}" >/dev/null 2>&1 || true
-  echo "Reset dev Postgres container and deleted volume."
+  echo "Legacy database reset is disabled to preserve the existing container and volume." >&2
+  return 2
 }
 
 status_container() {

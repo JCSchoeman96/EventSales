@@ -68,6 +68,9 @@ if config_env() in [:dev, :prod] do
 end
 
 if config_env() == :prod do
+  redis_namespace = "eventsales:prod"
+  config :event_sales, :redis_namespace, redis_namespace
+
   catalog_change_enabled? =
     System.get_env("CATALOG_CHANGE_RECEIVER_ENABLED", "false") in ~w(true 1)
 
@@ -217,7 +220,7 @@ if config_env() == :prod do
       max_entry_bytes:
         String.to_integer(System.get_env("WEBHOOK_REDIS_BUFFER_MAX_ENTRY_BYTES") || "256000"),
       adapter: EventSales.Ingestion.RedisWebhookBuffer.RedixAdapter,
-      key_prefix: "eventsales:webhook_buffer:v1"
+      key_prefix: "#{redis_namespace}:webhook_buffer:v1"
   else
     config :event_sales, :redis_webhook_buffer,
       enabled: false,
@@ -262,8 +265,7 @@ if config_env() == :prod do
     enabled: System.get_env("WEBHOOK_RATE_LIMIT_ENABLED", "true") in ~w(true 1),
     window_ms: String.to_integer(System.get_env("WEBHOOK_RATE_LIMIT_WINDOW_MS", "60000")),
     max_requests: String.to_integer(System.get_env("WEBHOOK_RATE_LIMIT_MAX_REQUESTS", "120")),
-    key_prefix:
-      System.get_env("WEBHOOK_RATE_LIMIT_KEY_PREFIX", "eventsales:webhook_rate_limit:v1"),
+    key_prefix: "#{redis_namespace}:webhook_rate_limit:v1",
     adapter: EventSales.Ingestion.RedisRateLimiter.RedixAdapter,
     redis_url: rate_limit_redis_url
 

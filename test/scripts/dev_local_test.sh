@@ -26,16 +26,20 @@ bash -n "${SCRIPT}"
 
 assert_contains 'local command="${1:-start}"'
 assert_contains 'catalogue-dry-run'
-assert_contains 'mix eventsales.catalog.dry_run'
+assert_contains 'mix_dev eventsales.catalog.dry_run'
+assert_contains 'quality_pr_command'
+assert_contains 'quality_ci_command'
 assert_contains 'readonly PHOENIX_PORT="${PORT:-4001}"'
 assert_contains 'readonly PHOENIX_URL="${EVENTSALES_LOCAL_URL:-http://127.0.0.1:${PHOENIX_PORT}}"'
 assert_contains 'export PORT="${PHOENIX_PORT}"'
 assert_absent '4000'
-assert_contains 'docker compose --env-file /dev/null'
-if grep -E '^[[:space:]]*docker compose ' "${SCRIPT}" |
-    grep -Fv -- 'docker compose --env-file /dev/null' >/dev/null; then
-  fail "every direct Compose invocation must include --env-file /dev/null"
-fi
+assert_absent 'docker compose'
+assert_absent 'docker '
+assert_absent 'redis-cli'
+assert_contains '55432'
+assert_contains '55433'
+assert_contains '56379'
+assert_contains '56380'
 assert_contains 'source "${REPO_ROOT}/.env.local"'
 assert_absent 'source "${REPO_ROOT}/.env"'
 assert_absent 'source .env'
@@ -67,11 +71,16 @@ printf 'local-test-secret' >"${tmp_dir}/catalog-secret"
 
 sed \
   -e "s|^EVENTSALES_CATALOG_SECRET_FILE=.*$|EVENTSALES_CATALOG_SECRET_FILE=${tmp_dir}/catalog-secret|" \
+  -e 's|^TEST_DATABASE_NAME=.*$|TEST_DATABASE_NAME=event_sales_test_smoke|' \
   "${REPO_ROOT}/.env.local.example" >"${tmp_dir}/repo/.env.local"
 chmod 600 "${tmp_dir}/repo/.env.local"
 
-for command in elixir ss; do
-  printf '#!/usr/bin/env bash\nexit 0\n' >"${tmp_dir}/bin/${command}"
+for command in elixir ss pg_isready; do
+  cat >"${tmp_dir}/bin/${command}" <<EOF
+#!/usr/bin/env bash
+printf '%s\\n' "\$*" >>"\${${command^^}_CALLS_FILE:-/dev/null}"
+exit 0
+EOF
   chmod +x "${tmp_dir}/bin/${command}"
 done
 
@@ -83,17 +92,38 @@ fi
 EOF
 chmod +x "${tmp_dir}/bin/curl"
 
-cat >"${tmp_dir}/bin/docker" <<'EOF'
+cat >"${tmp_dir}/bin/psql" <<'EOF'
 #!/usr/bin/env bash
-if [[ " $* " == *" redis-cli ping "* ]]; then
+printf '%s\n' "$*" >>"${PSQL_CALLS_FILE:-/dev/null}"
+database=""
+username=""
+while (($#)); do
+  case "$1" in
+    --dbname) database="$2"; shift 2 ;;
+    --username) username="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+printf '%s|%s|18|false\n' "$database" "$username"
+EOF
+chmod +x "${tmp_dir}/bin/psql"
+
+cat >"${tmp_dir}/bin/python3" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"${REDIS_PROBE_CALLS_FILE:-/dev/null}"
+if [[ " $* " == *" version "* ]]; then
+  printf '7\n'
+else
   printf 'PONG\n'
 fi
 EOF
-chmod +x "${tmp_dir}/bin/docker"
+chmod +x "${tmp_dir}/bin/python3"
 
 cat >"${tmp_dir}/bin/mix" <<EOF
 #!/usr/bin/env bash
 printf '%s\n' "\$*" >>"${tmp_dir}/mix-calls"
+printf '%s|%s|%s\n' "\$*" "\${MIX_ENV:-unset}" "\${MIX_TEST_PARTITION:-unset}" \
+  >>"\${MIX_ENV_CALLS_FILE:-/dev/null}"
 EOF
 chmod +x "${tmp_dir}/bin/mix"
 
@@ -130,23 +160,41 @@ assert_doctor_fails_with() {
 
 assert_doctor_passes "regular mode-600 .env.local"
 
+: >"${tmp_dir}/pg_isready-calls"
+: >"${tmp_dir}/psql-calls"
+MIX_TEST_PARTITION=2 \
+PG_ISREADY_CALLS_FILE="${tmp_dir}/pg_isready-calls" \
+PSQL_CALLS_FILE="${tmp_dir}/psql-calls" \
+PATH="${tmp_dir}/bin:${PATH}" \
+  bash "${tmp_dir}/repo/scripts/dev_local.sh" doctor >/dev/null
+
+grep -Fq -- '--dbname event_sales_test_smoke' "${tmp_dir}/pg_isready-calls" ||
+  fail "doctor must probe the configured TEST database"
+grep -Fq -- '--dbname event_sales_test_smoke' "${tmp_dir}/psql-calls" ||
+  fail "doctor identity check must use the configured TEST database"
+if grep -Fq -- '--dbname event_sales_test_smoke2' \
+  "${tmp_dir}/pg_isready-calls" "${tmp_dir}/psql-calls"; then
+  fail "doctor must not apply a test partition suffix to the configured TEST database"
+fi
+
 mv "${tmp_dir}/repo/.env.local" "${tmp_dir}/repo/.env.local-target"
 ln -s .env.local-target "${tmp_dir}/repo/.env.local"
-assert_doctor_passes "symlink to mode-600 regular .env.local target"
+assert_doctor_fails_with "symlink to mode-600 regular .env.local target" \
+  ".env.local must be a regular file"
 
 chmod 644 "${tmp_dir}/repo/.env.local-target"
 assert_doctor_fails_with "symlink to mode-644 regular .env.local target" \
-  ".env.local permissions are 644"
+  ".env.local must be a regular file"
 
 rm "${tmp_dir}/repo/.env.local-target"
 assert_doctor_fails_with "dangling .env.local symlink" \
-  ".env.local symlink target is unavailable"
+  ".env.local must be a regular file"
 
 mkdir "${tmp_dir}/repo/.env.local-directory"
 rm "${tmp_dir}/repo/.env.local"
 ln -s .env.local-directory "${tmp_dir}/repo/.env.local"
 assert_doctor_fails_with "symlink to .env.local directory" \
-  ".env.local is not a regular file"
+  ".env.local must be a regular file"
 
 rm "${tmp_dir}/repo/.env.local"
 cp "${REPO_ROOT}/.env.local.example" "${tmp_dir}/repo/.env.local"
@@ -160,8 +208,10 @@ chmod 600 "${tmp_dir}/repo/.env.local"
 
 PATH="${tmp_dir}/bin:${PATH}" bash "${tmp_dir}/repo/scripts/dev_local.sh" catalogue-dry-run
 
-grep -Fxq 'ecto.create' "${tmp_dir}/mix-calls" || fail "catalogue dry-run must create the database"
-grep -Fxq 'ecto.migrate' "${tmp_dir}/mix-calls" || fail "catalogue dry-run must migrate the database"
+grep -Fxq 'ecto.migrate' "${tmp_dir}/mix-calls" || fail "catalogue dry-run must migrate the development database"
+if grep -Fxq 'ecto.create' "${tmp_dir}/mix-calls"; then
+  fail "local startup must not create a database outside the workstation infrastructure owner"
+fi
 grep -Fxq 'eventsales.catalog.dry_run' "${tmp_dir}/mix-calls" ||
   fail "catalogue dry-run must dispatch to the Mix task"
 
@@ -184,6 +234,99 @@ PATH="${tmp_dir}/bin:${PATH}" bash "${tmp_dir}/repo/scripts/dev_local.sh" \
 grep -Fxq 'eventsales.catalog.dry_run --fresh' "${tmp_dir}/mix-calls" ||
   fail "catalog-dry-run alias must forward --fresh exactly once"
 
+: >"${tmp_dir}/mix-calls"
+: >"${tmp_dir}/mix-env-calls"
+MIX_ENV=test \
+MIX_ENV_CALLS_FILE="${tmp_dir}/mix-env-calls" \
+PATH="${tmp_dir}/bin:${PATH}" \
+  bash "${tmp_dir}/repo/scripts/dev_local.sh" migrate
+grep -Fxq 'ecto.migrate|dev|unset' "${tmp_dir}/mix-env-calls" ||
+  fail "development migration must force MIX_ENV=dev and clear test partition state"
+
+: >"${tmp_dir}/mix-calls"
+: >"${tmp_dir}/pg_isready-calls"
+: >"${tmp_dir}/psql-calls"
+: >"${tmp_dir}/redis-probe-calls"
+: >"${tmp_dir}/mix-env-calls"
+PSQL_CALLS_FILE="${tmp_dir}/psql-calls" \
+  PG_ISREADY_CALLS_FILE="${tmp_dir}/pg_isready-calls" \
+  REDIS_PROBE_CALLS_FILE="${tmp_dir}/redis-probe-calls" \
+  MIX_ENV_CALLS_FILE="${tmp_dir}/mix-env-calls" \
+  PATH="${tmp_dir}/bin:${PATH}" \
+  bash "${tmp_dir}/repo/scripts/dev_local.sh" test test/example_test.exs
+
+grep -Fxq 'ecto.create' "${tmp_dir}/mix-calls" ||
+  fail "local tests must create an isolated TEST database"
+grep -Fxq 'ecto.migrate' "${tmp_dir}/mix-calls" ||
+  fail "local tests must migrate the TEST database"
+grep -Fxq 'test test/example_test.exs' "${tmp_dir}/mix-calls" ||
+  fail "local test runner must forward focused test paths"
+if grep -q -- '--port 55432' "${tmp_dir}/psql-calls" "${tmp_dir}/pg_isready-calls"; then
+  fail "local tests must not connect to the PostgreSQL DEV endpoint"
+fi
+if grep -q -- '--port 55433' "${tmp_dir}/psql-calls" "${tmp_dir}/pg_isready-calls"; then
+  :
+else
+  fail "local test runner must connect to the PostgreSQL TEST endpoint"
+fi
+if [[ -s "${tmp_dir}/redis-probe-calls" ]]; then
+  fail "local tests must not connect to shared Redis"
+fi
+
+: >"${tmp_dir}/mix-calls"
+: >"${tmp_dir}/pg_isready-calls"
+: >"${tmp_dir}/psql-calls"
+: >"${tmp_dir}/redis-probe-calls"
+: >"${tmp_dir}/mix-env-calls"
+PSQL_CALLS_FILE="${tmp_dir}/psql-calls" \
+  PG_ISREADY_CALLS_FILE="${tmp_dir}/pg_isready-calls" \
+  REDIS_PROBE_CALLS_FILE="${tmp_dir}/redis-probe-calls" \
+  MIX_ENV_CALLS_FILE="${tmp_dir}/mix-env-calls" \
+  PATH="${tmp_dir}/bin:${PATH}" \
+  bash "${tmp_dir}/repo/scripts/dev_local.sh" test --partitions 2
+
+partition_database_count="$(grep -Eo -- '--dbname event_sales_test_run_[^ ]+' "${tmp_dir}/psql-calls" | sort -u | wc -l)"
+[[ "${partition_database_count}" -eq 2 ]] ||
+  fail "parallel local test partitions must use unique TEST database names"
+grep -Fxq 'test --partitions 2' "${tmp_dir}/mix-calls" ||
+  fail "local test runner must preserve the Mix partition count"
+grep -Fxq 'test --partitions 2|test|1' "${tmp_dir}/mix-env-calls" ||
+  fail "first partition must run in its unique MIX_TEST_PARTITION=1 process"
+grep -Fxq 'test --partitions 2|test|2' "${tmp_dir}/mix-env-calls" ||
+  fail "second partition must run in its unique MIX_TEST_PARTITION=2 process"
+
+: >"${tmp_dir}/mix-calls"
+: >"${tmp_dir}/pg_isready-calls"
+: >"${tmp_dir}/psql-calls"
+PSQL_CALLS_FILE="${tmp_dir}/psql-calls" \
+  PG_ISREADY_CALLS_FILE="${tmp_dir}/pg_isready-calls" \
+  PATH="${tmp_dir}/bin:${PATH}" \
+  bash "${tmp_dir}/repo/scripts/dev_local.sh" quality-pr
+grep -Fxq 'ecto.create' "${tmp_dir}/mix-calls" ||
+  fail "the local quality gate must create its isolated TEST database"
+grep -Fxq 'ecto.migrate' "${tmp_dir}/mix-calls" ||
+  fail "the local quality gate must migrate its isolated TEST database"
+grep -Fxq 'quality.pr' "${tmp_dir}/mix-calls" ||
+  fail "the local quality gate must run the established PR quality alias"
+if grep -q -- '--port 55432' "${tmp_dir}/psql-calls" "${tmp_dir}/pg_isready-calls"; then
+  fail "the local quality gate must not connect to the PostgreSQL DEV endpoint"
+fi
+
+: >"${tmp_dir}/mix-calls"
+: >"${tmp_dir}/pg_isready-calls"
+: >"${tmp_dir}/psql-calls"
+PSQL_CALLS_FILE="${tmp_dir}/psql-calls" \
+  PG_ISREADY_CALLS_FILE="${tmp_dir}/pg_isready-calls" \
+  PATH="${tmp_dir}/bin:${PATH}" \
+  bash "${tmp_dir}/repo/scripts/dev_local.sh" quality-ci
+grep -Fxq 'quality.ci' "${tmp_dir}/mix-calls" ||
+  fail "the local CI gate must run the established CI quality alias"
+grep -Eq -- '--dbname event_sales_test_ci_' "${tmp_dir}/psql-calls" ||
+  fail "the local CI gate must use a unique TEST database"
+if grep -q -- '--port 55432' "${tmp_dir}/psql-calls" "${tmp_dir}/pg_isready-calls"; then
+  fail "the local CI quality gate must not connect to the PostgreSQL DEV endpoint"
+fi
+
 set +e
 invalid_output="$(bash "${SCRIPT}" invalid 2>&1)"
 invalid_status=$?
@@ -191,5 +334,33 @@ set -e
 
 [[ ${invalid_status} -eq 2 ]] || fail "invalid command must exit 2"
 [[ "${invalid_output}" == *"Usage:"* ]] || fail "invalid command must print usage"
+
+mkdir -p "${tmp_dir}/backup-bin"
+for command in pg_dump psql pg_restore createdb dropdb mix; do
+  cat >"${tmp_dir}/backup-bin/${command}" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+  chmod +x "${tmp_dir}/backup-bin/${command}"
+done
+
+mkdir -p "${tmp_dir}/backup-repo/scripts"
+cp "${REPO_ROOT}/scripts/verify_backup_restore.sh" \
+  "${tmp_dir}/backup-repo/scripts/verify_backup_restore.sh"
+git -C "${tmp_dir}/backup-repo" init -q
+printf 'TEST_DATABASE_PASSWORD=must-not-load-root-env\n' >"${tmp_dir}/backup-repo/.env"
+ln -s .env "${tmp_dir}/backup-repo/.env.local"
+
+set +e
+backup_output="$(cd "${tmp_dir}/backup-repo" && PATH="${tmp_dir}/backup-bin:${PATH}" \
+  bash scripts/verify_backup_restore.sh 2>&1)"
+backup_status=$?
+set -e
+
+[[ ${backup_status} -ne 0 ]] || fail "backup verification must reject a .env.local symlink"
+[[ "${backup_output}" == *".env.local must be a regular file"* ]] ||
+  fail "backup verification must reject a .env.local symlink before running commands"
+[[ "${backup_output}" != *"must-not-load-root-env"* ]] ||
+  fail "backup verification must not expose values from a root .env symlink"
 
 printf 'dev_local tests passed\n'

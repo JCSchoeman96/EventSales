@@ -4,7 +4,12 @@
 
 Redis buffer is a degraded-mode safety valve only. Buffered payloads must be drained into Postgres before processing. Postgres remains durable truth.
 
-## Keys (prefix `eventsales:webhook_buffer:v1`)
+## Keys
+
+The key prefix includes the EventSales project and environment, for example
+`eventsales:prod:webhook_buffer:v1` or `eventsales:dev:webhook_buffer:v1`.
+Inspect only the environment-specific prefix in use. Shared Redis must never
+be cleared with `FLUSHALL` or `FLUSHDB`.
 
 - `{prefix}:pending` — FIFO queue awaiting drain
 - `{prefix}:processing` — in-flight entries claimed by the drainer

@@ -14,7 +14,7 @@ Prove EventSales can recover Postgres durable truth before live cutover.
 
 ## Local proof path
 
-Run the repository verification script from a machine with Postgres client tools installed:
+Run the repository verification script from a machine with Postgres client tools installed and a valid ignored `.env.local`. The script reads the TEST endpoint, role, and password from that file:
 
 ```bash
 bash scripts/verify_backup_restore.sh

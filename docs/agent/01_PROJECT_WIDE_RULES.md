@@ -324,24 +324,24 @@ Minimum before marking a slice done:
 
 ```bash
 mix format --check-formatted
-mix test
+bash scripts/dev_local.sh test
 ```
 
 Run when available:
 
 ```bash
 mix credo --strict
-MIX_ENV=test mix ash.codegen --dry-run
+bash scripts/dev_local.sh quality-pr
 ```
 
 Postgres-backed test baseline:
 
-```text
-Since Slice 0.2, mix test requires Postgres to be reachable.
-Local: start Postgres, then run MIX_ENV=test mix ecto.create && MIX_ENV=test mix ecto.migrate before mix test when the test DB is not ready yet.
-CI: only the test job gets a Postgres service.
-Do not add Redis to CI until a slice explicitly requires it.
-```
+Local tests use the isolated runner in `scripts/dev_local.sh`, which creates
+and migrates a unique database on the PostgreSQL TEST cluster. It forces
+`MIX_ENV=test`, the `eventsales_test` role, and port `55433`; the DEV cluster is
+not a valid test target. CI uses its job-owned PostgreSQL 18 service and
+non-superuser TEST role. The test adapters use in-memory Redis, so CI does not
+need a Redis service.
 
 ## Quality gates
 
@@ -352,17 +352,16 @@ Before commit
 |> mix quality.fast
 
 Before opening or updating a meaningful PR
-|> mix quality.pr
+|> bash scripts/dev_local.sh quality-pr
 
 Before marking a PR ready for review or pushing final changes
-|> mix quality.ci
+|> bash scripts/local_ci.sh
 
 Task is not complete unless required checks pass.
-Do not claim "all checks pass" unless Credo ran explicitly or through mix quality, mix quality.pr, or mix quality.ci.
-Do not add Ash-specific checks until Ash exists.
-Do not add DB/Redis CI services until tests require them.
-Postgres is now required for the CI test job because the Repo and Oban start in :test.
-Keep Redis out of CI until a later slice requires it.
+Do not claim "all checks pass" unless Credo ran explicitly or through mix quality, `bash scripts/dev_local.sh quality-pr`, or `bash scripts/dev_local.sh quality-ci`.
+GitHub CI owns a job-local PostgreSQL 18 service with a non-superuser TEST role.
+The local `quality-ci` wrapper runs the same full alias against a unique TEST
+database. EventSales tests use in-memory Redis adapters, so CI does not need Redis.
 ```
 
 Mandatory coverage areas:

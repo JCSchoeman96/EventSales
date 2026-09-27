@@ -49,7 +49,7 @@ defmodule EventSales.Analytics.DashboardCacheTest do
              {:eventsales, :analytics, :hot_state, :v1, :event_summary, @event_id}
 
     assert CacheKeys.redis_event_snapshot(@event_id) ==
-             "eventsales:analytics:hot_state:v1:event:#{@event_id}:summary"
+             "eventsales:test:analytics:hot_state:v1:event:#{@event_id}:summary"
   end
 
   defp summary(overrides) do

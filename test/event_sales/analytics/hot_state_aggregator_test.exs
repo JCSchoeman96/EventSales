@@ -178,7 +178,7 @@ defmodule EventSales.Analytics.HotStateAggregatorTest do
     assert %DateTime{} = summary.updated_at
 
     assert [%{key: key, summary: warm_summary}] = MemorySnapshotStoreAdapter.writes()
-    assert key == "eventsales:analytics:hot_state:v1:event:#{event.id}:summary"
+    assert key == "eventsales:test:analytics:hot_state:v1:event:#{event.id}:summary"
     assert warm_summary.total_sold == 2
 
     assert_receive {:hot_state_updated, event_id, %DateTime{}}, 500

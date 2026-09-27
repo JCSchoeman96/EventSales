@@ -8,10 +8,8 @@ defmodule EventSales.Analytics.SnapshotStore.RedixAdapter do
 
   @behaviour EventSales.Analytics.SnapshotStore.Adapter
 
-  alias EventSales.Analytics.SnapshotCodec
+  alias EventSales.Analytics.{CacheKeys, SnapshotCodec}
   alias EventSales.Telemetry
-
-  @scan_match "eventsales:analytics:hot_state:v1:event:*:summary"
 
   @doc false
   @spec redix_name() :: atom()
@@ -59,7 +57,14 @@ defmodule EventSales.Analytics.SnapshotStore.RedixAdapter do
   end
 
   defp scan_event_summaries(conn, cursor, scan_count, max_snapshots, acc) do
-    case Redix.command(conn, ["SCAN", cursor, "MATCH", @scan_match, "COUNT", scan_count]) do
+    case Redix.command(conn, [
+           "SCAN",
+           cursor,
+           "MATCH",
+           CacheKeys.redis_event_snapshot("*"),
+           "COUNT",
+           scan_count
+         ]) do
       {:ok, [next_cursor, keys]} when is_list(keys) ->
         acc = restore_keys(conn, keys, max_snapshots, acc)
 
@@ -120,7 +125,7 @@ defmodule EventSales.Analytics.SnapshotStore.RedixAdapter do
   end
 
   defp event_id_from_key(key) when is_binary(key) do
-    prefix = "eventsales:analytics:hot_state:v1:event:"
+    prefix = CacheKeys.redis_event_snapshot_prefix()
 
     with true <- String.starts_with?(key, prefix),
          true <- String.ends_with?(key, ":summary"),

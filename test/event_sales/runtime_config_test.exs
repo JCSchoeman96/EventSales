@@ -113,6 +113,11 @@ defmodule EventSales.RuntimeConfigTest do
 
     assert Keyword.fetch!(hot_state, :snapshot_adapter) ==
              EventSales.Analytics.SnapshotStore.RedixAdapter
+
+    assert Keyword.fetch!(app_config, :redis_namespace) == "eventsales:prod"
+
+    rate_limit = Keyword.fetch!(app_config, :webhook_intake_rate_limit)
+    assert Keyword.fetch!(rate_limit, :key_prefix) == "eventsales:prod:webhook_rate_limit:v1"
   end
 
   test "prod runtime config reads Tickera API settings from env without a global API key" do

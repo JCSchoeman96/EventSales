@@ -2,10 +2,18 @@
 
 ## Database and Redis paths
 
-- `DATABASE_URL` is the private Railway PostgreSQL URL used by Phoenix, Ecto, Ash, and Oban.
-- `DIRECT_DATABASE_URL` is the release migration path. Slice 24.0 references the same direct private PostgreSQL URL because PgBouncer is not deployed.
-- `REDIS_URL` is the managed Redis connection used by hot-state snapshots when `HOT_STATE_REDIS_SNAPSHOTS_ENABLED=true`.
-- The app must listen on Railway’s injected `PORT`.
+- `DATABASE_URL` is the PostgreSQL connection used by Phoenix, Ecto, Ash, and Oban.
+- `DIRECT_DATABASE_URL` is the preferred release migration path. The runtime may use `DATABASE_URL` when both values refer to the same direct service.
+- `REDIS_URL` is the Redis connection used by webhook rate limiting and by optional hot-state snapshots or degraded-mode buffering.
+- Docker Compose reads these URLs from a protected deployment environment file selected through `EVENTSALES_DEPLOY_ENV_FILE`. Pass `--env-file /dev/null` to Compose so it does not load the repository root `.env`. Its dependencies remain externally managed or separately project-owned; the repository Compose file does not duplicate workstation shared DEV/TEST services.
+- The app listens on `PORT`; the canonical Compose contract uses the container port `4000`.
+
+Example single-host deployment command:
+
+```bash
+EVENTSALES_DEPLOY_ENV_FILE=/etc/eventsales/eventsales.env \
+  docker compose --env-file /dev/null up -d --build
+```
 
 ## Required production variables
 
@@ -54,8 +62,13 @@ RAILWAY_SERVICE=EventSales
 
 ## Secret handling
 
-Set secrets through Railway stdin or its secret variable UI. Never commit values, place them in command-line arguments, or print them. The release bootstrap and smoke harness print safe status labels only.
+Set secrets through the selected deployment's protected environment mechanism.
+Never commit values, place them in command-line arguments, or print them. Safe
+templates such as `.env.example` contain placeholders only.
 
 ## Local test requirement
 
-PostgreSQL must be running for `mix test`. Use `bash scripts/dev_postgres.sh start`, then create and migrate the test database with `MIX_ENV=test mix ecto.create` and `MIX_ENV=test mix ecto.migrate`. Local tests do not require Redis.
+Local tests use the workstation PostgreSQL TEST server through
+`bash scripts/dev_local.sh test`. Each run gets an EventSales-owned database
+under the `event_sales_test` prefix; partition suffixes remain unique. Tests
+use in-memory Redis adapters and do not connect to shared Redis.

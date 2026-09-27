@@ -1,22 +1,45 @@
 import Config
 
-# Configure your database
-#
-# The MIX_TEST_PARTITION environment variable can be used
-# to provide built-in test partitioning in CI environment.
-# Run `mix help test` for more information.
+test_host = System.get_env("TEST_DATABASE_HOST", "127.0.0.1")
+
+test_port =
+  String.to_integer(System.get_env("TEST_DATABASE_PORT", "55433"))
+
+test_username = System.get_env("TEST_DATABASE_USERNAME", "eventsales_test")
+test_database_base = System.get_env("TEST_DATABASE_NAME", "event_sales_test")
+test_pool_size = String.to_integer(System.get_env("TEST_DATABASE_POOL_SIZE", "10"))
+test_partition = System.get_env("MIX_TEST_PARTITION")
+
+unless test_host == "127.0.0.1" and test_port == 55_433 do
+  raise "EventSales tests must use the TEST PostgreSQL endpoint (127.0.0.1:55433)."
+end
+
+unless test_username == "eventsales_test" do
+  raise "EventSales tests must use the non-superuser eventsales_test role."
+end
+
+unless Regex.match?(~r/\Aevent_sales_test(?:_[a-z0-9_]+)*\z/, test_database_base) do
+  raise "TEST_DATABASE_NAME must start with event_sales_test and contain only lowercase letters, digits, and underscores."
+end
+
+if test_partition && not Regex.match?(~r/\A[0-9]+\z/, test_partition) do
+  raise "MIX_TEST_PARTITION must be numeric so each test partition has a distinct database."
+end
+
+test_database = "#{test_database_base}#{test_partition}"
+
+if byte_size(test_database) > 63 do
+  raise "EventSales TEST database names cannot exceed 63 bytes."
+end
+
 config :event_sales, EventSales.Repo,
-  username: System.get_env("TEST_DATABASE_USERNAME", "postgres"),
-  password: System.get_env("TEST_DATABASE_PASSWORD", "postgres"),
-  hostname: System.get_env("TEST_DATABASE_HOST", "localhost"),
-  port: String.to_integer(System.get_env("TEST_DATABASE_PORT", "5432")),
-  database:
-    System.get_env(
-      "TEST_DATABASE_NAME",
-      "event_sales_test#{System.get_env("MIX_TEST_PARTITION")}"
-    ),
+  username: test_username,
+  password: System.get_env("TEST_DATABASE_PASSWORD", ""),
+  hostname: test_host,
+  port: test_port,
+  database: test_database,
   pool: Ecto.Adapters.SQL.Sandbox,
-  pool_size: System.schedulers_online() * 2
+  pool_size: test_pool_size
 
 # We don't run a server during test. If one is required,
 # you can enable the server option below.
@@ -47,7 +70,7 @@ config :event_sales, :webhook_intake_rate_limit,
   enabled: true,
   window_ms: 60_000,
   max_requests: 10_000,
-  key_prefix: "eventsales:webhook_rate_limit:test",
+  key_prefix: "eventsales:test:webhook_rate_limit:v1",
   adapter: EventSales.TestSupport.Ingestion.MemoryRateLimiterAdapter,
   redis_url: nil
 

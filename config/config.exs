@@ -27,6 +27,9 @@ config :event_sales,
 
 config :event_sales, EventSales.Repo, migration_lock: :pg_advisory_lock
 
+redis_namespace = "eventsales:#{config_env()}"
+config :event_sales, :redis_namespace, redis_namespace
+
 config :event_sales, :internal_tools, ash_admin_enabled: config_env() in [:dev, :test]
 
 config :event_sales, :staff_customer_pii_visibility, :masked
@@ -68,7 +71,7 @@ config :event_sales, :redis_webhook_buffer,
   max_entry_bytes: 256_000,
   adapter: EventSales.Ingestion.RedisWebhookBuffer.RedixAdapter,
   redis_url: nil,
-  key_prefix: "eventsales:webhook_buffer:v1"
+  key_prefix: "#{redis_namespace}:webhook_buffer:v1"
 
 config :event_sales, :hot_state_aggregator,
   snapshot_adapter: EventSales.Analytics.SnapshotStore.NoopAdapter,
@@ -105,7 +108,7 @@ config :event_sales, :webhook_intake_rate_limit,
   enabled: true,
   window_ms: 60_000,
   max_requests: 120,
-  key_prefix: "eventsales:webhook_rate_limit:v1",
+  key_prefix: "#{redis_namespace}:webhook_rate_limit:v1",
   adapter: EventSales.Ingestion.RedisRateLimiter.RedixAdapter,
   redis_url: nil
 

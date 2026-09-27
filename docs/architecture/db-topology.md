@@ -1,5 +1,20 @@
 # Database Topology
 
+## Local development
+
+The workstation Dockge `dev-core` stack owns the shared PostgreSQL services.
+EventSales connects only to its own database and role on each cluster:
+
+| Environment | Endpoint | Database | Role |
+| --- | --- | --- | --- |
+| Development | `127.0.0.1:55432` | `event_sales_dev` | `eventsales_dev` |
+| Test | `127.0.0.1:55433` | `event_sales_test` plus the existing partition suffix | `eventsales_test` |
+
+PostgreSQL 18 is the project baseline. Tests must use the TEST cluster and
+must never connect to development data. Local test runs use a run-specific
+database name under the `event_sales_test` prefix; `MIX_TEST_PARTITION` remains
+appended for partitioned runs.
+
 ## Runtime Paths
 
 - `DATABASE_URL`: normal Phoenix, Ecto, and Oban runtime traffic through PgBouncer **session pooling**.

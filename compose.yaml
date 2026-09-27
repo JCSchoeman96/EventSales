@@ -1,33 +1,17 @@
 services:
-  postgres:
-    image: postgres:17-alpine
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: eventsales:local
+    init: true
+    restart: unless-stopped
+    env_file:
+      - "${EVENTSALES_DEPLOY_ENV_FILE:?Set EVENTSALES_DEPLOY_ENV_FILE to a protected deployment env file}"
     environment:
-      POSTGRES_DB: event_sales_dev
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      PHX_SERVER: "true"
+      PORT: "4000"
+      EVENTSALES_BUSINESS_TIMEZONE: Africa/Johannesburg
+      EVENTSALES_DEFAULT_CURRENCY: ZAR
     ports:
-      - "127.0.0.1:5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d event_sales_dev"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  redis:
-    image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes"]
-    ports:
-      - "127.0.0.1:6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-volumes:
-  postgres_data:
-  redis_data:
+      - "127.0.0.1:4000:4000"
