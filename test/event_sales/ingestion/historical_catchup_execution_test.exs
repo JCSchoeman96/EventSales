@@ -1,6 +1,8 @@
 defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
   use EventSales.DataCase, async: false
 
+  alias EventSales.Analytics.HistoricalCatchupFreshnessNotifier
+  alias EventSales.Analytics.Resources.EventSourceFreshnessSnapshot
   alias EventSales.Catalog
   alias EventSales.Catalog.Resources.Event
   alias EventSales.Ingestion
@@ -172,17 +174,58 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     end
   end
 
+  defmodule CoverageCertifierDistinctClocks do
+    alias EventSales.TestSupport.HistoricalCoverageHelpers
+
+    def evaluate(run, _cursor, _opts) do
+      {:ok,
+       %{
+         coverage_start: run.date_from,
+         sales_covered_through: run.date_to,
+         refunds_covered_through: ~U[2026-08-14 14:00:00.000000Z],
+         coverage_evidence: HistoricalCoverageHelpers.certified_evidence()
+       }}
+    end
+  end
+
+  defmodule FreshnessNotifierRecorder do
+    alias EventSales.Repo
+
+    def child_spec(opts), do: %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}}
+
+    def start_link(_opts),
+      do: Agent.start_link(fn -> %{calls: [], response: :ok} end, name: __MODULE__)
+
+    def reset!, do: Agent.update(__MODULE__, fn _ -> %{calls: [], response: :ok} end)
+
+    def response!(response), do: Agent.update(__MODULE__, &Map.put(&1, :response, response))
+
+    def calls, do: Agent.get(__MODULE__, &Enum.reverse(&1.calls))
+
+    def notify_terminal_success(run, cursor, _opts) do
+      in_transaction? = Repo.in_transaction?()
+
+      Agent.update(__MODULE__, fn state ->
+        %{state | calls: [{run, cursor, in_transaction?} | state.calls]}
+      end)
+
+      Agent.get(__MODULE__, & &1.response)
+    end
+  end
+
   setup do
     start_supervised!(CatchupClient)
     start_supervised!(WooClient)
     start_supervised!(Selector)
     start_supervised!(Upserter)
     start_supervised!(RefundSync)
+    start_supervised!(FreshnessNotifierRecorder)
     CatchupClient.reset!()
     WooClient.reset!()
     Selector.reset!()
     Upserter.reset!()
     RefundSync.reset!()
+    FreshnessNotifierRecorder.reset!()
 
     source = SalesHelpers.create_source_system!(%{base_url: @source_url})
 
@@ -243,6 +286,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     assert persisted_run.order_coverage_status == :incomplete
     assert persisted_run.refund_coverage_status == :not_started
     assert is_nil(persisted_run.coverage_certified_at)
+    assert [] = FreshnessNotifierRecorder.calls()
   end
 
   test "catch-up records a newly discovered refund reference", %{run: run, cursor: cursor} do
@@ -408,6 +452,11 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     assert completed_run.status == :completed
     assert completed_run.coverage_evidence["result"] == "certified"
     assert completed_run.coverage_evidence["orders"]["blocking_reasons"] == %{}
+
+    assert [{notified_run, notified_cursor, false}] = FreshnessNotifierRecorder.calls()
+    assert notified_run.status == :completed
+    assert notified_cursor.status == :done
+    assert notified_run.id == notified_cursor.sync_run_id
   end
 
   test "terminal catch-up non-target to target certifies current target truth", %{
@@ -488,6 +537,62 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
 
     assert terminal_cursor.metadata["historical_catchup"]["state"] == "catchup_terminal"
     assert terminal_cursor.metadata["historical_catchup"]["terminal_evidence"] == "u-empty-proof"
+
+    assert [{notified_run, notified_cursor, false}] = FreshnessNotifierRecorder.calls()
+    assert notified_run.status == :completed
+    assert notified_cursor.status == :done
+    assert notified_cursor.metadata["historical_catchup"]["state"] == "catchup_terminal"
+
+    assert notified_cursor.metadata["historical_catchup"]["source_observed_at_gmt"] ==
+             DateTime.to_iso8601(@catchup_observed_at)
+  end
+
+  test "freshness notifier failure does not change committed terminal result", %{
+    run: run,
+    cursor: cursor
+  } do
+    FreshnessNotifierRecorder.response!({:error, :projection_failed})
+    CatchupClient.enqueue!(page([], has_more: false, terminal_evidence: "u-notifier-error"))
+
+    assert :ok = run_step(run, cursor)
+    assert current_run(run).status == :completed
+    assert current_cursor(cursor).status == :done
+
+    assert [{%SyncRun{status: :completed}, %SyncCursor{status: :done}, false}] =
+             FreshnessNotifierRecorder.calls()
+  end
+
+  test "persisted sync freshness uses terminal source observation instead of coverage clocks", %{
+    event: event,
+    run: run,
+    cursor: cursor
+  } do
+    CatchupClient.enqueue!(page([], has_more: false, terminal_evidence: "u-clock-proof"))
+
+    assert :ok =
+             run_step(run, cursor,
+               coverage_certifier: CoverageCertifierDistinctClocks,
+               historical_catchup_freshness_notifier: HistoricalCatchupFreshnessNotifier
+             )
+
+    completed_run = current_run(run)
+    assert completed_run.date_to == @date_to
+    assert completed_run.sales_covered_through == @date_to
+    assert completed_run.refunds_covered_through == ~U[2026-08-14 14:00:00.000000Z]
+    assert %DateTime{} = completed_run.finished_at
+
+    assert {:ok, snapshot} =
+             EventSourceFreshnessSnapshot
+             |> Ash.Query.filter(event_id == ^event.id)
+             |> Ash.read_one(domain: EventSales.Analytics)
+
+    assert snapshot.sync_source_observed_at == @catchup_observed_at
+    refute snapshot.sync_source_observed_at == completed_run.date_to
+    refute snapshot.sync_source_observed_at == completed_run.sales_covered_through
+    refute snapshot.sync_source_observed_at == completed_run.refunds_covered_through
+    refute snapshot.sync_source_observed_at == completed_run.finished_at
+    assert WooClient.calls() == []
+    assert [] = FreshnessNotifierRecorder.calls()
   end
 
   test "empty U certifies an unchanged manifest target with an explicit zero-refund observation",
@@ -577,6 +682,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     assert current_run(run).coverage_evidence["result"] == "blocked"
     assert current_cursor(cursor).status == :failed
     assert current_cursor(cursor).metadata["failure"] == "historical_coverage_blocked"
+    assert [] = FreshnessNotifierRecorder.calls()
   end
 
   test "retryable coverage evidence reads leave terminal cursor and run unchanged", %{
@@ -592,6 +698,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     assert current_cursor(cursor).status == :active
     assert current_cursor(cursor).page == cursor.page
     assert current_cursor(cursor).metadata["historical_catchup"]["state"] == "pending_first_page"
+    assert [] = FreshnessNotifierRecorder.calls()
   end
 
   test "terminal coverage certification is not repeated by a stale terminal replay", %{
@@ -641,6 +748,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     assert persisted.coverage_certified_at == certified.coverage_certified_at
     assert current_cursor(cursor).status == :active
     assert current_cursor(cursor).page == 1
+    assert [] = FreshnessNotifierRecorder.calls()
   end
 
   test "recovered transient diagnostic does not block terminal completion", %{
@@ -1032,6 +1140,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
       event_line_selector: Selector,
       order_upserter: Upserter,
       order_refund_sync: RefundSync,
+      historical_catchup_freshness_notifier: FreshnessNotifierRecorder,
       now: fn -> @now end
     ]
   end

@@ -11,6 +11,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
   import Ecto.Query
   require Ash.Query
 
+  alias EventSales.Analytics.HistoricalCatchupFreshnessNotifier
   alias EventSales.Catalog
   alias EventSales.Catalog.Changes.NormalizeBaseUrl
   alias EventSales.Catalog.Resources.{Event, SourceSystem}
@@ -624,6 +625,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
              opts
            ) do
         {:ok, result} ->
+          notify_terminal_freshness(result, opts)
           {:ok, notify_checkpoint(result)}
 
         {:error, {:coverage_retry, reason}} ->
@@ -1052,6 +1054,32 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
   end
 
   defp notify_checkpoint({:retry, reason}), do: {:retry, reason}
+
+  defp notify_terminal_freshness(
+         {:completed, %SyncRun{} = updated_run, %SyncCursor{} = updated_cursor, _notifications},
+         opts
+       ) do
+    notifier =
+      Keyword.get(
+        opts,
+        :historical_catchup_freshness_notifier,
+        HistoricalCatchupFreshnessNotifier
+      )
+
+    notifier_opts = Keyword.get(opts, :historical_catchup_freshness_notifier_opts, [])
+
+    try do
+      notifier.notify_terminal_success(updated_run, updated_cursor, notifier_opts)
+    rescue
+      _exception -> :ok
+    catch
+      _kind, _reason -> :ok
+    end
+
+    :ok
+  end
+
+  defp notify_terminal_freshness(_result, _opts), do: :ok
 
   defp locked_current_cursor(%SyncCursor{id: cursor_id}) do
     query =

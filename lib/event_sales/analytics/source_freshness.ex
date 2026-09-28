@@ -67,6 +67,28 @@ defmodule EventSales.Analytics.SourceFreshness do
     do: {:error, :invalid_refund_source_watermark}
 
   @doc """
+  Advances an event's durable sync source-observed watermark after a successful
+  bounded historical catch-up has committed.
+
+  Equal and older source timestamps are idempotent no-ops. The Ash/Postgres
+  upsert condition is the concurrency authority for the component watermark.
+  """
+  @spec advance_sync_source_observed(Ecto.UUID.t(), DateTime.t()) :: :ok | {:error, term()}
+  def advance_sync_source_observed(event_id, %DateTime{} = source_observed_at)
+      when is_binary(event_id) do
+    case Ecto.UUID.cast(event_id) do
+      {:ok, _uuid} ->
+        advance_sync_source_observed_watermark(event_id, source_observed_at)
+
+      :error ->
+        {:error, :invalid_event_id}
+    end
+  end
+
+  def advance_sync_source_observed(_event_id, _source_observed_at),
+    do: {:error, :invalid_sync_source_observed_at}
+
+  @doc """
   Returns source-freshness classification for one event.
 
   Pass `now` in `opts` for deterministic tests.
@@ -128,6 +150,30 @@ defmodule EventSales.Analytics.SourceFreshness do
              projection_refreshed_at: DateTime.utc_now()
            },
            action: :advance_refund_watermark,
+           return_skipped_upsert?: true,
+           domain: EventSales.Analytics
+         ) do
+      {:ok, %EventSourceFreshnessSnapshot{} = snapshot} ->
+        if Ash.Resource.get_metadata(snapshot, :upsert_skipped) do
+          :ok
+        else
+          DashboardPubSub.broadcast_source_freshness_updated(event_id)
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp advance_sync_source_observed_watermark(event_id, source_observed_at) do
+    case Ash.create(
+           EventSourceFreshnessSnapshot,
+           %{
+             event_id: event_id,
+             sync_source_observed_at: source_observed_at,
+             projection_refreshed_at: DateTime.utc_now()
+           },
+           action: :advance_sync_source_observed,
            return_skipped_upsert?: true,
            domain: EventSales.Analytics
          ) do
