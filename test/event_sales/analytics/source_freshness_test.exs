@@ -290,6 +290,116 @@ defmodule EventSales.Analytics.SourceFreshnessTest do
     end
   end
 
+  describe "advance_sync_source_observed/2" do
+    setup do
+      source = SalesHelpers.create_source_system!()
+
+      event =
+        SalesHelpers.create_event!(source, %{
+          name: "Sync Freshness",
+          slug: unique_slug("sync-fresh")
+        })
+
+      %{event: event}
+    end
+
+    test "first and newer sync observations persist and broadcast once per advance", %{
+      event: event
+    } do
+      assert :ok = DashboardPubSub.subscribe_event(event.id)
+
+      first_observed_at = ~U[2026-05-01 10:00:00.000000Z]
+      newer_observed_at = ~U[2026-05-01 11:00:00.000000Z]
+
+      assert :ok = SourceFreshness.advance_sync_source_observed(event.id, first_observed_at)
+      assert_receive {:source_freshness_updated, event_id}
+      assert event_id == event.id
+
+      assert {:ok, first_snapshot} = read_snapshot(event.id)
+      assert first_snapshot.sync_source_observed_at == first_observed_at
+      assert %DateTime{} = first_snapshot.projection_refreshed_at
+
+      assert :ok = SourceFreshness.advance_sync_source_observed(event.id, newer_observed_at)
+      assert_receive {:source_freshness_updated, event_id}
+      assert event_id == event.id
+
+      assert {:ok, newer_snapshot} = read_snapshot(event.id)
+      assert newer_snapshot.sync_source_observed_at == newer_observed_at
+
+      assert DateTime.compare(
+               newer_snapshot.projection_refreshed_at,
+               first_snapshot.projection_refreshed_at
+             ) in [:eq, :gt]
+
+      refute_receive {:source_freshness_updated, _event_id}, 0
+    end
+
+    test "equal and older replays preserve sync watermark and projection metadata", %{
+      event: event
+    } do
+      event_id = event.id
+      newer_observed_at = ~U[2026-05-01 11:00:00.000000Z]
+
+      assert :ok = DashboardPubSub.subscribe_event(event_id)
+      assert :ok = SourceFreshness.advance_sync_source_observed(event_id, newer_observed_at)
+      assert_receive {:source_freshness_updated, ^event_id}
+
+      assert {:ok, first_snapshot} = read_snapshot(event_id)
+
+      assert :ok = SourceFreshness.advance_sync_source_observed(event_id, newer_observed_at)
+
+      assert :ok =
+               SourceFreshness.advance_sync_source_observed(
+                 event_id,
+                 ~U[2026-05-01 10:00:00.000000Z]
+               )
+
+      assert {:ok, replayed_snapshot} = read_snapshot(event_id)
+      assert replayed_snapshot.sync_source_observed_at == first_snapshot.sync_source_observed_at
+      assert replayed_snapshot.projection_refreshed_at == first_snapshot.projection_refreshed_at
+      refute_receive {:source_freshness_updated, _event_id}, 0
+    end
+
+    test "sync advancement preserves order and refund components", %{event: event} do
+      order_watermark = ~U[2026-05-01 09:00:00.000000Z]
+      refund_watermark = ~U[2026-05-01 10:00:00.000000Z]
+      sync_observed_at = ~U[2026-05-01 11:00:00.000000Z]
+      refreshed_at = ~U[2026-05-01 12:00:00.000000Z]
+
+      assert {:ok, _} = advance_order!(event.id, order_watermark, refreshed_at)
+      assert {:ok, _} = advance_refund!(event.id, refund_watermark, refreshed_at)
+      assert :ok = SourceFreshness.advance_sync_source_observed(event.id, sync_observed_at)
+
+      assert {:ok, snapshot} = read_snapshot(event.id)
+      assert snapshot.order_source_watermark_at == order_watermark
+      assert snapshot.refund_source_watermark_at == refund_watermark
+      assert snapshot.sync_source_observed_at == sync_observed_at
+    end
+
+    test "rejects invalid event ids and timestamps" do
+      assert {:error, :invalid_event_id} =
+               SourceFreshness.advance_sync_source_observed(
+                 "not-a-uuid",
+                 ~U[2026-05-01 10:00:00.000000Z]
+               )
+
+      assert {:error, _reason} =
+               SourceFreshness.advance_sync_source_observed(Ecto.UUID.generate(), nil)
+    end
+
+    test "database failure returns an error and does not broadcast" do
+      event_id = Ecto.UUID.generate()
+      observed_at = ~U[2026-05-01 10:00:00.000000Z]
+
+      assert :ok = DashboardPubSub.subscribe_event(event_id)
+
+      assert {:error, _reason} =
+               SourceFreshness.advance_sync_source_observed(event_id, observed_at)
+
+      refute_receive {:source_freshness_updated, _event_id}, 0
+    end
+  end
+
   describe "durable projection lifecycle" do
     setup do
       source = SalesHelpers.create_source_system!()

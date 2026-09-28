@@ -26,6 +26,7 @@
     "lib/event_sales/analytics/event_detail.ex",
     "lib/event_sales/analytics/event_scoped_dashboard.ex",
     "lib/event_sales/analytics/event_snapshot_refresh_fence.ex",
+    "lib/event_sales/analytics/historical_catchup_freshness_notifier.ex",
     "lib/event_sales/analytics/hot_state_aggregator.ex",
     "lib/event_sales/analytics/metric_rules.ex",
     "lib/event_sales/analytics/order_processed_notifier.ex",
@@ -835,6 +836,21 @@
       "uses": []
     },
     {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.HistoricalCatchupFreshnessNotifier",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/historical_catchup_freshness_notifier.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "notify_terminal_success"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
       "docs_count": 7,
       "moduledoc?": true,
       "name": "EventSales.Analytics.HotStateAggregator",
@@ -1157,7 +1173,7 @@
       "uses": []
     },
     {
-      "docs_count": 3,
+      "docs_count": 4,
       "moduledoc?": true,
       "name": "EventSales.Analytics.SourceFreshness",
       "parse_error": null,
@@ -1170,6 +1186,10 @@
         {
           "arity": 2,
           "name": "advance_refund"
+        },
+        {
+          "arity": 2,
+          "name": "advance_sync_source_observed"
         },
         {
           "arity": 2,
