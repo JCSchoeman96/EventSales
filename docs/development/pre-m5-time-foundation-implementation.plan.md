@@ -486,30 +486,17 @@ M6 owns copy; TIME-F passes structured fields so banner can bind when `{:ok, %{c
 
 ## 11.1 Custom-range maximum (`CUSTOM_RANGE_MAX`)
 
-**OWNER_DECISION_REQUIRED** — no numeric cap in M1-07 or product decisions today.
+**RESOLVED**
 
-**Gate (locked sequencing):**
+Value:
+90 Johannesburg civil days
 
-```text
-CUSTOM_RANGE_MAX owner decision:
-  does NOT block TIME-B (pure bounds / classification kernel)
-  MUST be resolved before TIME-C exposes custom-range financial querying
-  until resolved, TIME-C may implement and test only locked presets:
-    Today, Yesterday, rolling 7d, rolling 30d
-  custom-range querying stays unavailable or returns {:error, :custom_range_max_undecided}
-```
+Decision authority:
+owner approval during PRE-M5-TIME before TIME-G certification
 
-Do not authorize unlimited custom periods merely because start/end timestamps are finite.
+M1-07 T23 deferred the numeric maximum. This later owner decision resolves that deferred value without changing M1-07 T1–T31.
 
-Options for owners (do not implement until chosen):
-
-| Option | Implication |
-| --- | --- |
-| Cap at 90 Johannesburg civil days | Matches common quarter-style reporting; bounded index range scans |
-| Cap at 365 days | Year-style management reports; heavier worst-case queries |
-| Cap at max(rolling presets) = 30 days until M5 | Smallest backend surface; may block some custom reports until owner extends cap |
-
-May block PRE-M5-TIME **closeout** if backend API requires hard validation before M5.
+This resolves the required pre-M5 numeric decision. It does not enable `:custom` financial querying. The current financial period API remains preset-only.
 
 ## 11.2 All-events freshness policy
 
