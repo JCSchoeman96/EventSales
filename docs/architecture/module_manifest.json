@@ -734,7 +734,7 @@
       "uses": []
     },
     {
-      "docs_count": 3,
+      "docs_count": 4,
       "moduledoc?": true,
       "name": "EventSales.Analytics.DashboardPubSub",
       "parse_error": null,
@@ -751,6 +751,10 @@
         {
           "arity": 2,
           "name": "broadcast_hot_state_updated"
+        },
+        {
+          "arity": 1,
+          "name": "broadcast_source_freshness_updated"
         }
       ],
       "specs?": true,
@@ -942,7 +946,7 @@
       "uses": []
     },
     {
-      "docs_count": 3,
+      "docs_count": 4,
       "moduledoc?": true,
       "name": "EventSales.Analytics.OrderProcessedNotifier",
       "parse_error": null,
@@ -951,6 +955,10 @@
         {
           "arity": 3,
           "name": "notify_order_processed"
+        },
+        {
+          "arity": 2,
+          "name": "notify_order_source_applied"
         },
         {
           "arity": 4,
@@ -1133,12 +1141,16 @@
       "uses": []
     },
     {
-      "docs_count": 1,
+      "docs_count": 2,
       "moduledoc?": true,
       "name": "EventSales.Analytics.SourceFreshness",
       "parse_error": null,
       "path": "lib/event_sales/analytics/source_freshness.ex",
       "public_funs": [
+        {
+          "arity": 2,
+          "name": "advance_order"
+        },
         {
           "arity": 2,
           "name": "for_event"
@@ -6535,7 +6547,7 @@
       "uses": []
     },
     {
-      "docs_count": 58,
+      "docs_count": 59,
       "moduledoc?": true,
       "name": "EventSales.Telemetry",
       "parse_error": null,
@@ -6796,6 +6808,10 @@
         {
           "arity": 0,
           "name": "source_freshness_clock_skew"
+        },
+        {
+          "arity": 0,
+          "name": "source_freshness_advance_failed"
         },
         {
           "arity": 1,

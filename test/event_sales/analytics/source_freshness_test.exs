@@ -6,6 +6,7 @@ defmodule EventSales.Analytics.SourceFreshnessTest do
   require Ash.Query
 
   alias Ecto.Adapters.SQL.Sandbox
+  alias EventSales.Analytics.DashboardPubSub
   alias EventSales.Analytics.Resources.EventSourceFreshnessSnapshot
   alias EventSales.Analytics.SourceFreshness
   alias EventSales.Catalog.Resources.{Event, SourceSystem}
@@ -93,6 +94,106 @@ defmodule EventSales.Analytics.SourceFreshnessTest do
       advance_sync!(event.id, sync_at, refreshed)
 
       assert {:ok, %{anchor_at: ^refund_at}} = SourceFreshness.for_event(event.id, now: refreshed)
+    end
+  end
+
+  describe "advance_order/2" do
+    setup do
+      source = SalesHelpers.create_source_system!()
+
+      event =
+        SalesHelpers.create_event!(source, %{
+          name: "Order Freshness",
+          slug: unique_slug("order-fresh")
+        })
+
+      %{event: event}
+    end
+
+    test "first and newer watermarks persist the order source clock and broadcast once", %{
+      event: event
+    } do
+      assert :ok = DashboardPubSub.subscribe_event(event.id)
+
+      first_watermark = ~U[2026-05-01 10:00:00.000000Z]
+      newer_watermark = ~U[2026-05-01 11:00:00.000000Z]
+
+      assert :ok = SourceFreshness.advance_order(event.id, first_watermark)
+
+      assert_receive {:source_freshness_updated, event_id}, 500
+      assert event_id == event.id
+
+      assert {:ok, first_snapshot} = read_snapshot(event.id)
+      assert first_snapshot.order_source_watermark_at == first_watermark
+      assert %DateTime{} = first_snapshot.projection_refreshed_at
+
+      assert :ok = SourceFreshness.advance_order(event.id, newer_watermark)
+
+      assert_receive {:source_freshness_updated, event_id}, 500
+      assert event_id == event.id
+
+      assert {:ok, newer_snapshot} = read_snapshot(event.id)
+      assert newer_snapshot.order_source_watermark_at == newer_watermark
+
+      assert DateTime.compare(
+               newer_snapshot.projection_refreshed_at,
+               first_snapshot.projection_refreshed_at
+             ) in [
+               :eq,
+               :gt
+             ]
+
+      refute_receive {:source_freshness_updated, _event_id}, 0
+    end
+
+    test "equal replay preserves the watermark and projection metadata without a broadcast", %{
+      event: event
+    } do
+      event_id = event.id
+      watermark = ~U[2026-05-01 10:00:00.000000Z]
+
+      assert :ok = DashboardPubSub.subscribe_event(event_id)
+      assert :ok = SourceFreshness.advance_order(event_id, watermark)
+      assert_receive {:source_freshness_updated, ^event_id}, 500
+
+      assert {:ok, first_snapshot} = read_snapshot(event_id)
+      assert :ok = SourceFreshness.advance_order(event_id, watermark)
+      assert {:ok, replayed_snapshot} = read_snapshot(event_id)
+
+      assert replayed_snapshot.order_source_watermark_at ==
+               first_snapshot.order_source_watermark_at
+
+      assert replayed_snapshot.projection_refreshed_at == first_snapshot.projection_refreshed_at
+      refute_receive {:source_freshness_updated, _event_id}, 0
+    end
+
+    test "older replay preserves the watermark and projection metadata without a broadcast", %{
+      event: event
+    } do
+      event_id = event.id
+      newer_watermark = ~U[2026-05-01 11:00:00.000000Z]
+      older_watermark = ~U[2026-05-01 10:00:00.000000Z]
+
+      assert :ok = DashboardPubSub.subscribe_event(event_id)
+      assert :ok = SourceFreshness.advance_order(event_id, newer_watermark)
+      assert_receive {:source_freshness_updated, ^event_id}, 500
+
+      assert {:ok, first_snapshot} = read_snapshot(event_id)
+      assert :ok = SourceFreshness.advance_order(event_id, older_watermark)
+      assert {:ok, stale_snapshot} = read_snapshot(event_id)
+
+      assert stale_snapshot.order_source_watermark_at == first_snapshot.order_source_watermark_at
+      assert stale_snapshot.projection_refreshed_at == first_snapshot.projection_refreshed_at
+      refute_receive {:source_freshness_updated, _event_id}, 0
+    end
+
+    test "database failure returns an error and does not broadcast" do
+      event_id = Ecto.UUID.generate()
+      watermark = ~U[2026-05-01 10:00:00.000000Z]
+
+      assert :ok = DashboardPubSub.subscribe_event(event_id)
+      assert {:error, _reason} = SourceFreshness.advance_order(event_id, watermark)
+      refute_receive {:source_freshness_updated, _event_id}, 0
     end
   end
 
@@ -374,6 +475,12 @@ defmodule EventSales.Analytics.SourceFreshnessTest do
     EventSourceFreshnessSnapshot
     |> Ash.Query.filter(event_id == ^event_id)
     |> Ash.count!(domain: EventSales.Analytics)
+  end
+
+  defp read_snapshot(event_id) do
+    EventSourceFreshnessSnapshot
+    |> Ash.Query.filter(event_id == ^event_id)
+    |> Ash.read_one(domain: EventSales.Analytics)
   end
 
   defp unique_slug(prefix) do

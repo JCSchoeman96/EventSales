@@ -349,9 +349,10 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
     refute queued.failed_at
     assert queued.error_message
     refute_receive {:webhook_step, {:refund_sync, _, _}}, 100
+    refute_receive {:webhook_step, {:source_freshness, _, _}}, 0
   end
 
-  test "default handler calls notifier after successful durable order upsert", %{source: source} do
+  test "source freshness runs before refund sync and hot-state notification", %{source: source} do
     order = create_order!(source)
     source_id = source.id
     Application.put_env(:event_sales, :order_upserter, __MODULE__.SuccessfulUpserter)
@@ -363,6 +364,9 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
     assert :ok = WebhookProcessor.process(event.id)
 
     assert_receive {:webhook_step, :order_upsert}, 500
+    assert_receive {:webhook_step, {:source_freshness, notified_order_id, source_watermark}}, 500
+    assert notified_order_id == order.id
+    assert source_watermark == order.updated_at_source
     assert_receive {:webhook_step, {:refund_sync, ^source_id, "10001"}}, 500
     assert_receive {:webhook_step, :notifier}, 500
     assert_receive {:notified, notified_order_id, notified_event_id}, 500
@@ -385,6 +389,7 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
     assert_receive {:webhook_step, {:refund_sync, source_id, "10001"}}, 500
     assert source_id == source.id
     refute_receive {:notified, _order_id, _event_id}, 100
+    refute_receive {:webhook_step, {:source_freshness, _, _}}, 0
 
     processed = reload!(event.id)
     assert processed.status == :processed
@@ -430,7 +435,10 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
                    500
   end
 
-  test "transient refund failure retries a stale order without notifying", %{source: source} do
+  test "transient refund failure keeps committed freshness and a stale retry does not advance it",
+       %{
+         source: source
+       } do
     order = create_order!(source)
     Application.put_env(:event_sales, :order_upserter, __MODULE__.SequenceUpserter)
     Application.put_env(:event_sales, :order_processed_notifier, __MODULE__.Notifier)
@@ -446,6 +454,13 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
 
     assert {:error, {:transient, :timeout}} = WebhookProcessor.process(event.id)
 
+    assert_receive {:webhook_step, :order_upsert}, 500
+    assert_receive {:webhook_step, {:source_freshness, notified_order_id, source_watermark}}, 500
+    assert notified_order_id == order.id
+    assert source_watermark == order.updated_at_source
+    assert_receive {:webhook_step, {:refund_sync, source_id, "10001"}}, 500
+    assert source_id == source.id
+
     queued = reload!(event.id)
     assert queued.status == :queued
     assert queued.processing_attempt_count == 1
@@ -455,12 +470,10 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
     assert :ok = WebhookProcessor.process(event.id)
 
     assert_receive {:webhook_step, :order_upsert}, 500
-    assert_receive {:webhook_step, {:refund_sync, source_id, "10001"}}, 500
-    assert source_id == source.id
-    assert_receive {:webhook_step, :order_upsert}, 500
     assert_receive {:webhook_step, {:refund_sync, ^source_id, "10001"}}, 500
     refute_receive {:webhook_step, :notifier}, 100
     refute_receive {:notified, _order_id, _event_id}, 100
+    refute_receive {:webhook_step, {:source_freshness, _, _}}, 0
 
     processed = reload!(event.id)
     assert processed.status == :processed
@@ -618,6 +631,13 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
   defmodule Notifier do
     @moduledoc false
 
+    def notify_order_source_applied(order) do
+      test_pid = Application.fetch_env!(:event_sales, :webhook_processor_test_pid)
+      send(test_pid, {:webhook_step, {:source_freshness, order.id, order.updated_at_source}})
+
+      :ok
+    end
+
     def notify_order_processed(order, event) do
       test_pid = Application.fetch_env!(:event_sales, :webhook_processor_test_pid)
       send(test_pid, {:webhook_step, :notifier})
@@ -629,6 +649,8 @@ defmodule EventSales.Ingestion.WebhookProcessorTest do
 
   defmodule FailingNotifier do
     @moduledoc false
+
+    def notify_order_source_applied(_order), do: :ok
 
     def notify_order_processed(_order, _event), do: raise("notifier unavailable")
   end
