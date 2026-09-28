@@ -1,11 +1,48 @@
+defmodule EventSales.Analytics.AdminDashboardTest.SourceFreshnessRecorder do
+  def for_events(event_ids, opts) do
+    report({:for_events, event_ids, opts})
+
+    Process.get(
+      {__MODULE__, :for_events_result},
+      {:ok, Map.new(event_ids, &{&1, {:error, :missing_source_freshness_anchor}})}
+    )
+  end
+
+  def for_event(event_id, opts) do
+    report({:for_event, event_id, opts})
+    Process.get({__MODULE__, :for_event_result}, {:error, :missing_source_freshness_anchor})
+  end
+
+  defp report(message) do
+    case Process.get({__MODULE__, :test_pid}) do
+      pid when is_pid(pid) -> send(pid, message)
+      _ -> :ok
+    end
+  end
+end
+
 defmodule EventSales.Analytics.AdminDashboardTest do
   use EventSales.DataCase, async: false
 
-  alias EventSales.Analytics.{AdminDashboard, DashboardCache, HotStateAggregator, SnapshotRefresh}
+  require Ash.Query
+
+  alias EventSales.Analytics.{
+    AdminDashboard,
+    DashboardCache,
+    HotStateAggregator,
+    SnapshotRefresh,
+    SourceFreshness
+  }
+
+  alias EventSales.Analytics.Resources.EventSourceFreshnessSnapshot
+  alias EventSales.Analytics.Workers.RebuildHotStateWorker
   alias EventSales.Catalog.Resources.{Event, TicketType}
+  alias EventSales.Repo
   alias EventSales.Sales
   alias EventSales.Sales.Resources.{Order, OrderItem}
   alias EventSales.TestSupport.SalesHelpers
+
+  alias EventSales.Analytics.AdminDashboardTest.SourceFreshnessRecorder
 
   setup do
     HotStateAggregator.reset_for_test!()
@@ -126,6 +163,92 @@ defmodule EventSales.Analytics.AdminDashboardTest do
     assert row.total_revenue == Decimal.new("1350.00")
     assert row.status_breakdown == %{"completed" => 2}
     assert row.refreshed_at == ~U[2026-05-17 10:00:00Z]
+    assert row.source_freshness == {:error, :missing_source_freshness_anchor}
+  end
+
+  test "event_row propagates unexpected source freshness read errors", %{event: event} do
+    Process.put({SourceFreshnessRecorder, :test_pid}, self())
+    Process.put({SourceFreshnessRecorder, :for_event_result}, {:error, :projection_unavailable})
+
+    assert {:error, :projection_unavailable} =
+             AdminDashboard.event_row(event.id, source_freshness: SourceFreshnessRecorder)
+
+    assert_receive {:for_event, event_id, _opts}
+    assert event_id == event.id
+  end
+
+  test "snapshot uses one batch freshness call for the bounded event set", %{
+    event: event,
+    other_event: other_event
+  } do
+    Process.put({SourceFreshnessRecorder, :test_pid}, self())
+
+    assert {:ok, snapshot} =
+             AdminDashboard.snapshot(
+               now: ~U[2026-05-17 10:00:00Z],
+               source_freshness: SourceFreshnessRecorder
+             )
+
+    assert_receive {:for_events, event_ids, [now: ~U[2026-05-17 10:00:00Z]]}
+    assert Enum.sort(event_ids) == Enum.sort([event.id, other_event.id])
+    refute_receive {:for_events, _, _}, 0
+    refute_receive {:for_event, _, _}, 0
+    assert snapshot.source_freshness.result == {:error, :missing_source_freshness_anchor}
+    assert snapshot.source_freshness.counts.missing == 2
+  end
+
+  test "normal newer anchor does not hide an older stale event", %{
+    event: event,
+    other_event: other_event
+  } do
+    now = ~U[2026-05-17 12:00:00.000000Z]
+    normal_anchor = DateTime.add(now, -1, :minute)
+
+    assert :ok = SourceFreshness.advance_order(event.id, normal_anchor)
+    assert :ok = SourceFreshness.advance_order(other_event.id, DateTime.add(now, -30, :minute))
+
+    assert {:ok, snapshot} = AdminDashboard.snapshot(now: now)
+
+    assert {:ok, %{classification: :stale, portfolio_anchor_at: ^normal_anchor}} =
+             snapshot.source_freshness.result
+
+    assert snapshot.source_freshness.counts == %{normal: 1, aging: 0, stale: 1, missing: 0}
+  end
+
+  test "missing evidence is counted without changing the worst classified event", %{
+    source: source,
+    event: event,
+    other_event: other_event
+  } do
+    missing =
+      SalesHelpers.create_event!(source, %{name: "Missing Event", slug: unique_slug("missing")})
+
+    now = ~U[2026-05-17 12:00:00Z]
+
+    assert :ok = SourceFreshness.advance_order(event.id, DateTime.add(now, -1, :minute))
+    assert :ok = SourceFreshness.advance_order(other_event.id, DateTime.add(now, -7, :minute))
+
+    assert {:ok, snapshot} = AdminDashboard.snapshot(now: now)
+
+    assert {:ok, %{classification: :aging}} = snapshot.source_freshness.result
+    assert snapshot.source_freshness.counts == %{normal: 1, aging: 1, stale: 0, missing: 1}
+    assert Enum.any?(snapshot.events, &(&1.event_id == missing.id))
+  end
+
+  test "all missing evidence returns the typed missing aggregate" do
+    assert {:ok, snapshot} = AdminDashboard.snapshot()
+
+    assert snapshot.source_freshness.result == {:error, :missing_source_freshness_anchor}
+    assert snapshot.source_freshness.counts == %{normal: 0, aging: 0, stale: 0, missing: 2}
+  end
+
+  test "an empty displayed event set returns typed missing evidence with zero counts" do
+    assert {:ok, snapshot} =
+             AdminDashboard.snapshot(lifecycle: :past, now: ~U[2026-05-17 12:00:00Z])
+
+    assert snapshot.events == []
+    assert snapshot.source_freshness.result == {:error, :missing_source_freshness_anchor}
+    assert snapshot.source_freshness.counts == %{normal: 0, aging: 0, stale: 0, missing: 0}
   end
 
   test "snapshot filters event lifecycle before event limit", %{source: source} do
@@ -177,31 +300,46 @@ defmodule EventSales.Analytics.AdminDashboardTest do
     event: event,
     other_event: other_event
   } do
+    aging_anchor = ~U[2026-05-17 11:53:00Z]
+    normal_anchor = ~U[2026-05-17 11:59:00Z]
+
     snapshot = %{
       kpis: %{total_sold: 1, total_revenue: Decimal.new("100.00")},
       statuses: %{"completed" => 1},
       events: [
-        row(event, %{total_sold: 1, total_revenue: Decimal.new("100.00")}),
+        row(event,
+          total_sold: 1,
+          total_revenue: Decimal.new("100.00"),
+          source_freshness: freshness(:aging, aging_anchor, 420_000)
+        ),
         row(other_event, %{
           total_sold: 2,
           total_revenue: Decimal.new("200.00"),
-          status_breakdown: %{"pending" => 2}
+          status_breakdown: %{"pending" => 2},
+          source_freshness: freshness(:normal, normal_anchor, 60_000)
         })
       ],
       ticket_types: [%{ticket_type_name: "GA"}],
       recent_orders: [%{order_number: "R-1"}],
       unmapped_alerts: [%{name: "Needs Mapping"}],
-      hot_state: %{state: :ready}
+      read_model: %{lifecycle: :ready, generated_at: normal_anchor},
+      source_freshness:
+        aggregate(:aging, normal_anchor, %{normal: 1, aging: 1, stale: 0, missing: 0})
     }
 
     replacement =
       row(event, %{
         total_sold: 4,
         total_revenue: Decimal.new("400.00"),
-        status_breakdown: %{"completed" => 4}
+        status_breakdown: %{"completed" => 4},
+        source_freshness: freshness(:stale, ~U[2026-05-17 11:30:00Z], 1_800_000)
       })
 
-    assert {:ok, updated} = AdminDashboard.replace_event_row(snapshot, replacement)
+    updated =
+      with_repo_query_capture(fn ->
+        assert {:ok, updated} = AdminDashboard.replace_event_row(snapshot, replacement)
+        updated
+      end)
 
     event_id = event.id
     other_event_id = other_event.id
@@ -214,10 +352,52 @@ defmodule EventSales.Analytics.AdminDashboardTest do
     assert updated.kpis.total_sold == 6
     assert updated.kpis.total_revenue == Decimal.new("600.00")
     assert updated.statuses == %{"completed" => 4, "pending" => 2}
+
+    assert updated.source_freshness ==
+             aggregate(:stale, normal_anchor, %{normal: 1, aging: 0, stale: 1, missing: 0})
+
     assert updated.ticket_types == snapshot.ticket_types
     assert updated.recent_orders == snapshot.recent_orders
     assert updated.unmapped_alerts == snapshot.unmapped_alerts
-    assert updated.hot_state == snapshot.hot_state
+    assert updated.read_model == snapshot.read_model
+  end
+
+  test "manual rebuild makes the read model ready without changing stale source freshness", %{
+    event: event
+  } do
+    now = DateTime.utc_now()
+    anchor = DateTime.add(now, -30, :minute)
+
+    assert :ok = SourceFreshness.advance_order(event.id, anchor)
+
+    assert {:ok, %{classification: :stale, anchor_at: ^anchor}} =
+             SourceFreshness.for_event(event.id, now: now)
+
+    projection_before = freshness_projection!(event.id)
+
+    assert :ok = RebuildHotStateWorker.perform(%Oban.Job{args: %{"scope" => "hot_state"}})
+
+    assert %{lifecycle: :ready, generated_at: %DateTime{}} = HotStateAggregator.status()
+    assert {:ok, dashboard} = AdminDashboard.snapshot(now: now)
+    assert dashboard.read_model.lifecycle == :ready
+
+    assert {:ok, %{classification: :stale, portfolio_anchor_at: ^anchor}} =
+             dashboard.source_freshness.result
+
+    projection_after = freshness_projection!(event.id)
+
+    assert Map.take(projection_after, [
+             :order_source_watermark_at,
+             :refund_source_watermark_at,
+             :sync_source_observed_at,
+             :projection_refreshed_at
+           ]) ==
+             Map.take(projection_before, [
+               :order_source_watermark_at,
+               :refund_source_watermark_at,
+               :sync_source_observed_at,
+               :projection_refreshed_at
+             ])
   end
 
   test "replace_event_row returns not_found when row is not displayed", %{
@@ -437,10 +617,54 @@ defmodule EventSales.Analytics.AdminDashboardTest do
       today_revenue: Decimal.new("0"),
       status_breakdown: %{},
       currency: "ZAR",
-      refreshed_at: nil
+      refreshed_at: nil,
+      source_freshness: {:error, :missing_source_freshness_anchor}
     }
 
     Map.merge(defaults, Map.new(attrs))
+  end
+
+  defp freshness(classification, anchor_at, age_ms) do
+    {:ok, %{classification: classification, anchor_at: anchor_at, age_ms: age_ms}}
+  end
+
+  defp aggregate(classification, portfolio_anchor_at, counts) do
+    %{
+      result: {:ok, %{classification: classification, portfolio_anchor_at: portfolio_anchor_at}},
+      counts: counts
+    }
+  end
+
+  defp freshness_projection!(event_id) do
+    EventSourceFreshnessSnapshot
+    |> Ash.Query.filter(event_id == ^event_id)
+    |> Ash.read_one!(domain: EventSales.Analytics)
+  end
+
+  defp with_repo_query_capture(fun) do
+    handler_id = "admin-dashboard-query-capture-#{System.unique_integer([:positive])}"
+    telemetry_prefix = Keyword.get(Repo.config(), :telemetry_prefix, [:event_sales, :repo])
+    test_pid = self()
+
+    :ok =
+      :telemetry.attach(
+        handler_id,
+        telemetry_prefix ++ [:query],
+        fn _event, _measurements, _metadata, pid -> send(pid, :repo_query) end,
+        test_pid
+      )
+
+    try do
+      Repo.query!("SELECT 1")
+      assert_receive :repo_query, 500
+      refute_receive :repo_query, 0
+
+      result = fun.()
+      refute_receive :repo_query, 0
+      result
+    after
+      :telemetry.detach(handler_id)
+    end
   end
 
   defp unique_slug(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"

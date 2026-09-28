@@ -1,3 +1,14 @@
+defmodule EventSales.Analytics.EventScopedDashboardTest.SourceFreshnessRecorder do
+  def for_event(event_id, opts) do
+    case Process.get({__MODULE__, :test_pid}) do
+      pid when is_pid(pid) -> send(pid, {:for_event, event_id, opts})
+      _ -> :ok
+    end
+
+    Process.get({__MODULE__, :result}, {:error, :missing_source_freshness_anchor})
+  end
+end
+
 defmodule EventSales.Analytics.EventScopedDashboardTest do
   use EventSales.DataCase, async: false
 
@@ -5,11 +16,20 @@ defmodule EventSales.Analytics.EventScopedDashboardTest do
 
   alias EventSales.Accounts
   alias EventSales.Accounts.Resources.{EventAccessGrant, Role, User, UserRole}
-  alias EventSales.Analytics.{DashboardCache, EventScopedDashboard, HotStateAggregator}
+
+  alias EventSales.Analytics.{
+    DashboardCache,
+    EventScopedDashboard,
+    HotStateAggregator,
+    SourceFreshness
+  }
+
   alias EventSales.Analytics.Resources.EventAggregateSnapshot
   alias EventSales.Catalog
   alias EventSales.Catalog.Resources.EventDashboardSetting
   alias EventSales.TestSupport.SalesHelpers
+
+  alias EventSales.Analytics.EventScopedDashboardTest.SourceFreshnessRecorder
 
   setup do
     HotStateAggregator.reset_for_test!()
@@ -64,12 +84,18 @@ defmodule EventSales.Analytics.EventScopedDashboardTest do
   end
 
   test "unassigned valid UUID is forbidden before event existence is revealed", %{
+    event: event,
     unassigned: unassigned
   } do
-    unknown_event_id = Ecto.UUID.generate()
+    Process.put({SourceFreshnessRecorder, :test_pid}, self())
 
     assert {:error, :forbidden} =
-             EventScopedDashboard.summary(unknown_event_id, actor: unassigned)
+             EventScopedDashboard.summary(event.id,
+               actor: unassigned,
+               source_freshness: SourceFreshnessRecorder
+             )
+
+    refute_receive {:for_event, _, _}, 0
   end
 
   test "unknown event returns not found only after actor is authorized", %{
@@ -197,6 +223,52 @@ defmodule EventSales.Analytics.EventScopedDashboardTest do
     assert summary.source_row_count == 0
     assert summary.snapshot_version == 1
     assert summary.pii_visibility == :none
+    assert summary.source_freshness == {:error, :missing_source_freshness_anchor}
+  end
+
+  test "authorized event reads canonical source freshness", %{event: event, admin: admin} do
+    now = ~U[2026-05-22 12:00:00.000000Z]
+    anchor = DateTime.add(now, -7, :minute)
+
+    assert :ok = SourceFreshness.advance_order(event.id, anchor)
+
+    assert {:ok, summary} = EventScopedDashboard.summary(event.id, actor: admin, now: now)
+
+    assert {:ok, %{classification: :aging, anchor_at: ^anchor, age_ms: 420_000}} =
+             summary.source_freshness
+  end
+
+  test "canonical source freshness wins over a newer legacy financial watermark", %{
+    event: event,
+    admin: admin
+  } do
+    now = ~U[2026-05-22 12:00:00.000000Z]
+    legacy_anchor = DateTime.add(now, -1, :minute)
+    canonical_anchor = DateTime.add(now, -30, :minute)
+
+    create_snapshot!(event, %{source_watermark_at: legacy_anchor})
+    assert :ok = SourceFreshness.advance_order(event.id, canonical_anchor)
+
+    assert {:ok, summary} = EventScopedDashboard.summary(event.id, actor: admin, now: now)
+
+    assert summary.source_watermark_at == legacy_anchor
+
+    assert {:ok, %{classification: :stale, anchor_at: ^canonical_anchor, age_ms: 1_800_000}} =
+             summary.source_freshness
+  end
+
+  test "authorized freshness read failures propagate", %{event: event, admin: admin} do
+    Process.put({SourceFreshnessRecorder, :test_pid}, self())
+    Process.put({SourceFreshnessRecorder, :result}, {:error, :projection_unavailable})
+
+    assert {:error, :projection_unavailable} =
+             EventScopedDashboard.summary(event.id,
+               actor: admin,
+               source_freshness: SourceFreshnessRecorder
+             )
+
+    assert_receive {:for_event, event_id, _opts}
+    assert event_id == event.id
   end
 
   test "hot aggregate is preferred over snapshot and response excludes pii", %{

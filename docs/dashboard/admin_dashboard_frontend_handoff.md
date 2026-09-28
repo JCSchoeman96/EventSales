@@ -75,9 +75,21 @@ hooks: { ...MishkaComponents, ...NewHooks }
 | Status breakdown | `EventSalesWeb.Live.Admin.Components.StatusBadge` | Per-status counts |
 | Unmapped alerts | `EventSalesWeb.Live.Admin.Components.UnmappedItemAlert` | Mapping queue rows |
 | Recent orders | `EventSalesWeb.Live.Admin.Components.OrderTable` | PII-safe order table |
-| Stale banner | `EventSalesWeb.Live.Admin.Components.StaleDataBanner` | `hot_state[:state]` warming/stale |
+| Freshness banner | `EventSalesWeb.Live.Admin.Components.StaleDataBanner` | Read-model lifecycle and source-freshness classification visibility |
 
 Do not move business logic into components. Formatting (`format_money`, dates) is allowed.
+
+## Read-model and source-freshness signals
+
+The dashboard snapshot has separate `read_model` and `source_freshness` fields. `read_model.generated_at` records when HotStateAggregator generated its read model. Source classification uses only the canonical event source-freshness projection.
+
+The all-events policy is `COMBINED_SIGNALS`. `source_freshness.result.classification` is the worst classification among displayed events with evidence. `portfolio_anchor_at` is the newest available event anchor and does not affect that classification. `counts.missing` records events without an anchor. If all displayed events are missing evidence, the result remains `{:error, :missing_source_freshness_anchor}`.
+
+Manual refresh rebuilds dashboard summaries. It does not advance the source-freshness projection. `EventScopedDashboard.source_watermark_at` remains legacy financial snapshot metadata; its `source_freshness` field is canonical M1-07 freshness.
+
+The `DashboardLive` process that requests a manual rebuild receives a direct completion message and reloads the bounded snapshot, including when no event rows are displayed. This does not add a PubSub topic.
+
+DashboardLive subscribes to each displayed event topic. `{:hot_state_updated, event_id, updated_at}` reports a read-model update. `{:source_freshness_updated, event_id}` reports a durable source projection update. Both replace one displayed row and update the displayed aggregates. An update for an event outside the displayed set leaves the dashboard unchanged. Do not add a global topic or polling.
 
 ---
 

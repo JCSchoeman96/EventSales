@@ -78,6 +78,25 @@ defmodule EventSalesWeb.Live.Admin.DashboardLive do
     {:noreply, socket}
   end
 
+  def handle_info({:source_freshness_updated, event_id}, socket) when is_binary(event_id) do
+    socket =
+      case AdminDashboard.event_row(event_id) do
+        {:ok, row} -> replace_event_row(socket, row)
+        :not_found -> socket
+        {:error, _reason} -> socket
+      end
+
+    {:noreply, socket}
+  end
+
+  def handle_info(:hot_state_rebuild_finished, socket) do
+    {:noreply,
+     socket
+     |> load_dashboard()
+     |> assign_chart_data()
+     |> maybe_subscribe_to_event_topics()}
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -93,7 +112,10 @@ defmodule EventSalesWeb.Live.Admin.DashboardLive do
         </button>
       </:actions>
 
-      <StaleDataBanner.banner hot_state={@dashboard.hot_state} />
+      <StaleDataBanner.banner
+        read_model={@dashboard.read_model}
+        source_freshness={@dashboard.source_freshness}
+      />
 
       <section class="card bg-base-100 border border-base-300 shadow-sm">
         <div class="card-body">
@@ -351,7 +373,21 @@ defmodule EventSalesWeb.Live.Admin.DashboardLive do
       ticket_types: [],
       recent_orders: [],
       unmapped_alerts: [],
-      hot_state: %{state: :stale}
+      read_model: %{
+        lifecycle: :degraded,
+        generated_at: nil,
+        rebuild_in_flight?: false,
+        restored_snapshot_count: 0,
+        restore_finished?: false,
+        last_restore_finished_at: nil,
+        last_rebuild_started_at: nil,
+        last_rebuild_finished_at: nil,
+        last_failure: :dashboard_load_failed
+      },
+      source_freshness: %{
+        result: {:error, :missing_source_freshness_anchor},
+        counts: %{normal: 0, aging: 0, stale: 0, missing: 0}
+      }
     }
   end
 

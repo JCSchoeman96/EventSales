@@ -32,6 +32,26 @@ defmodule EventSales.Analytics.HotStateAggregatorTest do
     assert Process.alive?(pid)
   end
 
+  test "status exposes read-model lifecycle and generation fields only" do
+    status = HotStateAggregator.status()
+
+    assert Map.keys(status) |> Enum.sort() ==
+             Enum.sort([
+               :lifecycle,
+               :generated_at,
+               :rebuild_in_flight?,
+               :restored_snapshot_count,
+               :restore_finished?,
+               :last_restore_finished_at,
+               :last_rebuild_started_at,
+               :last_rebuild_finished_at,
+               :last_failure
+             ])
+
+    assert status.lifecycle in [:warming, :ready, :degraded]
+    assert status.generated_at == nil or match?(%DateTime{}, status.generated_at)
+  end
+
   test "init is lightweight and defers restore to handle_continue" do
     assert {:ok, state, {:continue, :restore_snapshots}} =
              HotStateAggregator.init(
@@ -43,11 +63,13 @@ defmodule EventSales.Analytics.HotStateAggregatorTest do
   end
 
   test "Redis snapshot restore populates DashboardCache and transitions ready", %{event: event} do
+    generated_at = DateTime.utc_now()
+
     summary =
       summary(%{
         total_sold: 4,
         total_revenue: Decimal.new("1200.00"),
-        updated_at: DateTime.utc_now()
+        updated_at: generated_at
       })
 
     assert :ok = MemorySnapshotStoreAdapter.put(CacheKeys.redis_event_snapshot(event.id), summary)
@@ -55,7 +77,13 @@ defmodule EventSales.Analytics.HotStateAggregatorTest do
     restart_hot_state_aggregator!()
 
     assert {:ok, %{total_sold: 4}} = HotStateAggregator.summary_for_event(event.id)
-    assert %{state: :ready, restored_snapshot_count: 1} = HotStateAggregator.status()
+
+    assert %{
+             lifecycle: :ready,
+             generated_at: ^generated_at,
+             restored_snapshot_count: 1
+           } = HotStateAggregator.status()
+
     assert count_rebuild_jobs() == 0
   end
 
@@ -96,7 +124,7 @@ defmodule EventSales.Analytics.HotStateAggregatorTest do
     try do
       restart_hot_state_aggregator!()
 
-      assert %{state: :warming, rebuild_in_flight?: true} = HotStateAggregator.status()
+      assert %{lifecycle: :warming, rebuild_in_flight?: true} = HotStateAggregator.status()
       assert count_rebuild_jobs() == 1
     after
       Application.put_env(:event_sales, :hot_state_aggregator, original)
@@ -122,7 +150,7 @@ defmodule EventSales.Analytics.HotStateAggregatorTest do
 
       put_hot_state_config!(rebuild_in_flight_timeout_ms: -1)
 
-      assert %{state: :stale, rebuild_in_flight?: false, last_failure: :rebuild_timeout} =
+      assert %{lifecycle: :degraded, rebuild_in_flight?: false, last_failure: :rebuild_timeout} =
                HotStateAggregator.status()
 
       assert :ok = HotStateAggregator.request_rebuild(:manual_refresh)
@@ -136,7 +164,8 @@ defmodule EventSales.Analytics.HotStateAggregatorTest do
     assert :ok = Supervisor.terminate_child(EventSales.Supervisor, HotStateAggregator)
 
     assert %{
-             state: :stale,
+             lifecycle: :degraded,
+             generated_at: nil,
              rebuild_in_flight?: false,
              restored_snapshot_count: 0,
              restore_finished?: false,
@@ -147,7 +176,9 @@ defmodule EventSales.Analytics.HotStateAggregatorTest do
     wait_until(fn -> HotStateAggregator.status().restore_finished? end)
   end
 
-  test "restored summaries older than stale_after_ms report stale", %{event: event} do
+  test "restored summaries older than stale_after_ms report degraded read-model health", %{
+    event: event
+  } do
     old_summary = summary(%{updated_at: DateTime.add(DateTime.utc_now(), -600, :second)})
 
     assert :ok =
@@ -155,7 +186,7 @@ defmodule EventSales.Analytics.HotStateAggregatorTest do
 
     restart_hot_state_aggregator!()
 
-    assert %{state: :stale, restored_snapshot_count: 1} = HotStateAggregator.status()
+    assert %{lifecycle: :degraded, restored_snapshot_count: 1} = HotStateAggregator.status()
   end
 
   test "recomputes durable summary, writes hot and warm cache, and broadcasts", %{

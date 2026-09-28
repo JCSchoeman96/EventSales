@@ -97,6 +97,93 @@ defmodule EventSales.Analytics.SourceFreshnessTest do
     end
   end
 
+  describe "for_events/2" do
+    setup do
+      source = SalesHelpers.create_source_system!()
+
+      events =
+        Enum.map(["Normal", "Aging", "Stale", "Absent", "Empty"], fn name ->
+          SalesHelpers.create_event!(source, %{
+            name: "#{name} Freshness Event",
+            slug: unique_slug(String.downcase(name))
+          })
+        end)
+
+      %{events: events}
+    end
+
+    test "classifies all rows with one now and returns typed missing results", %{events: events} do
+      [normal, aging, stale, absent, empty] = events
+      now = ~U[2026-05-01 12:00:00.000000Z]
+
+      advance_order!(normal.id, DateTime.add(now, -4, :minute), now)
+      advance_order!(aging.id, DateTime.add(now, -7, :minute), now)
+      advance_order!(stale.id, DateTime.add(now, -11, :minute), now)
+      insert_empty_projection!(empty.id, now)
+
+      assert {:ok, results} =
+               SourceFreshness.for_events(
+                 [normal.id, aging.id, stale.id, absent.id, empty.id, normal.id],
+                 now: now
+               )
+
+      assert map_size(results) == 5
+
+      assert results[normal.id] ==
+               {:ok,
+                %{
+                  classification: :normal,
+                  anchor_at: DateTime.add(now, -4, :minute),
+                  age_ms: 240_000
+                }}
+
+      assert results[aging.id] ==
+               {:ok,
+                %{
+                  classification: :aging,
+                  anchor_at: DateTime.add(now, -7, :minute),
+                  age_ms: 420_000
+                }}
+
+      assert results[stale.id] ==
+               {:ok,
+                %{
+                  classification: :stale,
+                  anchor_at: DateTime.add(now, -11, :minute),
+                  age_ms: 660_000
+                }}
+
+      assert results[absent.id] == {:error, :missing_source_freshness_anchor}
+      assert results[empty.id] == {:error, :missing_source_freshness_anchor}
+    end
+
+    test "returns an empty map without reading for an empty id list" do
+      assert SourceFreshness.for_events([], now: ~U[2026-05-01 12:00:00Z]) == {:ok, %{}}
+    end
+
+    test "duplicate ids produce one future-clamped result and one skew signal", %{
+      events: [event | _]
+    } do
+      handler_id = telemetry_handler_id()
+      attach_clock_skew_handler(handler_id)
+
+      now = ~U[2026-05-01 12:00:00.000000Z]
+      anchor = DateTime.add(now, 30, :second)
+      event_id = event.id
+      advance_order!(event.id, anchor, now)
+
+      assert {:ok,
+              %{^event_id => {:ok, %{classification: :normal, anchor_at: ^anchor, age_ms: 0}}}} =
+               SourceFreshness.for_events([event.id, event.id], now: now)
+
+      assert_receive {:source_freshness_clock_skew,
+                      [:event_sales, :source_freshness, :clock_skew], %{count: 1},
+                      %{scope: :event}}
+
+      refute_receive {:source_freshness_clock_skew, _, _, _}, 0
+    end
+  end
+
   describe "advance_order/2" do
     setup do
       source = SalesHelpers.create_source_system!()
@@ -684,6 +771,20 @@ defmodule EventSales.Analytics.SourceFreshnessTest do
     EventSourceFreshnessSnapshot
     |> Ash.Query.filter(event_id == ^event_id)
     |> Ash.read_one(domain: EventSales.Analytics)
+  end
+
+  defp insert_empty_projection!(event_id, at) do
+    {1, _} =
+      Repo.insert_all("analytics_event_source_freshness_snapshots", [
+        %{
+          id: Ecto.UUID.bingenerate(),
+          event_id: Ecto.UUID.dump!(event_id),
+          projection_refreshed_at: at,
+          projection_version: 1,
+          inserted_at: at,
+          updated_at: at
+        }
+      ])
   end
 
   defp unique_slug(prefix) do
