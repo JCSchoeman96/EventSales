@@ -12,7 +12,7 @@
 | TIME-F merge SHA | `2e387f8f3a750c7cd5a0d10bd39a0d4fdf243f0c` |
 | TIME-F post-merge CI | [#691 / run 36461645968](https://github.com/JCSchoeman96/EventSales/actions/runs/36461645968), 6/6 PASS on the merge SHA |
 | Certification branch | `path1/pre-m5-time-g-certification` |
-| Certification PR | PENDING |
+| Certification PR | [#264](https://github.com/JCSchoeman96/EventSales/pull/264) (OPEN / UNMERGED) |
 | Approved head | PENDING |
 | Certification merge SHA | PENDING |
 | Certification post-merge CI | PENDING |
@@ -51,7 +51,7 @@ PR numbers, branch heads, merge SHAs, and the TIME-F CI run below were checked a
 | TIME-E3 | [#261](https://github.com/JCSchoeman96/EventSales/pull/261) | `a8e0064901fd2c18a6cfc1ab2a657638ee87d007` | Terminal catch-up source-freshness advancement |
 | Mint security recovery | [#262](https://github.com/JCSchoeman96/EventSales/pull/262) | `84653cfe4b143a7eeae19b243b0aa46ba7efa803` | `mix.lock` pins Mint 1.11.0; this recovery changed `mix.lock` only |
 | TIME-F | [#263](https://github.com/JCSchoeman96/EventSales/pull/263) | `2e387f8f3a750c7cd5a0d10bd39a0d4fdf243f0c` | Post-merge CI run 36461645968 passed `test`, `format_compile`, `ash_codegen`, `dialyzer`, `lint_security`, and `playwright_unit` |
-| TIME-G1 | PENDING | PENDING | Certification candidate; merge and exact merge-SHA CI remain pending |
+| TIME-G1 | [#264](https://github.com/JCSchoeman96/EventSales/pull/264) | PENDING | Certification candidate; PR open/unmerged; merge and exact merge-SHA CI remain pending |
 
 ## Acceptance matrix
 
