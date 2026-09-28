@@ -9,7 +9,7 @@ defmodule EventSales.Analytics.OrderProcessedNotifier do
 
   require Ash.Query
 
-  alias EventSales.Analytics.{DashboardCache, HotStateAggregator}
+  alias EventSales.Analytics.{DashboardCache, HotStateAggregator, SourceFreshness}
   alias EventSales.Catalog.CacheInvalidation
   alias EventSales.Ingestion.Resources.{CsvImportBatch, SyncRun, WebhookEvent}
   alias EventSales.Sales
@@ -33,12 +33,41 @@ defmodule EventSales.Analytics.OrderProcessedNotifier do
   end
 
   @doc """
+  Advances order source freshness after a successful durable order apply.
+
+  The mapped ticket events are resolved from the order's indexed line items.
+  Projection failures are reported through bounded telemetry and do not affect
+  the committed Sales write.
+  """
+  @spec notify_order_source_applied(Order.t(), keyword()) :: :ok
+  def notify_order_source_applied(%Order{} = order, opts \\ []) do
+    case affected_event_ids(order) do
+      {:ok, event_ids} ->
+        Enum.each(event_ids, &advance_order_source(&1, order, :webhook, opts))
+
+      {:error, _reason} ->
+        emit_source_freshness_failure(:webhook, :event_resolution)
+    end
+
+    :ok
+  rescue
+    _exception ->
+      emit_source_freshness_failure(:webhook, :event_resolution)
+      :ok
+  catch
+    _kind, _reason ->
+      emit_source_freshness_failure(:webhook, :event_resolution)
+      :ok
+  end
+
+  @doc """
   Notifies dashboard hot state that a durable order upsert completed via reconciliation.
   """
   @spec notify_order_reconciled(Order.t(), SyncRun.t(), Ecto.UUID.t(), keyword()) :: :ok
   def notify_order_reconciled(%Order{} = order, %SyncRun{} = sync_run, event_id, opts \\ [])
       when is_binary(event_id) do
     maybe_notify_test_pid(opts, order.id, sync_run.id, event_id)
+    advance_order_source(event_id, order, :reconciliation, opts)
 
     DashboardCache.invalidate_event(event_id, :reconciliation_applied)
     CacheInvalidation.emit_for_event(event_id, :reconciliation_applied)
@@ -201,6 +230,24 @@ defmodule EventSales.Analytics.OrderProcessedNotifier do
     end
   end
 
+  defp advance_order_source(event_id, %Order{} = order, source, opts) do
+    source_freshness = Keyword.get(opts, :source_freshness, SourceFreshness)
+
+    case source_freshness.advance_order(event_id, order.updated_at_source) do
+      :ok ->
+        :ok
+
+      _failure ->
+        emit_source_freshness_failure(source, :projection_write)
+    end
+  rescue
+    _exception ->
+      emit_source_freshness_failure(source, :projection_write)
+  catch
+    _kind, _reason ->
+      emit_source_freshness_failure(source, :projection_write)
+  end
+
   defp notify_event(event_id, %Order{} = order, %WebhookEvent{} = webhook_event, opts) do
     DashboardCache.invalidate_event(event_id, :order_processed)
     emit_cache_invalidate()
@@ -261,6 +308,14 @@ defmodule EventSales.Analytics.OrderProcessedNotifier do
       scope: :event,
       reason: :order_processed,
       source: :webhook
+    })
+  end
+
+  defp emit_source_freshness_failure(source, stage) do
+    Telemetry.emit(Telemetry.source_freshness_advance_failed(), %{count: 1}, %{
+      component: :order,
+      source: source,
+      stage: stage
     })
   end
 

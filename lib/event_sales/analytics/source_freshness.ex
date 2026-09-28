@@ -11,7 +11,7 @@ defmodule EventSales.Analytics.SourceFreshness do
   require Ash.Query
   import Ash.Expr
 
-  alias EventSales.Analytics.Resources.EventSourceFreshnessSnapshot
+  alias EventSales.Analytics.{DashboardPubSub, Resources.EventSourceFreshnessSnapshot}
   alias EventSales.Analytics.TimeRules
   alias EventSales.Analytics.TimeRules.Freshness
   alias EventSales.Telemetry
@@ -23,6 +23,27 @@ defmodule EventSales.Analytics.SourceFreshness do
           anchor_at: DateTime.t(),
           age_ms: non_neg_integer()
         }
+
+  @doc """
+  Advances an event's durable order source watermark after its Sales write commits.
+
+  Equal and older source timestamps are idempotent no-ops. The Ash/Postgres
+  upsert condition is the concurrency authority for the component watermark.
+  """
+  @spec advance_order(Ecto.UUID.t(), DateTime.t()) :: :ok | {:error, term()}
+  def advance_order(event_id, %DateTime{} = order_updated_at_source)
+      when is_binary(event_id) do
+    case Ecto.UUID.cast(event_id) do
+      {:ok, _uuid} ->
+        advance_order_watermark(event_id, order_updated_at_source)
+
+      :error ->
+        {:error, :invalid_event_id}
+    end
+  end
+
+  def advance_order(_event_id, _order_updated_at_source),
+    do: {:error, :invalid_order_source_watermark}
 
   @doc """
   Returns source-freshness classification for one event.
@@ -50,6 +71,30 @@ defmodule EventSales.Analytics.SourceFreshness do
         nil ->
           {:error, :missing_source_freshness_anchor}
       end
+    end
+  end
+
+  defp advance_order_watermark(event_id, order_updated_at_source) do
+    case Ash.create(
+           EventSourceFreshnessSnapshot,
+           %{
+             event_id: event_id,
+             order_source_watermark_at: order_updated_at_source,
+             projection_refreshed_at: DateTime.utc_now()
+           },
+           action: :advance_order_watermark,
+           return_skipped_upsert?: true,
+           domain: EventSales.Analytics
+         ) do
+      {:ok, %EventSourceFreshnessSnapshot{} = snapshot} ->
+        if Ash.Resource.get_metadata(snapshot, :upsert_skipped) do
+          :ok
+        else
+          DashboardPubSub.broadcast_source_freshness_updated(event_id)
+        end
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

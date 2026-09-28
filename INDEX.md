@@ -519,8 +519,8 @@ Project root: `.`
 - `EventSales.Analytics.DashboardPubSub` - `lib/event_sales/analytics/dashboard_pub_sub.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 3
-  - public_funs: `event_topic/1`, `subscribe_event/1`, `broadcast_hot_state_updated/2`
+  - docs_count: 4
+  - public_funs: `event_topic/1`, `subscribe_event/1`, `broadcast_hot_state_updated/2`, `broadcast_source_freshness_updated/1`
   - uses: _none_
 - `EventSales.Analytics.EventDetail` - `lib/event_sales/analytics/event_detail.ex`
   - moduledoc?: true
@@ -555,8 +555,8 @@ Project root: `.`
 - `EventSales.Analytics.OrderProcessedNotifier` - `lib/event_sales/analytics/order_processed_notifier.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 3
-  - public_funs: `notify_order_processed/3`, `notify_order_reconciled/4`, `finalize_csv_import_hot_state/4`
+  - docs_count: 4
+  - public_funs: `notify_order_processed/3`, `notify_order_source_applied/2`, `notify_order_reconciled/4`, `finalize_csv_import_hot_state/4`
   - uses: _none_
 - `EventSales.Analytics.Resources.DailySalesAggregateSnapshot` - `lib/event_sales/analytics/resources/daily_sales_aggregate_snapshot.ex`
   - moduledoc?: true
@@ -621,8 +621,8 @@ Project root: `.`
 - `EventSales.Analytics.SourceFreshness` - `lib/event_sales/analytics/source_freshness.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 1
-  - public_funs: `for_event/2`
+  - docs_count: 2
+  - public_funs: `advance_order/2`, `for_event/2`
   - uses: _none_
 - `EventSales.Analytics.TimeRules` - `lib/event_sales/analytics/time_rules.ex`
   - moduledoc?: true
@@ -2103,8 +2103,8 @@ Project root: `.`
 - `EventSales.Telemetry` - `lib/event_sales/telemetry.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 58
-  - public_funs: `event_names/0`, `webhook_accepted/0`, `webhook_rejected/0`, `webhook_backpressure/0`, `webhook_buffered/0`, `webhook_drained/0`, `webhook_rate_limited/0`, `webhook_replay_audit_failed/0`, `rest_request_stop/0`, `rest_request_exception/0`, `hot_state_rebuild_start/0`, `hot_state_rebuild_stop/0`, `hot_state_rebuild_exception/0`, `hot_state_event_applied/0`, `hot_state_event_ignored/0`, `hot_state_snapshot_write/0`, `snapshot_refresh_start/0`, `snapshot_refresh_stop/0`, `snapshot_refresh_exception/0`, `cache_invalidate/0`, `missing_catalog_recovery_start/0`, `missing_catalog_recovery_stop/0`, `missing_catalog_recovery_exception/0`, `product_metadata_cache_hit/0`, `product_metadata_cache_miss/0`, `product_metadata_cache_put/0`, `product_metadata_update/0`, `reconciliation_start/0`, `reconciliation_stop/0`, `reconciliation_exception/0`, `reconciliation_pause/0`, `tickera_request_stop/0`, `tickera_request_exception/0`, `tickera_sync_start/0`, `tickera_sync_stop/0`, `tickera_sync_exception/0`, `csv_import_dry_run_start/0`, `csv_import_dry_run_stop/0`, `csv_import_dry_run_exception/0`, `csv_import_apply_start/0`, `csv_import_apply_stop/0`, `csv_import_apply_exception/0`, `maintenance_raw_payload_purge_start/0`, `maintenance_raw_payload_purge_stop/0`, `maintenance_raw_payload_purge_exception/0`, `maintenance_stale_sync_cleanup_start/0`, `maintenance_stale_sync_cleanup_stop/0`, `maintenance_stale_sync_cleanup_exception/0`, `maintenance_cache_cleanup_start/0`, `maintenance_cache_cleanup_stop/0`, `maintenance_cache_cleanup_exception/0`, `maintenance_failed_job_alert_start/0`, `maintenance_failed_job_alert_stop/0`, `maintenance_failed_job_alert_exception/0`, `oban_queue_snapshot/0`, `catalog_change_intake_accepted/0`, `catalog_change_intake_duplicate/0`, `catalog_change_intake_stale/0`, `catalog_change_intake_rejected/0`, `catalog_change_dispatch_deferred/0`, `catalog_change_dispatch_queued/0`, `catalog_change_dispatch_settled/0`, `catalog_change_dispatch_failed/0`, `source_freshness_clock_skew/0`, `product_metadata_cache_event/1`, `emit/3`
+  - docs_count: 59
+  - public_funs: `event_names/0`, `webhook_accepted/0`, `webhook_rejected/0`, `webhook_backpressure/0`, `webhook_buffered/0`, `webhook_drained/0`, `webhook_rate_limited/0`, `webhook_replay_audit_failed/0`, `rest_request_stop/0`, `rest_request_exception/0`, `hot_state_rebuild_start/0`, `hot_state_rebuild_stop/0`, `hot_state_rebuild_exception/0`, `hot_state_event_applied/0`, `hot_state_event_ignored/0`, `hot_state_snapshot_write/0`, `snapshot_refresh_start/0`, `snapshot_refresh_stop/0`, `snapshot_refresh_exception/0`, `cache_invalidate/0`, `missing_catalog_recovery_start/0`, `missing_catalog_recovery_stop/0`, `missing_catalog_recovery_exception/0`, `product_metadata_cache_hit/0`, `product_metadata_cache_miss/0`, `product_metadata_cache_put/0`, `product_metadata_update/0`, `reconciliation_start/0`, `reconciliation_stop/0`, `reconciliation_exception/0`, `reconciliation_pause/0`, `tickera_request_stop/0`, `tickera_request_exception/0`, `tickera_sync_start/0`, `tickera_sync_stop/0`, `tickera_sync_exception/0`, `csv_import_dry_run_start/0`, `csv_import_dry_run_stop/0`, `csv_import_dry_run_exception/0`, `csv_import_apply_start/0`, `csv_import_apply_stop/0`, `csv_import_apply_exception/0`, `maintenance_raw_payload_purge_start/0`, `maintenance_raw_payload_purge_stop/0`, `maintenance_raw_payload_purge_exception/0`, `maintenance_stale_sync_cleanup_start/0`, `maintenance_stale_sync_cleanup_stop/0`, `maintenance_stale_sync_cleanup_exception/0`, `maintenance_cache_cleanup_start/0`, `maintenance_cache_cleanup_stop/0`, `maintenance_cache_cleanup_exception/0`, `maintenance_failed_job_alert_start/0`, `maintenance_failed_job_alert_stop/0`, `maintenance_failed_job_alert_exception/0`, `oban_queue_snapshot/0`, `catalog_change_intake_accepted/0`, `catalog_change_intake_duplicate/0`, `catalog_change_intake_stale/0`, `catalog_change_intake_rejected/0`, `catalog_change_dispatch_deferred/0`, `catalog_change_dispatch_queued/0`, `catalog_change_dispatch_settled/0`, `catalog_change_dispatch_failed/0`, `source_freshness_clock_skew/0`, `source_freshness_advance_failed/0`, `product_metadata_cache_event/1`, `emit/3`
   - uses: _none_
 - `EventSalesWeb` - `lib/event_sales_web.ex`
   - moduledoc?: true

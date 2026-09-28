@@ -1,6 +1,8 @@
 defmodule EventSales.Analytics.OrderProcessedNotifierTest do
   use EventSales.DataCase, async: false
 
+  require Ash.Query
+
   alias EventSales.Analytics.{
     DashboardCache,
     DashboardPubSub,
@@ -8,8 +10,10 @@ defmodule EventSales.Analytics.OrderProcessedNotifierTest do
     OrderProcessedNotifier
   }
 
+  alias EventSales.Analytics.Resources.EventSourceFreshnessSnapshot
+
   alias EventSales.Catalog.Resources.{Event, TicketType}
-  alias EventSales.Ingestion.Resources.WebhookEvent
+  alias EventSales.Ingestion.Resources.{SyncRun, WebhookEvent}
   alias EventSales.Sales
   alias EventSales.Sales.Resources.{Order, OrderItem}
   alias EventSales.Telemetry
@@ -140,6 +144,154 @@ defmodule EventSales.Analytics.OrderProcessedNotifierTest do
     refute_receive {:hot_state_updated, _event_id, _updated_at}, 100
   end
 
+  test "source-applied notification advances each mapped ticket event using the order source clock",
+       %{
+         source: source,
+         event: event,
+         other_event: other_event,
+         ticket: ticket,
+         other_ticket: other_ticket
+       } do
+    watermark = ~U[2026-05-17 08:23:41.123456Z]
+    order = create_order!(source, %{updated_at_source: watermark})
+    create_item!(order, event, ticket, %{woo_line_item_id: 11})
+    create_item!(order, other_event, other_ticket, %{woo_line_item_id: 12})
+
+    assert :ok = DashboardPubSub.subscribe_event(event.id)
+    assert :ok = DashboardPubSub.subscribe_event(other_event.id)
+
+    assert :ok = OrderProcessedNotifier.notify_order_source_applied(order)
+
+    received_event_ids =
+      for _ <- 1..2 do
+        assert_receive {:source_freshness_updated, event_id}, 500
+        event_id
+      end
+
+    assert Enum.sort(received_event_ids) == Enum.sort([event.id, other_event.id])
+
+    for event_id <- [event.id, other_event.id] do
+      assert {:ok, snapshot} = read_freshness_snapshot(event_id)
+      assert snapshot.order_source_watermark_at == watermark
+    end
+
+    refute_receive {:source_freshness_updated, _event_id}, 0
+  end
+
+  test "multiple line items for one event advance that event once", %{
+    source: source,
+    event: event,
+    ticket: ticket
+  } do
+    event_id = event.id
+    watermark = ~U[2026-05-17 08:23:41.123456Z]
+    order = create_order!(source, %{updated_at_source: watermark})
+    create_item!(order, event, ticket, %{woo_line_item_id: 21})
+    create_item!(order, event, ticket, %{woo_line_item_id: 22})
+
+    assert :ok =
+             OrderProcessedNotifier.notify_order_source_applied(order,
+               source_freshness: __MODULE__.CountingSourceFreshness
+             )
+
+    assert_receive {:order_source_advance, ^event_id, ^watermark}, 500
+    refute_receive {:order_source_advance, _event_id, _watermark}, 0
+  end
+
+  test "duplicate source-applied notifier calls leave the projection unchanged", %{
+    source: source,
+    event: event,
+    ticket: ticket
+  } do
+    event_id = event.id
+    watermark = ~U[2026-05-17 08:23:41.123456Z]
+    order = create_order!(source, %{updated_at_source: watermark})
+    create_item!(order, event, ticket, %{woo_line_item_id: 31})
+    assert :ok = DashboardPubSub.subscribe_event(event_id)
+
+    assert :ok = OrderProcessedNotifier.notify_order_source_applied(order)
+    assert_receive {:source_freshness_updated, ^event_id}, 500
+    assert {:ok, first_snapshot} = read_freshness_snapshot(event_id)
+
+    assert :ok = OrderProcessedNotifier.notify_order_source_applied(order)
+    assert {:ok, replayed_snapshot} = read_freshness_snapshot(event_id)
+
+    assert replayed_snapshot.order_source_watermark_at == first_snapshot.order_source_watermark_at
+    assert replayed_snapshot.projection_refreshed_at == first_snapshot.projection_refreshed_at
+    refute_receive {:source_freshness_updated, _event_id}, 0
+  end
+
+  test "reconciliation advances only its supplied event id", %{
+    source: source,
+    event: event,
+    other_event: other_event,
+    other_ticket: other_ticket
+  } do
+    event_id = event.id
+    watermark = ~U[2026-05-17 08:23:41.123456Z]
+    order = create_order!(source, %{updated_at_source: watermark})
+    create_item!(order, other_event, other_ticket, %{woo_line_item_id: 41})
+    sync_run = %SyncRun{id: Ecto.UUID.generate()}
+    assert :ok = DashboardPubSub.subscribe_event(event_id)
+    assert :ok = DashboardPubSub.subscribe_event(other_event.id)
+
+    assert :ok =
+             OrderProcessedNotifier.notify_order_reconciled(order, sync_run, event_id,
+               test_pid: self(),
+               hot_state_aggregator: __MODULE__.FakeHotState
+             )
+
+    assert_receive {:source_freshness_updated, received_event_id}, 500
+    assert received_event_id == event.id
+    refute_receive {:source_freshness_updated, _event_id}, 0
+    assert_receive {:notify_order_reconciled, order_id, sync_run_id, ^event_id}, 500
+    assert order_id == order.id
+    assert sync_run_id == sync_run.id
+    assert_receive {:apply_event, %{event_id: applied_event_id}}, 500
+    assert applied_event_id == event.id
+
+    assert {:ok, target_snapshot} = read_freshness_snapshot(event.id)
+    assert target_snapshot.order_source_watermark_at == watermark
+    assert {:ok, nil} = read_freshness_snapshot(other_event.id)
+  end
+
+  test "source projection failure emits bounded telemetry and leaves freshness missing", %{
+    source: source,
+    event: event,
+    ticket: ticket
+  } do
+    order = create_order!(source, %{updated_at_source: ~U[2026-05-17 08:23:41.123456Z]})
+    create_item!(order, event, ticket, %{woo_line_item_id: 51})
+    assert :ok = DashboardPubSub.subscribe_event(event.id)
+
+    handler_id = "source-freshness-failure-#{System.unique_integer([:positive])}"
+    test_pid = self()
+    failure_event = [:event_sales, :source_freshness, :advance_failed]
+
+    :ok =
+      :telemetry.attach(
+        handler_id,
+        failure_event,
+        fn event_name, measurements, metadata, _config ->
+          send(test_pid, {:source_freshness_failure, event_name, measurements, metadata})
+        end,
+        nil
+      )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+
+    assert :ok =
+             OrderProcessedNotifier.notify_order_source_applied(order,
+               source_freshness: __MODULE__.FailingSourceFreshness
+             )
+
+    assert_receive {:source_freshness_failure, ^failure_event, %{count: 1}, metadata}, 500
+    assert metadata == %{component: :order, source: :webhook, stage: :projection_write}
+    assert failure_event in Telemetry.event_names()
+    assert {:ok, nil} = read_freshness_snapshot(event.id)
+    refute_receive {:source_freshness_updated, _event_id}, 0
+  end
+
   test "hot-state apply failure is non-fatal and emits bounded telemetry", %{
     order: order,
     event: event,
@@ -195,22 +347,43 @@ defmodule EventSales.Analytics.OrderProcessedNotifierTest do
     def apply_event(_attrs), do: {:error, :db_unavailable}
   end
 
-  defp create_order!(source) do
+  defmodule FailingSourceFreshness do
+    @moduledoc false
+
+    def advance_order(_event_id, _watermark), do: {:error, :db_unavailable}
+  end
+
+  defmodule CountingSourceFreshness do
+    @moduledoc false
+
+    def advance_order(event_id, watermark) do
+      :event_sales
+      |> Application.fetch_env!(:order_processed_notifier_test_pid)
+      |> send({:order_source_advance, event_id, watermark})
+
+      :ok
+    end
+  end
+
+  defp create_order!(source, overrides \\ %{}) do
     Ash.create!(
       Order,
-      %{
-        source_system_id: source.id,
-        woo_order_id: System.unique_integer([:positive]),
-        order_number: "N-#{System.unique_integer([:positive])}",
-        status: :completed,
-        currency: "ZAR",
-        completed_at: ~U[2026-05-17 08:00:00.000000Z],
-        created_at_source: ~U[2026-05-17 07:00:00.000000Z],
-        updated_at_source: ~U[2026-05-17 08:00:00.000000Z],
-        raw_total: Decimal.new("0"),
-        raw_discount_total: Decimal.new("0"),
-        raw_tax_total: Decimal.new("0")
-      },
+      Map.merge(
+        %{
+          source_system_id: source.id,
+          woo_order_id: System.unique_integer([:positive]),
+          order_number: "N-#{System.unique_integer([:positive])}",
+          status: :completed,
+          currency: "ZAR",
+          completed_at: ~U[2026-05-17 08:00:00.000000Z],
+          created_at_source: ~U[2026-05-17 07:00:00.000000Z],
+          updated_at_source: ~U[2026-05-17 08:00:00.000000Z],
+          raw_total: Decimal.new("0"),
+          raw_discount_total: Decimal.new("0"),
+          raw_tax_total: Decimal.new("0")
+        },
+        Map.new(overrides)
+      ),
       action: :create_normalized,
       domain: Sales
     )
@@ -259,6 +432,12 @@ defmodule EventSales.Analytics.OrderProcessedNotifierTest do
       updated_at: ~U[2026-05-17 10:00:00Z]
     }
     |> Map.merge(overrides)
+  end
+
+  defp read_freshness_snapshot(event_id) do
+    EventSourceFreshnessSnapshot
+    |> Ash.Query.filter(event_id == ^event_id)
+    |> Ash.read_one(domain: EventSales.Analytics)
   end
 
   defp unique_slug(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"

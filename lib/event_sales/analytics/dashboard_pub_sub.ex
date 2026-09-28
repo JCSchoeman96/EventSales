@@ -25,4 +25,14 @@ defmodule EventSales.Analytics.DashboardPubSub do
       {:hot_state_updated, event_id, updated_at}
     )
   end
+
+  @doc "Broadcasts a durable source-freshness component update on its event topic."
+  @spec broadcast_source_freshness_updated(Ecto.UUID.t() | String.t()) :: :ok
+  def broadcast_source_freshness_updated(event_id) when is_binary(event_id) do
+    Phoenix.PubSub.broadcast(
+      EventSales.PubSub,
+      event_topic(event_id),
+      {:source_freshness_updated, event_id}
+    )
+  end
 end

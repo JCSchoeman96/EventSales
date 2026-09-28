@@ -98,6 +98,8 @@ defmodule EventSales.Ingestion.WebhookProcessor do
   defp handle_order_event(%WebhookEvent{} = event) do
     case order_upserter().upsert_from_webhook_event(event) do
       {:ok, %Order{} = order} ->
+        order_processed_notifier().notify_order_source_applied(order)
+
         with :ok <- sync_order_refunds(event) do
           notify_order_processed(order, event)
           :ok
