@@ -8,7 +8,7 @@ defmodule EventSales.Analytics.AdminDashboard do
 
   require Ash.Query
 
-  alias EventSales.Analytics.{HotStateAggregator, SnapshotReader}
+  alias EventSales.Analytics.{HotStateAggregator, SnapshotReader, SourceFreshness}
   alias EventSales.Catalog
   alias EventSales.Catalog.EventLifecycle
   alias EventSales.Catalog.Resources.Event
@@ -23,14 +23,32 @@ defmodule EventSales.Analytics.AdminDashboard do
 
   @zero Decimal.new("0")
 
+  @type source_freshness_aggregate :: %{
+          result:
+            {:ok, %{classification: :normal | :aging | :stale, portfolio_anchor_at: DateTime.t()}}
+            | {:error, :missing_source_freshness_anchor},
+          counts: %{
+            normal: non_neg_integer(),
+            aging: non_neg_integer(),
+            stale: non_neg_integer(),
+            missing: non_neg_integer()
+          }
+        }
+
+  @type event_row :: %{
+          event_id: Ecto.UUID.t(),
+          source_freshness: SourceFreshness.event_freshness_result()
+        }
+
   @type snapshot :: %{
           kpis: map(),
-          events: [map()],
+          events: [event_row()],
           statuses: map(),
           ticket_types: [map()],
           recent_orders: [map()],
           unmapped_alerts: [map()],
-          hot_state: map()
+          read_model: HotStateAggregator.status(),
+          source_freshness: source_freshness_aggregate()
         }
 
   @doc """
@@ -38,8 +56,14 @@ defmodule EventSales.Analytics.AdminDashboard do
   """
   @spec snapshot(keyword()) :: {:ok, snapshot()} | {:error, term()}
   def snapshot(opts \\ []) do
+    now = Keyword.get_lazy(opts, :now, &DateTime.utc_now/0)
+    opts = Keyword.put(opts, :now, now)
+    source_freshness = source_freshness_module(opts)
+
     with {:ok, events} <- list_events(limit(opts, :event_limit, @default_event_limit), opts),
-         {:ok, event_rows} <- event_rows(events, opts),
+         {:ok, freshness_by_event_id} <-
+           source_freshness.for_events(Enum.map(events, & &1.id), now: now),
+         {:ok, event_rows} <- event_rows(events, opts, freshness_by_event_id),
          {:ok, ticket_types} <- ticket_type_breakdown(events, opts),
          {:ok, recent_orders} <- recent_orders(opts),
          {:ok, unmapped_alerts} <- unmapped_alerts(opts) do
@@ -48,10 +72,11 @@ defmodule EventSales.Analytics.AdminDashboard do
          kpis: kpis(event_rows),
          events: event_rows,
          statuses: statuses(event_rows),
+         source_freshness: aggregate_source_freshness(event_rows),
          ticket_types: ticket_types,
          recent_orders: recent_orders,
          unmapped_alerts: unmapped_alerts,
-         hot_state: HotStateAggregator.status()
+         read_model: HotStateAggregator.status()
        }}
     end
   end
@@ -65,10 +90,26 @@ defmodule EventSales.Analytics.AdminDashboard do
   @spec event_row(Ecto.UUID.t() | String.t(), keyword()) ::
           {:ok, map()} | :not_found | {:error, term()}
   def event_row(event_id, opts \\ []) when is_binary(event_id) do
+    source_freshness = source_freshness_module(opts)
+
     case get_event(event_id) do
-      {:ok, %Event{} = event} -> {:ok, build_event_row(event, opts)}
-      {:ok, nil} -> :not_found
-      {:error, reason} -> {:error, reason}
+      {:ok, %Event{} = event} ->
+        case source_freshness.for_event(event_id, Keyword.take(opts, [:now])) do
+          {:ok, freshness} ->
+            {:ok, build_event_row(event, opts, {:ok, freshness})}
+
+          {:error, :missing_source_freshness_anchor} = missing ->
+            {:ok, build_event_row(event, opts, missing)}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+
+      {:ok, nil} ->
+        :not_found
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -89,7 +130,8 @@ defmodule EventSales.Analytics.AdminDashboard do
        snapshot
        |> Map.put(:events, events)
        |> Map.put(:kpis, kpis(events))
-       |> Map.put(:statuses, statuses(events))}
+       |> Map.put(:statuses, statuses(events))
+       |> Map.put(:source_freshness, aggregate_source_freshness(events))}
     else
       :not_found
     end
@@ -113,13 +155,17 @@ defmodule EventSales.Analytics.AdminDashboard do
     |> Ash.read_one(domain: Catalog)
   end
 
-  defp event_rows(events, opts) do
-    events
-    |> Enum.map(&build_event_row(&1, opts))
-    |> then(&{:ok, &1})
+  defp event_rows(events, opts, freshness_by_event_id) do
+    rows =
+      Enum.map(events, fn event ->
+        freshness = Map.fetch!(freshness_by_event_id, event.id)
+        build_event_row(event, opts, freshness)
+      end)
+
+    {:ok, rows}
   end
 
-  defp build_event_row(%Event{} = event, opts) do
+  defp build_event_row(%Event{} = event, opts, source_freshness) do
     summary = summary_for_event(event.id, opts)
 
     %{
@@ -135,9 +181,53 @@ defmodule EventSales.Analytics.AdminDashboard do
       status_breakdown: normalize_status_breakdown(summary.status_breakdown),
       currency:
         Map.get(summary, :currency, Application.fetch_env!(:event_sales, :default_currency)),
-      refreshed_at: Map.get(summary, :refreshed_at) || Map.get(summary, :updated_at)
+      refreshed_at: Map.get(summary, :refreshed_at) || Map.get(summary, :updated_at),
+      source_freshness: source_freshness
     }
   end
+
+  defp source_freshness_module(opts) do
+    Keyword.get(opts, :source_freshness, SourceFreshness)
+  end
+
+  defp aggregate_source_freshness(event_rows) do
+    {counts, classifications, anchors} =
+      Enum.reduce(event_rows, {%{normal: 0, aging: 0, stale: 0, missing: 0}, [], []}, fn row,
+                                                                                         {counts,
+                                                                                          classifications,
+                                                                                          anchors} ->
+        case row.source_freshness do
+          {:ok, %{classification: classification, anchor_at: %DateTime{} = anchor_at}}
+          when classification in [:normal, :aging, :stale] ->
+            {
+              Map.update!(counts, classification, &(&1 + 1)),
+              [classification | classifications],
+              [anchor_at | anchors]
+            }
+
+          {:error, :missing_source_freshness_anchor} ->
+            {Map.update!(counts, :missing, &(&1 + 1)), classifications, anchors}
+        end
+      end)
+
+    result =
+      case classifications do
+        [] ->
+          {:error, :missing_source_freshness_anchor}
+
+        _ ->
+          classification = Enum.max_by(classifications, &classification_rank/1)
+          portfolio_anchor_at = Enum.max_by(anchors, &DateTime.to_unix(&1, :microsecond))
+
+          {:ok, %{classification: classification, portfolio_anchor_at: portfolio_anchor_at}}
+      end
+
+    %{result: result, counts: counts}
+  end
+
+  defp classification_rank(:normal), do: 0
+  defp classification_rank(:aging), do: 1
+  defp classification_rank(:stale), do: 2
 
   defp summary_for_event(event_id, opts) do
     case HotStateAggregator.summary_for_event(event_id) do

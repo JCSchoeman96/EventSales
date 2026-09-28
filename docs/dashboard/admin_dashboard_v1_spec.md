@@ -31,9 +31,9 @@ This specification does **not** expose PII. It does **not** call WooCommerce or 
 
 ---
 
-## V1 snapshot contract (`AdminDashboard.snapshot/0`)
+## Snapshot contract (`AdminDashboard.snapshot/1`)
 
-Top-level map keys are **exactly** seven (no `:daily_buckets` in 23.1):
+Top-level map keys are exactly eight. The dashboard does not expose `:daily_buckets`.
 
 ```elixir
 %{
@@ -48,9 +48,47 @@ Top-level map keys are **exactly** seven (no `:daily_buckets` in 23.1):
   ticket_types: [ticket_type_row()],
   recent_orders: [recent_order_row()],
   unmapped_alerts: [unmapped_alert_row()],
-  hot_state: map()  # from HotStateAggregator.status/0
+  read_model: read_model_status(),
+  source_freshness: portfolio_source_freshness()
 }
 ```
+
+`read_model` reports the health and generation time of cached dashboard summaries. `source_freshness` reports source-update age from the durable `EventSourceFreshnessSnapshot` projection. `read_model.generated_at` and a source freshness anchor have different owners and must not be treated as one clock.
+
+```elixir
+read_model_status() :: %{
+  lifecycle: :warming | :ready | :degraded,
+  generated_at: DateTime.t() | nil,
+  rebuild_in_flight?: boolean(),
+  restored_snapshot_count: non_neg_integer(),
+  restore_finished?: boolean(),
+  last_restore_finished_at: DateTime.t() | nil,
+  last_rebuild_started_at: DateTime.t() | nil,
+  last_rebuild_finished_at: DateTime.t() | nil,
+  last_failure: atom() | nil
+}
+
+portfolio_source_freshness() :: %{
+  result:
+    {:ok, %{
+      classification: :normal | :aging | :stale,
+      portfolio_anchor_at: DateTime.t()
+    }}
+    | {:error, :missing_source_freshness_anchor},
+  counts: %{
+    normal: non_neg_integer(),
+    aging: non_neg_integer(),
+    stale: non_neg_integer(),
+    missing: non_neg_integer()
+  }
+}
+```
+
+### All-events freshness policy
+
+`ALL_EVENTS_FRESHNESS_POLICY = COMBINED_SIGNALS` is resolved. For the events returned after the lifecycle filter and event limit, the portfolio classification is the worst available per-event classification (`normal < aging < stale`). `portfolio_anchor_at` is the newest available event anchor and is activity metadata only. It does not determine the classification.
+
+Missing evidence is counted in `counts.missing` and does not add a fourth classification. If every displayed event lacks an anchor, or no events are displayed, `result` is `{:error, :missing_source_freshness_anchor}`.
 
 ### Event row
 
@@ -58,19 +96,28 @@ Top-level map keys are **exactly** seven (no `:daily_buckets` in 23.1):
 %{
   event_id: Ecto.UUID.t(),
   event_name: String.t(),
+  venue_name: String.t() | nil,
+  lifecycle: :future | :current | :past | :unknown,
   total_sold: non_neg_integer(),
   total_revenue: Decimal.t(),
   today_sold: non_neg_integer(),
   today_revenue: Decimal.t(),
   status_breakdown: %{String.t() => non_neg_integer()},
   currency: String.t(),
-  refreshed_at: DateTime.t() | nil
+  refreshed_at: DateTime.t() | nil,
+  source_freshness:
+    {:ok, %{
+      classification: :normal | :aging | :stale,
+      anchor_at: DateTime.t(),
+      age_ms: non_neg_integer()
+    }}
+    | {:error, :missing_source_freshness_anchor}
 }
 ```
 
 Event KPI totals come from hot cache or durable snapshots only. They do **not** backfill from raw order items when cache/snapshot is missing (zeros are correct).
 
-`stale?` on event rows is **not** in the v1 contract; 23.2 may derive staleness from `refreshed_at` and `hot_state`.
+`source_freshness` is classified per event from its durable source anchor. It does not use `refreshed_at` or the read-model generated clock.
 
 ### Ticket type row
 
@@ -178,7 +225,10 @@ When `:daily_buckets` is added, update this spec, chart contracts, and `admin_da
 ### 9. Freshness / stale data banner
 
 - **Owner:** `EventSalesWeb.Live.Admin.Components.StaleDataBanner`
-- **Data:** `snapshot.hot_state` — banner when `hot_state[:state]` in `[:warming, :stale]`
+- **Data:** `snapshot.read_model` and `snapshot.source_freshness`
+- Show a warning for read-model lifecycle `:warming` or `:degraded`, or source classification `:aging` or `:stale`.
+- Do not infer source classification from the read model or `portfolio_anchor_at`.
+- Missing source evidence remains `{:error, :missing_source_freshness_anchor}` and `counts.missing`; M6 owns its final presentation.
 
 ### 10. Manual refresh behavior
 
@@ -186,9 +236,9 @@ When `:daily_buckets` is added, update this spec, chart contracts, and `admin_da
 - **Behavior:** Rate-limited via `ManualActionRateLimiter`; calls `HotStateAggregator.request_rebuild/1` only
 - **Must not:** Call WooCommerce/Tickera or synchronously scan raw orders
 
-### 11. UX states (loading, empty, ready, stale, partial, error)
+### 11. UX states (loading, empty, ready, degraded, partial, error)
 
-| Section | loading | empty | ready | stale | partial | error |
+| Section | loading | empty | ready | degraded | partial | error |
 |---------|---------|-------|-------|-------|---------|-------|
 | KPI cards | First mount before snapshot | Zeros (not nil/blank) | Values from `kpis` | Same values; banner may show | Some events with data, KPIs still sum displayed rows | `empty_dashboard/0` zeros + error flash |
 | Sales trend | Mount | Empty chart panel / message; `labels/revenue/tickets == []` | Chart.js with data | Chart unchanged; banner | N/A until `daily_buckets` exists | Empty chart + error flash |
@@ -197,7 +247,7 @@ When `:daily_buckets` is added, update this spec, chart contracts, and `admin_da
 | By-event table | Mount | Single friendly empty row | Data rows | Banner | Events listed, zeros OK | Empty table + flash |
 | By-ticket-type | Mount | Empty row message | Data rows | Banner | — | Empty + flash |
 | Recent orders | Mount | `OrderTable` empty row | Order rows | Banner | — | Empty + flash |
-| Stale banner | Hidden | Hidden | Hidden | Visible for `:warming`/`:stale` | — | Hidden (error flash instead) |
+| Freshness banner | Hidden | Hidden | Hidden | Visible for `:warming` / `:degraded` or source `:aging` / `:stale` | — | Visible for degraded read model |
 
 **Must not:**
 
@@ -229,13 +279,17 @@ When `:daily_buckets` is added, update this spec, chart contracts, and `admin_da
 | Ticket types | Bounded `OrderItem` read in facade | Default **1000** rows scanned, aggregated in memory |
 | Recent orders | Bounded `Order` read | Default **10** |
 | Unmapped alerts | `OrderItemMapper` queue | Default **10** |
-| Hot state | `HotStateAggregator.status/0` | O(1) GenServer read |
+| Read-model health | `HotStateAggregator.status/0` | O(1) GenServer read |
+| Admin source freshness | `EventSourceFreshnessSnapshot` through `SourceFreshness.for_events/2` | One indexed query for at most 50 displayed events |
 
 **Rules:**
 
 - No unbounded order/order-item scans from LiveView or components
-- No polling loops; use existing PubSub + `handle_info` for hot updates
+- No polling loops; use event-scoped PubSub + `handle_info` for read-model and source-freshness updates
 - Manual refresh triggers async rebuild; does not block on full re-aggregation in the HTTP request
+- Manual refresh may change read-model lifecycle and `generated_at`; it does not advance source freshness.
+
+`EventScopedDashboard` also returns canonical `source_freshness` from `EventSourceFreshnessSnapshot`. Its `source_watermark_at` remains legacy financial snapshot metadata and is not a source-freshness anchor.
 
 ### 15. Slice 23.2 implementation boundaries
 

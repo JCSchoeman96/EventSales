@@ -7,7 +7,7 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLiveTest do
 
   alias EventSales.Accounts
   alias EventSales.Accounts.Resources.{Role, User, UserRole}
-  alias EventSales.Analytics.HotStateAggregator
+  alias EventSales.Analytics.{DashboardPubSub, HotStateAggregator}
   alias EventSales.Catalog.Resources.{Event, TicketType}
   alias EventSales.Sales
   alias EventSales.Sales.Resources.{Order, OrderItem}
@@ -228,6 +228,29 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLiveTest do
     assert html =~ "Original Unmapped"
     refute html =~ "NEW-AFTER-MOUNT"
     refute html =~ "New Unmapped After Mount"
+  end
+
+  test "source freshness event updates do not crash the event detail view", %{conn: conn} do
+    admin = create_user!("event-detail-source-freshness@example.com")
+    create_global_role!(admin, :admin)
+
+    source = SalesHelpers.create_source_system!()
+
+    event =
+      SalesHelpers.create_event!(source, %{
+        name: "Freshness Event",
+        slug: unique_slug("freshness")
+      })
+
+    {:ok, view, _html} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/events/#{event.id}")
+
+    assert :ok = DashboardPubSub.broadcast_source_freshness_updated(event.id)
+
+    assert render(view) =~ "Freshness Event"
+    assert Process.alive?(view.pid)
   end
 
   test "unknown event id renders a safe not-found state", %{conn: conn} do

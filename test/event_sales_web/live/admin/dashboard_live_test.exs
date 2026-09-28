@@ -8,7 +8,16 @@ defmodule EventSalesWeb.Live.Admin.DashboardLiveTest do
 
   alias EventSales.Accounts
   alias EventSales.Accounts.Resources.{Role, User, UserRole}
-  alias EventSales.Analytics.{AdminDashboard, DashboardCache, DashboardPubSub, HotStateAggregator}
+
+  alias EventSales.Analytics.{
+    AdminDashboard,
+    DashboardCache,
+    DashboardPubSub,
+    HotStateAggregator,
+    SourceFreshness
+  }
+
+  alias EventSales.Analytics.Workers.RebuildHotStateWorker
   alias EventSales.Repo
   alias EventSales.Sales
   alias EventSales.Sales.Resources.{Order, OrderItem}
@@ -228,6 +237,31 @@ defmodule EventSalesWeb.Live.Admin.DashboardLiveTest do
     assert render_click(second_view, "manual_refresh") =~ "Refresh requested"
   end
 
+  test "manual refresh completion reloads read-model health with no displayed events", %{
+    conn: conn
+  } do
+    admin = create_user!("dashboard-rebuild-complete@example.com")
+    create_global_role!(admin, :admin)
+
+    {:ok, view, html_before} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/dashboard")
+
+    assert html_before =~ "Dashboard data is warming."
+    assert render_click(view, "manual_refresh") =~ "Refresh requested"
+
+    assert :ok =
+             RebuildHotStateWorker.perform(%Oban.Job{args: %{"scope" => "hot_state"}})
+
+    assert %{lifecycle: :ready} = HotStateAggregator.status()
+
+    html_after = render(view)
+    refute html_after =~ "Dashboard data is warming."
+    refute html_after =~ "Dashboard data is degraded."
+    assert html_after =~ "No events yet."
+  end
+
   test "dashboard receives hot-state PubSub and updates one event row without full reload", %{
     conn: conn
   } do
@@ -297,6 +331,54 @@ defmodule EventSalesWeb.Live.Admin.DashboardLiveTest do
     assert Process.alive?(view.pid)
   end
 
+  test "source-freshness PubSub refreshes one row and recomputes the portfolio signal", %{
+    conn: conn
+  } do
+    admin = create_user!("dashboard-source-freshness@example.com")
+    create_global_role!(admin, :admin)
+
+    source = SalesHelpers.create_source_system!()
+
+    event =
+      SalesHelpers.create_event!(source, %{
+        name: "Freshness Update Event",
+        slug: unique_slug("freshness-update")
+      })
+
+    other_event =
+      SalesHelpers.create_event!(source, %{
+        name: "Other Freshness Event",
+        slug: unique_slug("other-freshness")
+      })
+
+    {:ok, view, html_before} =
+      conn
+      |> sign_in_as(admin)
+      |> live("/admin/dashboard")
+
+    refute html_before =~ "Source data is stale."
+
+    create_order!(source, :completed,
+      order_number: "SHOULD-NOT-APPEAR-AFTER-SOURCE-UPDATE",
+      updated_at_source: ~U[2026-05-17 09:00:00Z]
+    )
+
+    assert :ok =
+             SourceFreshness.advance_order(
+               event.id,
+               DateTime.add(DateTime.utc_now(), -30, :minute)
+             )
+
+    assert :ok = DashboardPubSub.broadcast_source_freshness_updated(event.id)
+
+    html_after = render(view)
+
+    assert html_after =~ "Source data is stale."
+    refute html_after =~ "SHOULD-NOT-APPEAR-AFTER-SOURCE-UPDATE"
+    assert Process.alive?(view.pid)
+    assert event.id != other_event.id
+  end
+
   test "dashboard ignores unknown event updates safely", %{conn: conn} do
     admin = create_user!("dashboard-unknown-event@example.com")
     create_global_role!(admin, :admin)
@@ -318,6 +400,7 @@ defmodule EventSalesWeb.Live.Admin.DashboardLiveTest do
     html_before = render(view)
 
     send(view.pid, {:hot_state_updated, Ecto.UUID.generate(), DateTime.utc_now()})
+    send(view.pid, {:source_freshness_updated, Ecto.UUID.generate()})
 
     assert render(view) == html_before
   end

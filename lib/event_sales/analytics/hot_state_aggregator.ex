@@ -28,7 +28,18 @@ defmodule EventSales.Analytics.HotStateAggregator do
   @default_rebuild_in_flight_timeout_ms 600_000
 
   @type apply_result :: :ok | {:error, term()}
-  @type lifecycle :: :warming | :ready | :stale
+  @type lifecycle :: :warming | :ready | :degraded
+  @type status :: %{
+          lifecycle: lifecycle(),
+          generated_at: DateTime.t() | nil,
+          rebuild_in_flight?: boolean(),
+          restored_snapshot_count: non_neg_integer(),
+          restore_finished?: boolean(),
+          last_restore_finished_at: DateTime.t() | nil,
+          last_rebuild_started_at: DateTime.t() | nil,
+          last_rebuild_finished_at: DateTime.t() | nil,
+          last_failure: atom() | nil
+        }
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
@@ -48,7 +59,7 @@ defmodule EventSales.Analytics.HotStateAggregator do
   def summary_for_event(event_id), do: DashboardCache.get_event_summary(event_id)
 
   @doc "Returns rebuild and restore status for dashboard-safe reads."
-  @spec status() :: map()
+  @spec status() :: status()
   def status do
     case Process.whereis(__MODULE__) do
       nil -> not_running_status()
@@ -104,6 +115,7 @@ defmodule EventSales.Analytics.HotStateAggregator do
       applied: MapSet.new(),
       in_flight: MapSet.new(),
       latest_source_updated_at: %{},
+      rebuild_requesters: MapSet.new(),
       max_applied_event_ids: Keyword.get(opts, :max_applied_event_ids, max_applied_event_ids()),
       lifecycle: :warming,
       rebuild_in_flight?: false,
@@ -129,17 +141,22 @@ defmodule EventSales.Analytics.HotStateAggregator do
 
   @impl true
   def handle_call(:status, _from, state) do
-    state = recover_stale_rebuild(state)
+    state = recover_timed_out_rebuild(state)
     {:reply, status_from_state(state), state}
   end
 
-  def handle_call({:request_rebuild, reason}, _from, state) do
-    state = recover_stale_rebuild(state)
+  def handle_call({:request_rebuild, reason}, {requester, _tag}, state) do
+    state = recover_timed_out_rebuild(state)
 
     case schedule_rebuild(state, reason) do
-      {:ok, state} -> {:reply, :ok, state}
-      {:already_running, state} -> {:reply, :already_running, state}
-      {{:error, reason}, state} -> {:reply, {:error, reason}, state}
+      {:ok, state} ->
+        {:reply, :ok, register_rebuild_requester(state, requester)}
+
+      {:already_running, state} ->
+        {:reply, :already_running, register_rebuild_requester(state, requester)}
+
+      {{:error, reason}, state} ->
+        {:reply, {:error, reason}, state}
     end
   end
 
@@ -160,6 +177,7 @@ defmodule EventSales.Analytics.HotStateAggregator do
        | applied: MapSet.new(),
          in_flight: MapSet.new(),
          latest_source_updated_at: %{},
+         rebuild_requesters: MapSet.new(),
          lifecycle: :warming,
          rebuild_in_flight?: false,
          restored_snapshot_count: 0,
@@ -179,7 +197,17 @@ defmodule EventSales.Analytics.HotStateAggregator do
 
   @impl true
   def handle_cast({:rebuild_finished, result}, state) do
-    {:noreply, mark_rebuild_finished(state, result)}
+    state = mark_rebuild_finished(state, result)
+    notify_rebuild_requesters(state)
+    {:noreply, %{state | rebuild_requesters: MapSet.new()}}
+  end
+
+  defp register_rebuild_requester(state, requester) when is_pid(requester) do
+    Map.update!(state, :rebuild_requesters, &MapSet.put(&1, requester))
+  end
+
+  defp notify_rebuild_requesters(%{rebuild_requesters: requesters}) do
+    Enum.each(requesters, &send(&1, :hot_state_rebuild_finished))
   end
 
   defp call_if_running(message) do
@@ -191,7 +219,8 @@ defmodule EventSales.Analytics.HotStateAggregator do
 
   defp not_running_status do
     %{
-      state: :stale,
+      lifecycle: :degraded,
+      generated_at: nil,
       rebuild_in_flight?: false,
       restored_snapshot_count: 0,
       restore_finished?: false,
@@ -219,7 +248,7 @@ defmodule EventSales.Analytics.HotStateAggregator do
 
         %{
           state
-          | lifecycle: lifecycle_for_fresh_at(last_fresh_at, restored_count),
+          | lifecycle: read_model_lifecycle_for_generated_at(last_fresh_at, restored_count),
             restored_snapshot_count: restored_count,
             restore_finished?: true,
             last_restore_finished_at: finished_at,
@@ -230,7 +259,7 @@ defmodule EventSales.Analytics.HotStateAggregator do
       {:error, reason} ->
         %{
           state
-          | lifecycle: if(state.restored_snapshot_count > 0, do: :stale, else: :warming),
+          | lifecycle: if(state.restored_snapshot_count > 0, do: :degraded, else: :warming),
             restore_finished?: true,
             last_restore_finished_at: finished_at,
             last_failure: low_cardinality_reason(reason)
@@ -263,18 +292,18 @@ defmodule EventSales.Analytics.HotStateAggregator do
     |> Enum.max_by(&DateTime.to_unix(&1, :microsecond), fn -> nil end)
   end
 
-  defp lifecycle_for_fresh_at(_fresh_at, 0), do: :warming
+  defp read_model_lifecycle_for_generated_at(_generated_at, 0), do: :warming
 
-  defp lifecycle_for_fresh_at(%DateTime{} = fresh_at, _count) do
-    if stale_fresh_at?(fresh_at), do: :stale, else: :ready
+  defp read_model_lifecycle_for_generated_at(%DateTime{} = generated_at, _count) do
+    if read_model_expired?(generated_at), do: :degraded, else: :ready
   end
 
-  defp lifecycle_for_fresh_at(_fresh_at, _count), do: :ready
+  defp read_model_lifecycle_for_generated_at(_generated_at, _count), do: :ready
 
   defp maybe_schedule_boot_rebuild(
          %{restored_snapshot_count: count, lifecycle: lifecycle} = state
        )
-       when count == 0 or lifecycle == :stale do
+       when count == 0 or lifecycle == :degraded do
     if schedule_rebuild_on_boot?() do
       case schedule_rebuild(state, :boot_restore) do
         {:ok, state} -> state
@@ -356,7 +385,7 @@ defmodule EventSales.Analytics.HotStateAggregator do
 
     %{
       state
-      | lifecycle: if(state.restored_snapshot_count > 0, do: :stale, else: :warming),
+      | lifecycle: if(state.restored_snapshot_count > 0, do: :degraded, else: :warming),
         rebuild_in_flight?: false,
         last_rebuild_finished_at: finished_at,
         last_failure: low_cardinality_reason(Map.get(result, :reason))
@@ -377,14 +406,15 @@ defmodule EventSales.Analytics.HotStateAggregator do
     lifecycle =
       case {state.lifecycle, state.last_fresh_at} do
         {:ready, %DateTime{} = fresh_at} ->
-          if stale_fresh_at?(fresh_at), do: :stale, else: :ready
+          if read_model_expired?(fresh_at), do: :degraded, else: :ready
 
         {lifecycle, _fresh_at} ->
           lifecycle
       end
 
     %{
-      state: lifecycle,
+      lifecycle: lifecycle,
+      generated_at: state.last_fresh_at,
       rebuild_in_flight?: state.rebuild_in_flight?,
       restored_snapshot_count: state.restored_snapshot_count,
       restore_finished?: state.restore_finished?,
@@ -395,14 +425,14 @@ defmodule EventSales.Analytics.HotStateAggregator do
     }
   end
 
-  defp recover_stale_rebuild(
+  defp recover_timed_out_rebuild(
          %{rebuild_in_flight?: true, last_rebuild_started_at: %DateTime{} = started_at} = state
        ) do
     if DateTime.diff(DateTime.utc_now(), started_at, :millisecond) >
          rebuild_in_flight_timeout_ms() do
       %{
         state
-        | lifecycle: :stale,
+        | lifecycle: :degraded,
           rebuild_in_flight?: false,
           last_failure: :rebuild_timeout
       }
@@ -411,15 +441,15 @@ defmodule EventSales.Analytics.HotStateAggregator do
     end
   end
 
-  defp recover_stale_rebuild(state), do: state
+  defp recover_timed_out_rebuild(state), do: state
 
   defp lifecycle_for_rebuild_result(_rebuilt_count, failed_count) when failed_count > 0,
-    do: :stale
+    do: :degraded
 
   defp lifecycle_for_rebuild_result(_rebuilt_count, _failed_count), do: :ready
 
-  defp stale_fresh_at?(%DateTime{} = fresh_at) do
-    DateTime.diff(DateTime.utc_now(), fresh_at, :millisecond) > stale_after_ms()
+  defp read_model_expired?(%DateTime{} = generated_at) do
+    DateTime.diff(DateTime.utc_now(), generated_at, :millisecond) > stale_after_ms()
   end
 
   defp handle_valid_event(%AggregateEvent{} = event, opts, state) do

@@ -1,18 +1,19 @@
 ---
 Plan ID: pre-m5-time-foundation-implementation
-Plan version: v2
+Plan version: v3
 Status: active execution plan (PRE-M5-TIME-A docs-only baseline)
 Scope: PRE-M5-TIME-B through PRE-M5-TIME-G sequencing; M1-07 physical conformance on certified main
 Authority: M1-07 T1–T31 = semantic authority; this PRE-M5-TIME plan = current physical/repository implementation authority
 Historical context: `docs/path-1/m1-07-timestamp-johannesburg-period-and-freshness-contract.md` (locked semantics; repository observations superseded here)
-Last updated: 2026-09-26
-Change summary (v2): Sync freshness from terminal catch-up `source_observed_at`; missing-anchor API consistency; M5 deferral typo; owner-decision gates before TIME-C/TIME-F
+Last updated: 2026-09-28
+Change summary (v3): Resolve `ALL_EVENTS_FRESHNESS_POLICY` as `COMBINED_SIGNALS`; keep worst event classification independent from the newest portfolio anchor
 ---
 
 ### Revision log
 
 - v1 — PRE-M5-TIME-A current-repo reconciliation + physical implementation plan at merge `5746edb8a2c272b1e6c0ce16153f9063c8e78925`
 - v2 — PR #254 review: separate sync source-observed watermark from historical coverage; remove fourth freshness enum; fix M5/M6 typo; lock owner-decision deadlines
+- v3 — owner decision: `ALL_EVENTS_FRESHNESS_POLICY = COMBINED_SIGNALS`
 
 # PRE-M5-TIME — Time, period and source-freshness foundation
 
@@ -312,18 +313,23 @@ M1-07 anchor for a scope is **max** of latest applies (portfolio “when did we 
 **Plan requirement:**
 
 - Event-scoped dashboards use **that event’s** projection row.
-- All-events management view must not hide per-event STALE behind a global max without an explicit rule.
+- All-events management view keeps its warning classification separate from the newest portfolio anchor.
 
-**ALL_EVENTS_FRESHNESS_POLICY — OWNER_DECISION_REQUIRED** (must be locked **before TIME-F** changes `AdminDashboard` all-events freshness behavior):
+**ALL_EVENTS_FRESHNESS_POLICY — RESOLVED = `COMBINED_SIGNALS`**
 
 ```text
-Options (owners choose one; TIME-F must STOP rather than pick):
-  (a) worst event classification across in-scope events with readiness
-  (b) max anchor only (portfolio “last apply” — may hide per-event STALE)
-  (c) combined signals (e.g. worst for STALE banner, max for telemetry)
+Scope:      events returned by AdminDashboard.snapshot/1 after lifecycle filter and event limit
+Classify:   worst available per-event classification, normal < aging < stale
+Anchor:     newest available event anchor, kept separately as portfolio_anchor_at
+Counts:     normal, aging, stale, missing
+Missing:    excluded from severity ranking and counted separately
+All missing or no displayed events:
+            {:error, :missing_source_freshness_anchor}
 ```
 
-TIME-D/E may implement per-event durable projection independently. TIME-G **certifies** the chosen rule; TIME-G must not be where the policy is first selected.
+The portfolio anchor does not determine the warning classification. An event with a stale anchor remains visible as STALE even when another event has a newer normal anchor.
+
+TIME-D/E implement the durable per-event projection and producers. TIME-F applies this resolved policy to the bounded admin event set. TIME-G certifies the result.
 
 ---
 
@@ -507,7 +513,7 @@ May block PRE-M5-TIME **closeout** if backend API requires hard validation befor
 
 ## 11.2 All-events freshness policy
 
-See §4 **ALL_EVENTS_FRESHNESS_POLICY** — must be locked before TIME-F integrates all-events `AdminDashboard` freshness. Does not block TIME-B/C/D/E per-event work.
+See §4. **ALL_EVENTS_FRESHNESS_POLICY = `COMBINED_SIGNALS` is resolved.** It does not change TIME-B/C/D/E per-event freshness semantics.
 
 ---
 
@@ -581,8 +587,7 @@ Outcome:   separated read_model vs source_freshness in status/snapshot APIs
 Files:     hot_state_aggregator.ex, admin_dashboard.ex, event_scoped_dashboard.ex
            stale_data_banner.ex (assigns only; copy still M6)
 Config:    remove programme stale binding to stale_after_ms for source (may retain for read-model degraded)
-STOP:      manual rebuild clears source STALE; all-events policy undecided; fourth freshness enum
-           TIME-F must not choose ALL_EVENTS_FRESHNESS_POLICY — owner decision required first
+STOP:      manual rebuild clears source STALE; fourth freshness enum; raw order/refund freshness scans
 ```
 
 ## PRE-M5-TIME-G — Certification + programme closeout
@@ -591,7 +596,7 @@ STOP:      manual rebuild clears source STALE; all-events policy undecided; four
 Outcome:   GAP-PRE-M5-TIME CLOSED; handoff doc updates; evidence bundle
 Tests:     integration tests crossing order+refund+sync freshness; period + classification
 Docs:      current-state-and-path-handoff.md revision (v24+) when authorized
-STOP:      M5 aggregate work; numeric custom max without owner sign-off; certifying undecided ALL_EVENTS_FRESHNESS_POLICY
+STOP:      M5 aggregate work; numeric custom max without owner sign-off
 ```
 
 ---
@@ -630,7 +635,7 @@ Repo stack unchanged: Hot ETS, warm Redis optional, cold Postgres, PubSub notify
 | Clock skew / future anchor | age clamp 0 → NORMAL + telemetry |
 | Event with no financial rows | Anchor missing → `{:error, :missing_source_freshness_anchor}` |
 | Multi-currency event | One freshness row per event (currency-independent) |
-| All-events with mixed ages | See §4 owner decision on worst vs max |
+| All-events with mixed ages | Worst available classification plus newest available portfolio anchor, counted separately |
 
 No global GenServer lock for freshness persistence.
 
@@ -703,8 +708,8 @@ Source NORMAL/AGING/STALE derived from anchor; missing anchor returns :missing_s
 EventAggregator period queries use sale/refund effective clocks with [start,end)
 Index strategy backed by EXPLAIN evidence
 Daily v1 explicitly non-canonical for M5 periods
-HotState status exposes read_model vs source_freshness separately
-CUSTOM_RANGE_MAX locked before custom-range TIME-C API; ALL_EVENTS_FRESHNESS_POLICY locked before TIME-F
+HotState status exposes read_model lifecycle and generated_at separately from source_freshness
+CUSTOM_RANGE_MAX locked before custom-range TIME-C API; ALL_EVENTS_FRESHNESS_POLICY resolved as COMBINED_SIGNALS
 M1-07 T1–T31 unchanged; physical gaps closed
 ```
 
@@ -712,7 +717,7 @@ M1-07 T1–T31 unchanged; physical gaps closed
 
 # 20. Risks and edge cases
 
-- **Portfolio max vs per-event STALE** can mislead all-events operators unless worst-event rule is chosen (§4).
+- **Portfolio anchor and per-event classification may refer to different events.** TIME-F keeps the worst classification and newest anchor as separate fields (§4).
 - **CSV imports** may leave freshness anchor stale if excluded; operators rely on webhooks/recon.
 - **Coalesce index** vs separate `paid_at` index: wrong choice hurts M5 period queries at scale.
 - **Refund notifier absence today** is the highest regression risk for anchor completeness.

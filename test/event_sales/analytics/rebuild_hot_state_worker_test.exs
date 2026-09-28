@@ -50,7 +50,9 @@ defmodule EventSales.Analytics.RebuildHotStateWorkerTest do
 
     assert total_revenue == Decimal.new("900.00")
     assert [%{summary: %{total_sold: 2}}] = MemorySnapshotStoreAdapter.writes()
-    assert %{state: :ready, rebuild_in_flight?: false} = HotStateAggregator.status()
+
+    assert %{lifecycle: :ready, rebuild_in_flight?: false, generated_at: %DateTime{}} =
+             HotStateAggregator.status()
   end
 
   test "emits start stop and exception telemetry", %{
@@ -172,7 +174,8 @@ defmodule EventSales.Analytics.RebuildHotStateWorkerTest do
       assert {:ok, %{total_sold: 1}} = DashboardCache.get_event_summary(event.id)
       assert :miss = DashboardCache.get_event_summary(failed_event.id)
 
-      assert %{state: :stale, last_failure: :partial_rebuild} = HotStateAggregator.status()
+      assert %{lifecycle: :degraded, last_failure: :partial_rebuild} =
+               HotStateAggregator.status()
     after
       Application.put_env(:event_sales, :hot_state_aggregator, original)
       EventSales.TestSupport.Analytics.SelectiveEventAggregator.reset!()

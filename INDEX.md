@@ -635,8 +635,8 @@ Project root: `.`
 - `EventSales.Analytics.SourceFreshness` - `lib/event_sales/analytics/source_freshness.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 4
-  - public_funs: `advance_order/2`, `advance_refund/2`, `advance_sync_source_observed/2`, `for_event/2`
+  - docs_count: 5
+  - public_funs: `advance_order/2`, `advance_refund/2`, `advance_sync_source_observed/2`, `for_event/2`, `for_events/2`
   - uses: _none_
 - `EventSales.Analytics.TimeRules` - `lib/event_sales/analytics/time_rules.ex`
   - moduledoc?: true

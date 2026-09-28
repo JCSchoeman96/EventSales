@@ -1173,7 +1173,7 @@
       "uses": []
     },
     {
-      "docs_count": 4,
+      "docs_count": 5,
       "moduledoc?": true,
       "name": "EventSales.Analytics.SourceFreshness",
       "parse_error": null,
@@ -1194,6 +1194,10 @@
         {
           "arity": 2,
           "name": "for_event"
+        },
+        {
+          "arity": 2,
+          "name": "for_events"
         }
       ],
       "specs?": true,

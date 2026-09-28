@@ -61,6 +61,12 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLive do
     end
   end
 
+  def handle_info({:source_freshness_updated, _event_id}, socket) do
+    # This page does not render source freshness, but it shares event topics with
+    # DashboardLive and must safely consume the notification.
+    {:noreply, socket}
+  end
+
   @impl true
   def render(%{not_found?: true} = assigns) do
     ~H"""

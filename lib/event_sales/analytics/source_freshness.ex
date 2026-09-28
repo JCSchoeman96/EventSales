@@ -24,6 +24,9 @@ defmodule EventSales.Analytics.SourceFreshness do
           age_ms: non_neg_integer()
         }
 
+  @type event_freshness_result ::
+          {:ok, freshness_result()} | {:error, :missing_source_freshness_anchor}
+
   @doc """
   Advances an event's durable order source watermark after its Sales write commits.
 
@@ -96,24 +99,36 @@ defmodule EventSales.Analytics.SourceFreshness do
   @spec for_event(Ecto.UUID.t(), keyword()) ::
           {:ok, freshness_result()} | {:error, :missing_source_freshness_anchor | term()}
   def for_event(event_id, opts \\ []) when is_binary(event_id) do
-    now = Keyword.get(opts, :now, DateTime.utc_now())
+    with {:ok, results} <- for_events([event_id], opts) do
+      Map.fetch!(results, event_id)
+    end
+  end
 
-    with {:ok, %EventSourceFreshnessSnapshot{} = snapshot} <- fetch_snapshot(event_id) do
-      case source_freshness_anchor_at(snapshot) do
-        %DateTime{} = anchor_at ->
-          freshness = TimeRules.classify_source_freshness(anchor_at, now)
-          emit_clock_skew_telemetry(freshness)
+  @doc """
+  Returns source-freshness results for a bounded set of events with one projection read.
 
-          {:ok,
-           %{
-             classification: freshness.classification,
-             anchor_at: anchor_at,
-             age_ms: div(freshness.age_microseconds, 1_000)
-           }}
+  Missing rows and rows without any component watermark return the typed missing-anchor
+  result. Pass `now` in `opts` to classify every result against the same instant.
+  """
+  @spec for_events([Ecto.UUID.t()], keyword()) ::
+          {:ok, %{optional(Ecto.UUID.t()) => event_freshness_result()}} | {:error, term()}
+  def for_events([], _opts), do: {:ok, %{}}
 
-        nil ->
-          {:error, :missing_source_freshness_anchor}
-      end
+  def for_events(event_ids, opts) when is_list(event_ids) do
+    requested_ids = Enum.uniq(event_ids)
+    query_ids = requested_ids |> Enum.map(&normalized_event_id/1) |> Enum.uniq()
+    now = Keyword.get_lazy(opts, :now, &DateTime.utc_now/0)
+
+    with {:ok, snapshots} <- fetch_snapshots(query_ids) do
+      snapshots_by_event_id = Map.new(snapshots, &{&1.event_id, &1})
+
+      results =
+        Map.new(requested_ids, fn event_id ->
+          snapshot = Map.get(snapshots_by_event_id, normalized_event_id(event_id))
+          {event_id, classify_snapshot(snapshot, now)}
+        end)
+
+      {:ok, results}
     end
   end
 
@@ -189,13 +204,39 @@ defmodule EventSales.Analytics.SourceFreshness do
     end
   end
 
-  defp fetch_snapshot(event_id) do
+  defp fetch_snapshots(event_ids) do
     case EventSourceFreshnessSnapshot
-         |> Ash.Query.filter(expr(event_id == ^event_id))
-         |> Ash.read_one(domain: EventSales.Analytics) do
-      {:ok, nil} -> {:error, :missing_source_freshness_anchor}
-      {:ok, snapshot} -> {:ok, snapshot}
+         |> Ash.Query.filter(expr(event_id in ^event_ids))
+         |> Ash.read(domain: EventSales.Analytics) do
+      {:ok, snapshots} -> {:ok, snapshots}
       {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp classify_snapshot(nil, _now), do: {:error, :missing_source_freshness_anchor}
+
+  defp classify_snapshot(%EventSourceFreshnessSnapshot{} = snapshot, now) do
+    case source_freshness_anchor_at(snapshot) do
+      %DateTime{} = anchor_at ->
+        freshness = TimeRules.classify_source_freshness(anchor_at, now)
+        emit_clock_skew_telemetry(freshness)
+
+        {:ok,
+         %{
+           classification: freshness.classification,
+           anchor_at: anchor_at,
+           age_ms: div(freshness.age_microseconds, 1_000)
+         }}
+
+      nil ->
+        {:error, :missing_source_freshness_anchor}
+    end
+  end
+
+  defp normalized_event_id(event_id) do
+    case Ecto.UUID.cast(event_id) do
+      {:ok, uuid} -> uuid
+      :error -> event_id
     end
   end
 

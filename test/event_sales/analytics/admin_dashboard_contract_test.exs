@@ -21,7 +21,8 @@ defmodule EventSales.Analytics.AdminDashboardContractTest do
     :ticket_types,
     :recent_orders,
     :unmapped_alerts,
-    :hot_state
+    :read_model,
+    :source_freshness
   ]
 
   @event_row_keys [
@@ -35,7 +36,8 @@ defmodule EventSales.Analytics.AdminDashboardContractTest do
     :today_revenue,
     :status_breakdown,
     :currency,
-    :refreshed_at
+    :refreshed_at,
+    :source_freshness
   ]
 
   @ticket_type_row_keys [
@@ -130,6 +132,7 @@ defmodule EventSales.Analytics.AdminDashboardContractTest do
     assert row.event_name == "Contract Dashboard Event"
     assert row.total_sold == 3
     assert row.refreshed_at == ~U[2026-05-17 10:00:00Z]
+    assert row.source_freshness == {:error, :missing_source_freshness_anchor}
   end
 
   test "ticket type rows include documented fields and only completed mapped tickets", %{
@@ -227,7 +230,13 @@ defmodule EventSales.Analytics.AdminDashboardContractTest do
     assert snapshot.recent_orders == []
     assert snapshot.unmapped_alerts == []
     assert snapshot.statuses == %{}
-    assert is_map(snapshot.hot_state)
+    assert is_map(snapshot.read_model)
+    assert snapshot.read_model.lifecycle in [:warming, :ready, :degraded]
+    assert Map.has_key?(snapshot.read_model, :generated_at)
+    assert Map.has_key?(snapshot.read_model, :rebuild_in_flight?)
+    assert is_map(snapshot.source_freshness.counts)
+    assert snapshot.source_freshness.result == {:error, :missing_source_freshness_anchor}
+    refute Map.has_key?(snapshot, :hot_state)
 
     row = Enum.find(snapshot.events, &(&1.event_id == event.id))
     assert row.total_sold == 0

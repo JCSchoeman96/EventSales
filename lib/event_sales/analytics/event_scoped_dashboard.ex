@@ -9,7 +9,7 @@ defmodule EventSales.Analytics.EventScopedDashboard do
   require Ash.Query
 
   alias EventSales.Accounts.Policies
-  alias EventSales.Analytics.{HotStateAggregator, SnapshotReader}
+  alias EventSales.Analytics.{HotStateAggregator, SnapshotReader, SourceFreshness}
   alias EventSales.Catalog
   alias EventSales.Catalog.Resources.Event
 
@@ -24,6 +24,9 @@ defmodule EventSales.Analytics.EventScopedDashboard do
           status_breakdown: map(),
           currency: String.t(),
           refreshed_at: DateTime.t() | nil,
+          source_freshness:
+            {:ok, SourceFreshness.freshness_result()}
+            | {:error, :missing_source_freshness_anchor},
           source_watermark_at: DateTime.t() | nil,
           source_row_count: non_neg_integer(),
           snapshot_version: pos_integer(),
@@ -42,7 +45,7 @@ defmodule EventSales.Analytics.EventScopedDashboard do
     with {:ok, event_id} <- cast_uuid(event_id),
          :ok <- authorize(Keyword.get(opts, :actor), event_id),
          {:ok, true} <- event_exists?(event_id),
-         {:ok, summary} <- build_summary(event_id, Keyword.get(opts, :actor)) do
+         {:ok, summary} <- build_summary(event_id, Keyword.get(opts, :actor), opts) do
       {:ok, summary}
     else
       {:ok, false} -> :not_found
@@ -71,12 +74,29 @@ defmodule EventSales.Analytics.EventScopedDashboard do
     end
   end
 
-  defp build_summary(event_id, actor) do
-    with {:ok, raw_summary} <- aggregate_summary(event_id) do
+  defp build_summary(event_id, actor, opts) do
+    with {:ok, raw_summary} <- aggregate_summary(event_id),
+         {:ok, source_freshness} <- read_source_freshness(event_id, opts) do
       raw_summary
       |> normalize_summary(event_id)
+      |> Map.put(:source_freshness, source_freshness)
       |> apply_revenue_visibility(actor, event_id)
       |> then(&{:ok, &1})
+    end
+  end
+
+  defp read_source_freshness(event_id, opts) do
+    source_freshness = Keyword.get(opts, :source_freshness, SourceFreshness)
+
+    case source_freshness.for_event(event_id, Keyword.take(opts, [:now])) do
+      {:ok, freshness} ->
+        {:ok, {:ok, freshness}}
+
+      {:error, :missing_source_freshness_anchor} ->
+        {:ok, {:error, :missing_source_freshness_anchor}}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -108,6 +128,7 @@ defmodule EventSales.Analytics.EventScopedDashboard do
       currency:
         Map.get(summary, :currency, Application.fetch_env!(:event_sales, :default_currency)),
       refreshed_at: Map.get(summary, :refreshed_at) || Map.get(summary, :updated_at),
+      # This legacy value remains financial snapshot metadata, not canonical freshness.
       source_watermark_at: Map.get(summary, :source_watermark_at),
       source_row_count: Map.get(summary, :source_row_count, 0),
       snapshot_version: Map.get(summary, :snapshot_version, 1),
