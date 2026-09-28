@@ -29,6 +29,7 @@
     "lib/event_sales/analytics/hot_state_aggregator.ex",
     "lib/event_sales/analytics/metric_rules.ex",
     "lib/event_sales/analytics/order_processed_notifier.ex",
+    "lib/event_sales/analytics/refund_processed_notifier.ex",
     "lib/event_sales/analytics/resources/daily_sales_aggregate_snapshot.ex",
     "lib/event_sales/analytics/resources/event_aggregate_snapshot.ex",
     "lib/event_sales/analytics/resources/event_source_freshness_snapshot.ex",
@@ -973,6 +974,21 @@
       "uses": []
     },
     {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.RefundProcessedNotifier",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/refund_processed_notifier.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "notify_refund_applied"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
       "docs_count": 0,
       "moduledoc?": true,
       "name": "EventSales.Analytics.Resources.DailySalesAggregateSnapshot",
@@ -1141,7 +1157,7 @@
       "uses": []
     },
     {
-      "docs_count": 2,
+      "docs_count": 3,
       "moduledoc?": true,
       "name": "EventSales.Analytics.SourceFreshness",
       "parse_error": null,
@@ -1150,6 +1166,10 @@
         {
           "arity": 2,
           "name": "advance_order"
+        },
+        {
+          "arity": 2,
+          "name": "advance_refund"
         },
         {
           "arity": 2,

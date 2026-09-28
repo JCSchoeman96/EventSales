@@ -398,7 +398,7 @@ defmodule EventSales.Telemetry do
   @spec source_freshness_clock_skew() :: event_name()
   def source_freshness_clock_skew, do: @source_freshness_clock_skew
 
-  @doc "Order source-freshness projection advancement failed."
+  @doc "Source-freshness component projection advancement failed."
   @spec source_freshness_advance_failed() :: event_name()
   def source_freshness_advance_failed, do: @source_freshness_advance_failed
 

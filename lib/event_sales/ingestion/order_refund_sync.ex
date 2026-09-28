@@ -9,6 +9,7 @@ defmodule EventSales.Ingestion.OrderRefundSync do
 
   require Ash.Query
 
+  alias EventSales.Analytics.RefundProcessedNotifier
   alias EventSales.Catalog
   alias EventSales.Catalog.Changes.NormalizeBaseUrl
   alias EventSales.Catalog.Resources.SourceSystem
@@ -34,6 +35,11 @@ defmodule EventSales.Ingestion.OrderRefundSync do
     client_opts = woocommerce_client_opts(opts)
     upserter = Keyword.get(opts, :refund_upserter, RefundUpserter)
     upserter_opts = Keyword.get(opts, :refund_upserter_opts, [])
+
+    refund_processed_notifier =
+      Keyword.get(opts, :refund_processed_notifier, RefundProcessedNotifier)
+
+    refund_processed_notifier_opts = Keyword.get(opts, :refund_processed_notifier_opts, [])
     observed_at = Keyword.get(opts, :observed_at, DateTime.utc_now())
 
     with {:ok, source_system} <- load_source_system(source_system_id, opts),
@@ -47,7 +53,9 @@ defmodule EventSales.Ingestion.OrderRefundSync do
              source_system_id,
              woo_order_id,
              raw_refunds,
-             upserter_opts
+             upserter_opts,
+             refund_processed_notifier,
+             refund_processed_notifier_opts
            ),
          {:ok, active_refunds} <- load_active_refunds(source_system_id, woo_order_id) do
       confirmation = %{
@@ -55,6 +63,8 @@ defmodule EventSales.Ingestion.OrderRefundSync do
         client_opts: client_opts,
         upserter: upserter,
         upserter_opts: upserter_opts,
+        refund_processed_notifier: refund_processed_notifier,
+        refund_processed_notifier_opts: refund_processed_notifier_opts,
         observed_at: observed_at,
         source_system_id: source_system_id,
         woo_order_id: woo_order_id
@@ -162,15 +172,25 @@ defmodule EventSales.Ingestion.OrderRefundSync do
     end
   end
 
-  defp persist_listed_refunds(_upserter, _source_system_id, _woo_order_id, [], _upserter_opts),
-    do: :ok
+  defp persist_listed_refunds(
+         _upserter,
+         _source_system_id,
+         _woo_order_id,
+         [],
+         _upserter_opts,
+         _notifier,
+         _notifier_opts
+       ),
+       do: :ok
 
   defp persist_listed_refunds(
          upserter,
          source_system_id,
          woo_order_id,
          raw_refunds,
-         upserter_opts
+         upserter_opts,
+         notifier,
+         notifier_opts
        ) do
     Enum.reduce_while(raw_refunds, :ok, fn raw_refund, :ok ->
       case persist_listed_refund(
@@ -178,7 +198,9 @@ defmodule EventSales.Ingestion.OrderRefundSync do
              source_system_id,
              woo_order_id,
              raw_refund,
-             upserter_opts
+             upserter_opts,
+             notifier,
+             notifier_opts
            ) do
         :ok -> {:cont, :ok}
         {:error, reason} -> {:halt, {:error, reason}}
@@ -191,11 +213,23 @@ defmodule EventSales.Ingestion.OrderRefundSync do
          source_system_id,
          woo_order_id,
          raw_refund,
-         upserter_opts
+         upserter_opts,
+         notifier,
+         notifier_opts
        ) do
     case upsert_refund(upserter, source_system_id, woo_order_id, raw_refund, upserter_opts) do
-      {:ok, refund} when is_map(refund) -> listed_refund_result(refund)
-      _other -> {:error, :refund_upsert_failed}
+      {:ok, refund} when is_map(refund) ->
+        case listed_refund_result(refund) do
+          :ok ->
+            notify_active_refund(refund, notifier, notifier_opts)
+            :ok
+
+          {:error, _reason} = error ->
+            error
+        end
+
+      _other ->
+        {:error, :refund_upsert_failed}
     end
   end
 
@@ -258,21 +292,28 @@ defmodule EventSales.Ingestion.OrderRefundSync do
   end
 
   defp persist_exact_refund(context, woo_refund_id, exact_refund) do
-    case validate_exact_refund(exact_refund, woo_refund_id) do
-      :ok ->
-        case upsert_refund(
-               context.upserter,
-               context.source_system_id,
-               context.woo_order_id,
-               exact_refund,
-               context.upserter_opts
-             ) do
-          {:ok, refund} when is_map(refund) -> exact_refund_result(refund)
-          _other -> {:error, :refund_upsert_failed}
-        end
+    with :ok <- validate_exact_refund(exact_refund, woo_refund_id),
+         {:ok, refund} <-
+           upsert_refund(
+             context.upserter,
+             context.source_system_id,
+             context.woo_order_id,
+             exact_refund,
+             context.upserter_opts
+           ) do
+      case exact_refund_result(refund) do
+        :ok ->
+          notify_active_refund(
+            refund,
+            context.refund_processed_notifier,
+            context.refund_processed_notifier_opts
+          )
 
-      {:error, reason} ->
-        {:error, reason}
+          :ok
+
+        {:error, _reason} = error ->
+          error
+      end
     end
   end
 
@@ -280,6 +321,16 @@ defmodule EventSales.Ingestion.OrderRefundSync do
     do: {:error, :voided_refund_reappeared}
 
   defp exact_refund_result(_refund), do: :ok
+
+  defp notify_active_refund(%{source_state: :active} = refund, notifier, notifier_opts) do
+    if module_exports?(notifier, :notify_refund_applied, 2) do
+      safe_function_call(notifier, :notify_refund_applied, [refund, notifier_opts])
+    end
+
+    :ok
+  end
+
+  defp notify_active_refund(_refund, _notifier, _notifier_opts), do: :ok
 
   defp void_deleted_refund(context, woo_refund_id) do
     case module_call(

@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-399
+400
 
 ## Files
 
@@ -41,6 +41,7 @@ Project root: `.`
 - `lib/event_sales/analytics/hot_state_aggregator.ex`
 - `lib/event_sales/analytics/metric_rules.ex`
 - `lib/event_sales/analytics/order_processed_notifier.ex`
+- `lib/event_sales/analytics/refund_processed_notifier.ex`
 - `lib/event_sales/analytics/resources/daily_sales_aggregate_snapshot.ex`
 - `lib/event_sales/analytics/resources/event_aggregate_snapshot.ex`
 - `lib/event_sales/analytics/resources/event_source_freshness_snapshot.ex`
@@ -558,6 +559,12 @@ Project root: `.`
   - docs_count: 4
   - public_funs: `notify_order_processed/3`, `notify_order_source_applied/2`, `notify_order_reconciled/4`, `finalize_csv_import_hot_state/4`
   - uses: _none_
+- `EventSales.Analytics.RefundProcessedNotifier` - `lib/event_sales/analytics/refund_processed_notifier.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `notify_refund_applied/2`
+  - uses: _none_
 - `EventSales.Analytics.Resources.DailySalesAggregateSnapshot` - `lib/event_sales/analytics/resources/daily_sales_aggregate_snapshot.ex`
   - moduledoc?: true
   - specs?: false
@@ -621,8 +628,8 @@ Project root: `.`
 - `EventSales.Analytics.SourceFreshness` - `lib/event_sales/analytics/source_freshness.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 2
-  - public_funs: `advance_order/2`, `for_event/2`
+  - docs_count: 3
+  - public_funs: `advance_order/2`, `advance_refund/2`, `for_event/2`
   - uses: _none_
 - `EventSales.Analytics.TimeRules` - `lib/event_sales/analytics/time_rules.ex`
   - moduledoc?: true
