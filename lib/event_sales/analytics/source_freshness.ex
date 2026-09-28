@@ -46,6 +46,27 @@ defmodule EventSales.Analytics.SourceFreshness do
     do: {:error, :invalid_order_source_watermark}
 
   @doc """
+  Advances an event's durable refund source watermark after its Sales write commits.
+
+  Equal and older source timestamps are idempotent no-ops. The Ash/Postgres
+  upsert condition is the concurrency authority for the component watermark.
+  """
+  @spec advance_refund(Ecto.UUID.t(), DateTime.t()) :: :ok | {:error, term()}
+  def advance_refund(event_id, %DateTime{} = refund_source_created_at)
+      when is_binary(event_id) do
+    case Ecto.UUID.cast(event_id) do
+      {:ok, _uuid} ->
+        advance_refund_watermark(event_id, refund_source_created_at)
+
+      :error ->
+        {:error, :invalid_event_id}
+    end
+  end
+
+  def advance_refund(_event_id, _refund_source_created_at),
+    do: {:error, :invalid_refund_source_watermark}
+
+  @doc """
   Returns source-freshness classification for one event.
 
   Pass `now` in `opts` for deterministic tests.
@@ -83,6 +104,30 @@ defmodule EventSales.Analytics.SourceFreshness do
              projection_refreshed_at: DateTime.utc_now()
            },
            action: :advance_order_watermark,
+           return_skipped_upsert?: true,
+           domain: EventSales.Analytics
+         ) do
+      {:ok, %EventSourceFreshnessSnapshot{} = snapshot} ->
+        if Ash.Resource.get_metadata(snapshot, :upsert_skipped) do
+          :ok
+        else
+          DashboardPubSub.broadcast_source_freshness_updated(event_id)
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp advance_refund_watermark(event_id, refund_source_created_at) do
+    case Ash.create(
+           EventSourceFreshnessSnapshot,
+           %{
+             event_id: event_id,
+             refund_source_watermark_at: refund_source_created_at,
+             projection_refreshed_at: DateTime.utc_now()
+           },
+           action: :advance_refund_watermark,
            return_skipped_upsert?: true,
            domain: EventSales.Analytics
          ) do

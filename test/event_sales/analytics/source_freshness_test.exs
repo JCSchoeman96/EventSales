@@ -197,6 +197,99 @@ defmodule EventSales.Analytics.SourceFreshnessTest do
     end
   end
 
+  describe "advance_refund/2" do
+    setup do
+      source = SalesHelpers.create_source_system!()
+
+      event =
+        SalesHelpers.create_event!(source, %{
+          name: "Refund Freshness",
+          slug: unique_slug("refund-fresh")
+        })
+
+      %{event: event}
+    end
+
+    test "first and newer refund watermarks persist and broadcast once per advance", %{
+      event: event
+    } do
+      assert :ok = DashboardPubSub.subscribe_event(event.id)
+
+      first_watermark = ~U[2026-05-01 10:00:00.000000Z]
+      newer_watermark = ~U[2026-05-01 11:00:00.000000Z]
+
+      assert :ok = SourceFreshness.advance_refund(event.id, first_watermark)
+      assert_receive {:source_freshness_updated, event_id}
+      assert event_id == event.id
+
+      assert {:ok, first_snapshot} = read_snapshot(event.id)
+      assert first_snapshot.refund_source_watermark_at == first_watermark
+      assert %DateTime{} = first_snapshot.projection_refreshed_at
+
+      assert :ok = SourceFreshness.advance_refund(event.id, newer_watermark)
+      assert_receive {:source_freshness_updated, event_id}
+      assert event_id == event.id
+
+      assert {:ok, newer_snapshot} = read_snapshot(event.id)
+      assert newer_snapshot.refund_source_watermark_at == newer_watermark
+      refute_receive {:source_freshness_updated, _event_id}, 0
+    end
+
+    test "equal and older replay preserve the watermark and metadata without broadcasts", %{
+      event: event
+    } do
+      event_id = event.id
+      newer_watermark = ~U[2026-05-01 11:00:00.000000Z]
+
+      assert :ok = DashboardPubSub.subscribe_event(event_id)
+      assert :ok = SourceFreshness.advance_refund(event_id, newer_watermark)
+      assert_receive {:source_freshness_updated, ^event_id}
+
+      assert {:ok, first_snapshot} = read_snapshot(event_id)
+      assert :ok = SourceFreshness.advance_refund(event_id, newer_watermark)
+      assert :ok = SourceFreshness.advance_refund(event_id, ~U[2026-05-01 10:00:00.000000Z])
+      assert {:ok, replayed_snapshot} = read_snapshot(event_id)
+
+      assert replayed_snapshot.refund_source_watermark_at ==
+               first_snapshot.refund_source_watermark_at
+
+      assert replayed_snapshot.projection_refreshed_at == first_snapshot.projection_refreshed_at
+      refute_receive {:source_freshness_updated, _event_id}, 0
+    end
+
+    test "refund advancement preserves order and sync components", %{event: event} do
+      order_watermark = ~U[2026-05-01 09:00:00.000000Z]
+      sync_observed_at = ~U[2026-05-01 08:00:00.000000Z]
+      refund_watermark = ~U[2026-05-01 10:00:00.000000Z]
+      refreshed_at = ~U[2026-05-01 12:00:00.000000Z]
+
+      assert {:ok, _} = advance_order!(event.id, order_watermark, refreshed_at)
+      assert {:ok, _} = advance_sync!(event.id, sync_observed_at, refreshed_at)
+      assert :ok = SourceFreshness.advance_refund(event.id, refund_watermark)
+
+      assert {:ok, snapshot} = read_snapshot(event.id)
+      assert snapshot.refund_source_watermark_at == refund_watermark
+      assert snapshot.order_source_watermark_at == order_watermark
+      assert snapshot.sync_source_observed_at == sync_observed_at
+    end
+
+    test "rejects invalid event ids and timestamps" do
+      assert {:error, :invalid_event_id} =
+               SourceFreshness.advance_refund("not-a-uuid", ~U[2026-05-01 10:00:00.000000Z])
+
+      assert {:error, _reason} = SourceFreshness.advance_refund(Ecto.UUID.generate(), nil)
+    end
+
+    test "database failure returns an error and does not broadcast" do
+      event_id = Ecto.UUID.generate()
+      watermark = ~U[2026-05-01 10:00:00.000000Z]
+
+      assert :ok = DashboardPubSub.subscribe_event(event_id)
+      assert {:error, _reason} = SourceFreshness.advance_refund(event_id, watermark)
+      refute_receive {:source_freshness_updated, _event_id}, 0
+    end
+  end
+
   describe "durable projection lifecycle" do
     setup do
       source = SalesHelpers.create_source_system!()

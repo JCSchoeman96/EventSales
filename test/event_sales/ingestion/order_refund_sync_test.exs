@@ -164,6 +164,44 @@ defmodule EventSales.Ingestion.OrderRefundSyncTest do
     end
   end
 
+  defmodule PostCommitRecordingUpserter do
+    def upsert_refund(source_system_id, woo_order_id, raw_refund, opts) do
+      result =
+        EventSales.Sales.RefundUpserter.upsert_refund(
+          source_system_id,
+          woo_order_id,
+          raw_refund
+        )
+
+      send(
+        Keyword.fetch!(opts, :test_pid),
+        {:refund_upsert_returned, result, EventSales.Repo.in_transaction?()}
+      )
+
+      result
+    end
+
+    def mark_source_deleted(source_system_id, woo_order_id, woo_refund_id, observed_at, _opts) do
+      EventSales.Sales.RefundUpserter.mark_source_deleted(
+        source_system_id,
+        woo_order_id,
+        woo_refund_id,
+        observed_at
+      )
+    end
+  end
+
+  defmodule RecordingRefundNotifier do
+    def notify_refund_applied(refund, opts) do
+      send(
+        Keyword.fetch!(opts, :test_pid),
+        {:refund_notified, refund, EventSales.Repo.in_transaction?()}
+      )
+
+      :ok
+    end
+  end
+
   setup do
     {:ok, source: SalesHelpers.create_source_system!(), state: start_state()}
   end
@@ -341,6 +379,35 @@ defmodule EventSales.Ingestion.OrderRefundSyncTest do
              Ash.read!(Refund, domain: Sales)
   end
 
+  test "notifies a listed refund after the durable upsert transaction returns", %{
+    source: source,
+    state: state
+  } do
+    order = SalesHelpers.create_order_from_fixture!(:order_completed, source)
+
+    raw_refund = %{
+      "id" => 98_030,
+      "amount" => "45.00",
+      "date_created_gmt" => "2026-08-18T10:00:00",
+      "line_items" => []
+    }
+
+    put_state(state, list_response: {:ok, [raw_refund]})
+
+    opts =
+      sync_opts(source, state)
+      |> Keyword.put(:refund_upserter, PostCommitRecordingUpserter)
+      |> Keyword.put(:refund_upserter_opts, test_pid: self())
+      |> notifier_opts()
+
+    assert :ok = OrderRefundSync.sync_order(source.id, order.woo_order_id, opts)
+
+    assert_receive {:refund_upsert_returned, {:ok, %Refund{} = refund}, false}
+    assert refund.source_state == :active
+    assert DateTime.compare(refund.source_created_at, ~U[2026-08-18 10:00:00Z]) == :eq
+    assert_receive {:refund_notified, ^refund, false}
+  end
+
   test "replays the same list idempotently", %{source: source, state: state} do
     order = SalesHelpers.create_order_from_fixture!(:order_completed, source)
     raw_refund = %{"id" => 98_004, "amount" => "45.00", "line_items" => []}
@@ -366,9 +433,33 @@ defmodule EventSales.Ingestion.OrderRefundSyncTest do
     )
 
     assert {:error, :voided_refund_reappeared} =
-             OrderRefundSync.sync_order(source.id, 10_001, sync_opts(source, state))
+             OrderRefundSync.sync_order(
+               source.id,
+               10_001,
+               sync_opts(source, state) |> notifier_opts()
+             )
 
     assert client_calls(state) == [{:list_refunds, 10_001, %{}}]
+    refute_receive {:refund_notified, _refund, _in_transaction?}, 0
+  end
+
+  test "upsert failure does not notify the refund freshness notifier", %{
+    source: source,
+    state: state
+  } do
+    put_state(state,
+      list_response: {:ok, [%{"id" => 98_031}]},
+      upsert_responses: [{:error, :db_failed}]
+    )
+
+    assert {:error, :refund_upsert_failed} =
+             OrderRefundSync.sync_order(
+               source.id,
+               10_001,
+               sync_opts(source, state) |> notifier_opts()
+             )
+
+    refute_receive {:refund_notified, _refund, _in_transaction?}, 0
   end
 
   test "does not void an omitted active refund until exact confirmation finds it", %{
@@ -406,6 +497,39 @@ defmodule EventSales.Ingestion.OrderRefundSyncTest do
            ]
   end
 
+  test "exact-fetch recovery notifies after its successful durable upsert", %{
+    source: source,
+    state: state
+  } do
+    order = SalesHelpers.create_order_from_fixture!(:order_completed, source)
+
+    raw_refund = %{
+      "id" => 99_010,
+      "amount" => "45.00",
+      "date_created_gmt" => "2026-08-18T10:30:00",
+      "line_items" => []
+    }
+
+    assert {:ok, _refund} =
+             RefundUpserter.upsert_refund(source.id, order.woo_order_id, raw_refund)
+
+    put_state(state,
+      list_response: {:ok, []},
+      fetch_responses: %{99_010 => {:ok, raw_refund}}
+    )
+
+    opts =
+      sync_opts(source, state)
+      |> Keyword.put(:refund_upserter, PostCommitRecordingUpserter)
+      |> Keyword.put(:refund_upserter_opts, test_pid: self())
+      |> notifier_opts()
+
+    assert :ok = OrderRefundSync.sync_order(source.id, order.woo_order_id, opts)
+    assert_receive {:refund_upsert_returned, {:ok, %Refund{} = refund}, false}
+    assert DateTime.compare(refund.source_created_at, ~U[2026-08-18 10:30:00Z]) == :eq
+    assert_receive {:refund_notified, ^refund, false}
+  end
+
   test "voids an omitted active refund only after exact not-found confirmation", %{
     source: source,
     state: state
@@ -423,7 +547,7 @@ defmodule EventSales.Ingestion.OrderRefundSyncTest do
              OrderRefundSync.sync_order(
                source_id,
                order_id,
-               durable_sync_opts(source, state, observed_at)
+               durable_sync_opts(source, state, observed_at) |> notifier_opts()
              )
 
     assert [%Refund{source_state: :voided, void_reason: "source_deleted"} = voided] =
@@ -433,6 +557,8 @@ defmodule EventSales.Ingestion.OrderRefundSyncTest do
 
     assert [{:mark_source_deleted, ^source_id, ^order_id, 99_002, ^observed_at}] =
              upserter_calls(state)
+
+    refute_receive {:refund_notified, _refund, _in_transaction?}, 0
 
     assert client_calls(state) == [
              {:list_refunds, order_id, %{}},
@@ -546,8 +672,18 @@ defmodule EventSales.Ingestion.OrderRefundSyncTest do
     order = SalesHelpers.create_order_from_fixture!(:order_completed, source)
 
     refunds = [
-      %{"id" => 99_007, "amount" => "45.00", "line_items" => []},
-      %{"id" => 99_008, "amount" => "20.00", "line_items" => []}
+      %{
+        "id" => 99_007,
+        "amount" => "45.00",
+        "date_created_gmt" => "2026-08-18T10:00:00",
+        "line_items" => []
+      },
+      %{
+        "id" => 99_008,
+        "amount" => "20.00",
+        "date_created_gmt" => "2026-08-18T10:15:00",
+        "line_items" => []
+      }
     ]
 
     put_state(state, list_response: {:ok, refunds}, upsert_count: 0)
@@ -556,9 +692,14 @@ defmodule EventSales.Ingestion.OrderRefundSyncTest do
       sync_opts(source, state)
       |> Keyword.put(:refund_upserter, FailingDurableUpserter)
       |> Keyword.put(:refund_upserter_opts, state: state)
+      |> notifier_opts()
 
     assert {:error, :refund_upsert_failed} =
              OrderRefundSync.sync_order(source.id, order.woo_order_id, opts)
+
+    assert_receive {:refund_notified, %Refund{woo_refund_id: 99_007} = refund, false}
+    assert DateTime.compare(refund.source_created_at, ~U[2026-08-18 10:00:00Z]) == :eq
+    refute_receive {:refund_notified, _refund, _in_transaction?}, 0
 
     assert :ok = OrderRefundSync.sync_order(source.id, order.woo_order_id, opts)
     assert Ash.count!(Refund, domain: Sales) == 2
@@ -619,6 +760,12 @@ defmodule EventSales.Ingestion.OrderRefundSyncTest do
     |> Keyword.put(:refund_upserter, RecordingUpserter)
     |> Keyword.put(:refund_upserter_opts, state: state)
     |> Keyword.put(:observed_at, observed_at)
+  end
+
+  defp notifier_opts(opts) do
+    opts
+    |> Keyword.put(:refund_processed_notifier, RecordingRefundNotifier)
+    |> Keyword.put(:refund_processed_notifier_opts, test_pid: self())
   end
 
   defp start_state do
