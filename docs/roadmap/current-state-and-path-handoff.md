@@ -8,8 +8,8 @@
 | Authority | This document wins for current program priority and Path 2 resume procedure |
 | Durable Phase 5D evidence | `docs/phase-5d/native-v3-e2e-run-report.md` |
 | Historical Phase 5D certification commit | `c286fd0e647199a261b6ef2ec3791617dacb5834` |
-| Handoff version | `v23` |
-| Last updated | 2026-09-26 |
+| Handoff version | `v24` |
+| Last updated | 2026-09-29 |
 | Path 1 repository truth | `docs/path-1/m1-01-current-repo-truth.md` |
 | Path 1 execution roadmap | `docs/path-1/path-1-phase-breakdown.md` |
 | Path 1 identity contract | `docs/path-1/m1-02-source-scoped-external-identity-contract.md` |
@@ -46,6 +46,7 @@
 - `v21` — M4-01 through M4-07 COMPLETE (PASS); PR #241 two-parent merge (`fa71fef` / merge `5681ffd`); ANALYTICS_READY machinery certified on main; next = PRE-M5 Conformance Gate; M5 BLOCKED; PRE-M5 gaps preserved OPEN / CERTIFICATION_REQUIRED
 - `v22` — PRE-M5-01A/01B COMPLETE (PASS); PR #243 + PR #244; `GAP-PRE-M5-READY-IX` CLOSED; PRE-M5-02A metrics conformance spec landed; next = PRE-M5-02 metrics foundation (PRE-M5-02B); METRICS/TIME OPEN; M5 BLOCKED
 - `v23` — PRE-M5-02B through PRE-M5-02F COMPLETE (PASS); PR #251 metrics certification merged and post-merge CI passed; `GAP-PRE-M5-METRICS` CLOSED; `GAP-PRE-M5-TIME` remains OPEN; M5 remains BLOCKED; next = PRE-M5-TIME
+- `v24` — PRE-M5-TIME COMPLETE (PASS); TIME-G1 PR #264 merged as `c1fc8cd02b1809d3fd97e379b16dfec29d65b870` with exact merge-SHA CI #695 / 36525412734 6/6 PASS; `GAP-PRE-M5-TIME` CLOSED; all PRE-M5 gates CLOSED; M5 AUTHORIZED; next = M5-01 Base Event Aggregates.
 
 ### Conflict rule
 
@@ -126,8 +127,8 @@ Status: ESTABLISHED
 
 PATH 1 — MANAGEMENT ANALYTICS
 Status: ACTIVE
-Next milestone: PRE-M5-TIME
-M5 authorization: BLOCKED
+Next milestone: M5 — Analytics Read Model
+M5 authorization: AUTHORIZED
 P1-00: COMPLETE
 M1-01: COMPLETE (PASS)
 M1-01A: COMPLETE (PASS)
@@ -152,7 +153,10 @@ M1-08: COMPLETE (PASS)
 M1-09: COMPLETE (PASS_WITH_PRE_M2_IMPLEMENTATION_GATE)
 M1-C: COMPLETE (PASS)
 TAX-INCLUSIVE REVENUE CONTRACT: IMPLEMENTED / CERTIFIED BY PRE-M5-02F (MG2)
-FRESHNESS / STALE CONTRACT: LOCKED (`age > 10m` STALE on source age; HotStateAggregator 5m = IMPLEMENTATION_CHANGE_REQUIRED)
+FRESHNESS / STALE CONTRACT:
+IMPLEMENTED / CERTIFIED BY PRE-M5-TIME
+Source freshness: <5m NORMAL; 5m–10m inclusive AGING; >10m STALE
+HotStateAggregator 5m threshold: read-model degradation/rebuild-age only; NOT programme source-stale truth
 ANALYTICS_READY CONTRACT: LOCKED (derived; ≠ freshness; attendee recon DIAGNOSTIC)
 FINANCIAL RECONCILIATION CONTRACT: LOCKED (concept C; exact Decimal; ticket-scoped)
 M2 AUTHORIZATION: AUTHORIZED
@@ -192,11 +196,15 @@ ANALYTICS_READY_MACHINERY: IMPLEMENTED / CERTIFIED BY M4
 PRE-M5-02: COMPLETE (PASS)
 PRE-M5-02B..02F: COMPLETE (PASS)
 PRE-M5-02F evidence: PR #251; merge bd916712be4657555c7a17cfe604e69cdf790729; post-merge CI #654 / 36228450299 PASS
-Current Path 1 task: PRE-M5-TIME (next; not started)
+PRE-M5-TIME: COMPLETE (PASS)
+PRE-M5-TIME evidence: `docs/evidence/pre-m5-time-g-certification.md`
+TIME-G1: COMPLETE (PASS); PR #264; approved head `c23053a4f1c0d98f502a23f938f3b7c6ecc4a977`; merge `c1fc8cd02b1809d3fd97e379b16dfec29d65b870`; tree `0a2db09c3634a19ebb9c9e253794cd67b2658703`; CI #695 / 36525412734 PASS
+Current Path 1 task: M5-01 — Base Event Aggregates
 GAP-PRE-M5-METRICS: CLOSED
-GAP-PRE-M5-TIME: OPEN
-GAP-PRE-M5-READY-IX: CLOSED (UNCHANGED)
-NEXT: PRE-M5-TIME
+GAP-PRE-M5-TIME: CLOSED
+GAP-PRE-M5-READY-IX: CLOSED
+M5 AUTHORIZATION: AUTHORIZED
+NEXT: M5-01 — Base Event Aggregates
 
 PATH 2 — AUTOMATIC SYNC / CATALOGUE AUTOMATION
 Status: PAUSED AT CERTIFIED CHECKPOINT
@@ -587,10 +595,10 @@ M7 — Production Certification / Pilot
 
 ```text
 CURRENT NEXT STEP:
-PRE-M5-TIME
+M5-01 — Base Event Aggregates
 
 M5:
-BLOCKED (PRE-M5-TIME remains OPEN)
+AUTHORIZED (PRE-M5-TIME COMPLETE; all PRE-M5 gates CLOSED)
 
 P1-00:
 COMPLETE
@@ -754,20 +762,34 @@ PR #251; merge bd916712be4657555c7a17cfe604e69cdf790729; post-merge CI #654 / 36
 GAP-PRE-M5-METRICS:
 CLOSED
 
+PRE-M5-TIME:
+COMPLETE (PASS)
+
+PRE-M5-TIME evidence:
+docs/evidence/pre-m5-time-g-certification.md
+
+TIME-G1 certification:
+PR #264; approved head c23053a4f1c0d98f502a23f938f3b7c6ecc4a977; merge c1fc8cd02b1809d3fd97e379b16dfec29d65b870; tree 0a2db09c3634a19ebb9c9e253794cd67b2658703; CI #695 / 36525412734 PASS
+
 GAP-PRE-M5-TIME:
-OPEN
+CLOSED
 
 GAP-PRE-M5-READY-IX:
-CLOSED (UNCHANGED)
+CLOSED
 
 NEXT:
-PRE-M5-TIME
+M5-01 — Base Event Aggregates
+
+M5 AUTHORIZATION:
+AUTHORIZED
 
 TAX-INCLUSIVE REVENUE CONTRACT:
 IMPLEMENTED / CERTIFIED BY PRE-M5-02F (MG2)
 
 FRESHNESS / STALE CONTRACT:
-LOCKED (`age > 10m` STALE on source age; HotStateAggregator 5m = IMPLEMENTATION_CHANGE_REQUIRED)
+IMPLEMENTED / CERTIFIED BY PRE-M5-TIME
+Source freshness: <5m NORMAL; 5m–10m inclusive AGING; >10m STALE
+HotStateAggregator 5m threshold: read-model degradation/rebuild-age only; NOT programme source-stale truth
 
 ANALYTICS_READY CONTRACT:
 LOCKED (derived; ≠ freshness; attendee recon DIAGNOSTIC)
@@ -834,9 +856,9 @@ M3-01 through M3-08 are COMPLETE (PASS). M4-01 through M4-07 are COMPLETE (PASS)
 
 PRE-M5-01A and PRE-M5-01B are COMPLETE (PASS) via PR #243 and PR #244. `GAP-PRE-M5-READY-IX` is CLOSED. PRE-M5-02A metrics conformance specification is COMPLETE in `docs/development/`.
 
-PRE-M5-02B through PRE-M5-02F are COMPLETE (PASS). PR #251 merged at `bd916712be4657555c7a17cfe604e69cdf790729`; post-merge CI #654 / 36228450299 passed. `GAP-PRE-M5-METRICS` is CLOSED, and `GAP-PRE-M5-TIME` remains OPEN. The next programme step is PRE-M5-TIME. M5 is BLOCKED.
+PRE-M5-02B through PRE-M5-02F are COMPLETE (PASS). PR #251 merged at `bd916712be4657555c7a17cfe604e69cdf790729`; post-merge CI #654 / 36228450299 passed. TIME-G1 is COMPLETE (PASS) via PR #264, merge `c1fc8cd02b1809d3fd97e379b16dfec29d65b870`, and exact merge-SHA CI #695 / 36525412734 passed all six jobs. All PRE-M5 gates are CLOSED. M5 is AUTHORIZED, and the next programme step is M5-01 — Base Event Aggregates.
 
-Do not reopen M2-07 scope. Do not start M5 aggregate implementation until PRE-M5 closes.
+Do not reopen M2-07 scope. M5-01 Base Event Aggregates is the next authorized implementation task.
 
 ---
 
@@ -903,7 +925,19 @@ PATH 1 — TRUSTED MANAGEMENT ANALYTICS
 ACTIVE
 
 Current Path 1 task:
-PRE-M5-TIME
+M5-01 — Base Event Aggregates
+
+PRE-M5-TIME:
+COMPLETE (PASS)
+
+PRE-M5-TIME evidence:
+docs/evidence/pre-m5-time-g-certification.md
+
+TIME-G1:
+COMPLETE (PASS)
+
+TIME-G1 certification:
+PR #264; approved head c23053a4f1c0d98f502a23f938f3b7c6ecc4a977; merge c1fc8cd02b1809d3fd97e379b16dfec29d65b870; tree 0a2db09c3634a19ebb9c9e253794cd67b2658703; CI #695 / 36525412734 6/6 PASS
 
 PRE-M5-02:
 COMPLETE (PASS)
@@ -924,16 +958,22 @@ ANALYTICS_READY_MACHINERY:
 IMPLEMENTED / CERTIFIED BY M4
 
 M5:
-BLOCKED
+AUTHORIZED
+
+M5 AUTHORIZATION:
+AUTHORIZED
 
 GAP-PRE-M5-METRICS:
 CLOSED
 
 GAP-PRE-M5-TIME:
-OPEN
+CLOSED
 
 GAP-PRE-M5-READY-IX:
 CLOSED (UNCHANGED)
+
+NEXT:
+M5-01 — Base Event Aggregates
 
 P1-00:
 COMPLETE
@@ -1059,7 +1099,9 @@ TAX-INCLUSIVE REVENUE CONTRACT:
 IMPLEMENTED / CERTIFIED BY PRE-M5-02F (MG2)
 
 FRESHNESS / STALE CONTRACT:
-LOCKED (`age > 10m` STALE on source age; HotStateAggregator 5m = IMPLEMENTATION_CHANGE_REQUIRED)
+IMPLEMENTED / CERTIFIED BY PRE-M5-TIME
+Source freshness: <5m NORMAL; 5m–10m inclusive AGING; >10m STALE
+HotStateAggregator 5m threshold: read-model degradation/rebuild-age only; NOT programme source-stale truth
 
 ANALYTICS_READY CONTRACT:
 LOCKED (derived; ≠ freshness; attendee recon DIAGNOSTIC)

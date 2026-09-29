@@ -3,8 +3,8 @@
 | Field | Value |
 | --- | --- |
 | Plan ID | PRE-M5-TIME-G1 |
-| Version | v1 |
-| Status | CERTIFICATION CANDIDATE |
+| Version | v2 |
+| Status | Merged and certified; PR #264 |
 | Scope | Certify the PRE-M5-TIME implementation against M1-07 T1–T31 and TIME-B through TIME-F |
 | Certification base SHA | `2e387f8f3a750c7cd5a0d10bd39a0d4fdf243f0c` |
 | Certification base tree | `1f5f2715e009167a58ac777b178567a35e93184c` |
@@ -12,18 +12,16 @@
 | TIME-F merge SHA | `2e387f8f3a750c7cd5a0d10bd39a0d4fdf243f0c` |
 | TIME-F post-merge CI | [#691 / run 36461645968](https://github.com/JCSchoeman96/EventSales/actions/runs/36461645968), 6/6 PASS on the merge SHA |
 | Certification branch | `path1/pre-m5-time-g-certification` |
-| Certification PR | [#264](https://github.com/JCSchoeman96/EventSales/pull/264) (OPEN / UNMERGED) |
-| Approved head | PENDING |
-| Certification merge SHA | PENDING |
-| Certification post-merge CI | PENDING |
-| Last updated | 2026-09-28 |
+| Certification PR | [#264](https://github.com/JCSchoeman96/EventSales/pull/264) |
+| Approved head | `c23053a4f1c0d98f502a23f938f3b7c6ecc4a977` |
+| Certification merge SHA | `c1fc8cd02b1809d3fd97e379b16dfec29d65b870` |
+| Certification merge tree | `0a2db09c3634a19ebb9c9e253794cd67b2658703` |
+| Certification post-merge CI | [#695 / run 36525412734](https://github.com/JCSchoeman96/EventSales/actions/runs/36525412734) — 6/6 PASS |
+| Last updated | 2026-09-29 |
 
-Programme state for this candidate:
+### Revision log
 
-```text
-GAP-PRE-M5-TIME = OPEN pending this PR merge and exact merge-SHA CI
-M5 = BLOCKED pending this PR merge and exact merge-SHA CI
-```
+- v2 — PR #264 merged as `c1fc8cd02b1809d3fd97e379b16dfec29d65b870`; approved HEAD `c23053a4f1c0d98f502a23f938f3b7c6ecc4a977`; merge tree matched the approved HEAD tree; exact merge-SHA CI #695 / run 36525412734 passed all six jobs; TIME-G1 certification complete.
 
 ## Owner decisions
 
@@ -51,7 +49,7 @@ PR numbers, branch heads, merge SHAs, and the TIME-F CI run below were checked a
 | TIME-E3 | [#261](https://github.com/JCSchoeman96/EventSales/pull/261) | `a8e0064901fd2c18a6cfc1ab2a657638ee87d007` | Terminal catch-up source-freshness advancement |
 | Mint security recovery | [#262](https://github.com/JCSchoeman96/EventSales/pull/262) | `84653cfe4b143a7eeae19b243b0aa46ba7efa803` | `mix.lock` pins Mint 1.11.0; this recovery changed `mix.lock` only |
 | TIME-F | [#263](https://github.com/JCSchoeman96/EventSales/pull/263) | `2e387f8f3a750c7cd5a0d10bd39a0d4fdf243f0c` | Post-merge CI run 36461645968 passed `test`, `format_compile`, `ash_codegen`, `dialyzer`, `lint_security`, and `playwright_unit` |
-| TIME-G1 | [#264](https://github.com/JCSchoeman96/EventSales/pull/264) | PENDING | Certification candidate; PR open/unmerged; merge and exact merge-SHA CI remain pending |
+| TIME-G1 | [#264](https://github.com/JCSchoeman96/EventSales/pull/264) | `c1fc8cd02b1809d3fd97e379b16dfec29d65b870` | Merged and certified; exact merge-SHA CI #695 / 36525412734 6/6 PASS |
 
 ## Acceptance matrix
 
@@ -118,10 +116,19 @@ PRODUCTION CODE CHANGES = NONE
 ## Programme state
 
 ```text
-GAP-PRE-M5-TIME = OPEN pending this PR merge and exact merge-SHA CI
+PRE-M5-TIME = COMPLETE (PASS)
+
 GAP-PRE-M5-METRICS = CLOSED
 GAP-PRE-M5-READY-IX = CLOSED
-M5 = BLOCKED pending this PR merge and exact merge-SHA CI
+GAP-PRE-M5-TIME = CLOSED
+
+M5 = AUTHORIZED
+
+NEXT = M5-01 — Base Event Aggregates
 ```
 
-G1 does not edit the programme handoff or Path 1 phase breakdown. G2 owns those state changes after G1 merges and exact merge-SHA CI passes.
+## G2 closeout protocol note
+
+After TIME-G1 certification, PR #265 merged as `c3e7b1d85a4ca93583bebc187a2164024bae2d81` from approved head `2de6875cb2b94bab53dee2b00f667464e0c2378e`. PR CI #696 / run 36529470280 passed all six jobs.
+
+Protected-main governance now requires the PR checks followed by verification of merge parents and tree identity. The workflow has no `push: main` trigger, so an automatic duplicate post-merge CI run is not expected. This records repository closeout procedure and does not define TIME semantics.
