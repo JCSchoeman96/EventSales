@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-401
+405
 
 ## Files
 
@@ -45,6 +45,7 @@ Project root: `.`
 - `lib/event_sales/analytics/refund_processed_notifier.ex`
 - `lib/event_sales/analytics/resources/daily_sales_aggregate_snapshot.ex`
 - `lib/event_sales/analytics/resources/event_aggregate_snapshot.ex`
+- `lib/event_sales/analytics/resources/event_dimension_aggregate_snapshot.ex`
 - `lib/event_sales/analytics/resources/event_source_freshness_snapshot.ex`
 - `lib/event_sales/analytics/snapshot_codec.ex`
 - `lib/event_sales/analytics/snapshot_queries.ex`
@@ -56,6 +57,9 @@ Project root: `.`
 - `lib/event_sales/analytics/source_freshness.ex`
 - `lib/event_sales/analytics/time_rules.ex`
 - `lib/event_sales/analytics/validations/canonical_snapshot_financials.ex`
+- `lib/event_sales/analytics/validations/validate_dimension_aggregate_grain.ex`
+- `lib/event_sales/analytics/validations/validate_dimension_source_event.ex`
+- `lib/event_sales/analytics/validations/validate_dimension_ticket_type_event.ex`
 - `lib/event_sales/analytics/workers/rebuild_hot_state_worker.ex`
 - `lib/event_sales/analytics/workers/refresh_snapshot_worker.ex`
 - `lib/event_sales/application.ex`
@@ -584,6 +588,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: _none_
   - uses: `Ash.Resource`
+- `EventSales.Analytics.Resources.EventDimensionAggregateSnapshot` - `lib/event_sales/analytics/resources/event_dimension_aggregate_snapshot.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
 - `EventSales.Analytics.Resources.EventSourceFreshnessSnapshot` - `lib/event_sales/analytics/resources/event_source_freshness_snapshot.ex`
   - moduledoc?: true
   - specs?: false
@@ -657,6 +667,24 @@ Project root: `.`
   - public_funs: _none_
   - uses: _none_
 - `EventSales.Analytics.Validations.CanonicalSnapshotFinancials` - `lib/event_sales/analytics/validations/canonical_snapshot_financials.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `init/1`, `validate/3`
+  - uses: `Ash.Resource.Validation`
+- `EventSales.Analytics.Validations.ValidateDimensionAggregateGrain` - `lib/event_sales/analytics/validations/validate_dimension_aggregate_grain.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `init/1`, `validate/3`
+  - uses: `Ash.Resource.Validation`
+- `EventSales.Analytics.Validations.ValidateDimensionSourceEvent` - `lib/event_sales/analytics/validations/validate_dimension_source_event.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `init/1`, `validate/3`
+  - uses: `Ash.Resource.Validation`
+- `EventSales.Analytics.Validations.ValidateDimensionTicketTypeEvent` - `lib/event_sales/analytics/validations/validate_dimension_ticket_type_event.ex`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
@@ -2815,6 +2843,7 @@ Project root: `.`
 - `EventSales.Accounts.Resources.UserRole` - `lib/event_sales/accounts/resources/user_role.ex`
 - `EventSales.Analytics.Resources.DailySalesAggregateSnapshot` - `lib/event_sales/analytics/resources/daily_sales_aggregate_snapshot.ex`
 - `EventSales.Analytics.Resources.EventAggregateSnapshot` - `lib/event_sales/analytics/resources/event_aggregate_snapshot.ex`
+- `EventSales.Analytics.Resources.EventDimensionAggregateSnapshot` - `lib/event_sales/analytics/resources/event_dimension_aggregate_snapshot.ex`
 - `EventSales.Analytics.Resources.EventSourceFreshnessSnapshot` - `lib/event_sales/analytics/resources/event_source_freshness_snapshot.ex`
 - `EventSales.AshBaseline.Resources.AuthUser` - `lib/event_sales/ash_baseline/resources/auth_user.ex`
 - `EventSales.AshBaseline.Resources.PaperTrailProof` - `lib/event_sales/ash_baseline/resources/paper_trail_proof.ex`
@@ -2881,6 +2910,9 @@ Project root: `.`
 ### Validations
 
 - `EventSales.Analytics.Validations.CanonicalSnapshotFinancials` - `lib/event_sales/analytics/validations/canonical_snapshot_financials.ex`
+- `EventSales.Analytics.Validations.ValidateDimensionAggregateGrain` - `lib/event_sales/analytics/validations/validate_dimension_aggregate_grain.ex`
+- `EventSales.Analytics.Validations.ValidateDimensionSourceEvent` - `lib/event_sales/analytics/validations/validate_dimension_source_event.ex`
+- `EventSales.Analytics.Validations.ValidateDimensionTicketTypeEvent` - `lib/event_sales/analytics/validations/validate_dimension_ticket_type_event.ex`
 - `EventSales.Ingestion.Validations.AuthorizedFinancialReconciliationStateMutation` - `lib/event_sales/ingestion/validations/authorized_financial_reconciliation_state_mutation.ex`
 - `EventSales.Ingestion.Validations.AuthorizedTickeraStateMutation` - `lib/event_sales/ingestion/validations/authorized_tickera_state_mutation.ex`
 - `EventSales.Ingestion.Validations.BoundedMetadata` - `lib/event_sales/ingestion/validations/bounded_metadata.ex`
