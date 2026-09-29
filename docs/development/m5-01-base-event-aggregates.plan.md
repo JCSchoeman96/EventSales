@@ -1,11 +1,12 @@
 ---
 Plan ID: m5-01-base-event-aggregates
-Plan version: v4
-Status: M5-01A COMPLETE; M5-01-G1 / B23 implemented by the M5-01B candidate, not certified; M5-01 IN PROGRESS
+Plan version: v5
+Status: M5-01A COMPLETE; M5-01B MERGED at `f420437`; M5-01C certification evidence on branch (PR pending review); M5-01 closes on M5-01C merge
 Scope: M5-01 base event-level canonical aggregate foundations and B23 orchestration candidate
 Authority: `docs/path-1/path-1-phase-breakdown.md` (M5-01 row); PRE-M5-02F + PRE-M5-TIME-G evidence; M1-04–M1-08 contracts (locked)
 Historical context: PRE-M5-02 metrics foundation plans and evidence; do not reopen locked PRE-M5 semantics
 Last updated: 2026-09-29
+Change summary (v5): M5-01C records B01–B23 certification evidence (`docs/evidence/m5-01-base-event-aggregates-certification.md`) on merged M5-01B base `f420437` / tree `f8245055`. B23 certified pending independent M5-01C PR merge; no semantics reopened; next programme work waits on certification merge review.
 Change summary (v4): v3 exposed a production-only Oban Basic uniqueness lock-contention gap because test mode bypassed advisory uniqueness locking. M5-01B now serializes event refresh scheduling with a namespaced transaction advisory lock and uses Oban 2.24.0's `retry: false` pass-through; production-mode concurrency proofs are required. B23 remains uncertified pending M5-01C.
 ---
 
@@ -14,6 +15,7 @@ Change summary (v4): v3 exposed a production-only Oban Basic uniqueness lock-con
 - v1 — M5-01A audit against `047b645` / tree `d188ce84`; B01–B22 matrix; CERTIFICATION_ONLY decision; next slice M5-01B.
 - v2 — B23 durable snapshot refresh orchestration gap; `M5-01_DECISION = IMPLEMENTATION_REQUIRED`; distinguish certified refresh safety from missing post-mutation enqueue; next M5-01B implementation / M5-01C certification.
 - v3 — M5-01A marked complete; M5-01B implements B23 as a candidate using same-transaction refresh intent, pending coalescing, and an executing-job trailing refresh; M5-01C remains the certification slice.
+- v5 — M5-01B merged (#268 / `f420437`); M5-01C evidence certifies B01–B23 on that base; M5-01 programme closeout awaits M5-01C PR merge only.
 - v4 — v3 exposed production-only Basic Oban unique-lock contention because test mode bypassed advisory uniqueness locking. Record the event-scoped transaction-lock correction, Oban 2.24.0 nested-transaction option forwarding, and production-mode contention proofs; B23 remains uncertified.
 
 # M5-01 — Base event aggregates
@@ -27,10 +29,12 @@ Repository:        JCSchoeman96/EventSales
 M5-01A merge SHA:  66788096afd7a36c1cd6877ae5290565130d976a
 M5-01A tree:       bf9633c5f80d3e0ede54167bb0557df90ac5283a
 M5-01A status:     COMPLETE
-M5-01B branch:     path1/m5-01b-snapshot-refresh-orchestration
-M5-01B status:     IMPLEMENTED CANDIDATE; certification pending
-M5-01 status:     IN PROGRESS
-Next slice:        M5-01C certification
+M5-01B merge SHA:  f420437ab6ab5ab7a72db8e164ba08c59cbed328 (#268)
+M5-01B status:     MERGED
+M5-01C branch:     path1/m5-01c-base-event-aggregates-certification
+M5-01C status:     CERTIFICATION EVIDENCE COMPLETE; PR pending merge
+M5-01 status:     AWAITING M5-01C MERGE (B01–B23 certified in evidence; not effective until PR merges)
+Next slice:        Independent review + merge M5-01C; then programme closeout
 Programme:         PRE-M5-TIME COMPLETE; GAP-PRE-M5-* CLOSED; M5 AUTHORIZED
 ```
 
@@ -233,20 +237,20 @@ OWNER_DECISION_REQUIRED           — policy choice blocks classification
 | B20 | No raw dashboard history scan | ALREADY_IMPLEMENTED_CERTIFIED | AGENTS; PRE-M5-02F M14 | Dashboard LiveView + `EventScopedDashboard` boundary | `snapshot_boundaries_test.exs` |
 | B21 | Legacy v1 compatibility boundary | ALREADY_IMPLEMENTED_CERTIFIED | PRE-M5-02 | v1 rows non-canonical; v2 required for `SnapshotReader` financial readers | PRE-M5-02F M13; `historical_reporting_snapshots_test.exs` |
 | B22 | M5 scope isolation | ALREADY_IMPLEMENTED_NEEDS_M5_TEST | path-1 M5-01 row | No ticket-type/dimension snapshots added | M5-01C evidence pack should state non-goals explicitly |
-| B23 | Durable event snapshot refresh orchestration after relevant source mutation | IMPLEMENTED_NOT_CERTIFIED (M5-01B candidate) | M5-01 lifecycle; PRE-M5-02 projection lifecycle; path-1 M5 event-scoped invalidation | Existing `RefreshSnapshotWorker` is enqueued in the same Repo transaction at order, refund, missing-catalog mapping recovery, and audited attribution correction seams | M5-01B focused tests prove transactional rollback, pending replacement row locking, trailing refresh, and exact before+after candidate scheduling; M5-01C owns certification |
+| B23 | Durable event snapshot refresh orchestration after relevant source mutation | CERTIFIED (M5-01C evidence; effective on M5-01C merge) | M5-01 lifecycle; PRE-M5-02 projection lifecycle; path-1 M5 event-scoped invalidation | `RefreshSnapshotWorker.enqueue_events/1` in same Repo transaction at order, refund, mapped missing-catalog recovery, and audited attribution correction seams | `docs/evidence/m5-01-base-event-aggregates-certification.md` §3–§5; focused bundle on `f420437` |
 
 ---
 
 ## 6. Gap decision
 
 ```text
-M5-01_DECISION = IMPLEMENTATION_CANDIDATE_IMPLEMENTED; CERTIFICATION_REQUIRED
+M5-01_DECISION = CERTIFICATION_COMPLETE_ON_BRANCH; AWAITING M5-01C PR MERGE
 ```
 
-B01–B21 remain implemented and certified (calculation, v2 durability, refresh transaction, readers, query plans, M4 separation, hot path). B23 has an M5-01B implementation candidate but is not certified.
+B01–B23 pass in M5-01C evidence on base `f420437`. Programme effective closeout requires M5-01C PR merge and independent review. Do not start M5-02 until that merge lands.
 
 ```text
-IMPLEMENTED_NOT_CERTIFIED_IDS = M5-01-G1 / B23
+IMPLEMENTED_NOT_CERTIFIED_IDS = (none on certified branch evidence)
 ```
 
 **M5-01-G1 — Event-scoped durable snapshot refresh orchestration (implemented candidate; certification pending)**
@@ -293,11 +297,11 @@ M5-01B implementation candidate:
 4. Prove production Basic contention under TX-A commit and rollback, executing trailing work, distinct-event independence, pending row-lock behavior, outer rollback, and deterministic multi-event ordering with focused tests.
 5. Change no snapshot implementation, source freshness projection, readiness semantics, or hot/warm/cold ownership.
 
-M5-01C (next; certification, not yet complete) should:
+M5-01C (certification slice on branch) delivered:
 
-1. Add `docs/evidence/m5-01-base-event-aggregates-certification.md` mapping B01–B23 to tests and PRE-M5 evidence.
-2. Run focused analytics, orchestration, and readiness tests documented in evidence.
-3. Update programme closeout in path-1 handoff only after M5-01C merges.
+1. `docs/evidence/m5-01-base-event-aggregates-certification.md` maps B01–B23 to production paths, tests, and prior evidence.
+2. Focused bundle (257 tests, 0 failures on certification run) documented in evidence §9.
+3. Programme closeout in path-1 handoff remains blocked until M5-01C PR merges.
 
 Do not start M5-02–M5-09 in M5-01B or M5-01C.
 
