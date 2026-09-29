@@ -1,6 +1,6 @@
 ---
 Plan ID: m5-02-ticket-product-variation-aggregates
-Plan version: v1
+Plan version: v2
 Status: M5-02A planning / conformance audit (docs only)
 Linear: JC-294
 Scope: Ticket / product / variation dimensional aggregate architecture for Path 1 M5-02
@@ -8,6 +8,7 @@ Authority base SHA: c6a8708903d0d76eebc16024b6ff80b74a2161b2
 Authority base tree: a122ab8655f21e793af494a2f81bf6c4d80fca84
 Programme: M5-01 COMPLETE (PASS); B01–B23 CERTIFIED; next implementation programme = M5-02
 Last updated: 2026-09-29
+Change summary (v2): Correct ANALYTICS_READY vs projection maintenance (M5-01 B18); lock single normalized dimensional resource topology; lock same-event dimension-only B23 invalidation via `HistoricalOrderMutationDetector`; fix historical cardinality wording.
 Change summary (v1): Initial M5-02A audit; architectural alternatives; grain and identity matrix; M5-03 boundary; mutation matrix; gap ledger; IMPLEMENTATION_REQUIRED with split M5-02B+ sequence.
 ---
 
@@ -22,6 +23,7 @@ Historical **PRE-M5-02A** remains `docs/development/pre-m5-02-metrics-foundation
 
 ### Revision log
 
+- `v2` — Readiness separation corrected; one normalized projection locked; same-event dimension-only mutation invalidation locked; historical cardinality wording corrected (independent review JC-294).
 - `v1` — M5-02A conformance audit on authority base `c6a87089` / tree `a122ab86`; terminal decision and M5-02B+ slice map.
 
 # M5-02A — Ticket / Product / Variation aggregate planning and conformance audit
@@ -46,7 +48,7 @@ source-scoped Woo variation (parent product + variation id)
 
 ```text
 For one event and one currency partition:
-  durable cold derived rows for each active dimension grain
+  durable cold derived rows for each historically represented dimensional grain
   gross_ticket_quantity + gross_ticket_value (tax-inclusive, M1-06 historical gross split)
   refreshed through existing B23 orchestration (same event enqueue, no second scheduler)
   management reads via snapshot-style reader (not LiveView → raw OrderItem scan)
@@ -169,9 +171,9 @@ All monetary metrics are **partitioned by `currency`** (order currency). Mixed-c
 
 | Grain ID | Uniqueness key (per snapshot generation) | Row describes | Cardinality bound |
 | --- | --- | --- | --- |
-| `ticket_type` | `event_id` + `currency` + `ticket_type_id` | Recognised gross qty/value for mapped ticket lines attributed to that TicketType | ≤ active ticket types per event (typically small) |
-| `source_product` | `event_id` + `currency` + `source_system_id` + `woo_product_id` | Same metrics for lines with that product evidence (variation id may be null on line) | ≤ distinct products sold per event |
-| `source_variation` | `event_id` + `currency` + `source_system_id` + `woo_product_id` + `woo_variation_id` | Lines where `woo_variation_id` IS NOT NULL | ≤ distinct variations sold |
+| `ticket_type` | `event_id` + `currency` + `ticket_type_id` | Recognised gross qty/value for mapped ticket lines attributed to that TicketType | ≤ distinct historically attributed `ticket_type_id` values on recognised ticket lines for the event (includes inactive TicketTypes) |
+| `source_product` | `event_id` + `currency` + `source_system_id` + `woo_product_id` | Same metrics for lines with that product evidence (variation id may be null on line) | ≤ distinct `(source_system_id, woo_product_id)` pairs on qualifying lines |
+| `source_variation` | `event_id` + `currency` + `source_system_id` + `woo_product_id` + `woo_variation_id` | Lines where `woo_variation_id` IS NOT NULL | ≤ distinct source-scoped variation tuples on qualifying lines |
 
 **Lines with null `woo_variation_id`:** contribute to `source_product` only, not a variation row.
 
@@ -208,7 +210,9 @@ Dimensional rows must **reconcile upward**: for each currency, sum of `gross_tic
 | `recognised_order_count` | Event | **Not in M5-02 MVP** | Optional later |
 | Status breakdown | Event snapshot field | Out of scope | — |
 
-**Refund boundary:** M5-01 refund aggregates join refund lines to **current** mapped ticket items in the event (`event_ticket_items_subquery`). Dimensional **refund** allocation requires explicit line→dimension binding and risks double-count if refund lines are joined to multiple dimension tables. **Defer all refund-dimensional metrics to M5-03** with a dedicated design pass; M5-02 MVP stores **gross-only** dimensional facts.
+**M1-06 authority (gross split):** Gross Ticket Sales scope explicitly includes Event / TicketType / Product / Variation; Product / Ticket-Type Revenue uses the same gross/refund/net formulas by durable historical attribution. M5-02 therefore **owns the additive gross dimensional split** (`gross_ticket_quantity`, tax-inclusive `gross_ticket_value`).
+
+**Refund boundary:** M5-01 refund aggregates join refund lines to **current** mapped ticket items in the event (`event_ticket_items_subquery`). Dimensional **refund** allocation requires explicit line→dimension binding and risks double-count if refund lines are joined to multiple dimension tables. **Defer to M5-03:** `refund_ticket_quantity`, `refund_ticket_value`, net qty/value, and ATV at dimensional grain. M5-02 MVP stores **gross-only** dimensional facts.
 
 ---
 
@@ -234,16 +238,50 @@ Aggregation reads **durable OrderItem attribution + line financial fields**, not
 
 | Writer / action | Changes historical membership? | Display/catalogue only? | B23 snapshot refresh? | Dimension projection |
 | --- | --- | --- | --- | --- |
-| `OrderUpserter` | Can change `event_id` / mapping | No | Yes (certified) | Recompute affected events |
+| `OrderUpserter` | Yes — any `HistoricalOrderMutationDetector` certificate-truth change on items (see §10.1) | No | Yes when detector reports `changed?` | Recompute **all candidate events** (before + after) |
 | `RefundUpserter` | Refund facts | No | When aggregate-qualified | Event-level today; dimensional gross only in M5-02 |
 | `MissingCatalogResolver` pending→mapped | Yes | No | Yes | Recompute |
 | `OrderAttributionCorrection` | Yes | No | Yes | Recompute |
 | `ManualMappingCreator` / ProductMapping create | Catalogue | No | **No** (unless coupled item remap) | No |
 | ProductMapping deactivate / retarget | Catalogue | No | **No** | No |
-| TicketType update name/capacity | Catalogue | Yes | **No** | No |
+| TicketType update name/capacity/active | Catalogue | Yes | **No** | No — does not alter historical grain keys on lines |
 | Tickera catalogue apply (bulk) | May change mappings | Mixed | Only via order/item seams | Follow B23 rules |
 
 Reject broad “refresh on every mapping change” — contradicted by M5-01C certification.
+
+### 10.1 Dimension-only invalidation (B23 / `HistoricalOrderMutationDetector`)
+
+Production: `EventSales.Ingestion.HistoricalOrderMutationDetector` captures per-line certificate truth including:
+
+```text
+event_id, ticket_type_id, woo_product_id, woo_variation_id,
+quantity, line_subtotal, line_total, line_total_tax, discount_total,
+item_kind, mapping_status, source_tickera_event_id, attribution_status_reason
+```
+
+`compare/2` uses full snapshot inequality; `candidate_event_ids/2` unions `event_id` from before and after item rows.
+
+**Locked rule (M5-02):** Any accepted detector change affecting **dimensional membership** or **M5-02 gross primitives** on a line MUST enqueue refresh for every candidate event (including **same event** when `event_id` is unchanged).
+
+Refresh-relevant examples (event-level gross total may be unchanged):
+
+```text
+same event + ticket_type_id changed
+same event + woo_product_id changed
+same event + woo_variation_id changed
+same event + quantity or gross financial primitive changed (line_total / line_total_tax / etc.)
+event_id changed (A → B or removal)
+mapping_status / item_kind changes that alter recognised-sale membership
+```
+
+**Not refresh-relevant (preserve M5-01C):**
+
+```text
+ProductMapping-only catalogue mutation (no OrderItem certificate change)
+TicketType rename, capacity, or active flag (no OrderItem mutation)
+```
+
+`OrderUpserter` must **not** be documented as “event_id / mapping only”; it is **detector-governed** historical truth on order items.
 
 ---
 
@@ -262,18 +300,26 @@ Add ticket_type_id / woo_* columns to existing table.
 | HotStateAggregator / DashboardCache | Keys assume one canonical financial row per currency |
 | Verdict | **REJECT** without multi-year migration and re-certification; convenience-driven |
 
-### B. New normalized dimensional projection (recommended)
+### B. New normalized dimensional projection (locked for M5-02)
 
 ```text
-Separate durable table(s) in Analytics with explicit dimension_kind + grain keys.
-One event refresh persists event v2 rows AND replaces full dimensional set per currency.
+ONE durable Analytics resource/table with dimension_kind + grain keys.
+One event refresh persists event v2 rows AND replaces the full dimensional set per currency.
 ```
 
 | Criterion | Assessment |
 | --- | --- |
 | Compatibility | **Preserves** M5-01 snapshot grain |
 | Orchestration | Extend `SnapshotRefresh.refresh_event/2` inside same fence/transaction pattern |
-| Verdict | **PREFERRED** |
+| Verdict | **SELECTED** — implementation authority for M5-02B |
+
+```text
+RESOURCE_STRATEGY = NEW normalized dimensional projection
+RESOURCE_COUNT = ONE
+DIMENSION_KINDS = ticket_type | source_product | source_variation
+```
+
+Working module name: `EventDimensionAggregateSnapshot` (table name finalized in M5-02B; spelling is not an owner decision).
 
 ### C. Multiple specialized projections
 
@@ -284,7 +330,7 @@ Separate snapshot tables per dimension kind.
 | Criterion | Assessment |
 | --- | --- |
 | Operations | Three refresh/purge paths; higher drift risk |
-| Verdict | **Defer** unless row width or indexing forces split; start with **one** resource + `dimension_kind` enum |
+| Verdict | **STOP / REPLAN only** — if M5-02B/C produces concrete evidence (impossible integrity, failed query plans, pathological row width, unsafe Ash/Postgres representation). Do not switch topology silently during implementation. |
 
 ### D. Bounded on-demand aggregation only
 
@@ -304,11 +350,42 @@ Extend EventAggregator with dimensional queries; no durable projection.
 
 Reuse M5-01 lifecycle vocabulary; **no second scheduler**.
 
+### 12.1 ANALYTICS_READY separation (M5-01 B18)
+
+```text
+ANALYTICS_READY does NOT guard projection refresh.
+
+Projection maintenance MUST continue while ANALYTICS_READY is false.
+
+ANALYTICS_READY gates management exposure / read eligibility only.
+
+It MUST NOT suppress, defer, or cancel durable dimensional projection refresh.
+```
+
+Authority: `EventSales.Analytics.SnapshotRefresh.refresh_event/2` does **not** consult `AnalyticsReadinessResolver`. M4 readiness and derived snapshot maintenance are intentionally separate (certified B18).
+
+```text
+source mutation → B23 refresh intent → projection refresh (independent of ANALYTICS_READY)
+ANALYTICS_READY → management facade / dashboard eligibility (separate path)
+```
+
+`DimensionSnapshotReader` remains a **pure cold derived reader** (like `SnapshotReader`). Where readiness applies: **management facade** (`EventDetail`, `EventScopedDashboard`, admin LiveView eligibility) — not inside `SnapshotRefresh` or `RefreshSnapshotWorker`. Do not invent a second readiness mechanism.
+
+### 12.2 Lifecycle states
+
+Driven by source mutation and B23 orchestration only:
+
+```text
+ABSENT → REFRESH_PENDING → REFRESHING → CURRENT
+         ↘ failure/retry ↗
+         STALE (served until refresh completes)
+```
+
 | State | Meaning | Trigger | Guard | Durable effect | Cache | PubSub | Recovery |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| absent | No rows for event/currency/dimension | First recognised sale / first refresh | ANALYTICS_READY (read gate unchanged) | Insert on refresh | Miss → cold read | Existing dashboard topics after invalidate | Enqueue via B23 |
-| current | Rows match last successful refresh | `SnapshotRefresh.refresh_event` success | Event snapshot fence lock | Replace full dimension set per currency (mirror B13 purge obsolete currencies) | `DashboardCache.invalidate_event` | Same as M5-01 | — |
-| stale | Source mutated; job pending | B23 enqueue | Coalesced Oban unique job | Old rows until worker runs | May serve stale until refresh | HotState may show rebuild age (M5-07) | Worker retry |
+| absent | No rows for event/currency/dimension | First successful `refresh_event` after qualifying source truth | Event snapshot fence lock only | Insert on refresh | Miss → cold read | After invalidate | B23 enqueue from mutation |
+| current | Rows match last successful refresh | `SnapshotRefresh.refresh_event` success | Fence held | Replace full dimension set per currency (mirror B13 purge obsolete currencies) | `DashboardCache.invalidate_event` | Same as M5-01 | — |
+| stale | Source mutated; job pending or running | B23 enqueue / worker start | Coalesced Oban unique job | Prior rows until transactional replace | May serve stale until refresh | HotState rebuild age (M5-07) | Worker retry |
 | refresh pending | Job enqueued | `RefreshSnapshotWorker` | Unique keys | None yet | — | — | — |
 | refreshing | Worker running | `perform/1` | Advisory fence | Transactional replace | Invalidate after commit | — | Rollback preserves prior rows (mirror B15) |
 | failure / retry | Aggregator or persist error | Oban retry | max_attempts | Prior rows preserved | No partial publish | — | Oban backoff |
@@ -321,11 +398,12 @@ Reuse M5-01 lifecycle vocabulary; **no second scheduler**.
 
 | Seam | Event `EventAggregateSnapshot` | Dimension projection | DashboardCache |
 | --- | --- | --- | --- |
-| OrderUpserter | Refresh | Recompute same event(s) | Invalidate on success |
+| OrderUpserter | Refresh when detector `changed?` | Recompute **all candidate events**; includes same-event `ticket_type_id` / `woo_product_id` / `woo_variation_id` / gross primitive changes | Invalidate on success |
 | RefundUpserter | Refresh when certified | **Gross dimensional only**; refund dims deferred M5-03 | Same |
 | MissingCatalogResolver mapped recovery | Refresh | Recompute | Same |
-| OrderAttributionCorrection | Refresh | Recompute | Same |
-| ProductMapping / TicketType catalogue | **No enqueue** | **No** | No |
+| OrderAttributionCorrection | Refresh | Recompute (including A→B) | Same |
+| ProductMapping-only catalogue | **No enqueue** | **No** | No |
+| TicketType display/catalogue-only | **No enqueue** | **No** | No |
 
 ---
 
@@ -341,6 +419,8 @@ EventSales.Analytics.DimensionSnapshotReader (proposed)
     woo ids displayed as stable integers + source system label
 
 Authorization: same admin/policy boundary as EventDetail / SnapshotReader (no LiveView Woo REST).
+
+**Readiness:** `DimensionSnapshotReader` does not check ANALYTICS_READY. Management surfaces that expose dimensional breakdowns must apply `AnalyticsReadinessResolver` (or existing dashboard eligibility) **before** calling the reader — same boundary as other certified management reads (B18).
 
 Fail-closed: if v2 event snapshot missing for currency, dimensional reader returns {:error, :snapshot_not_ready} or empty with explicit freshness signal — exact behaviour fixed in M5-02E (must not invent financial totals).
 ```
@@ -405,7 +485,7 @@ GROUP BY o.currency, oi.ticket_type_id
 ## 17. Performance and scaling review
 
 ```text
-Cardinality: ticket types per event ≪ 100; products/variations per event bounded by catalogue skew.
+Cardinality: bounded by distinct historically attributed identities on recognised lines (not “active catalogue” row counts).
 Refresh cost: O(lines for event) with indexed filter — same order class as EventAggregator today.
 Read cost: O(dimension rows) per event — typically hundreds, not 100k users scanning history.
 100k users: management read model is event-scoped projection, not fan-out per user; safety argument = bounded event cardinality + cold snapshot read, not vague scale hand-waving.
@@ -456,11 +536,25 @@ Dimensional rows are derived read models, not source truth.
 | --- | --- | --- |
 | **M5-02B** | Ash resource + migration + grain identities + changeset validations; no aggregator | Reader, UI, worker |
 | **M5-02C** | `DimensionAggregator` bounded SQL + query-plan tests; parity lemma vs event gross | SnapshotRefresh wiring |
-| **M5-02D** | `SnapshotRefresh` extension; purge obsolete currencies/dimensions; rollback tests | EventDetail |
+| **M5-02D** | `SnapshotRefresh` extension; purge obsolete currencies/dimensions; rollback tests; **focused B23/dimension invalidation tests** (§21.1) | EventDetail |
 | **M5-02E** | `DimensionSnapshotReader` + policy tests | UI |
 | **M5-02F** | `EventDetail` conformance; certification evidence doc; reconciliation tests event ↔ sum(dimensions) | M5-03 metrics |
 
 Each slice: independent PR, focused tests, `mix quality.fast` at slice end.
+
+### 21.1 M5-02D acceptance tests (requirements only — not implemented in M5-02A)
+
+Focused tests must cover at least:
+
+```text
+same-event ticket_type_id membership change triggers dimensional refresh
+same-event woo_product_id change triggers dimensional refresh
+same-event woo_variation_id change triggers dimensional refresh
+before/after event correction A → B refreshes both events
+pending → mapped recovery refreshes affected event
+ProductMapping-only mutation does NOT enqueue dimensional refresh
+TicketType rename or active-state change does NOT alter historical grain / does NOT enqueue refresh
+```
 
 ---
 
@@ -473,6 +567,9 @@ Each slice: independent PR, focused tests, `mix quality.fast` at slice end.
 | EventAggregateSnapshot grain preserved | PASS (option B) |
 | M5-03 refund-dimensional deferred | PASS |
 | B23 mapping-only refresh rule respected | PASS |
+| ANALYTICS_READY separate from refresh (B18) | PASS (v2 §12.1) |
+| Same-event dimension-only invalidation locked | PASS (v2 §10.1) |
+| Single normalized resource topology locked | PASS (v2 §11B, §23) |
 | No Cachex / no Path 2 | PASS |
 | Terminal decision stated | PASS (below) |
 
@@ -482,16 +579,18 @@ Each slice: independent PR, focused tests, `mix quality.fast` at slice end.
 
 ```text
 M5_02A_DECISION = IMPLEMENTATION_REQUIRED
+RESOURCE_STRATEGY = ONE NORMALIZED DIMENSIONAL PROJECTION
+RESOURCE_COUNT = ONE
+DIMENSION_KINDS = ticket_type | source_product | source_variation
 ```
 
 Rationale: Path-1 M5-02 requires dimensional aggregates without Product resources; certified M5-01 infrastructure explicitly excluded ticket-type snapshots (B22); `EventDetail` demonstrates an unscanned conformance debt and peak-history read pattern that a planning-only certification cannot close.
 
-**OWNER_DECISION_REQUIRED** items (non-blocking for M5-02B start):
+**Implementation authority (locked):** one normalized `EventDimensionAggregateSnapshot` (working name) with `dimension_kind`; all three dimension kinds in M5-02C SQL together. Split tables are a **STOP / REPLAN** trigger only (§11C).
 
-```text
-1. Final resource name (`EventDimensionAggregateSnapshot` vs split tables) — default single-table + dimension_kind unless M5-02B review finds index pressure.
-2. Whether M5-02 MVP includes source_product + source_variation grains in first PR chain or ticket_type-only first — recommendation: all three grains in M5-02C SQL together to avoid triple refresh semantics drift.
-```
+**Non-blocking naming detail:** final Postgres table name / Ash module spelling may be chosen in M5-02B without owner escalation.
+
+**NEXT_SLICE:** M5-02B — resource + migration for the single normalized projection.
 
 ---
 
