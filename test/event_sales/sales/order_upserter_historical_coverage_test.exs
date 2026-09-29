@@ -3,12 +3,14 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
 
   require Ash.Query
 
+  alias EventSales.Analytics.Workers.RefreshSnapshotWorker
   alias EventSales.Catalog
   alias EventSales.Catalog.Resources.ProductMapping
   alias EventSales.Ingestion
   alias EventSales.Ingestion.HistoricalCoverageInvalidator
   alias EventSales.Ingestion.HistoricalCoverageResolver
   alias EventSales.Ingestion.Resources.SyncRun
+  alias EventSales.Repo
   alias EventSales.Sales
   alias EventSales.Sales.OrderUpserter
   alias EventSales.Sales.Resources.{CouponSnapshot, Order, OrderItem, Refund, RefundLine}
@@ -37,6 +39,28 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
     create_mapping!(source, event, ticket, %{woo_product_id: 501, woo_variation_id: 601})
 
     {:ok, source: source, event: event, ticket: ticket}
+  end
+
+  test "a new aggregate-relevant Order requests its exact Event refresh", %{
+    source: source,
+    event: event
+  } do
+    test_pid = self()
+
+    scheduler = fn event_ids ->
+      send(test_pid, {:snapshot_refresh_requested, event_ids})
+      :ok
+    end
+
+    assert {:ok, _order} =
+             OrderUpserter.upsert_order(
+               source.id,
+               payload(@historical_created_at),
+               snapshot_refresh_scheduler: scheduler
+             )
+
+    assert_receive {:snapshot_refresh_requested, [event_id]}
+    assert event_id == event.id
   end
 
   test "OrderItem Event A to B mutation invalidates both certificates through D2", %{
@@ -75,8 +99,15 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
                source.id,
                event_b.id,
                corrected_payload,
-               [corrected_line]
+               [corrected_line],
+               snapshot_refresh_scheduler: fn event_ids ->
+                 send(self(), {:snapshot_refresh_requested, event_ids})
+                 :ok
+               end
              )
+
+    assert_receive {:snapshot_refresh_requested, event_ids}
+    assert event_ids == Enum.sort([event_a.id, event_b.id])
 
     for run_id <- [event_a_run.id, event_b_run.id] do
       invalidated = Ash.get!(SyncRun, run_id, domain: Ingestion)
@@ -448,7 +479,20 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
       |> Map.put("date_modified_gmt", woo_datetime(~U[2026-08-05 13:00:00.000000Z]))
       |> put_in(["line_items", Access.at(0), "meta_data"], [])
 
-    assert {:ok, changed} = OrderUpserter.upsert_order(source.id, removed_payload)
+    test_pid = self()
+
+    assert {:ok, changed} =
+             OrderUpserter.upsert_order(
+               source.id,
+               removed_payload,
+               snapshot_refresh_scheduler: fn event_ids ->
+                 send(test_pid, {:snapshot_refresh_requested, event_ids})
+                 :ok
+               end
+             )
+
+    assert_receive {:snapshot_refresh_requested, [scheduled_event_id]}
+    assert scheduled_event_id == event.id
     assert changed.id == order.id
 
     assert [%OrderItem{event_id: nil, source_tickera_event_id: nil}] = order_items(order.id)
@@ -541,6 +585,11 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
     runs = Enum.map(events, &certified_run!/1)
     test_pid = self()
 
+    scheduler = fn event_ids ->
+      send(test_pid, {:snapshot_refresh_requested, event_ids})
+      :ok
+    end
+
     invalidator = fn invalidation_order, event_ids ->
       send(test_pid, {:candidate_event_ids, event_ids})
       HistoricalCoverageInvalidator.invalidate_order_change(invalidation_order, event_ids)
@@ -557,12 +606,14 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
                reconciliation_event.id,
                changed_payload,
                [],
-               historical_coverage_invalidator: invalidator
+               historical_coverage_invalidator: invalidator,
+               snapshot_refresh_scheduler: scheduler
              )
 
     assert reconciled.id == order.id
 
     expected_event_ids = Enum.sort(Enum.map(events, & &1.id))
+    assert_receive {:snapshot_refresh_requested, ^expected_event_ids}
     assert_receive {:candidate_event_ids, ^expected_event_ids}
     assert_receive {:candidate_event_ids, ^expected_event_ids}
 
@@ -648,6 +699,11 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
     run = certified_run!(event)
     test_pid = self()
 
+    scheduler = fn event_ids ->
+      send(test_pid, {:snapshot_refresh_requested, event_ids})
+      :ok
+    end
+
     candidate_resolver = fn _order, _before_snapshot, _after_snapshot, _explicit_event_ids ->
       send(test_pid, :unexpected_candidate_resolver_call)
       {:error, :unexpected_candidate_resolver_call}
@@ -657,6 +713,7 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
              OrderUpserter.upsert_order(
                source.id,
                initial_payload,
+               snapshot_refresh_scheduler: scheduler,
                historical_order_coverage_candidate_resolver: candidate_resolver
              )
 
@@ -670,11 +727,13 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
              OrderUpserter.upsert_order(
                source.id,
                version_only_payload,
+               snapshot_refresh_scheduler: scheduler,
                historical_order_coverage_candidate_resolver: candidate_resolver
              )
 
     assert advanced.id == order.id
     refute_receive :unexpected_candidate_resolver_call
+    refute_receive {:snapshot_refresh_requested, _event_ids}
 
     assert {:ok, current} = HistoricalCoverageResolver.resolve_current(event.id)
     assert current.id == run.id
@@ -876,9 +935,14 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
              OrderUpserter.upsert_order(
                source.id,
                stale_payload,
-               historical_coverage_invalidator: invalidator
+               historical_coverage_invalidator: invalidator,
+               snapshot_refresh_scheduler: fn event_ids ->
+                 send(self(), {:unexpected_snapshot_refresh, event_ids})
+                 {:error, :unexpected_snapshot_refresh}
+               end
              )
 
+    refute_receive {:unexpected_snapshot_refresh, _event_ids}
     persisted = Ash.get!(Order, order.id, domain: Sales)
     assert persisted.raw_total == Decimal.new("900.00")
     assert {:ok, current} = HistoricalCoverageResolver.resolve_current(event.id)
@@ -930,6 +994,76 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
     assert Ash.get!(SyncRun, run.id, domain: Ingestion) == before_certificate
     assert {:ok, current} = HistoricalCoverageResolver.resolve_current(event.id)
     assert current.id == run.id
+  end
+
+  test "snapshot enqueue failure rolls back Order and coverage invalidation", %{
+    source: source,
+    event: event
+  } do
+    initial_payload = payload(@historical_created_at)
+
+    assert {:ok, order} =
+             OrderUpserter.upsert_order(
+               source.id,
+               initial_payload,
+               snapshot_refresh_scheduler: fn _event_ids -> :ok end
+             )
+
+    run = certified_run!(event)
+    before_order = Ash.get!(Order, order.id, domain: Sales)
+    before_items = order_projection(order.id)
+    before_certificate = Ash.get!(SyncRun, run.id, domain: Ingestion)
+
+    changed_payload =
+      initial_payload
+      |> Map.put("date_modified_gmt", woo_datetime(~U[2026-08-05 13:00:00.000000Z]))
+      |> Map.put("total", "901.00")
+      |> put_in(["line_items", Access.at(0), "total"], "901.00")
+
+    scheduler = fn event_ids ->
+      assert event_ids == [event.id]
+      assert :ok = RefreshSnapshotWorker.enqueue_events(event_ids)
+      {:error, :snapshot_refresh_failed_after_insert}
+    end
+
+    assert {:error, :snapshot_refresh_failed_after_insert} =
+             OrderUpserter.upsert_order(
+               source.id,
+               changed_payload,
+               snapshot_refresh_scheduler: scheduler
+             )
+
+    assert Ash.get!(Order, order.id, domain: Sales) == before_order
+    assert order_projection(order.id) == before_items
+    assert Ash.get!(SyncRun, run.id, domain: Ingestion) == before_certificate
+    assert refresh_job_count(event.id) == 0
+  end
+
+  test "an outer transaction rollback removes an OrderUpserter refresh job", %{
+    source: source,
+    event: event
+  } do
+    woo_order_id = 981_267
+    test_pid = self()
+
+    payload =
+      payload(@historical_created_at)
+      |> Map.put("id", woo_order_id)
+      |> Map.put("number", "RSW-#{woo_order_id}")
+
+    assert {:error, :outer_rollback} =
+             Repo.transaction(fn ->
+               assert {:ok, order} = OrderUpserter.upsert_order(source.id, payload)
+               send(test_pid, {:uncommitted_order_id, order.id})
+               Repo.rollback(:outer_rollback)
+             end)
+
+    assert_receive {:uncommitted_order_id, order_id}
+
+    assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Query.NotFound{}]}} =
+             Ash.get(Order, order_id, domain: Sales)
+
+    assert refresh_job_count(event.id) == 0
   end
 
   defp payload(created_at_source, updated_at_source \\ nil) do
@@ -1088,6 +1222,22 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
 
   defp tickera_event_meta(external_event_id) do
     [%{"id" => 1, "key" => "tickera_event_id", "value" => Integer.to_string(external_event_id)}]
+  end
+
+  defp refresh_job_count(event_id) do
+    %{rows: [[count]]} =
+      Repo.query!(
+        """
+        SELECT count(*)
+        FROM oban_jobs
+        WHERE worker = $1
+          AND args ->> 'scope' = 'event'
+          AND args ->> 'event_id' = $2
+        """,
+        [Keyword.fetch!(RefreshSnapshotWorker.__opts__(), :worker), event_id]
+      )
+
+    count
   end
 
   defp fixture(name), do: FixtureHelpers.decode_json_fixture!(:woocommerce, name)

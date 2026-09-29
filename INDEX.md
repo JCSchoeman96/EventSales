@@ -670,9 +670,9 @@ Project root: `.`
   - uses: `Oban.Worker`
 - `EventSales.Analytics.Workers.RefreshSnapshotWorker` - `lib/event_sales/analytics/workers/refresh_snapshot_worker.ex`
   - moduledoc?: true
-  - specs?: false
-  - docs_count: 0
-  - public_funs: `perform/1`
+  - specs?: true
+  - docs_count: 2
+  - public_funs: `enqueue_event/2`, `enqueue_events/2`, `perform/1`
   - uses: `Oban.Worker`
 - `EventSales.Application` - `lib/event_sales/application.ex`
   - moduledoc?: true

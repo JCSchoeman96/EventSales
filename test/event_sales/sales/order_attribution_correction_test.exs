@@ -6,6 +6,7 @@ defmodule EventSales.Sales.OrderAttributionCorrectionTest do
   alias EventSales.Accounts
   alias EventSales.Accounts.Resources.{Role, User, UserRole}
   alias EventSales.Analytics.DashboardCache
+  alias EventSales.Analytics.Workers.RefreshSnapshotWorker
   alias EventSales.Audit
   alias EventSales.Audit.Resources.AuditLog
   alias EventSales.Catalog
@@ -83,12 +84,21 @@ defmodule EventSales.Sales.OrderAttributionCorrectionTest do
                actor: admin
              )
 
+    test_pid = self()
+
     assert {:ok, result} =
              OrderAttributionCorrection.correct_confirmed_order_113834(
                source.id,
                "CORRECT ORDER 113834 109132/109167 FROM 108658 TO 109120",
-               actor: admin
+               actor: admin,
+               snapshot_refresh_scheduler: fn event_ids ->
+                 send(test_pid, {:snapshot_refresh_requested, event_ids})
+                 :ok
+               end
              )
+
+    assert_receive {:snapshot_refresh_requested, event_ids}
+    assert event_ids == Enum.sort([mp_event.id, wr_event.id])
 
     assert result.order_item.id == order_item.id
     assert result.order_item.event_id == wr_event.id
@@ -244,6 +254,42 @@ defmodule EventSales.Sales.OrderAttributionCorrectionTest do
     assert target.id == target_run.id
     assert {:ok, %{total_sold: 5}} = DashboardCache.get_event_summary(mp_event.id)
     assert {:ok, %{total_sold: 0}} = DashboardCache.get_event_summary(wr_event.id)
+  end
+
+  test "refresh scheduling failure rolls back correction, audit, and coverage", %{
+    admin: admin,
+    source: source,
+    order_item: order_item,
+    mp_event: mp_event,
+    wr_event: wr_event
+  } do
+    current_run = certified_run!(mp_event)
+    target_run = certified_run!(wr_event)
+    before_item = Ash.get!(OrderItem, order_item.id, domain: Sales)
+    before_current = Ash.get!(SyncRun, current_run.id, domain: Ingestion)
+    before_target = Ash.get!(SyncRun, target_run.id, domain: Ingestion)
+    before_audit_count = audit_count()
+
+    scheduler = fn event_ids ->
+      assert event_ids == Enum.sort([mp_event.id, wr_event.id])
+      assert :ok = RefreshSnapshotWorker.enqueue_events(event_ids)
+      {:error, :refresh_enqueue_failed}
+    end
+
+    assert {:error, :snapshot_refresh_enqueue_failed} =
+             OrderAttributionCorrection.correct_confirmed_order_113834(
+               source.id,
+               "CORRECT ORDER 113834 109132/109167 FROM 108658 TO 109120",
+               actor: admin,
+               snapshot_refresh_scheduler: scheduler
+             )
+
+    assert Ash.get!(OrderItem, order_item.id, domain: Sales) == before_item
+    assert Ash.get!(SyncRun, current_run.id, domain: Ingestion) == before_current
+    assert Ash.get!(SyncRun, target_run.id, domain: Ingestion) == before_target
+    assert audit_count() == before_audit_count
+    assert refresh_job_count(mp_event.id) == 0
+    assert refresh_job_count(wr_event.id) == 0
   end
 
   test "blocks when current event no longer matches confirmed tuple", %{
@@ -419,6 +465,20 @@ defmodule EventSales.Sales.OrderAttributionCorrectionTest do
     |> Ash.Query.filter(event_type == :order_attribution_corrected)
     |> Ash.read!(domain: Audit)
     |> length()
+  end
+
+  defp refresh_job_count(event_id) do
+    %{rows: [[count]]} =
+      Repo.query!(
+        """
+        SELECT count(*)
+        FROM oban_jobs
+        WHERE worker = $1 AND args ->> 'scope' = 'event' AND args ->> 'event_id' = $2
+        """,
+        [Keyword.fetch!(RefreshSnapshotWorker.__opts__(), :worker), event_id]
+      )
+
+    count
   end
 
   defp install_second_invalidation_failure_trigger! do

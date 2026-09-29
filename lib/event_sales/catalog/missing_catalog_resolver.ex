@@ -11,6 +11,7 @@ defmodule EventSales.Catalog.MissingCatalogResolver do
 
   require Ash.Query
 
+  alias EventSales.Analytics.Workers.RefreshSnapshotWorker
   alias EventSales.Ingestion.HistoricalCoverageInvalidator
   alias EventSales.Ingestion.HistoricalOrderCoverageCandidateResolver
   alias EventSales.Ingestion.HistoricalOrderMutationDetector
@@ -90,7 +91,9 @@ defmodule EventSales.Catalog.MissingCatalogResolver do
            {:ok, before_snapshot} <- capture_order(order, opts),
            {:ok, result} <- recover_items(items),
            {:ok, after_snapshot} <- capture_order(order, opts),
-           :ok <- invalidate_changed_order(order, before_snapshot, after_snapshot, opts) do
+           {:ok, candidate_event_ids} <-
+             invalidate_changed_order(order, before_snapshot, after_snapshot, opts),
+           :ok <- enqueue_mapped_recovery_refreshes(result, candidate_event_ids, opts) do
         result
       else
         {:error, reason} -> Repo.rollback(reason)
@@ -214,7 +217,7 @@ defmodule EventSales.Catalog.MissingCatalogResolver do
 
     case detector.compare(before_snapshot, after_snapshot) do
       %{changed?: false} ->
-        :ok
+        {:ok, []}
 
       %{changed?: true} ->
         with {:ok, candidate_event_ids} <-
@@ -247,10 +250,12 @@ defmodule EventSales.Catalog.MissingCatalogResolver do
     end
   end
 
-  defp invalidate_resolved_candidates(_order, [], _opts), do: :ok
+  defp invalidate_resolved_candidates(_order, [], _opts), do: {:ok, []}
 
   defp invalidate_resolved_candidates(order, candidate_event_ids, opts) do
-    call_coverage_invalidator(order, candidate_event_ids, opts)
+    with :ok <- call_coverage_invalidator(order, candidate_event_ids, opts) do
+      {:ok, candidate_event_ids}
+    end
   end
 
   defp call_coverage_invalidator(order, event_ids, opts) do
@@ -265,6 +270,37 @@ defmodule EventSales.Catalog.MissingCatalogResolver do
       {:ok, _result} -> :ok
       {:error, reason} -> {:error, reason}
       other -> {:error, {:invalid_historical_coverage_invalidator_result, other}}
+    end
+  end
+
+  defp enqueue_mapped_recovery_refreshes(%{mapped: mapped}, event_ids, opts) when mapped > 0 do
+    enqueue_snapshot_refreshes(event_ids, opts)
+  end
+
+  defp enqueue_mapped_recovery_refreshes(_result, _event_ids, _opts), do: :ok
+
+  defp enqueue_snapshot_refreshes([], _opts), do: :ok
+
+  defp enqueue_snapshot_refreshes(event_ids, opts) do
+    scheduler =
+      Keyword.get(opts, :snapshot_refresh_scheduler, &RefreshSnapshotWorker.enqueue_events/1)
+
+    result =
+      case scheduler do
+        scheduler when is_function(scheduler, 1) ->
+          scheduler.(event_ids)
+
+        scheduler when is_atom(scheduler) and not is_nil(scheduler) ->
+          scheduler.enqueue_events(event_ids)
+
+        _other ->
+          {:error, :invalid_snapshot_refresh_scheduler}
+      end
+
+    case result do
+      :ok -> :ok
+      {:error, reason} -> {:error, reason}
+      other -> {:error, {:invalid_snapshot_refresh_scheduler_result, other}}
     end
   end
 

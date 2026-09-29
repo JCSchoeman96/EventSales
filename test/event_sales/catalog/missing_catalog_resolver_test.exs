@@ -3,6 +3,7 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
 
   require Ash.Query
 
+  alias EventSales.Analytics.Workers.RefreshSnapshotWorker
   alias EventSales.Catalog
   alias EventSales.Catalog.MissingCatalogResolver
   alias EventSales.Catalog.Resources.{Event, ProductMapping}
@@ -37,9 +38,18 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
     create_mapping!(source, event_b, ticket_b, %{woo_product_id: 501, woo_variation_id: 601})
     item = create_item!(order, %{woo_product_id: 501, woo_variation_id: 601})
     run = certified_run!(event_b)
+    test_pid = self()
 
     assert {:ok, %{mapped: 1, marked_unmapped: 0, unchanged: 0}} =
-             MissingCatalogResolver.recover_product(source.id, 501, 601)
+             MissingCatalogResolver.recover_product(source.id, 501, 601,
+               snapshot_refresh_scheduler: fn event_ids ->
+                 send(test_pid, {:snapshot_refresh_requested, event_ids})
+                 :ok
+               end
+             )
+
+    assert_receive {:snapshot_refresh_requested, [event_id]}
+    assert event_id == event_b.id
 
     assert Ash.get!(OrderItem, item.id, domain: Sales).mapping_status == :mapped
     assert Ash.get!(OrderItem, item.id, domain: Sales).event_id == event_b.id
@@ -52,6 +62,34 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
     assert invalidated.order_coverage_status == :incomplete
     assert invalidated.refund_coverage_status == :incomplete
     assert %DateTime{} = invalidated.coverage_invalidated_at
+  end
+
+  test "refresh scheduling failure rolls back the recovered mapping and coverage", %{
+    source: source
+  } do
+    order = create_coverage_order!(source)
+    event = SalesHelpers.create_event!(source, %{name: "Rollback Recovered Event"})
+    ticket = SalesHelpers.create_variation_ticket_type!(event, 501, 601)
+    create_mapping!(source, event, ticket, %{woo_product_id: 501, woo_variation_id: 601})
+    item = create_item!(order, %{woo_product_id: 501, woo_variation_id: 601})
+    run = certified_run!(event)
+    before_item = Ash.get!(OrderItem, item.id, domain: Sales)
+    before_coverage = Ash.get!(SyncRun, run.id, domain: Ingestion)
+
+    scheduler = fn event_ids ->
+      assert event_ids == [event.id]
+      assert :ok = RefreshSnapshotWorker.enqueue_events(event_ids)
+      {:error, :snapshot_refresh_failed_after_insert}
+    end
+
+    assert {:error, :snapshot_refresh_failed_after_insert} =
+             MissingCatalogResolver.recover_product(source.id, 501, 601,
+               snapshot_refresh_scheduler: scheduler
+             )
+
+    assert Ash.get!(OrderItem, item.id, domain: Sales) == before_item
+    assert Ash.get!(SyncRun, run.id, domain: Ingestion) == before_coverage
+    assert refresh_job_count(event.id) == 0
   end
 
   test "marks a pending item with a latent exact source Event unmapped and invalidates it", %{
@@ -74,9 +112,17 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
       })
 
     run = certified_run!(event)
+    test_pid = self()
 
     assert {:ok, %{mapped: 0, marked_unmapped: 1, unchanged: 0}} =
-             MissingCatalogResolver.recover_product(source.id, 501, 601)
+             MissingCatalogResolver.recover_product(source.id, 501, 601,
+               snapshot_refresh_scheduler: fn event_ids ->
+                 send(test_pid, {:unexpected_snapshot_refresh, event_ids})
+                 {:error, :unexpected_snapshot_refresh}
+               end
+             )
+
+    refute_receive {:unexpected_snapshot_refresh, _event_ids}
 
     assert Ash.get!(OrderItem, item.id, domain: Sales).mapping_status == :unmapped
 
@@ -275,10 +321,18 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
       {:error, :unexpected_d2a_call}
     end
 
+    test_pid = self()
+
     assert {:ok, %{mapped: 0, marked_unmapped: 0, unchanged: 1}} =
              MissingCatalogResolver.recover_product(source.id, 501, 601,
-               historical_coverage_invalidator: invalidator
+               historical_coverage_invalidator: invalidator,
+               snapshot_refresh_scheduler: fn event_ids ->
+                 send(test_pid, {:unexpected_snapshot_refresh, event_ids})
+                 {:error, :unexpected_snapshot_refresh}
+               end
              )
+
+    refute_receive {:unexpected_snapshot_refresh, _event_ids}
 
     refute_receive :unexpected_d4b2_d2a_call
     assert {:ok, current} = HistoricalCoverageResolver.resolve_current(event_b.id)
@@ -695,6 +749,20 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
       domain: Ingestion
     )
     |> Ash.update!(%{}, action: :complete, domain: Ingestion)
+  end
+
+  defp refresh_job_count(event_id) do
+    %{rows: [[count]]} =
+      Repo.query!(
+        """
+        SELECT count(*)
+        FROM oban_jobs
+        WHERE worker = $1 AND args ->> 'scope' = 'event' AND args ->> 'event_id' = $2
+        """,
+        [Keyword.fetch!(RefreshSnapshotWorker.__opts__(), :worker), event_id]
+      )
+
+    count
   end
 
   defp create_coverage_order!(source, created_at_source \\ @within_sales_scope) do

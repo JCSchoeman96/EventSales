@@ -5,6 +5,7 @@ defmodule EventSales.Sales.OrderUpserter do
 
   require Ash.Query
 
+  alias EventSales.Analytics.Workers.RefreshSnapshotWorker
   alias EventSales.Ingestion.HistoricalCoverageInvalidator
   alias EventSales.Ingestion.HistoricalOrderCoverageCandidateResolver
   alias EventSales.Ingestion.HistoricalOrderMutationDetector
@@ -203,7 +204,8 @@ defmodule EventSales.Sales.OrderUpserter do
        ) do
     with {:ok, candidates} <-
            resolve_coverage_candidates(order, nil, after_snapshot, reconciliation_event_id, opts),
-         :ok <- invalidate_new_order(order, candidates, opts) do
+         :ok <- invalidate_new_order(order, candidates, opts),
+         :ok <- enqueue_snapshot_refreshes(candidates, opts) do
       {:ok, order}
     end
   end
@@ -237,7 +239,8 @@ defmodule EventSales.Sales.OrderUpserter do
                  true,
                  candidates,
                  opts
-               ) do
+               ),
+             :ok <- enqueue_snapshot_refreshes(candidates, opts) do
           {:ok, order}
         end
     end
@@ -333,6 +336,31 @@ defmodule EventSales.Sales.OrderUpserter do
       {:ok, _result} -> :ok
       {:error, reason} -> {:error, reason}
       other -> {:error, {:invalid_historical_coverage_invalidator_result, other}}
+    end
+  end
+
+  defp enqueue_snapshot_refreshes([], _opts), do: :ok
+
+  defp enqueue_snapshot_refreshes(event_ids, opts) do
+    scheduler =
+      Keyword.get(opts, :snapshot_refresh_scheduler, &RefreshSnapshotWorker.enqueue_events/1)
+
+    result =
+      case scheduler do
+        scheduler when is_function(scheduler, 1) ->
+          scheduler.(event_ids)
+
+        scheduler when is_atom(scheduler) and not is_nil(scheduler) ->
+          scheduler.enqueue_events(event_ids)
+
+        _other ->
+          {:error, :invalid_snapshot_refresh_scheduler}
+      end
+
+    case result do
+      :ok -> :ok
+      {:error, reason} -> {:error, reason}
+      other -> {:error, {:invalid_snapshot_refresh_scheduler_result, other}}
     end
   end
 
