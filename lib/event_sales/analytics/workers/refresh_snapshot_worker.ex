@@ -25,6 +25,7 @@ defmodule EventSales.Analytics.Workers.RefreshSnapshotWorker do
   alias Oban.Job
 
   @pending_states ~w(suspended scheduled available retryable)
+  @event_scheduler_lock_namespace "eventsales:analytics:event-snapshot-refresh:v1:"
 
   @doc "Enqueues a refresh request for one event."
   @spec enqueue_event(Ecto.UUID.t() | String.t(), keyword()) :: :ok | {:error, term()}
@@ -178,14 +179,59 @@ defmodule EventSales.Analytics.Workers.RefreshSnapshotWorker do
   end
 
   defp insert_event_jobs(event_ids, opts) do
-    insert_job = Keyword.get(opts, :oban_insert, &Oban.insert/1)
+    insert_job =
+      Keyword.get(opts, :oban_insert, fn changeset ->
+        Oban.insert(changeset, retry: false)
+      end)
 
+    if Repo.in_transaction?() do
+      insert_event_jobs_in_transaction(event_ids, insert_job)
+    else
+      insert_event_jobs_in_own_transaction(event_ids, insert_job)
+    end
+  end
+
+  defp insert_event_jobs_in_own_transaction(event_ids, insert_job) do
+    Repo.transaction(fn ->
+      insert_event_jobs_or_rollback(event_ids, insert_job)
+    end)
+    |> case do
+      {:ok, :ok} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp insert_event_jobs_or_rollback(event_ids, insert_job) do
+    case insert_event_jobs_in_transaction(event_ids, insert_job) do
+      :ok -> :ok
+      {:error, reason} -> Repo.rollback(reason)
+    end
+  end
+
+  defp insert_event_jobs_in_transaction(event_ids, insert_job) do
     Enum.reduce_while(event_ids, :ok, fn event_id, :ok ->
-      case insert_event_job(insert_job, event_id) do
-        :ok -> {:cont, :ok}
+      with :ok <- acquire_event_scheduler_lock(event_id),
+           :ok <- insert_event_job(insert_job, event_id) do
+        {:cont, :ok}
+      else
         {:error, reason} -> {:halt, {:error, reason}}
       end
     end)
+  end
+
+  defp acquire_event_scheduler_lock(event_id) do
+    Repo.query("SELECT pg_advisory_xact_lock($1)", [event_scheduler_lock_key(event_id)])
+    |> case do
+      {:ok, _result} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp event_scheduler_lock_key(event_id) do
+    <<lock_key::signed-big-64, _rest::binary>> =
+      :crypto.hash(:sha256, @event_scheduler_lock_namespace <> event_id)
+
+    lock_key
   end
 
   defp new_event_job(event_id) do

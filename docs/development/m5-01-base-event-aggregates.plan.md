@@ -1,12 +1,12 @@
 ---
 Plan ID: m5-01-base-event-aggregates
-Plan version: v3
+Plan version: v4
 Status: M5-01A COMPLETE; M5-01-G1 / B23 implemented by the M5-01B candidate, not certified; M5-01 IN PROGRESS
 Scope: M5-01 base event-level canonical aggregate foundations and B23 orchestration candidate
 Authority: `docs/path-1/path-1-phase-breakdown.md` (M5-01 row); PRE-M5-02F + PRE-M5-TIME-G evidence; M1-04–M1-08 contracts (locked)
 Historical context: PRE-M5-02 metrics foundation plans and evidence; do not reopen locked PRE-M5 semantics
 Last updated: 2026-09-29
-Change summary (v3): M5-01B implements transactional event snapshot refresh orchestration at authoritative mutation seams; B23 remains uncertified pending M5-01C.
+Change summary (v4): v3 exposed a production-only Oban Basic uniqueness lock-contention gap because test mode bypassed advisory uniqueness locking. M5-01B now serializes event refresh scheduling with a namespaced transaction advisory lock and uses Oban 2.24.0's `retry: false` pass-through; production-mode concurrency proofs are required. B23 remains uncertified pending M5-01C.
 ---
 
 ### Revision log
@@ -14,6 +14,7 @@ Change summary (v3): M5-01B implements transactional event snapshot refresh orch
 - v1 — M5-01A audit against `047b645` / tree `d188ce84`; B01–B22 matrix; CERTIFICATION_ONLY decision; next slice M5-01B.
 - v2 — B23 durable snapshot refresh orchestration gap; `M5-01_DECISION = IMPLEMENTATION_REQUIRED`; distinguish certified refresh safety from missing post-mutation enqueue; next M5-01B implementation / M5-01C certification.
 - v3 — M5-01A marked complete; M5-01B implements B23 as a candidate using same-transaction refresh intent, pending coalescing, and an executing-job trailing refresh; M5-01C remains the certification slice.
+- v4 — v3 exposed production-only Basic Oban unique-lock contention because test mode bypassed advisory uniqueness locking. Record the event-scoped transaction-lock correction, Oban 2.24.0 nested-transaction option forwarding, and production-mode contention proofs; B23 remains uncertified.
 
 # M5-01 — Base event aggregates
 
@@ -167,7 +168,9 @@ CURRENT
   |> CURRENT
 ```
 
-A pending conflict updates only `meta.refresh_request_id` without moving `scheduled_at`. The scheduler rereads the conflicted row with `SELECT ... FOR UPDATE` in the caller's transaction. If a worker claimed the row between Oban's uniqueness lookup and metadata replacement, the scheduler makes one bounded trailing insert; if it cannot confirm durable pending intent, it returns an error so the mutation rolls back. `executing` is excluded from uniqueness. The fence continues to serialize the actual refresh operation.
+A pending conflict updates only `meta.refresh_request_id` without moving `scheduled_at`. Before each event insertion, the scheduler takes a blocking, transaction-scoped PostgreSQL advisory lock derived from a namespaced SHA-256 hash of the canonical UUID. The lock is held by the same EventSales transaction as the mutation and Oban insert. UUIDs are sorted before lock acquisition. This serializes same-event scheduling before Oban Basic's non-blocking uniqueness lock can report an idless conflict; `id: nil` remains an enqueue failure and is never treated as durable intent. A persisted pending conflict still updates only `meta` and is verified under `SELECT ... FOR UPDATE`. If a worker claimed the row between Oban's uniqueness lookup and metadata replacement, the scheduler makes one bounded trailing insert. `executing` is excluded from uniqueness. Oban 2.24.0 forwards `retry: false` from Basic unique insertion into `Oban.Repo.transaction/3`, preventing nested transaction retry loops inside the application transaction. The existing `EventSnapshotRefreshFence` continues to serialize refresh execution.
+
+Same-event mutations wait on the event lock until the scheduling transaction commits or rolls back. The lock is acquired immediately before each job insert, after each mutation has resolved its candidates, and is retained through the encompassing transaction. This is per-event serialization; distinct event IDs proceed independently. Multi-event locks are acquired in deterministic UUID order. SHA-256 truncation collisions can reduce concurrency but cannot weaken correctness. No global lock or scan is introduced.
 
 The candidate refreshes only exact before+after event candidates already resolved at the durable mutation boundaries. ProductMapping-only changes are not an aggregate mutation; mapping and attribution paths schedule only when durable OrderItem event membership actually changes.
 
@@ -255,7 +258,7 @@ Persist refresh intent transactionally with authoritative durable mutations that
 - `MissingCatalogResolver`: mapped recovery only, using existing before+after order candidates
 - `OrderAttributionCorrection`: audited correction's before+after candidates
 
-Reuse `RefreshSnapshotWorker`; enqueue event jobs one at a time in sorted UUID order. Pending states coalesce with an `infinity` uniqueness period and a transactional `meta` replacement. Exclude `executing` so a mutation during refresh leaves a trailing pending job. `EventSnapshotRefreshFence` remains execution serialization. No second worker, Redis lock, GenServer serializer, resource, migration, index, dependency, or cache layer is added.
+Reuse `RefreshSnapshotWorker`; enqueue event jobs one at a time in sorted UUID order. A namespaced per-event `pg_advisory_xact_lock` serializes scheduling within the mutation transaction before the normal Oban Basic unique insertion. Oban is upgraded to 2.24.0, whose Basic engine forwards `retry: false` into its nested transaction. Pending states coalesce with an `infinity` uniqueness period and a transactional `meta` replacement. Exclude `executing` so a mutation during refresh leaves a trailing pending job. `EventSnapshotRefreshFence` remains execution serialization. No second worker, Redis lock, GenServer serializer, resource, migration, index, new dependency, or cache layer is added.
 
 ---
 
@@ -266,6 +269,7 @@ NEW_RESOURCE = NO
 MIGRATION = NO
 NEW_INDEX = NO
 NEW_DEPENDENCY = NO
+OBAN_VERSION_CHANGE = 2.22.1 → 2.24.0
 NEW_CACHE_LAYER = NO
 PRODUCTION_ORCHESTRATION_CHANGE = YES
 ```
@@ -286,7 +290,7 @@ M5-01B implementation candidate:
 1. Enqueue refresh intent in the same transaction as order/refund/attribution mutations.
 2. Reuse exact before+after event candidates, including events losing their last mapped line.
 3. Coalesce pending jobs, allow a trailing job while another executes, and retain the existing refresh fence.
-4. Prove rollback, pending conflict row-lock behavior, and deterministic event ordering with focused tests.
+4. Prove production Basic contention under TX-A commit and rollback, executing trailing work, distinct-event independence, pending row-lock behavior, outer rollback, and deterministic multi-event ordering with focused tests.
 5. Change no snapshot implementation, source freshness projection, readiness semantics, or hot/warm/cold ownership.
 
 M5-01C (next; certification, not yet complete) should:
