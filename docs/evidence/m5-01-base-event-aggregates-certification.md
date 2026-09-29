@@ -3,21 +3,30 @@
 | Field | Value |
 | --- | --- |
 | Plan ID | m5-01-base-event-aggregates |
+| Evidence version | v2 |
 | Plan version (authority at start) | v4 |
+| Plan version (current) | v6 |
 | Certification slice | M5-01C |
-| Linear | JC-292 |
-| Status | Certification complete on branch; PR not merged |
+| Linear | JC-292 (Done); programme closeout JC-293 |
+| Status | MERGED AND CERTIFIED |
 | Scope | Certify M5-01 requirements B01–B23 on merged M5-01B base |
-| Programme base SHA | `f420437ab6ab5ab7a72db8e164ba08c59cbed328` |
-| Programme base tree | `f8245055c3a7acc8c7f3ee2891434d3a076ba9b6` |
+| Programme base SHA (M5-01B) | `f420437ab6ab5ab7a72db8e164ba08c59cbed328` |
+| Programme base tree (M5-01B) | `f8245055c3a7acc8c7f3ee2891434d3a076ba9b6` |
 | M5-01B merge | PR #268 on `main` at base SHA above |
 | M5-01B implementation HEAD (reviewed) | `63acf204c9fe5098d65b51cb825a7d7b2110f729` |
-| Branch | `path1/m5-01c-base-event-aggregates-certification` |
-| Authority | `docs/development/m5-01-base-event-aggregates.plan.md` v4→v5; locked M1-04–M1-08; PRE-M5-02F; PRE-M5-TIME-G |
+| Certification PR | #269 |
+| Approved HEAD | `24c6de35b6f0fa7ac67ba01a44c4a0b3a1752176` |
+| Merge SHA | `42d830343c3baa714cec2eda8568d00ddb981abe` |
+| Merge tree | `cbf5b19ddbdaabc6cf8ba86b177aeccefb4e8b96` |
+| Exact-head CI (pre-merge) | run `36578565067`; 6/6 PASS; 2596 tests, 0 failures |
+| Merge-SHA CI | none recorded at M5-01D closeout preparation |
+| Branch (historical) | `path1/m5-01c-base-event-aggregates-certification` |
+| Authority | `docs/development/m5-01-base-event-aggregates.plan.md` v6; locked M1-04–M1-08; PRE-M5-02F; PRE-M5-TIME-G |
 | Last updated | 2026-09-29 |
 
 ### Revision log
 
+- `v2` — Record PR #269 merge identity; status MERGED AND CERTIFIED; M5-01 COMPLETE on `main`; preserve B01–B23 PASS and residual advisory-lock capacity note.
 - `v1` — M5-01C acceptance matrix B01–B23, B23 seam and transactional proof, regression and scope isolation, performance review, focused test bundle, verdict.
 
 ---
@@ -294,16 +303,16 @@ PR exact-head CI: recorded in repository final report after push.
 B01–B23 = PASS
 M5-01-G1 / B23 = CERTIFIED
 M5-01 CERTIFICATION = PASS
-M5-01 = COMPLETE_EFFECTIVE_ON_MERGE
+M5-01 = COMPLETE (PASS)
 ```
 
-Effective completion requires independent review and merge of the M5-01C certification PR. This evidence does not claim the certification PR has merged.
+Certification PR #269 merged at `42d830343c3baa714cec2eda8568d00ddb981abe` (merge tree `cbf5b19ddbdaabc6cf8ba86b177aeccefb4e8b96`). Merge tree matches approved HEAD `24c6de35b6f0fa7ac67ba01a44c4a0b3a1752176`. No merge-SHA workflow run was recorded when M5-01D closeout was prepared.
 
 ---
 
 ## 12. Residual risks / future performance work
 
-- Same-event scheduling waiters may block on `pg_advisory_xact_lock` under high write concurrency; exercise in dedicated performance certification.
+- Same-event scheduling waiters use a blocking PostgreSQL transaction advisory lock and may occupy database connections under dense contention. Treat as a performance/load concern for later M5-09 / M7-06 certification, not a correctness defect.
 - SHA-256 lock key truncation is a theoretical concurrency reduction, not a correctness weakening (documented in plan v4).
 
 ---
@@ -312,5 +321,4 @@ Effective completion requires independent review and merge of the M5-01C certifi
 
 - No production code, migration, index, dependency, or formula changes.
 - No M5-02–M5-09 implementation.
-- No programme handoff closeout until this PR merges.
-- No merge of the certification PR within M5-01C.
+- Programme handoff closeout is M5-01D (JC-293), separate from this certification merge.
