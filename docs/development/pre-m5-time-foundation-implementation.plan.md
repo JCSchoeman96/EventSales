@@ -1,12 +1,12 @@
 ---
 Plan ID: pre-m5-time-foundation-implementation
-Plan version: v3
-Status: active execution plan (PRE-M5-TIME-A docs-only baseline)
+Plan version: v4
+Status: COMPLETE (PASS) — PRE-M5-TIME certified and closed
 Scope: PRE-M5-TIME-B through PRE-M5-TIME-G sequencing; M1-07 physical conformance on certified main
 Authority: M1-07 T1–T31 = semantic authority; this PRE-M5-TIME plan = current physical/repository implementation authority
 Historical context: `docs/path-1/m1-07-timestamp-johannesburg-period-and-freshness-contract.md` (locked semantics; repository observations superseded here)
-Last updated: 2026-09-28
-Change summary (v3): Resolve `ALL_EVENTS_FRESHNESS_POLICY` as `COMBINED_SIGNALS`; keep worst event classification independent from the newest portfolio anchor
+Last updated: 2026-09-29
+Change summary (v4): TIME-G1 certification merged and passed exact merge-SHA CI; `GAP-PRE-M5-TIME` closed; M5 authorized.
 ---
 
 ### Revision log
@@ -14,6 +14,7 @@ Change summary (v3): Resolve `ALL_EVENTS_FRESHNESS_POLICY` as `COMBINED_SIGNALS`
 - v1 — PRE-M5-TIME-A current-repo reconciliation + physical implementation plan at merge `5746edb8a2c272b1e6c0ce16153f9063c8e78925`
 - v2 — PR #254 review: separate sync source-observed watermark from historical coverage; remove fourth freshness enum; fix M5/M6 typo; lock owner-decision deadlines
 - v3 — owner decision: `ALL_EVENTS_FRESHNESS_POLICY = COMBINED_SIGNALS`
+- v4 — TIME-G1 certified by PR #264 / `c1fc8cd02b1809d3fd97e379b16dfec29d65b870` / CI #695; `CUSTOM_RANGE_MAX` remains 90 Johannesburg civil days; `COMBINED_SIGNALS` remains locked; programme closeout authorizes M5.
 
 # PRE-M5-TIME — Time, period and source-freshness foundation
 
@@ -701,6 +702,27 @@ M1-07 T1–T31 unchanged; physical gaps closed
 ```
 
 ---
+
+## Final programme closeout
+
+```text
+PRE-M5-TIME = COMPLETE (PASS)
+
+Certification:
+PR #264
+approved head c23053a4f1c0d98f502a23f938f3b7c6ecc4a977
+merge c1fc8cd02b1809d3fd97e379b16dfec29d65b870
+merge tree 0a2db09c3634a19ebb9c9e253794cd67b2658703
+CI #695 / 36525412734 — 6/6 PASS
+
+GAP-PRE-M5-READY-IX = CLOSED
+GAP-PRE-M5-METRICS = CLOSED
+GAP-PRE-M5-TIME = CLOSED
+M5 = AUTHORIZED
+NEXT = M5-01 — Base Event Aggregates
+```
+
+The original baseline audit and pre-closeout gate conditions above remain historical. This v4 closeout block records the final programme state.
 
 # 20. Risks and edge cases
 
