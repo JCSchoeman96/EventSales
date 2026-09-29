@@ -2,7 +2,7 @@
 Plan ID: m5-01-base-event-aggregates
 Plan version: v5
 Status: M5-01A COMPLETE; M5-01B MERGED at `f420437`; M5-01C certification evidence on branch (PR pending review); M5-01 closes on M5-01C merge
-Scope: M5-01 base event-level canonical aggregate foundations and B23 orchestration candidate
+Scope: M5-01 base event-level canonical aggregate foundations and B23 durable refresh orchestration (merged; certified on M5-01C branch; effective on PR #269 merge)
 Authority: `docs/path-1/path-1-phase-breakdown.md` (M5-01 row); PRE-M5-02F + PRE-M5-TIME-G evidence; M1-04–M1-08 contracts (locked)
 Historical context: PRE-M5-02 metrics foundation plans and evidence; do not reopen locked PRE-M5 semantics
 Last updated: 2026-09-29
@@ -131,14 +131,15 @@ Conceptual states (not persisted enums):
 | CURRENT | At least one v2 row per canonical currency after successful `SnapshotRefresh.refresh_event/2`; rows reflect the aggregation at that refresh |
 | STALE | **Target contract:** durable facts affecting the event changed since the last successful refresh, but v2 rows still exist. There is no persisted STALE flag; M5-01B now persists refresh intent in the mutation transaction |
 
-### Certified refresh behavior and B23 orchestration candidate
+### Certified refresh behavior and B23 orchestration
 
 ```text
 Refresh operation safety (when refresh_event/2 runs)
   IMPLEMENTED / CERTIFIED — PRE-M5-02F; concurrency and rollback tests
 
 Automatic CURRENT → detect lag → queue refresh → CURRENT
-  IMPLEMENTED CANDIDATE by M5-01B; M5-01C certification is pending
+  IMPLEMENTED — merged in M5-01B (#268)
+  CERTIFIED — M5-01C evidence PASS on PR #269 branch; programme-effective on M5-01C merge
 ```
 
 Do not treat `EventAggregateSnapshot.source_watermark_at` as proof the durable aggregate incorporated later facts. It is refresh-time metadata from order-item scope (`event_source_metadata/1` in `SnapshotRefresh`), not M1-07 source-freshness authority and not a refund/sync freshness model.
@@ -161,7 +162,7 @@ The notifiers retain their separate responsibilities: `OrderProcessedNotifier` u
 
 There is no terminal projection state or new readiness gate. The durable refresh job is a repairable cold read-model task; existing readers and M4 readiness semantics remain unchanged.
 
-**Mutation → pending → refresh → current (M5-01B candidate; certification pending)**
+**Mutation → pending → refresh → current (merged B23; certified on M5-01C branch)**
 
 ```text
 CURRENT
@@ -176,7 +177,7 @@ A pending conflict updates only `meta.refresh_request_id` without moving `schedu
 
 Same-event mutations wait on the event lock until the scheduling transaction commits or rolls back. The lock is acquired immediately before each job insert, after each mutation has resolved its candidates, and is retained through the encompassing transaction. This is per-event serialization; distinct event IDs proceed independently. Multi-event locks are acquired in deterministic UUID order. SHA-256 truncation collisions can reduce concurrency but cannot weaken correctness. No global lock or scan is introduced.
 
-The candidate refreshes only exact before+after event candidates already resolved at the durable mutation boundaries. ProductMapping-only changes are not an aggregate mutation; mapping and attribution paths schedule only when durable OrderItem event membership actually changes.
+The orchestration refreshes only exact before+after event candidates already resolved at the durable mutation boundaries. ProductMapping-only changes are not an aggregate mutation; mapping and attribution paths schedule only when durable OrderItem event membership actually changes.
 
 **STALE → CURRENT (manual / test today)**
 
@@ -253,7 +254,7 @@ B01–B23 pass in M5-01C evidence on base `f420437`. Programme effective closeou
 IMPLEMENTED_NOT_CERTIFIED_IDS = (none on certified branch evidence)
 ```
 
-**M5-01-G1 — Event-scoped durable snapshot refresh orchestration (implemented candidate; certification pending)**
+**M5-01-G1 — Event-scoped durable snapshot refresh orchestration (merged; certified on M5-01C branch; effective on PR #269 merge)**
 
 Persist refresh intent transactionally with authoritative durable mutations that affect `EventAggregateSnapshot` membership or financial primitives:
 
@@ -282,14 +283,15 @@ Existing uniqueness: `analytics_event_aggregate_snapshots_unique_event_currency_
 
 ---
 
-## 8. Proposed next slice
+## 8. Programme sequencing (current)
 
 ```text
-M5-01B = implement smallest event-scoped durable snapshot refresh scheduling delta for M5-01-G1 (B23) — IMPLEMENTED CANDIDATE
-M5-01C = certify B01–B23 and close M5-01 — NEXT
+M5-01B = MERGED (#268 / f420437)
+M5-01C = CERTIFICATION COMPLETE ON BRANCH; PR #269 AWAITING REVIEW/MERGE
+NEXT = programme closeout only after M5-01C merge
 ```
 
-M5-01B implementation candidate:
+M5-01B delivered (merged):
 
 1. Enqueue refresh intent in the same transaction as order/refund/attribution mutations.
 2. Reuse exact before+after event candidates, including events losing their last mapped line.

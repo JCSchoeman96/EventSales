@@ -84,16 +84,16 @@ Production: `EventSales.Sales.OrderUpserter` calls `enqueue_snapshot_refreshes/2
 
 ### RefundUpserter
 
-Production: `finalize_refund_comparison/6` enqueues when `refresh_snapshot?` or `refund_snapshot_aggregates?/1` on before or after snapshot (`source_state: :active`, `detail_status: :complete`). Candidate event IDs come from `HistoricalRefundMutationDetector`.
+Production: `finalize_refund_comparison/6` enqueues when `refresh_snapshot?` or `refund_snapshot_aggregates?/1` on **either** before or after snapshot. An aggregate-contributing refund snapshot is `source_state: :active` and `detail_status: :complete`. Candidate event IDs come from `HistoricalRefundMutationDetector`.
 
 | Seam | Evidence | M5-01C result |
 | --- | --- | --- |
 | Qualifying active refund creation | `RefundUpserterHistoricalCoverageTest` — `"new normalized historical detail invalidates its exact Event certificate"` | PASS |
 | Qualifying active refund update (aggregate-affecting) | Production guard on before/after complete active snapshots; reference-only→complete persists lines (`"reference-only to complete persists lines before invalidating both exact Events"`) with default scheduler path in production | PASS |
-| Active complete → unresolved | `"new malformed detail invalidates every bounded parent Event"` asserts no refresh (`refute_receive {:unexpected_snapshot_refresh}`) | PASS (no refresh scheduled; locked semantics) |
-| Active → voided / source-deleted | `"active to voided invalidates the BEFORE exact Event candidates"` via `mark_source_deleted/5` with scheduler assertion | PASS |
-| Before-state events when refund contribution disappears | `"malformed replay of an active complete refund refreshes its prior aggregate events"` | PASS |
-| Unresolved / reference-only detail without aggregate truth | `"new reference-only detail invalidates every bounded parent Event"` — `refute_receive` unexpected refresh | PASS |
+| Active complete → unresolved | `"malformed replay of an active complete refund refreshes its prior aggregate events"` — `assert_receive` with `event_ids == Enum.sort([event_a.id, event_b.id])`; before snapshot qualified, so removed refund contribution is recomputed | PASS |
+| New unresolved / malformed detail without prior qualifying aggregate truth | `"new malformed detail invalidates every bounded parent Event"` — `refute_receive {:unexpected_snapshot_refresh}`; no prior active+complete contribution | PASS — no snapshot refresh |
+| Reference-only detail without aggregate truth | `"new reference-only detail invalidates every bounded parent Event"` — `refute_receive` unexpected refresh | PASS — no snapshot refresh |
+| Active → voided / source-deleted | `"active to voided invalidates the BEFORE exact Event candidates"` via `mark_source_deleted/5` with scheduler assertion | PASS — refreshes BEFORE-state aggregate event IDs |
 | Enqueue failure rolls back refund mutation | `"snapshot enqueue failure rolls back active refund facts and coverage invalidation"` | PASS |
 
 ### MissingCatalogResolver
