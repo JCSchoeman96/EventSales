@@ -8,7 +8,7 @@
 | Authority | This document wins for current program priority and Path 2 resume procedure |
 | Durable Phase 5D evidence | `docs/phase-5d/native-v3-e2e-run-report.md` |
 | Historical Phase 5D certification commit | `c286fd0e647199a261b6ef2ec3791617dacb5834` |
-| Handoff version | `v24` |
+| Handoff version | `v25` |
 | Last updated | 2026-09-29 |
 | Path 1 repository truth | `docs/path-1/m1-01-current-repo-truth.md` |
 | Path 1 execution roadmap | `docs/path-1/path-1-phase-breakdown.md` |
@@ -47,6 +47,7 @@
 - `v22` — PRE-M5-01A/01B COMPLETE (PASS); PR #243 + PR #244; `GAP-PRE-M5-READY-IX` CLOSED; PRE-M5-02A metrics conformance spec landed; next = PRE-M5-02 metrics foundation (PRE-M5-02B); METRICS/TIME OPEN; M5 BLOCKED
 - `v23` — PRE-M5-02B through PRE-M5-02F COMPLETE (PASS); PR #251 metrics certification merged and post-merge CI passed; `GAP-PRE-M5-METRICS` CLOSED; `GAP-PRE-M5-TIME` remains OPEN; M5 remains BLOCKED; next = PRE-M5-TIME
 - `v24` — PRE-M5-TIME COMPLETE (PASS); TIME-G1 PR #264 merged as `c1fc8cd02b1809d3fd97e379b16dfec29d65b870` with exact merge-SHA CI #695 / 36525412734 6/6 PASS; `GAP-PRE-M5-TIME` CLOSED; all PRE-M5 gates CLOSED; M5 AUTHORIZED; next = M5-01 Base Event Aggregates.
+- `v25` — M5-01 COMPLETE (PASS); M5-01B PR #268; M5-01C certification PR #269 merged `42d830343c3baa714cec2eda8568d00ddb981abe` (tree `cbf5b19ddbdaabc6cf8ba86b177aeccefb4e8b96`); B01–B23 certified; next = M5-02 — Ticket/Product/Variation Aggregates.
 
 ### Conflict rule
 
@@ -199,12 +200,17 @@ PRE-M5-02F evidence: PR #251; merge bd916712be4657555c7a17cfe604e69cdf790729; po
 PRE-M5-TIME: COMPLETE (PASS)
 PRE-M5-TIME evidence: `docs/evidence/pre-m5-time-g-certification.md`
 TIME-G1: COMPLETE (PASS); PR #264; approved head `c23053a4f1c0d98f502a23f938f3b7c6ecc4a977`; merge `c1fc8cd02b1809d3fd97e379b16dfec29d65b870`; tree `0a2db09c3634a19ebb9c9e253794cd67b2658703`; CI #695 / 36525412734 PASS
-Current Path 1 task: M5-01 — Base Event Aggregates
+M5-01: COMPLETE (PASS)
+M5-01 B01–B23: CERTIFIED
+M5-01 implementation: PR #268
+M5-01 certification: PR #269
+M5-01 merge authority: 42d830343c3baa714cec2eda8568d00ddb981abe
+Current Path 1 task: M5-02 — Ticket/Product/Variation Aggregates
 GAP-PRE-M5-METRICS: CLOSED
 GAP-PRE-M5-TIME: CLOSED
 GAP-PRE-M5-READY-IX: CLOSED
 M5 AUTHORIZATION: AUTHORIZED
-NEXT: M5-01 — Base Event Aggregates
+NEXT: M5-02 — Ticket/Product/Variation Aggregates
 
 PATH 2 — AUTOMATIC SYNC / CATALOGUE AUTOMATION
 Status: PAUSED AT CERTIFIED CHECKPOINT
@@ -595,7 +601,7 @@ M7 — Production Certification / Pilot
 
 ```text
 CURRENT NEXT STEP:
-M5-01 — Base Event Aggregates
+M5-02 — Ticket/Product/Variation Aggregates
 
 M5:
 AUTHORIZED (PRE-M5-TIME COMPLETE; all PRE-M5 gates CLOSED)
@@ -778,7 +784,7 @@ GAP-PRE-M5-READY-IX:
 CLOSED
 
 NEXT:
-M5-01 — Base Event Aggregates
+M5-02 — Ticket/Product/Variation Aggregates
 
 M5 AUTHORIZATION:
 AUTHORIZED
@@ -853,9 +859,9 @@ M3-01 through M3-08 are COMPLETE (PASS). M4-01 through M4-07 are COMPLETE (PASS)
 
 PRE-M5-01A and PRE-M5-01B are COMPLETE (PASS) via PR #243 and PR #244. `GAP-PRE-M5-READY-IX` is CLOSED. PRE-M5-02A metrics conformance specification is COMPLETE in `docs/development/`.
 
-PRE-M5-02B through PRE-M5-02F are COMPLETE (PASS). PR #251 merged at `bd916712be4657555c7a17cfe604e69cdf790729`; post-merge CI #654 / 36228450299 passed. TIME-G1 is COMPLETE (PASS) via PR #264, merge `c1fc8cd02b1809d3fd97e379b16dfec29d65b870`, and exact merge-SHA CI #695 / 36525412734 passed all six jobs. All PRE-M5 gates are CLOSED. M5 is AUTHORIZED, and the next programme step is M5-01 — Base Event Aggregates.
+PRE-M5-02B through PRE-M5-02F are COMPLETE (PASS). PR #251 merged at `bd916712be4657555c7a17cfe604e69cdf790729`; post-merge CI #654 / 36228450299 passed. TIME-G1 is COMPLETE (PASS) via PR #264, merge `c1fc8cd02b1809d3fd97e379b16dfec29d65b870`, and exact merge-SHA CI #695 / 36525412734 passed all six jobs. All PRE-M5 gates are CLOSED. M5-01 is COMPLETE (PASS) via implementation PR #268 and certification PR #269 (merge `42d830343c3baa714cec2eda8568d00ddb981abe`; B01–B23 certified). The next programme step is M5-02 — Ticket/Product/Variation Aggregates after M5-01D closeout PR merge.
 
-Do not reopen M2-07 scope. M5-01 Base Event Aggregates is the next authorized implementation task.
+Do not reopen M2-07 scope. M5-02 is not implementation-authorized until the M5-01D programme closeout PR merges independently.
 
 ---
 
@@ -922,7 +928,22 @@ PATH 1 — TRUSTED MANAGEMENT ANALYTICS
 ACTIVE
 
 Current Path 1 task:
-M5-01 — Base Event Aggregates
+M5-02 — Ticket/Product/Variation Aggregates
+
+M5-01:
+COMPLETE (PASS)
+
+M5-01 B01–B23:
+CERTIFIED
+
+M5-01 implementation:
+PR #268
+
+M5-01 certification:
+PR #269
+
+M5-01 merge authority:
+42d830343c3baa714cec2eda8568d00ddb981abe
 
 PRE-M5-TIME:
 COMPLETE (PASS)
@@ -970,7 +991,7 @@ GAP-PRE-M5-READY-IX:
 CLOSED (UNCHANGED)
 
 NEXT:
-M5-01 — Base Event Aggregates
+M5-02 — Ticket/Product/Variation Aggregates
 
 P1-00:
 COMPLETE
