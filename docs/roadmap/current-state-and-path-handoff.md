@@ -809,9 +809,6 @@ M1-C — PRE-M2 Contract Conformance Gate (COMPLETE)
 M2 AUTHORIZATION:
 AUTHORIZED
 
-M5 AUTHORIZATION:
-BLOCKED
-
 Canonical gap ledger:
 docs/path-1/m1-09-m1-certification-and-pre-m2-gate.md §7
 
