@@ -1087,7 +1087,15 @@ P1-00 COMPLETE
 → PRE-M5-TIME COMPLETE (PASS)
 → GAP-PRE-M5-TIME CLOSED
 → M5 AUTHORIZED
-→ M5-01 — Base Event Aggregates NEXT
+→ M5-01 — Base Event Aggregates COMPLETE (PASS)
+→ M5-02 — Ticket/Product/Variation Aggregates NEXT
+→ M5-03 — Revenue / Refund Aggregates
+→ M5-04 — Period Comparisons
+→ M5-05 — Deterministic Sales Velocity
+→ M5-06 — Capacity / Occupancy
+→ M5-07 — Freshness and Data-Quality Projection
+→ M5-08 — Hot/Warm/Cold Caching
+→ M5-09 — Analytics Certification
 → M6
 → M7
 ```
