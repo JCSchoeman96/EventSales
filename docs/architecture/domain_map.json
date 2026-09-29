@@ -1126,18 +1126,26 @@
         ]
       },
       {
-        "docs_count": 0,
+        "docs_count": 2,
         "moduledoc?": true,
         "name": "EventSales.Analytics.Workers.RefreshSnapshotWorker",
         "parse_error": null,
         "path": "lib/event_sales/analytics/workers/refresh_snapshot_worker.ex",
         "public_funs": [
           {
+            "arity": 2,
+            "name": "enqueue_event"
+          },
+          {
+            "arity": 2,
+            "name": "enqueue_events"
+          },
+          {
             "arity": 1,
             "name": "perform"
           }
         ],
-        "specs?": false,
+        "specs?": true,
         "uses": [
           "Oban.Worker"
         ]

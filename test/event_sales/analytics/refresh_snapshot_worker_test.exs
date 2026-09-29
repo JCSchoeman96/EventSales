@@ -28,7 +28,54 @@ defmodule EventSales.Analytics.RefreshSnapshotWorkerTest do
     assert RefreshSnapshotWorker.__opts__() |> Keyword.fetch!(:max_attempts) == 3
 
     unique = RefreshSnapshotWorker.__opts__() |> Keyword.fetch!(:unique)
+    assert Keyword.fetch!(unique, :period) == :infinity
+    assert Keyword.fetch!(unique, :fields) == [:worker, :queue, :args]
     assert Keyword.fetch!(unique, :keys) == [:scope, :event_id, :business_date]
+    assert Keyword.fetch!(unique, :states) == [:suspended, :scheduled, :available, :retryable]
+
+    replace = RefreshSnapshotWorker.__opts__() |> Keyword.fetch!(:replace)
+    assert replace[:suspended] == [:meta]
+    assert replace[:scheduled] == [:meta]
+    assert replace[:available] == [:meta]
+    assert replace[:retryable] == [:meta]
+    refute :executing in Keyword.fetch!(unique, :states)
+  end
+
+  test "normalizes event UUIDs and inserts them in deterministic order" do
+    first_id = "00000000-0000-4000-8000-000000000001"
+    second_id = "00000000-0000-4000-8000-000000000002"
+    test_pid = self()
+
+    insert_job = fn changeset ->
+      send(test_pid, {:inserted_refresh, changeset.changes.args})
+      {:ok, %Oban.Job{id: System.unique_integer([:positive])}}
+    end
+
+    assert :ok =
+             RefreshSnapshotWorker.enqueue_events(
+               [String.upcase(second_id), first_id, second_id],
+               oban_insert: insert_job
+             )
+
+    assert_receive {:inserted_refresh, %{"scope" => "event", "event_id" => ^first_id}}
+    assert_receive {:inserted_refresh, %{"scope" => "event", "event_id" => ^second_id}}
+    refute_receive {:inserted_refresh, _args}
+  end
+
+  test "rejects invalid event UUIDs before inserting a job" do
+    insert_job = fn _changeset -> flunk("invalid event IDs must fail before insertion") end
+
+    assert {:error, :invalid_event_id} =
+             RefreshSnapshotWorker.enqueue_events([Ecto.UUID.generate(), "not-a-uuid"],
+               oban_insert: insert_job
+             )
+  end
+
+  test "rejects an unconfirmed unique conflict without a persisted job" do
+    insert_job = fn _changeset -> {:ok, %Oban.Job{conflict?: true}} end
+
+    assert {:error, :snapshot_refresh_enqueue_unconfirmed_conflict} =
+             RefreshSnapshotWorker.enqueue_event(Ecto.UUID.generate(), oban_insert: insert_job)
   end
 
   test "refreshes event snapshots for valid event args", %{event: event} do

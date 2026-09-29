@@ -10,6 +10,7 @@ defmodule EventSales.Sales.OrderAttributionCorrection do
 
   alias EventSales.Accounts.Policies
   alias EventSales.Analytics.DashboardCache
+  alias EventSales.Analytics.Workers.RefreshSnapshotWorker
   alias EventSales.Audit.Logger, as: AuditLogger
   alias EventSales.Catalog
   alias EventSales.Catalog.Resources.{Event, ProductMapping}
@@ -64,23 +65,23 @@ defmodule EventSales.Sales.OrderAttributionCorrection do
     with :ok <- authorize_admin(opts),
          :ok <- validate_confirmation(confirmation) do
       source_system_id
-      |> correction_transaction(actor)
+      |> correction_transaction(actor, opts)
       |> handle_correction_transaction()
     end
   end
 
-  defp correction_transaction(source_system_id, actor) do
-    Repo.transaction(fn -> correction_transaction_body(source_system_id, actor) end)
+  defp correction_transaction(source_system_id, actor, opts) do
+    Repo.transaction(fn -> correction_transaction_body(source_system_id, actor, opts) end)
   end
 
-  defp correction_transaction_body(source_system_id, actor) do
+  defp correction_transaction_body(source_system_id, actor, opts) do
     with {:ok, context} <- preview_context(source_system_id, lock?: true),
          {:ok, before_snapshot} <- capture_before(context.order),
          {:ok, corrected, notifications} <- correct_order_item(context, actor),
          {:ok, _audit_log} <- audit_correction(context, corrected, actor),
          {:ok, after_snapshot} <- capture_after(context.order),
          {:ok, comparison} <- compare_correction_truth(before_snapshot, after_snapshot),
-         :ok <- invalidate_correction_coverage(context.order, comparison) do
+         :ok <- invalidate_correction_coverage(context.order, comparison, opts) do
       {corrected, public_preview(%{context | order_item: corrected}), notifications, context}
     else
       {:error, :audit_failed} -> Repo.rollback(:audit_failed)
@@ -251,11 +252,12 @@ defmodule EventSales.Sales.OrderAttributionCorrection do
 
   defp invalidate_correction_coverage(
          %Order{} = order,
-         %{changed?: true, candidate_event_ids: candidate_event_ids}
+         %{changed?: true, candidate_event_ids: candidate_event_ids},
+         opts
        ) do
     case HistoricalCoverageInvalidator.invalidate_order_change(order, candidate_event_ids) do
       {:ok, _result} ->
-        :ok
+        enqueue_snapshot_refreshes(candidate_event_ids, opts)
 
       {:error, reason}
       when reason in [
@@ -269,6 +271,30 @@ defmodule EventSales.Sales.OrderAttributionCorrection do
 
       _other ->
         {:error, :order_coverage_invalidation_failed}
+    end
+  end
+
+  defp enqueue_snapshot_refreshes([], _opts), do: :ok
+
+  defp enqueue_snapshot_refreshes(event_ids, opts) do
+    scheduler =
+      Keyword.get(opts, :snapshot_refresh_scheduler, &RefreshSnapshotWorker.enqueue_events/1)
+
+    result =
+      case scheduler do
+        scheduler when is_function(scheduler, 1) ->
+          scheduler.(event_ids)
+
+        scheduler when is_atom(scheduler) and not is_nil(scheduler) ->
+          scheduler.enqueue_events(event_ids)
+
+        _other ->
+          {:error, :invalid_snapshot_refresh_scheduler}
+      end
+
+    case result do
+      :ok -> :ok
+      _other -> {:error, :snapshot_refresh_enqueue_failed}
     end
   end
 

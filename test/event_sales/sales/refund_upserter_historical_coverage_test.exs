@@ -3,6 +3,7 @@ defmodule EventSales.Sales.RefundUpserterHistoricalCoverageTest do
 
   require Ash.Query
 
+  alias EventSales.Analytics.Workers.RefreshSnapshotWorker
   alias EventSales.Ingestion
   alias EventSales.Ingestion.HistoricalCoverageResolver
   alias EventSales.Ingestion.Resources.SyncRun
@@ -59,13 +60,21 @@ defmodule EventSales.Sales.RefundUpserterHistoricalCoverageTest do
   test "new normalized historical detail invalidates its exact Event certificate" do
     %{source: source, order: order, items: [item_a | _], events: [event_a | _]} = mixed_fixture!()
     run = certified_run!(event_a)
+    test_pid = self()
 
     assert {:ok, %Refund{}} =
              RefundUpserter.upsert_normalized_refund(
                source.id,
                order.woo_order_id,
-               normalized_refund(98_002, [refund_line(88_003, item_a)])
+               normalized_refund(98_002, [refund_line(88_003, item_a)]),
+               snapshot_refresh_scheduler: fn event_ids ->
+                 send(test_pid, {:snapshot_refresh_requested, event_ids})
+                 :ok
+               end
              )
+
+    assert_receive {:snapshot_refresh_requested, [event_id]}
+    assert event_id == event_a.id
 
     assert_invalidated!(run)
   end
@@ -97,11 +106,21 @@ defmodule EventSales.Sales.RefundUpserterHistoricalCoverageTest do
 
     run = certified_run!(event_a)
     install_invalidation_failure_trigger!()
+    test_pid = self()
 
     assert {:ok, %Refund{id: refund_id}} =
-             RefundUpserter.upsert_normalized_refund(source.id, order.woo_order_id, normalized)
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               order.woo_order_id,
+               normalized,
+               snapshot_refresh_scheduler: fn event_ids ->
+                 send(test_pid, {:snapshot_refresh_requested, event_ids})
+                 :ok
+               end
+             )
 
     assert refund_id == first.id
+    refute_receive {:snapshot_refresh_requested, _event_ids}
     assert_current!(event_a, run)
   end
 
@@ -135,15 +154,57 @@ defmodule EventSales.Sales.RefundUpserterHistoricalCoverageTest do
   test "new malformed detail invalidates every bounded parent Event" do
     %{source: source, order: order, events: events} = fixture_with_third_event!()
     runs = Enum.map(events, &certified_run!/1)
+    test_pid = self()
 
     assert {:ok, %Refund{detail_status: :unresolved}} =
              RefundUpserter.upsert_refund(
                source.id,
                order.woo_order_id,
-               malformed_refund_payload(98_006)
+               malformed_refund_payload(98_006),
+               snapshot_refresh_scheduler: fn event_ids ->
+                 send(test_pid, {:unexpected_snapshot_refresh, event_ids})
+                 {:error, :unexpected_snapshot_refresh}
+               end
              )
 
+    refute_receive {:unexpected_snapshot_refresh, _event_ids}
     Enum.each(runs, &assert_invalidated!/1)
+  end
+
+  test "malformed replay of an active complete refund refreshes its prior aggregate events" do
+    %{
+      source: source,
+      order: order,
+      items: [item_a | _],
+      events: [event_a, event_b | _]
+    } = mixed_fixture!()
+
+    assert {:ok, %Refund{}} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               order.woo_order_id,
+               normalized_refund(98_021, [refund_line(88_021, item_a)])
+             )
+
+    run_a = certified_run!(event_a)
+    run_b = certified_run!(event_b)
+    test_pid = self()
+
+    assert {:ok, %Refund{detail_status: :unresolved}} =
+             RefundUpserter.upsert_refund(
+               source.id,
+               order.woo_order_id,
+               malformed_refund_payload(98_021),
+               snapshot_refresh_scheduler: fn event_ids ->
+                 send(test_pid, {:snapshot_refresh_requested, event_ids})
+                 :ok
+               end
+             )
+
+    assert_receive {:snapshot_refresh_requested, event_ids}
+    assert event_ids == Enum.sort([event_a.id, event_b.id])
+    assert_invalidated!(run_a)
+    assert_invalidated!(run_b)
   end
 
   test "an identical malformed replay does not invalidate coverage" do
@@ -165,13 +226,23 @@ defmodule EventSales.Sales.RefundUpserterHistoricalCoverageTest do
   test "new reference-only detail invalidates every bounded parent Event" do
     %{source: source, order: order, events: events} = fixture_with_third_event!()
     runs = Enum.map(events, &certified_run!/1)
+    test_pid = self()
 
     assert {:ok, %Refund{detail_status: :reference_only}} =
-             RefundUpserter.upsert_reference(source.id, order.woo_order_id, %{
-               woo_refund_id: 98_008,
-               summary_total_amount: Decimal.new("1300.00")
-             })
+             RefundUpserter.upsert_reference(
+               source.id,
+               order.woo_order_id,
+               %{
+                 woo_refund_id: 98_008,
+                 summary_total_amount: Decimal.new("1300.00")
+               },
+               snapshot_refresh_scheduler: fn event_ids ->
+                 send(test_pid, {:unexpected_snapshot_refresh, event_ids})
+                 {:error, :unexpected_snapshot_refresh}
+               end
+             )
 
+    refute_receive {:unexpected_snapshot_refresh, _event_ids}
     Enum.each(runs, &assert_invalidated!/1)
   end
 
@@ -276,18 +347,62 @@ defmodule EventSales.Sales.RefundUpserterHistoricalCoverageTest do
     run_b = certified_run!(event_b)
     run_c = certified_run!(event_c)
     observed_at = ~U[2026-05-06 10:00:00Z]
+    test_pid = self()
 
     assert {:ok, %Refund{source_state: :voided}} =
              RefundUpserter.mark_source_deleted(
                source.id,
                order.woo_order_id,
                refund.woo_refund_id,
-               observed_at
+               observed_at,
+               snapshot_refresh_scheduler: fn event_ids ->
+                 send(test_pid, {:snapshot_refresh_requested, event_ids})
+                 :ok
+               end
              )
+
+    assert_receive {:snapshot_refresh_requested, event_ids}
+    assert event_ids == Enum.sort([event_a.id, event_b.id])
 
     assert_invalidated!(run_a)
     assert_invalidated!(run_b)
     assert_current!(event_c, run_c)
+  end
+
+  test "snapshot enqueue failure rolls back active refund facts and coverage invalidation" do
+    %{source: source, order: order, items: [item_a | _], events: [event_a, event_b | _]} =
+      mixed_fixture!()
+
+    assert {:ok, refund} =
+             RefundUpserter.upsert_reference(source.id, order.woo_order_id, %{
+               woo_refund_id: 98_099,
+               summary_total_amount: Decimal.new("45.00")
+             })
+
+    run = certified_run!(event_a)
+    before_refund = Ash.get!(Refund, refund.id, domain: Sales)
+    before_lines = refund_lines(refund.id)
+    before_coverage = Ash.get!(SyncRun, run.id, domain: Ingestion)
+
+    scheduler = fn event_ids ->
+      assert event_ids == Enum.sort([event_a.id, event_b.id])
+      assert :ok = RefreshSnapshotWorker.enqueue_events(event_ids)
+      {:error, :snapshot_refresh_failed_after_insert}
+    end
+
+    assert {:error, :snapshot_refresh_failed_after_insert} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               order.woo_order_id,
+               normalized_refund(98_099, [refund_line(88_099, item_a)]),
+               snapshot_refresh_scheduler: scheduler
+             )
+
+    assert Ash.get!(Refund, refund.id, domain: Sales) == before_refund
+    assert refund_lines(refund.id) == before_lines
+    assert Ash.get!(SyncRun, run.id, domain: Ingestion) == before_coverage
+    assert refresh_job_count(event_a.id) == 0
+    assert refresh_job_count(event_b.id) == 0
   end
 
   test "already-voided source deletion replay does not invalidate coverage" do
@@ -566,6 +681,20 @@ defmodule EventSales.Sales.RefundUpserterHistoricalCoverageTest do
     |> Ash.Query.filter(refund_id == ^refund_id)
     |> Ash.Query.sort(woo_refund_line_item_id: :asc)
     |> Ash.read!(domain: Sales)
+  end
+
+  defp refresh_job_count(event_id) do
+    %{rows: [[count]]} =
+      Repo.query!(
+        """
+        SELECT count(*)
+        FROM oban_jobs
+        WHERE worker = $1 AND args ->> 'scope' = 'event' AND args ->> 'event_id' = $2
+        """,
+        [Keyword.fetch!(RefreshSnapshotWorker.__opts__(), :worker), event_id]
+      )
+
+    count
   end
 
   defp certified_run!(event) do

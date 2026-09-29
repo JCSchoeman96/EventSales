@@ -4,6 +4,7 @@ defmodule EventSales.Sales.RefundUpserterTest do
   require Ash.Query
 
   alias Ecto.Adapters.SQL.Sandbox
+  alias EventSales.Analytics.Workers.RefreshSnapshotWorker
   alias EventSales.Repo
   alias EventSales.Sales
   alias EventSales.Sales.RefundUpserter
@@ -1024,6 +1025,46 @@ defmodule EventSales.Sales.RefundUpserterTest do
     assert DateTime.compare(voided.voided_at, observed_at) == :eq
     assert [%RefundLine{refunded_quantity: 1}] = refund_lines(voided.id)
     assert voided.header_amount == Decimal.new("45.00")
+  end
+
+  test "source-deleted refresh failure leaves the refund active", %{source: source} do
+    %{order: order, item: item} = create_ticket_order_fixture!(source, 2)
+
+    assert {:ok, refund} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               order.woo_order_id,
+               normalized_refund(97_099, [refund_line(91_099, item.woo_line_item_id)]),
+               snapshot_refresh_scheduler: fn _event_ids -> :ok end
+             )
+
+    scheduler = fn event_ids ->
+      assert event_ids == [item.event_id]
+      assert :ok = RefreshSnapshotWorker.enqueue_events(event_ids)
+      {:error, :snapshot_refresh_failed_after_insert}
+    end
+
+    assert {:error, :snapshot_refresh_failed_after_insert} =
+             RefundUpserter.mark_source_deleted(
+               source.id,
+               order.woo_order_id,
+               refund.woo_refund_id,
+               ~U[2026-08-18 10:00:00Z],
+               snapshot_refresh_scheduler: scheduler
+             )
+
+    assert %Refund{source_state: :active, voided_at: nil} =
+             Ash.get!(Refund, refund.id, domain: Sales)
+
+    %{rows: [[0]]} =
+      Repo.query!(
+        """
+        SELECT count(*)
+        FROM oban_jobs
+        WHERE worker = $1 AND args ->> 'scope' = 'event' AND args ->> 'event_id' = $2
+        """,
+        [Keyword.fetch!(RefreshSnapshotWorker.__opts__(), :worker), item.event_id]
+      )
   end
 
   test "source-deleted void replay preserves the original voided_at", %{source: source} do
