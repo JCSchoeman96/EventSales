@@ -237,7 +237,7 @@ OWNER_DECISION_REQUIRED           — policy choice blocks classification
 | B19 | Source-freshness separation | ALREADY_IMPLEMENTED_CERTIFIED | M1-07 | `SourceFreshness` / event source freshness snapshots; not stored on aggregate snapshot as readiness | PRE-M5-TIME-G evidence; `EventScopedDashboard` reads freshness separately |
 | B20 | No raw dashboard history scan | ALREADY_IMPLEMENTED_CERTIFIED | AGENTS; PRE-M5-02F M14 | Dashboard LiveView + `EventScopedDashboard` boundary | `snapshot_boundaries_test.exs` |
 | B21 | Legacy v1 compatibility boundary | ALREADY_IMPLEMENTED_CERTIFIED | PRE-M5-02 | v1 rows non-canonical; v2 required for `SnapshotReader` financial readers | PRE-M5-02F M13; `historical_reporting_snapshots_test.exs` |
-| B22 | M5 scope isolation | ALREADY_IMPLEMENTED_NEEDS_M5_TEST | path-1 M5-01 row | No ticket-type/dimension snapshots added | M5-01C evidence pack should state non-goals explicitly |
+| B22 | M5 scope isolation | CERTIFIED (M5-01C evidence; effective on M5-01C merge) | path-1 M5-01 row | No ticket-type/dimension snapshots added | `docs/evidence/m5-01-base-event-aggregates-certification.md` §7 (B22 scope-isolation checklist; verdict PASS) |
 | B23 | Durable event snapshot refresh orchestration after relevant source mutation | CERTIFIED (M5-01C evidence; effective on M5-01C merge) | M5-01 lifecycle; PRE-M5-02 projection lifecycle; path-1 M5 event-scoped invalidation | `RefreshSnapshotWorker.enqueue_events/1` in same Repo transaction at order, refund, mapped missing-catalog recovery, and audited attribution correction seams | `docs/evidence/m5-01-base-event-aggregates-certification.md` §3–§5; focused bundle on `f420437` |
 
 ---
