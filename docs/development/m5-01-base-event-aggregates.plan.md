@@ -1,17 +1,18 @@
 ---
 Plan ID: m5-01-base-event-aggregates
-Plan version: v1
-Status: M5-01A conformance audit complete — planning only; M5-01 not COMPLETE
+Plan version: v2
+Status: M5-01A conformance audit complete (revised) — planning only; M5-01 not COMPLETE
 Scope: M5-01 base event-level canonical aggregate foundations (audit slice M5-01A)
 Authority: `docs/path-1/path-1-phase-breakdown.md` (M5-01 row); PRE-M5-02F + PRE-M5-TIME-G evidence; M1-04–M1-08 contracts (locked)
 Historical context: PRE-M5-02 metrics foundation plans and evidence; do not reopen locked PRE-M5 semantics
 Last updated: 2026-09-29
-Change summary (v1): Initial M5-01A repository conformance audit; decision CERTIFICATION_ONLY; no production delta required.
+Change summary (v2): PR #267 review — B23 orchestration gap; IMPLEMENTATION_REQUIRED (M5-01-G1); lifecycle wording corrected.
 ---
 
 ### Revision log
 
 - v1 — M5-01A audit against `047b645` / tree `d188ce84`; B01–B22 matrix; CERTIFICATION_ONLY decision; next slice M5-01B.
+- v2 — B23 durable snapshot refresh orchestration gap; `M5-01_DECISION = IMPLEMENTATION_REQUIRED`; distinguish certified refresh safety from missing post-mutation enqueue; next M5-01B implementation / M5-01C certification.
 
 # M5-01 — Base event aggregates (conformance audit)
 
@@ -85,7 +86,9 @@ EventSales.Analytics.DashboardCache (+ HotStateAggregator)
   |> HOT: ETS event summaries; recompute uses EventAggregator on write path, not dashboard SQL scans
 
 EventSales.Analytics.Workers.RefreshSnapshotWorker
-  |> Oban durable snapshot rebuild (heavy work queue)
+  |> Oban durable snapshot rebuild (`:analytics_rebuilds`, event-scoped uniqueness)
+  |> perform/1 calls `SnapshotRefresh.refresh_event/2` when a job runs
+  |> **no production caller enqueues event-scope jobs today** (see B23)
 ```
 
 Refresh chain (event scope):
@@ -115,8 +118,22 @@ Conceptual states (not persisted enums):
 | State | Meaning in repository |
 | --- | --- |
 | MISSING | No version-2 rows for the event; `SnapshotReader` returns `:miss` for canonical readers |
-| CURRENT | At least one v2 row per canonical currency after successful `SnapshotRefresh.refresh_event/2`; rows match last successful bounded aggregation |
-| STALE | Durable sales/refund facts or mappings changed after `refreshed_at` / `source_watermark_at`; projection row still present but no longer guaranteed current until refresh |
+| CURRENT | At least one v2 row per canonical currency after successful `SnapshotRefresh.refresh_event/2`; rows reflect the aggregation at that refresh |
+| STALE | **Target contract:** durable facts affecting the event changed since the last successful refresh, but v2 rows still exist. **Today:** no enforced STALE flag; rows can lag facts because post-mutation refresh orchestration is missing (B23) |
+
+### Certified vs missing (lifecycle split)
+
+```text
+Refresh operation safety (when refresh_event/2 runs)
+  IMPLEMENTED / CERTIFIED — PRE-M5-02F; concurrency and rollback tests
+
+Automatic CURRENT → detect lag → queue refresh → CURRENT
+  NOT IMPLEMENTED — no production enqueue of RefreshSnapshotWorker for event scope
+```
+
+Do not treat `EventAggregateSnapshot.source_watermark_at` as proof the durable aggregate incorporated later facts. It is refresh-time metadata from order-item scope (`event_source_metadata/1` in `SnapshotRefresh`), not M1-07 source-freshness authority and not a refund/sync freshness model.
+
+`SourceFreshness` and `RefundProcessedNotifier` advance separate projections. They do not refresh `EventAggregateSnapshot`.
 
 ### Transitions
 
@@ -126,15 +143,34 @@ Guards: valid `Event`; `EventAggregator.financial_summaries_for_event/1` succeed
 
 Evidence: `HistoricalReportingSnapshotsTest`; `event_snapshot_refresh_rollback_test.exs`.
 
-**CURRENT → STALE**
+**CURRENT → STALE (contract) / lag without orchestration (today)**
 
-Mechanism: implicit. Durable fact writes do not synchronously rewrite snapshots. `OrderProcessedNotifier` invalidates hot cache and triggers `HotStateAggregator` recompute from Postgres facts. Durable v2 snapshot rows remain until `RefreshSnapshotWorker` or explicit `SnapshotRefresh.refresh_event/2`. Staleness is operational (compare source watermark vs facts), not a column on `EventAggregateSnapshot`.
+After relevant durable mutation, the projection should become logically stale until refresh. Production today:
 
-Evidence: `OrderProcessedNotifier` moduledoc and invalidate paths; snapshot `source_watermark_at` on refresh.
+```text
+OrderProcessedNotifier
+  → DashboardCache.invalidate_event
+  → HotStateAggregator recompute (bounded EventAggregator)
+  → does NOT enqueue RefreshSnapshotWorker
 
-**STALE → CURRENT**
+RefundProcessedNotifier
+  → SourceFreshness advancement
+  → does NOT enqueue RefreshSnapshotWorker
+```
 
-Same guards as MISSING → CURRENT; upsert replaces per-currency rows; `purge_obsolete_event_projections!/2` removes v1 rows and v2 currencies no longer in canonical set.
+Repository search (`lib/`, 2026-09-29): `RefreshSnapshotWorker` is defined in `lib/event_sales/analytics/workers/refresh_snapshot_worker.ex` only; no `Oban.insert` / worker module reference enqueues event-scope jobs in production. Tests call `perform/1` directly (`refresh_snapshot_worker_test.exs`). Manual dashboard refresh expects zero snapshot jobs (`dashboard_live_test.exs` asserts `refresh_snapshot_job_count() == 0`).
+
+There is no production reader that compares live facts to snapshot rows and blocks `SnapshotReader` until refresh. On hot-cache miss, `SnapshotReader` can return the last persisted v2 row even when facts are newer.
+
+**STALE → CURRENT (target)**
+
+Enqueue/coalesce `RefreshSnapshotWorker` with existing Oban uniqueness (`keys: [:scope, :event_id, :business_date]`), then same guards as MISSING → CURRENT. **M5-01-G1** closes this path.
+
+Mapping/attribution changes that alter aggregate membership must be included in M5-01B seam analysis (smallest authoritative post-commit hooks; no scatter `Oban.insert`).
+
+**STALE → CURRENT (manual / test today)**
+
+Explicit `SnapshotRefresh.refresh_event/2` or direct `RefreshSnapshotWorker.perform/1` in tests.
 
 ### Side effects (existing only)
 
@@ -153,7 +189,7 @@ None.
 
 ---
 
-## 5. Requirement matrix (B01–B22)
+## 5. Requirement matrix (B01–B23)
 
 Classification key:
 
@@ -189,19 +225,32 @@ OWNER_DECISION_REQUIRED           — policy choice blocks classification
 | B19 | Source-freshness separation | ALREADY_IMPLEMENTED_CERTIFIED | M1-07 | `SourceFreshness` / event source freshness snapshots; not stored on aggregate snapshot as readiness | PRE-M5-TIME-G evidence; `EventScopedDashboard` reads freshness separately |
 | B20 | No raw dashboard history scan | ALREADY_IMPLEMENTED_CERTIFIED | AGENTS; PRE-M5-02F M14 | Dashboard LiveView + `EventScopedDashboard` boundary | `snapshot_boundaries_test.exs` |
 | B21 | Legacy v1 compatibility boundary | ALREADY_IMPLEMENTED_CERTIFIED | PRE-M5-02 | v1 rows non-canonical; v2 required for `SnapshotReader` financial readers | PRE-M5-02F M13; `historical_reporting_snapshots_test.exs` |
-| B22 | M5 scope isolation | ALREADY_IMPLEMENTED_NEEDS_M5_TEST | path-1 M5-01 row | No ticket-type/dimension snapshots added | M5-01A plan boundary; M5-01B evidence pack should state non-goals explicitly |
+| B22 | M5 scope isolation | ALREADY_IMPLEMENTED_NEEDS_M5_TEST | path-1 M5-01 row | No ticket-type/dimension snapshots added | M5-01C evidence pack should state non-goals explicitly |
+| B23 | Durable event snapshot refresh orchestration after relevant source mutation | IMPLEMENTATION_GAP | M5-01 lifecycle; PRE-M5-02 projection lifecycle; path-1 M5 event-scoped invalidation | `RefreshSnapshotWorker` + `SnapshotRefresh.refresh_event/2` exist; **no production event-scope enqueue** | `OrderProcessedNotifier` hot path only; `RefundProcessedNotifier` source freshness only; `grep RefreshSnapshotWorker` → lib definition + tests + docs only; PRE-M5-02F certifies refresh **when it runs**, not post-mutation scheduling |
 
 ---
 
 ## 6. Gap decision
 
 ```text
-M5-01_DECISION = CERTIFICATION_ONLY
+M5-01_DECISION = IMPLEMENTATION_REQUIRED
 ```
 
-No B01–B22 row is `IMPLEMENTATION_GAP`. PRE-M5-02B–02F and PRE-M5-TIME already implemented and certified the foundation the roadmap labels M5-01 REUSE/EXTEND. The roadmap TBD cells for new resource/migration on M5-01 resolve to **no delta** on current main.
+B01–B21 remain implemented and certified (calculation, v2 durability, refresh transaction, readers, query plans, M4 separation, hot path). B23 is the sole `IMPLEMENTATION_GAP`.
 
-Gap IDs for implementation: **none**.
+```text
+IMPLEMENTATION_GAP_IDS = M5-01-G1
+```
+
+**M5-01-G1 — Event-scoped durable snapshot refresh orchestration**
+
+Schedule/coalesce existing `RefreshSnapshotWorker` (`scope: "event"`, `event_id`) from authoritative post-commit seams after durable changes that affect `EventAggregateSnapshot` membership or primitives, at minimum:
+
+- order / order-item apply
+- refund apply
+- mapping / attribution changes that alter event aggregate membership
+
+Reuse Oban uniqueness on the worker; do not add a second worker, Redis lock, GenServer serializer, resource, migration, or cache layer.
 
 ---
 
@@ -213,6 +262,7 @@ MIGRATION = NO
 NEW_INDEX = NO
 NEW_DEPENDENCY = NO
 NEW_CACHE_LAYER = NO
+PRODUCTION_ORCHESTRATION_CHANGE = YES
 ```
 
 Existing uniqueness: `analytics_event_aggregate_snapshots_unique_event_currency_index` (`event_id`, `currency`). Financial fact indexes certified under PRE-M5-02F query-plan work remain sufficient for event-scoped aggregation.
@@ -222,16 +272,23 @@ Existing uniqueness: `analytics_event_aggregate_snapshots_unique_event_currency_
 ## 8. Proposed next slice
 
 ```text
-M5-01B = focused certification / evidence slice
+M5-01B = implement smallest event-scoped durable snapshot refresh scheduling delta for M5-01-G1 (B23)
+M5-01C = certify B01–B23 and close M5-01
 ```
 
-M5-01B should:
+M5-01B (implementation, not this PR):
 
-1. Add `docs/evidence/m5-01-base-event-aggregates-certification.md` mapping B01–B22 to tests and PRE-M5 evidence (crosswalk, not semantic reopen).
-2. Run the same focused test bundle plus any M5-01B-only smoke checks documented in evidence.
-3. Update programme closeout in path-1 handoff only after M5-01B merges (not in M5-01A).
+1. Map smallest authoritative post-commit seams for order/order-item, refund, and mapping/attribution mutations.
+2. Enqueue/coalesce `RefreshSnapshotWorker` per affected `event_id`; reuse existing uniqueness and `SnapshotRefresh`.
+3. Add focused tests proving jobs are scheduled (and coalesced) without duplicating refresh logic.
 
-Do not start M5-02–M5-09 in M5-01B.
+M5-01C should:
+
+1. Add `docs/evidence/m5-01-base-event-aggregates-certification.md` mapping B01–B23 to tests and PRE-M5 evidence.
+2. Run focused analytics, orchestration, and readiness tests documented in evidence.
+3. Update programme closeout in path-1 handoff only after M5-01C merges.
+
+Do not start M5-02–M5-09 in M5-01B or M5-01C.
 
 ---
 
@@ -253,7 +310,14 @@ Do not start M5-02–M5-09 in M5-01B.
 
 ## 10. STOP findings
 
-None. Audit preflight, code inspection, and focused tests (107 examples, 0 failures) did not contradict PRE-M5 certifications or reveal partial multi-currency exposure, unbounded dashboard scans, or M4 readiness redesign need.
+No programme STOP for M5-01 overall. One audit correction (B23 / M5-01-G1) blocks **certification-only** closeout:
+
+- Durable `EventAggregateSnapshot` can lag facts with no automatic `RefreshSnapshotWorker` enqueue.
+- PRE-M5-02F does not certify post-mutation orchestration.
+
+No contradictory evidence found for B01–B21. No new resource, migration, index, or dependency required for M5-01-G1.
+
+Preflight, code inspection, and focused tests (107 examples, 0 failures) did not contradict PRE-M5 refresh-safety, concurrency, rollback, query-plan, or M4 readiness certifications.
 
 ---
 
