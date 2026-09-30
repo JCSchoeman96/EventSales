@@ -165,7 +165,7 @@ defmodule EventSales.Analytics.Aggregators.DimensionAggregator do
   defp normalize_source_product_rows(rows, event_id) do
     normalize_rows(rows, fn row ->
       with {:ok, source_system_id} <- load_uuid(row.source_system_id),
-           true <- is_integer(row.woo_product_id) do
+           true <- positive_integer?(row.woo_product_id) do
         {:ok,
          build_row(event_id, row.currency, :source_product, %{
            ticket_type_id: nil,
@@ -184,8 +184,8 @@ defmodule EventSales.Analytics.Aggregators.DimensionAggregator do
   defp normalize_source_variation_rows(rows, event_id) do
     normalize_rows(rows, fn row ->
       with {:ok, source_system_id} <- load_uuid(row.source_system_id),
-           true <- is_integer(row.woo_product_id),
-           true <- is_integer(row.woo_variation_id) do
+           true <- positive_integer?(row.woo_product_id),
+           true <- positive_integer?(row.woo_variation_id) do
         {:ok,
          build_row(event_id, row.currency, :source_variation, %{
            ticket_type_id: nil,
@@ -244,6 +244,9 @@ defmodule EventSales.Analytics.Aggregators.DimensionAggregator do
 
   defp quantity_as_integer(%Decimal{} = quantity), do: Decimal.to_integer(quantity)
   defp quantity_as_integer(quantity) when is_integer(quantity), do: quantity
+
+  defp positive_integer?(value) when is_integer(value), do: value > 0
+  defp positive_integer?(_value), do: false
 
   defp sort_rows(rows) do
     Enum.sort_by(rows, fn row ->

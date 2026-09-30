@@ -294,6 +294,28 @@ defmodule EventSales.Analytics.DimensionAggregatorTest do
              {:error, :invalid_dimension_identity}
   end
 
+  test "rejects nonpositive source product identities" do
+    %{source: source, event: event, ticket: ticket} = fixture!()
+    order = create_order!(source, :completed)
+
+    create_item!(order, event, ticket, woo_product_id: 0)
+    create_item!(order, event, ticket, woo_product_id: -1)
+
+    assert DimensionAggregator.gross_rows_for_event(event.id) ==
+             {:error, :invalid_dimension_identity}
+  end
+
+  test "rejects nonpositive source variation identities" do
+    %{source: source, event: event, ticket: ticket} = fixture!()
+    order = create_order!(source, :completed)
+
+    create_item!(order, event, ticket, woo_product_id: 1201, woo_variation_id: 0)
+    create_item!(order, event, ticket, woo_product_id: 1202, woo_variation_id: -1)
+
+    assert DimensionAggregator.gross_rows_for_event(event.id) ==
+             {:error, :invalid_dimension_identity}
+  end
+
   test "returns an empty list for no recognised sales and rejects invalid event ids" do
     assert DimensionAggregator.gross_rows_for_event("not-a-uuid") == {:error, :invalid_event_id}
     assert DimensionAggregator.gross_rows_for_event(Ecto.UUID.generate()) == {:ok, []}
