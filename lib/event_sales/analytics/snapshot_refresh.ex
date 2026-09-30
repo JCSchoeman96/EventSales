@@ -213,7 +213,9 @@ defmodule EventSales.Analytics.SnapshotRefresh do
       |> Enum.reject(&is_nil/1)
       |> Enum.uniq()
 
-    if ticket_type_ids == [], do: :ok, else: verify_ticket_type_ids_for_event(event_id, ticket_type_ids)
+    if ticket_type_ids == [],
+      do: :ok,
+      else: verify_ticket_type_ids_for_event(event_id, ticket_type_ids)
   end
 
   defp verify_ticket_type_ids_for_event(event_id, ticket_type_ids) do
