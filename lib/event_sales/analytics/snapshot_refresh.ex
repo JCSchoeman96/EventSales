@@ -12,6 +12,7 @@ defmodule EventSales.Analytics.SnapshotRefresh do
   require Ash.Query
 
   alias EventSales.Analytics
+  alias EventSales.Analytics.Aggregators.DimensionAggregator
   alias EventSales.Analytics.Aggregators.EventAggregator
   alias EventSales.Analytics.DashboardCache
   alias EventSales.Analytics.EventSnapshotRefreshFence
@@ -26,6 +27,8 @@ defmodule EventSales.Analytics.SnapshotRefresh do
   @event_snapshot_version 2
   @daily_snapshot_version 1
   @zero Decimal.new("0")
+  @dimension_snapshots_table "analytics_event_dimension_aggregate_snapshots"
+  @product_dimension_kinds [:source_product, :source_variation]
 
   @doc "Refreshes the canonical event financial projection set for one event."
   @spec refresh_event(Ecto.UUID.t() | String.t(), keyword()) ::
@@ -107,20 +110,27 @@ defmodule EventSales.Analytics.SnapshotRefresh do
   end
 
   defp refresh_event_projection_set!(event_id, timezone, now, refreshed_at) do
-    with {:ok, summaries} <- EventAggregator.financial_summaries_for_event(event_id),
-         {:ok, legacy_summary} <- legacy_summary_for_refresh(event_id, timezone, now) do
-      {source_row_count, source_watermark_at} = event_source_metadata(event_id)
-      refreshed_at = DateTime.truncate(refreshed_at, :microsecond)
+    projection_refreshed_at = DateTime.truncate(refreshed_at, :microsecond)
+    persisted_at = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
-      persist_event_projection_set!(
-        event_id,
-        summaries,
-        legacy_summary,
-        timezone,
-        refreshed_at,
-        source_row_count,
-        source_watermark_at
-      )
+    with {:ok, summaries} <- EventAggregator.financial_summaries_for_event(event_id),
+         {:ok, dimension_rows} <- DimensionAggregator.gross_rows_for_event(event_id),
+         {:ok, legacy_summary} <- legacy_summary_for_refresh(event_id, timezone, now),
+         {:ok, event} <- fetch_event(event_id),
+         :ok <- validate_dimension_rows_for_persist!(event, dimension_rows) do
+      {source_row_count, source_watermark_at} = event_source_metadata(event_id)
+
+      persist_event_projection_set!(%{
+        event_id: event_id,
+        summaries: summaries,
+        legacy_summary: legacy_summary,
+        dimension_rows: dimension_rows,
+        timezone: timezone,
+        projection_refreshed_at: projection_refreshed_at,
+        persisted_at: persisted_at,
+        source_row_count: source_row_count,
+        source_watermark_at: source_watermark_at
+      })
     end
   end
 
@@ -149,33 +159,195 @@ defmodule EventSales.Analytics.SnapshotRefresh do
     end
   end
 
-  defp persist_event_projection_set!(
-         event_id,
-         summaries,
-         legacy_summary,
-         timezone,
-         refreshed_at,
-         source_row_count,
-         source_watermark_at
-       ) do
-    canonical_currencies = summaries |> Map.keys() |> Enum.sort()
+  defp persist_event_projection_set!(%{} = context) do
+    canonical_currencies = context.summaries |> Map.keys() |> Enum.sort()
 
     persist_context = %{
-      event_id: event_id,
-      summaries: summaries,
-      legacy_summary: legacy_summary,
+      event_id: context.event_id,
+      summaries: context.summaries,
+      legacy_summary: context.legacy_summary,
       canonical_currencies: canonical_currencies,
-      timezone: timezone,
-      refreshed_at: refreshed_at,
-      source_row_count: source_row_count,
-      source_watermark_at: source_watermark_at
+      timezone: context.timezone,
+      refreshed_at: context.projection_refreshed_at,
+      source_row_count: context.source_row_count,
+      source_watermark_at: context.source_watermark_at
+    }
+
+    dimension_context = %{
+      event_id: context.event_id,
+      dimension_rows: context.dimension_rows,
+      projection_refreshed_at: context.projection_refreshed_at,
+      persisted_at: context.persisted_at
     }
 
     with :ok <- persist_canonical_currencies!(persist_context),
-         :ok <- purge_obsolete_event_projections!(event_id, MapSet.new(canonical_currencies)) do
-      {:ok, read_event_snapshots(event_id, @event_snapshot_version)}
+         :ok <-
+           purge_obsolete_event_projections!(context.event_id, MapSet.new(canonical_currencies)),
+         :ok <- replace_event_dimension_projection_set!(dimension_context) do
+      {:ok, read_event_snapshots(context.event_id, @event_snapshot_version)}
     end
   end
+
+  defp validate_dimension_rows_for_persist!(%Event{} = event, dimension_rows) do
+    case validate_dimension_source_system_ids!(event, dimension_rows) do
+      :ok -> validate_dimension_ticket_type_event_membership!(event.id, dimension_rows)
+      error -> error
+    end
+  end
+
+  defp validate_dimension_source_system_ids!(%Event{} = event, dimension_rows) do
+    invalid? =
+      Enum.any?(dimension_rows, fn row ->
+        row.dimension_kind in @product_dimension_kinds and
+          row.source_system_id != event.source_system_id
+      end)
+
+    if invalid?, do: {:error, :dimension_source_event_mismatch}, else: :ok
+  end
+
+  defp validate_dimension_ticket_type_event_membership!(event_id, dimension_rows) do
+    ticket_type_ids =
+      dimension_rows
+      |> Enum.filter(&(&1.dimension_kind == :ticket_type))
+      |> Enum.map(& &1.ticket_type_id)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+
+    if ticket_type_ids == [],
+      do: :ok,
+      else: verify_ticket_type_ids_for_event(event_id, ticket_type_ids)
+  end
+
+  defp verify_ticket_type_ids_for_event(event_id, ticket_type_ids) do
+    case load_ticket_type_ids_for_event(event_id, ticket_type_ids) do
+      {:ok, found_ids} -> compare_ticket_type_id_sets(found_ids, ticket_type_ids)
+      error -> error
+    end
+  end
+
+  defp compare_ticket_type_id_sets(found_ids, ticket_type_ids) do
+    if MapSet.new(found_ids) == MapSet.new(ticket_type_ids) do
+      :ok
+    else
+      {:error, :dimension_ticket_type_event_mismatch}
+    end
+  end
+
+  defp load_ticket_type_ids_for_event(event_id, ticket_type_ids) do
+    case repo_dimension_persist_step(fn ->
+           dumped_event_id = Ecto.UUID.dump!(event_id)
+           dumped_ticket_type_ids = Enum.map(ticket_type_ids, &Ecto.UUID.dump!/1)
+
+           found_ids =
+             from(tt in "catalog_ticket_types",
+               where: tt.event_id == ^dumped_event_id and tt.id in ^dumped_ticket_type_ids,
+               select: tt.id
+             )
+             |> Repo.all()
+             |> Enum.map(&uuid_from_repo/1)
+
+           {:ok, found_ids}
+         end) do
+      {:ok, found_ids} -> {:ok, found_ids}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp replace_event_dimension_projection_set!(%{} = context) do
+    case delete_dimension_rows_for_event!(context.event_id) do
+      :ok ->
+        bulk_insert_dimension_rows!(
+          context.event_id,
+          context.dimension_rows,
+          context.projection_refreshed_at,
+          context.persisted_at
+        )
+
+      error ->
+        error
+    end
+  end
+
+  defp delete_dimension_rows_for_event!(event_id) do
+    case repo_dimension_persist_step(fn ->
+           dumped_event_id = Ecto.UUID.dump!(event_id)
+
+           {_count, _} =
+             from(d in @dimension_snapshots_table, where: d.event_id == ^dumped_event_id)
+             |> Repo.delete_all()
+
+           :ok
+         end) do
+      :ok -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp bulk_insert_dimension_rows!(_event_id, [], _projection_refreshed_at, _persisted_at),
+    do: :ok
+
+  defp bulk_insert_dimension_rows!(
+         event_id,
+         dimension_rows,
+         projection_refreshed_at,
+         persisted_at
+       ) do
+    insert_rows =
+      Enum.map(dimension_rows, fn row ->
+        dimension_row_to_insert_map(event_id, row, projection_refreshed_at, persisted_at)
+      end)
+
+    repo_dimension_persist_step(fn ->
+      {inserted_count, _} = Repo.insert_all(@dimension_snapshots_table, insert_rows)
+      dimension_insert_result(inserted_count, length(dimension_rows))
+    end)
+    |> normalize_dimension_persist_result()
+  end
+
+  defp dimension_insert_result(inserted_count, expected_count)
+       when inserted_count == expected_count,
+       do: :ok
+
+  defp dimension_insert_result(_inserted_count, _expected_count),
+    do: {:error, :dimension_snapshot_insert_count_mismatch}
+
+  defp normalize_dimension_persist_result(:ok), do: :ok
+  defp normalize_dimension_persist_result({:error, reason}), do: {:error, reason}
+
+  defp dimension_row_to_insert_map(event_id, row, projection_refreshed_at, persisted_at) do
+    %{
+      id: Ecto.UUID.generate() |> Ecto.UUID.dump!(),
+      event_id: Ecto.UUID.dump!(event_id),
+      currency: row.currency,
+      dimension_kind: Atom.to_string(row.dimension_kind),
+      ticket_type_id: dump_optional_uuid(row.ticket_type_id),
+      source_system_id: dump_optional_uuid(row.source_system_id),
+      woo_product_id: row.woo_product_id,
+      woo_variation_id: row.woo_variation_id,
+      gross_ticket_quantity: row.gross_ticket_quantity,
+      gross_ticket_value: row.gross_ticket_value,
+      refreshed_at: projection_refreshed_at,
+      inserted_at: persisted_at,
+      updated_at: persisted_at
+    }
+  end
+
+  defp repo_dimension_persist_step(fun) when is_function(fun, 0) do
+    fun.()
+  rescue
+    e in Postgrex.Error -> {:error, {:dimension_snapshot_persist_failed, e}}
+    e in DBConnection.ConnectionError -> {:error, {:dimension_snapshot_persist_failed, e}}
+  end
+
+  defp uuid_from_repo(id) when is_binary(id) do
+    case Ecto.UUID.load(id) do
+      {:ok, uuid} -> uuid
+      :error -> id
+    end
+  end
+
+  defp dump_optional_uuid(nil), do: nil
+  defp dump_optional_uuid(id), do: Ecto.UUID.dump!(id)
 
   defp persist_canonical_currencies!(context) do
     Enum.reduce_while(context.canonical_currencies, :ok, fn currency, :ok ->
