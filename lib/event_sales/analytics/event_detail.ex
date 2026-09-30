@@ -2,8 +2,11 @@ defmodule EventSales.Analytics.EventDetail do
   @moduledoc """
   Admin-only read facade for Slice 12 event list and event detail pages.
 
-  The event list uses hot/snapshot summaries only. Scoped detail aggregates are
-  computed for exactly one event from durable EventSales state.
+  The event list uses hot/snapshot summaries only. Event detail financial and
+  ticket-type breakdowns read canonical v2 projections inside one coherent
+  database transaction. `status_breakdown` remains a separate operational query
+  over current order status (mapped ticket lines); it is not canonical financial
+  or dimensional truth.
   """
 
   import Ecto.Query
@@ -12,10 +15,18 @@ defmodule EventSales.Analytics.EventDetail do
 
   alias EventSales.Accounts.Policies
   alias EventSales.AdminRead.Pagination, as: AdminReadPagination
-  alias EventSales.Analytics.{HotStateAggregator, SnapshotReader}
+
+  alias EventSales.Analytics.{
+    DimensionSnapshotReader,
+    EventSnapshotRefreshFence,
+    HotStateAggregator,
+    SnapshotReader
+  }
+
   alias EventSales.Catalog
   alias EventSales.Catalog.EventLifecycle
   alias EventSales.Catalog.Resources.{Event, TicketType}
+  alias EventSales.Ingestion.AnalyticsReadinessResolver
   alias EventSales.Repo
 
   @default_per_page 25
@@ -115,29 +126,8 @@ defmodule EventSales.Analytics.EventDetail do
   def get_event_detail(event_id, opts \\ []) when is_binary(event_id) do
     with :ok <- authorize(opts),
          {:ok, event_id} <- cast_uuid(event_id),
-         {:ok, %Event{} = event} <- fetch_event(event_id),
-         {:ok, summary} <- scoped_summary(event_id),
-         {:ok, status_breakdown} <- status_breakdown(event_id),
-         {:ok, ticket_types} <- ticket_type_breakdown(event) do
-      {:ok,
-       %{
-         event_id: event.id,
-         event_name: event.name,
-         slug: event.slug,
-         status: event.status,
-         capacity: event.capacity,
-         sold: summary.sold,
-         remaining: remaining(event.capacity, summary.sold),
-         revenue: summary.revenue,
-         currency: summary.currency,
-         refreshed_at: nil,
-         status_breakdown: status_breakdown,
-         ticket_types: ticket_types
-       }}
-    else
-      {:ok, nil} -> :not_found
-      {:error, :not_found} -> :not_found
-      {:error, reason} -> {:error, reason}
+         transaction_result <- run_coherent_detail_transaction(event_id, opts) do
+      normalize_detail_transaction_result(transaction_result)
     end
   end
 
@@ -174,6 +164,176 @@ defmodule EventSales.Analytics.EventDetail do
          rows: Enum.map(visible_rows, &normalize_unmapped_item/1),
          page: AdminReadPagination.page_info(page, per_page, has_next?)
        }}
+    end
+  end
+
+  defp run_coherent_detail_transaction(event_id, opts) do
+    actor = Keyword.get(opts, :actor)
+    transaction_opts = EventSnapshotRefreshFence.coherent_transaction_opts()
+
+    Repo.transaction(
+      fn ->
+        case build_coherent_event_detail(event_id, actor) do
+          {:ok, detail} -> detail
+          :not_found -> Repo.rollback(:not_found)
+          {:error, reason} -> Repo.rollback(reason)
+        end
+      end,
+      transaction_opts
+    )
+  end
+
+  defp normalize_detail_transaction_result({:ok, detail}) when is_map(detail), do: {:ok, detail}
+  defp normalize_detail_transaction_result({:error, :not_found}), do: :not_found
+  defp normalize_detail_transaction_result({:error, reason}), do: {:error, reason}
+
+  defp build_coherent_event_detail(event_id, actor) do
+    with {:ok, %Event{} = event} <- fetch_event_result(event_id),
+         :ok <- require_analytics_ready(event_id),
+         {:ok, financial_scalar} <- scalar_from_financial_summaries(event_id),
+         {:ok, ticket_types} <-
+           ticket_type_rows_from_projection(event, financial_scalar.currency, actor),
+         status_breakdown <- operational_status_breakdown_map(event_id) do
+      {:ok,
+       %{
+         event_id: event.id,
+         event_name: event.name,
+         slug: event.slug,
+         status: event.status,
+         capacity: event.capacity,
+         sold: financial_scalar.sold,
+         remaining: remaining(event.capacity, financial_scalar.sold),
+         revenue: financial_scalar.revenue,
+         currency: financial_scalar.currency,
+         refreshed_at: nil,
+         status_breakdown: status_breakdown,
+         ticket_types: ticket_types
+       }}
+    end
+  end
+
+  defp fetch_event_result(event_id) do
+    case fetch_event(event_id) do
+      {:ok, %Event{} = event} -> {:ok, event}
+      {:ok, nil} -> :not_found
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp require_analytics_ready(event_id) do
+    case AnalyticsReadinessResolver.resolve(event_id) do
+      {:ok, %{analytics_ready?: true}} ->
+        :ok
+
+      {:ok, %{blocking_reason: reason}} ->
+        {:error, {:analytics_not_ready, reason}}
+
+      {:error, :invalid_event_id} ->
+        {:error, :not_found}
+    end
+  end
+
+  defp scalar_from_financial_summaries(event_id) do
+    case SnapshotReader.financial_summaries_for_event(event_id) do
+      :miss ->
+        {:error, :snapshot_not_ready}
+
+      {:ok, summaries} when map_size(summaries) == 0 ->
+        {:error, :snapshot_not_ready}
+
+      {:ok, summaries} when map_size(summaries) > 1 ->
+        {:error, :mixed_currency}
+
+      {:ok, summaries} ->
+        [{currency, summary}] = Map.to_list(summaries)
+
+        with {:ok, sold} <- quantity_from_gross(summary.gross_ticket_quantity) do
+          {:ok,
+           %{
+             sold: sold,
+             revenue: summary.gross_ticket_value || @zero,
+             currency: currency
+           }}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp quantity_from_gross(%Decimal{} = quantity) do
+    if Decimal.integer?(quantity) do
+      {:ok, Decimal.to_integer(quantity)}
+    else
+      {:error, :snapshot_not_ready}
+    end
+  end
+
+  defp quantity_from_gross(quantity) when is_integer(quantity) and quantity >= 0,
+    do: {:ok, quantity}
+
+  defp quantity_from_gross(_), do: {:error, :snapshot_not_ready}
+
+  defp ticket_type_rows_from_projection(%Event{} = event, currency, actor) do
+    with {:ok, dimension_result} <-
+           read_ticket_dimension_snapshot(event.id, actor),
+         {:ok, ticket_rows} <- ticket_rows_for_currency(dimension_result, currency),
+         {:ok, catalogue_ticket_types} <- read_ticket_types(event.id) do
+      sold_by_ticket_type =
+        Map.new(ticket_rows, fn row ->
+          {row.ticket_type_id,
+           %{
+             sold: row.gross_ticket_quantity,
+             revenue: row.gross_ticket_value || @zero
+           }}
+        end)
+
+      {:ok,
+       Enum.map(catalogue_ticket_types, fn ticket_type ->
+         aggregate = Map.get(sold_by_ticket_type, ticket_type.id, %{sold: 0, revenue: @zero})
+
+         %{
+           ticket_type_id: ticket_type.id,
+           ticket_type_name: ticket_type.name,
+           capacity: ticket_type.capacity,
+           sold: aggregate.sold,
+           remaining: remaining(ticket_type.capacity, aggregate.sold),
+           revenue: aggregate.revenue
+         }
+       end)}
+    end
+  end
+
+  defp read_ticket_dimension_snapshot(event_id, actor) do
+    case DimensionSnapshotReader.list_for_event(event_id,
+           actor: actor,
+           dimension_kind: :ticket_type
+         ) do
+      {:ok, result} -> {:ok, result}
+      :miss -> {:error, :snapshot_not_ready}
+      :not_found -> :not_found
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp ticket_rows_for_currency(%{currencies: currencies}, currency) do
+    currency_codes = Enum.map(currencies, & &1.currency)
+
+    cond do
+      length(currency_codes) > 1 ->
+        {:error, :mixed_currency}
+
+      currency_codes != [] and currency_codes != [currency] ->
+        {:error, :snapshot_not_ready}
+
+      true ->
+        bucket = Enum.find(currencies, &(&1.currency == currency))
+
+        if is_nil(bucket) and currency_codes == [] do
+          {:error, :snapshot_not_ready}
+        else
+          {:ok, (bucket && bucket.dimensions.ticket_type) || []}
+        end
     end
   end
 
@@ -239,33 +399,7 @@ defmodule EventSales.Analytics.EventDetail do
     end
   end
 
-  defp scoped_summary(event_id) do
-    row =
-      Repo.one(
-        from item in "sales_order_items",
-          join: order in "sales_orders",
-          on: field(order, :id) == field(item, :order_id),
-          where:
-            field(item, :event_id) == type(^event_id, :binary_id) and
-              field(item, :mapping_status) == "mapped" and
-              field(item, :item_kind) == "ticket" and
-              field(order, :status) == "completed",
-          select: %{
-            sold: sum(field(item, :quantity)),
-            revenue: sum(field(item, :line_total)),
-            currency: max(field(order, :currency))
-          }
-      )
-
-    {:ok,
-     %{
-       sold: count_value(row.sold),
-       revenue: row.revenue || @zero,
-       currency: row.currency || Application.fetch_env!(:event_sales, :default_currency)
-     }}
-  end
-
-  defp status_breakdown(event_id) do
+  defp operational_status_breakdown_map(event_id) do
     rows =
       Repo.all(
         from item in "sales_order_items",
@@ -279,32 +413,7 @@ defmodule EventSales.Analytics.EventDetail do
           select: %{status: field(order, :status), count: sum(field(item, :quantity))}
       )
 
-    {:ok, Map.new(rows, &{to_string(&1.status), count_value(&1.count)})}
-  end
-
-  defp ticket_type_breakdown(%Event{} = event) do
-    with {:ok, ticket_types} <- read_ticket_types(event.id) do
-      sold_by_ticket_type =
-        event.id
-        |> ticket_type_aggregate_rows()
-        |> Map.new(
-          &{&1.ticket_type_id, %{sold: count_value(&1.sold), revenue: &1.revenue || @zero}}
-        )
-
-      {:ok,
-       Enum.map(ticket_types, fn ticket_type ->
-         aggregate = Map.get(sold_by_ticket_type, ticket_type.id, %{sold: 0, revenue: @zero})
-
-         %{
-           ticket_type_id: ticket_type.id,
-           ticket_type_name: ticket_type.name,
-           capacity: ticket_type.capacity,
-           sold: aggregate.sold,
-           remaining: remaining(ticket_type.capacity, aggregate.sold),
-           revenue: aggregate.revenue
-         }
-       end)}
-    end
+    Map.new(rows, &{to_string(&1.status), count_value(&1.count)})
   end
 
   defp read_ticket_types(event_id) do
@@ -312,25 +421,6 @@ defmodule EventSales.Analytics.EventDetail do
     |> Ash.Query.filter(event_id == ^event_id)
     |> Ash.Query.sort(name: :asc)
     |> Ash.read(domain: Catalog)
-  end
-
-  defp ticket_type_aggregate_rows(event_id) do
-    Repo.all(
-      from item in "sales_order_items",
-        join: order in "sales_orders",
-        on: field(order, :id) == field(item, :order_id),
-        where:
-          field(item, :event_id) == type(^event_id, :binary_id) and
-            field(item, :mapping_status) == "mapped" and
-            field(item, :item_kind) == "ticket" and
-            field(order, :status) == "completed",
-        group_by: field(item, :ticket_type_id),
-        select: %{
-          ticket_type_id: type(field(item, :ticket_type_id), :binary_id),
-          sold: sum(field(item, :quantity)),
-          revenue: sum(field(item, :line_total))
-        }
-    )
   end
 
   defp recent_order_rows(event_id, limit, offset) do

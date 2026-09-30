@@ -20,6 +20,19 @@ defmodule EventSales.Analytics.SnapshotBoundariesTest do
     assert source =~ "EventAggregateSnapshot"
   end
 
+  test "EventDetail financial path uses snapshot readers inside coherent transaction" do
+    source = File.read!("lib/event_sales/analytics/event_detail.ex")
+
+    assert source =~ "SnapshotReader.financial_summaries_for_event"
+    assert source =~ "DimensionSnapshotReader"
+    assert source =~ "EventSnapshotRefreshFence.coherent_transaction_opts"
+    assert source =~ "AnalyticsReadinessResolver"
+    refute source =~ "scoped_summary"
+    refute source =~ "ticket_type_aggregate_rows"
+    refute source =~ "EventAggregator"
+    refute source =~ "DimensionAggregator"
+  end
+
   test "EventScopedDashboard uses hot-state and snapshot readers only" do
     source = File.read!("lib/event_sales/analytics/event_scoped_dashboard.ex")
 
