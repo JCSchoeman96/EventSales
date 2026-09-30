@@ -242,6 +242,21 @@ defmodule EventSales.Analytics.DimensionSnapshotReader do
 
   defp build_result(event_id, %{v2_rows: v2_rows, dim_rows: dim_rows}, actor) do
     revenue_visible? = Policies.can_view_revenue?(actor, event_id)
+
+    ticket_type_ids =
+      dim_rows
+      |> Enum.map(& &1.ticket_type_id)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+
+    source_system_ids =
+      dim_rows
+      |> Enum.map(& &1.source_system_id)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+
+    ticket_types = batch_ticket_types(ticket_type_ids)
+    source_systems = batch_source_systems(source_system_ids)
     dim_by_currency = Enum.group_by(dim_rows, & &1.currency)
 
     currencies =
@@ -249,7 +264,11 @@ defmodule EventSales.Analytics.DimensionSnapshotReader do
       |> Enum.sort_by(& &1.currency)
       |> Enum.map(fn v2 ->
         rows = Map.get(dim_by_currency, v2.currency, [])
-        %{currency: v2.currency, dimensions: build_dimensions_map(rows, revenue_visible?)}
+
+        %{
+          currency: v2.currency,
+          dimensions: build_dimensions_map(rows, revenue_visible?, ticket_types, source_systems)
+        }
       end)
 
     %{
@@ -260,13 +279,7 @@ defmodule EventSales.Analytics.DimensionSnapshotReader do
     }
   end
 
-  defp build_dimensions_map(rows, revenue_visible?) do
-    ticket_type_ids = Enum.map(rows, & &1.ticket_type_id)
-    source_system_ids = Enum.map(rows, & &1.source_system_id)
-
-    ticket_types = batch_ticket_types(ticket_type_ids)
-    source_systems = batch_source_systems(source_system_ids)
-
+  defp build_dimensions_map(rows, revenue_visible?, ticket_types, source_systems) do
     grouped =
       rows
       |> Enum.group_by(

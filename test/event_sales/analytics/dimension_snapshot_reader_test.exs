@@ -97,7 +97,7 @@ defmodule EventSales.Analytics.DimensionSnapshotReaderTest do
 
     currencies_by_code = Map.new(result.currencies, &{&1.currency, &1})
     zar = Map.fetch!(currencies_by_code, "ZAR")
-    usd = Map.fetch!(currencies_by_code, "USD")
+    _usd = Map.fetch!(currencies_by_code, "USD")
     assert Enum.map(result.currencies, & &1.currency) == Enum.sort(Map.keys(currencies_by_code))
 
     tickets_by_id = Map.new(zar.dimensions.ticket_type, &{&1.ticket_type_id, &1})
@@ -151,6 +151,43 @@ defmodule EventSales.Analytics.DimensionSnapshotReaderTest do
     bucket = hd(filtered.currencies)
     assert length(bucket.dimensions.ticket_type) == 1
     assert bucket.dimensions.source_product == []
+    assert bucket.dimensions.source_variation == []
+  end
+
+  test "optional source_product filter returns one family", %{
+    source: source,
+    event: event,
+    admin: admin
+  } do
+    ticket = SalesHelpers.create_ticket_type!(event, %{name: "GA"})
+    seed_ready_v2!(event, "ZAR", gross_qty: 1, refreshed_at: @refreshed_at)
+
+    seed_dimension!(event, :ticket_type, %{
+      currency: "ZAR",
+      ticket_type_id: ticket.id,
+      gross_ticket_quantity: 1,
+      gross_ticket_value: Decimal.new("10.00"),
+      refreshed_at: @refreshed_at
+    })
+
+    seed_dimension!(event, :source_product, %{
+      currency: "ZAR",
+      source_system_id: source.id,
+      woo_product_id: 502,
+      gross_ticket_quantity: 1,
+      gross_ticket_value: Decimal.new("10.00"),
+      refreshed_at: @refreshed_at
+    })
+
+    assert {:ok, filtered} =
+             DimensionSnapshotReader.list_for_event(event.id,
+               actor: admin,
+               dimension_kind: :source_product
+             )
+
+    bucket = hd(filtered.currencies)
+    assert length(bucket.dimensions.source_product) == 1
+    assert bucket.dimensions.ticket_type == []
     assert bucket.dimensions.source_variation == []
   end
 
@@ -325,13 +362,13 @@ defmodule EventSales.Analytics.DimensionSnapshotReaderTest do
     assert bucket.dimensions.source_variation == []
   end
 
-  test "dimension query count stays flat as row cardinality grows", %{
+  test "projection and catalogue query counts stay flat as row cardinality grows", %{
     source: source,
     event: event,
     admin: admin
   } do
-    counts =
-      for row_count <- [1, 50] do
+    classified =
+      for row_count <- [1, 50, 200] do
         cleanup_dimensions!(event.id)
         seed_projection_rows!(event, source, row_count)
 
@@ -340,10 +377,66 @@ defmodule EventSales.Analytics.DimensionSnapshotReaderTest do
             DimensionSnapshotReader.list_for_event(event.id, actor: admin)
           end)
 
-        dimension_select_count(queries)
+        projection_catalog_query_counts(queries)
       end
 
-    assert counts == [Enum.at(counts, 0), Enum.at(counts, 0)]
+    first = hd(classified)
+
+    for counts <- classified do
+      assert counts == first
+      assert_reader_projection_catalog_bounds!(counts)
+    end
+  end
+
+  test "catalogue enrichment uses one TicketType and one SourceSystem query for multi-currency output",
+       %{source: source, event: event, admin: admin} do
+    ticket = SalesHelpers.create_ticket_type!(event, %{name: "Multi Currency"})
+    seed_multi_currency_projection!(event, source, ticket)
+
+    {_result, queries} =
+      capture_queries(fn ->
+        DimensionSnapshotReader.list_for_event(event.id, actor: admin)
+      end)
+
+    counts = projection_catalog_query_counts(queries)
+    assert_reader_projection_catalog_bounds!(counts)
+    refute queries == []
+  end
+
+  defp seed_multi_currency_projection!(event, source, ticket) do
+    for {currency, product_id, variation_id} <- [
+          {"ZAR", 801, 901},
+          {"USD", 802, 902}
+        ] do
+      seed_ready_v2!(event, currency, gross_qty: 2, refreshed_at: @refreshed_at)
+
+      seed_dimension!(event, :ticket_type, %{
+        currency: currency,
+        ticket_type_id: ticket.id,
+        gross_ticket_quantity: 2,
+        gross_ticket_value: Decimal.new("20.00"),
+        refreshed_at: @refreshed_at
+      })
+
+      seed_dimension!(event, :source_product, %{
+        currency: currency,
+        source_system_id: source.id,
+        woo_product_id: product_id,
+        gross_ticket_quantity: 2,
+        gross_ticket_value: Decimal.new("20.00"),
+        refreshed_at: @refreshed_at
+      })
+
+      seed_dimension!(event, :source_variation, %{
+        currency: currency,
+        source_system_id: source.id,
+        woo_product_id: product_id,
+        woo_variation_id: variation_id,
+        gross_ticket_quantity: 2,
+        gross_ticket_value: Decimal.new("20.00"),
+        refreshed_at: @refreshed_at
+      })
+    end
   end
 
   defp seed_projection_rows!(event, source, row_count) do
@@ -570,7 +663,39 @@ defmodule EventSales.Analytics.DimensionSnapshotReaderTest do
     end
   end
 
-  defp dimension_select_count(queries) do
-    Enum.count(queries, &String.contains?(&1, "analytics_event_dimension_aggregate_snapshots"))
+  defp projection_catalog_query_counts(queries) do
+    relevant =
+      Enum.reject(queries, fn query ->
+        String.match?(query, ~r/\b(BEGIN|COMMIT|ROLLBACK)\b/i)
+      end)
+
+    %{
+      event_v2: count_table_queries(relevant, "analytics_event_aggregate_snapshots"),
+      dimensions: count_table_queries(relevant, "analytics_event_dimension_aggregate_snapshots"),
+      ticket_types: count_table_queries(relevant, "catalog_ticket_types"),
+      source_systems: count_table_queries(relevant, "catalog_source_systems"),
+      catalog_events: count_table_queries(relevant, "catalog_events"),
+      sales_orders: count_table_queries(relevant, "sales_orders"),
+      sales_order_items: count_table_queries(relevant, "sales_order_items"),
+      sales_refunds: count_table_queries(relevant, "sales_refunds"),
+      sales_refund_lines: count_table_queries(relevant, "sales_refund_lines"),
+      product_mappings: count_table_queries(relevant, "catalog_product_mappings")
+    }
+  end
+
+  defp assert_reader_projection_catalog_bounds!(counts) do
+    assert counts.event_v2 <= 1
+    assert counts.dimensions <= 1
+    assert counts.ticket_types <= 1
+    assert counts.source_systems <= 1
+    assert counts.sales_orders == 0
+    assert counts.sales_order_items == 0
+    assert counts.sales_refunds == 0
+    assert counts.sales_refund_lines == 0
+    assert counts.product_mappings == 0
+  end
+
+  defp count_table_queries(queries, table) do
+    Enum.count(queries, &String.contains?(&1, table))
   end
 end

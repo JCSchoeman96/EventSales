@@ -115,6 +115,24 @@ defmodule EventSales.Analytics.DimensionSnapshotReaderPolicyTest do
     assert {:error, :forbidden} = DimensionSnapshotReader.list_for_event(event.id, actor: nil)
   end
 
+  test "unassigned unknown valid uuid is forbidden before event or projection reads", %{
+    unassigned: unassigned
+  } do
+    unknown_event_id = Ecto.UUID.generate()
+
+    {result, queries} =
+      capture_queries(fn ->
+        DimensionSnapshotReader.list_for_event(unknown_event_id, actor: unassigned)
+      end)
+
+    assert {:error, :forbidden} = result
+
+    counts = projection_existence_query_counts(queries)
+    assert counts.catalog_events == 0
+    assert counts.event_v2 == 0
+    assert counts.dimensions == 0
+  end
+
   test "unassigned valid uuid is forbidden before dimension projection is read", %{
     event: event,
     unassigned: unassigned
@@ -294,5 +312,22 @@ defmodule EventSales.Analytics.DimensionSnapshotReaderPolicyTest do
     after
       0 -> Enum.reverse(queries)
     end
+  end
+
+  defp projection_existence_query_counts(queries) do
+    relevant =
+      Enum.reject(queries, fn query ->
+        String.match?(query, ~r/\b(BEGIN|COMMIT|ROLLBACK)\b/i)
+      end)
+
+    %{
+      catalog_events: count_table_queries(relevant, "catalog_events"),
+      event_v2: count_table_queries(relevant, "analytics_event_aggregate_snapshots"),
+      dimensions: count_table_queries(relevant, "analytics_event_dimension_aggregate_snapshots")
+    }
+  end
+
+  defp count_table_queries(queries, table) do
+    Enum.count(queries, &String.contains?(&1, table))
   end
 end
