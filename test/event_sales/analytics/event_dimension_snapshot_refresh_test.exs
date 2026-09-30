@@ -411,45 +411,46 @@ defmodule EventSales.Analytics.EventDimensionSnapshotRefreshTest do
   end
 
   defp cleanup_unboxed_invariant_fixture!(ctx) do
+    invalidate_unboxed_cache_keys!(ctx)
+    delete_unboxed_snapshot_rows!(ctx)
+    delete_unboxed_order_rows!(ctx)
+    delete_unboxed_catalog_rows!(ctx)
+  end
+
+  defp invalidate_unboxed_cache_keys!(ctx) do
     Enum.each(ctx[:cache_event_ids] || [], &DashboardCache.invalidate_event(&1, :test_teardown))
+  end
 
-    dimension_snapshot_ids = ctx[:dimension_snapshot_ids] || []
-    event_snapshot_ids = ctx[:event_snapshot_ids] || []
+  defp delete_unboxed_snapshot_rows!(ctx) do
+    delete_ids!(EventDimensionAggregateSnapshot, ctx[:dimension_snapshot_ids])
+    delete_ids!(EventAggregateSnapshot, ctx[:event_snapshot_ids])
+
     event_ids = ctx[:event_ids] || []
-    order_ids = ctx[:order_ids] || []
-    ticket_type_ids = ctx[:ticket_type_ids] || []
-    source_system_ids = ctx[:source_system_ids] || []
-
-    if dimension_snapshot_ids != [] do
-      Repo.delete_all(
-        from(d in EventDimensionAggregateSnapshot, where: d.id in ^dimension_snapshot_ids)
-      )
-    end
-
-    if event_snapshot_ids != [] do
-      Repo.delete_all(from(d in EventAggregateSnapshot, where: d.id in ^event_snapshot_ids))
-    end
 
     if event_ids != [] do
       Repo.delete_all(from(d in EventDimensionAggregateSnapshot, where: d.event_id in ^event_ids))
       Repo.delete_all(from(d in EventAggregateSnapshot, where: d.event_id in ^event_ids))
     end
+  end
+
+  defp delete_unboxed_order_rows!(ctx) do
+    order_ids = ctx[:order_ids] || []
 
     if order_ids != [] do
       Repo.delete_all(from(oi in OrderItem, where: oi.order_id in ^order_ids))
       Repo.delete_all(from(o in Order, where: o.id in ^order_ids))
     end
+  end
 
-    if ticket_type_ids != [] do
-      Repo.delete_all(from(tt in TicketType, where: tt.id in ^ticket_type_ids))
-    end
+  defp delete_unboxed_catalog_rows!(ctx) do
+    delete_ids!(TicketType, ctx[:ticket_type_ids])
+    delete_ids!(Event, ctx[:event_ids])
+    delete_ids!(SourceSystem, ctx[:source_system_ids])
+  end
 
-    if event_ids != [] do
-      Repo.delete_all(from(e in Event, where: e.id in ^event_ids))
-    end
+  defp delete_ids!(schema, ids) when ids in [nil, []], do: :ok
 
-    if source_system_ids != [] do
-      Repo.delete_all(from(s in SourceSystem, where: s.id in ^source_system_ids))
-    end
+  defp delete_ids!(schema, ids) do
+    Repo.delete_all(from(row in schema, where: row.id in ^ids))
   end
 end
