@@ -304,7 +304,8 @@ defmodule EventSales.Analytics.Aggregators.EventAggregator do
     if Repo.one(query), do: {:error, :incomplete_financial_primitives}, else: :ok
   end
 
-  defp recognised_sale_item_filters(event_id) do
+  @doc false
+  def recognised_sale_item_filters(event_id) do
     dynamic(
       [oi, o],
       oi.event_id == ^event_id and

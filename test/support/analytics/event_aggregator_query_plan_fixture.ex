@@ -256,6 +256,7 @@ defmodule EventSales.TestSupport.Analytics.EventAggregatorQueryPlanFixture do
         ticket_type_id: ticket_type_id,
         woo_line_item_id: 70,
         woo_product_id: 71,
+        woo_variation_id: 72,
         name: "Target ticket",
         quantity: 2,
         line_subtotal: Decimal.new("80.00"),

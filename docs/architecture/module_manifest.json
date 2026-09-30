@@ -19,6 +19,7 @@
     "lib/event_sales/analytics/admin_dashboard.ex",
     "lib/event_sales/analytics/aggregate_event.ex",
     "lib/event_sales/analytics/aggregate_event_idempotency.ex",
+    "lib/event_sales/analytics/aggregators/dimension_aggregator.ex",
     "lib/event_sales/analytics/aggregators/event_aggregator.ex",
     "lib/event_sales/analytics/cache_keys.ex",
     "lib/event_sales/analytics/dashboard_cache.ex",
@@ -655,7 +656,22 @@
       "uses": []
     },
     {
-      "docs_count": 4,
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.Aggregators.DimensionAggregator",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/aggregators/dimension_aggregator.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "gross_rows_for_event"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 5,
       "moduledoc?": true,
       "name": "EventSales.Analytics.Aggregators.EventAggregator",
       "parse_error": null,
@@ -676,6 +692,10 @@
         {
           "arity": 2,
           "name": "operational_status_breakdown_for_event"
+        },
+        {
+          "arity": 1,
+          "name": "recognised_sale_item_filters"
         }
       ],
       "specs?": true,

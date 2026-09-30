@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-405
+406
 
 ## Files
 
@@ -31,6 +31,7 @@ Project root: `.`
 - `lib/event_sales/analytics/admin_dashboard.ex`
 - `lib/event_sales/analytics/aggregate_event.ex`
 - `lib/event_sales/analytics/aggregate_event_idempotency.ex`
+- `lib/event_sales/analytics/aggregators/dimension_aggregator.ex`
 - `lib/event_sales/analytics/aggregators/event_aggregator.ex`
 - `lib/event_sales/analytics/cache_keys.ex`
 - `lib/event_sales/analytics/dashboard_cache.ex`
@@ -504,11 +505,17 @@ Project root: `.`
   - docs_count: 4
   - public_funs: `duplicate?/2`, `reserve/2`, `clear_in_flight/2`, `mark_applied/3`
   - uses: _none_
+- `EventSales.Analytics.Aggregators.DimensionAggregator` - `lib/event_sales/analytics/aggregators/dimension_aggregator.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `gross_rows_for_event/1`
+  - uses: _none_
 - `EventSales.Analytics.Aggregators.EventAggregator` - `lib/event_sales/analytics/aggregators/event_aggregator.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 4
-  - public_funs: `financial_summaries_for_event/1`, `financial_summaries_for_event_period/2`, `summary_for_event/2`, `operational_status_breakdown_for_event/2`
+  - docs_count: 5
+  - public_funs: `financial_summaries_for_event/1`, `financial_summaries_for_event_period/2`, `summary_for_event/2`, `operational_status_breakdown_for_event/2`, `recognised_sale_item_filters/1`
   - uses: _none_
 - `EventSales.Analytics.CacheKeys` - `lib/event_sales/analytics/cache_keys.ex`
   - moduledoc?: true
