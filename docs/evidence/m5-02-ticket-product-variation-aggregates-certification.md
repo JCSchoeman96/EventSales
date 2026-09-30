@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | Plan ID | m5-02-ticket-product-variation-aggregates |
-| Plan version | v2 |
+| Plan version | v3 |
 | Linear | JC-299 (M5-02F) |
 | Status | IN REVIEW (PR #276; merge pending) |
 | Programme base SHA | `191666b670d4c0d9dac1b6c91d30201a0300358a` |
@@ -12,6 +12,7 @@
 
 ### Revision log
 
+- `v3` — B23 matrix cites `order_upserter_historical_coverage_test.exs` (mutation enqueue + negative controls), not dimension refresh persistence tests.
 - `v2` — Full slice merge authority (M5-02B–F); auditable PASS matrix with test citations; EventDetail readiness propagation evidence.
 - `v1` — Initial M5-02F EventDetail conformance draft.
 
@@ -60,7 +61,7 @@ Nested `DimensionSnapshotReader` `Repo.transaction` executes inside the outer tr
 | Transactional dimension full replace | PASS | `test/event_sales/analytics/event_dimension_snapshot_refresh_test.exs` ("second refresh removes obsolete dimensional grains") |
 | Rollback preservation on failed refresh | PASS | `test/event_sales/analytics/event_snapshot_refresh_rollback_test.exs` |
 | Same-event refresh concurrency / fence | PASS | `test/event_sales/analytics/event_snapshot_refresh_concurrency_test.exs` |
-| B23 dimension-identity invalidation enqueue | PASS | `test/event_sales/analytics/event_dimension_snapshot_refresh_test.exs` (mutation-driven refresh); M5-01 B23 seam tests on `main` |
+| B23 dimension-identity invalidation enqueue | PASS | `test/event_sales/sales/order_upserter_historical_coverage_test.exs`: same-event `ticket_type_id`, `woo_product_id`, and `woo_variation_id` changes each request the Event snapshot refresh; ProductMapping-only and TicketType catalogue-only mutations do not enqueue refresh |
 | `DimensionSnapshotReader` authorization | PASS | `test/event_sales/analytics/dimension_snapshot_reader_policy_test.exs` |
 | `DimensionSnapshotReader` revenue redaction policy | PASS | `test/event_sales/analytics/dimension_snapshot_reader_policy_test.exs` |
 | Reader coherent projection read (event v2 + dimensions) | PASS | `test/event_sales/analytics/dimension_snapshot_reader_test.exs` |
