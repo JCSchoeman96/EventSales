@@ -705,8 +705,9 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
     assert {:ok, order} = OrderUpserter.upsert_order(source.id, initial_payload)
     assert [%OrderItem{ticket_type_id: ticket_id}] = order_items(order.id)
     assert ticket_id == ticket.id
-    before_certificate = dimension_identity_certificate_fields(hd(order_items(order.id)))
+    before_line_certificate = dimension_identity_certificate_fields(hd(order_items(order.id)))
     before_order = Ash.get!(Order, order.id, domain: Sales)
+    before_header_certificate = order_header_certificate_fields(before_order)
     _run = certified_run!(event)
 
     {:ok, normalized} = WoocommerceOrderParser.parse(initial_payload)
@@ -732,17 +733,16 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
                end
              )
 
-    assert updated.id == order.id
-    assert updated.raw_total == before_order.raw_total
-    assert updated.status == before_order.status
-
     assert_receive {:snapshot_refresh_requested, [event_id]}
     assert event_id == event.id
 
+    after_order = Ash.get!(Order, updated.id, domain: Sales)
     after_item = hd(order_items(order.id))
 
-    assert_only_certificate_field_changed!(
-      before_certificate,
+    assert_identity_only_historical_mutation!(
+      before_header_certificate,
+      after_order,
+      before_line_certificate,
       after_item,
       :ticket_type_id,
       alternate_ticket.id
@@ -756,7 +756,9 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
   } do
     initial_payload = payload(@historical_created_at)
     assert {:ok, order} = OrderUpserter.upsert_order(source.id, initial_payload)
-    before_certificate = dimension_identity_certificate_fields(hd(order_items(order.id)))
+    before_line_certificate = dimension_identity_certificate_fields(hd(order_items(order.id)))
+    before_order = Ash.get!(Order, order.id, domain: Sales)
+    before_header_certificate = order_header_certificate_fields(before_order)
     _run = certified_run!(event)
 
     mapping =
@@ -777,7 +779,7 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
       |> Map.put("date_modified_gmt", woo_datetime(~U[2026-08-05 13:00:00.000000Z]))
       |> put_in(["line_items", Access.at(0), "product_id"], 777)
 
-    assert {:ok, _updated} =
+    assert {:ok, updated} =
              OrderUpserter.upsert_order(
                source.id,
                replay_payload,
@@ -790,8 +792,17 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
     assert_receive {:snapshot_refresh_requested, [event_id]}
     assert event_id == event.id
 
+    after_order = Ash.get!(Order, updated.id, domain: Sales)
     after_item = hd(order_items(order.id))
-    assert_only_certificate_field_changed!(before_certificate, after_item, :woo_product_id, 777)
+
+    assert_identity_only_historical_mutation!(
+      before_header_certificate,
+      after_order,
+      before_line_certificate,
+      after_item,
+      :woo_product_id,
+      777
+    )
   end
 
   test "same-event woo_variation_id change requests snapshot refresh for that event", %{
@@ -801,7 +812,9 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
   } do
     initial_payload = payload(@historical_created_at)
     assert {:ok, order} = OrderUpserter.upsert_order(source.id, initial_payload)
-    before_certificate = dimension_identity_certificate_fields(hd(order_items(order.id)))
+    before_line_certificate = dimension_identity_certificate_fields(hd(order_items(order.id)))
+    before_order = Ash.get!(Order, order.id, domain: Sales)
+    before_header_certificate = order_header_certificate_fields(before_order)
     _run = certified_run!(event)
 
     mapping =
@@ -822,7 +835,7 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
       |> Map.put("date_modified_gmt", woo_datetime(~U[2026-08-05 13:00:00.000000Z]))
       |> put_in(["line_items", Access.at(0), "variation_id"], 888)
 
-    assert {:ok, _updated} =
+    assert {:ok, updated} =
              OrderUpserter.upsert_order(
                source.id,
                replay_payload,
@@ -835,8 +848,17 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
     assert_receive {:snapshot_refresh_requested, [event_id]}
     assert event_id == event.id
 
+    after_order = Ash.get!(Order, updated.id, domain: Sales)
     after_item = hd(order_items(order.id))
-    assert_only_certificate_field_changed!(before_certificate, after_item, :woo_variation_id, 888)
+
+    assert_identity_only_historical_mutation!(
+      before_header_certificate,
+      after_order,
+      before_line_certificate,
+      after_item,
+      :woo_variation_id,
+      888
+    )
   end
 
   test "ProductMapping-only mutation does not enqueue analytics snapshot refresh", %{
@@ -1454,6 +1476,19 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
     [%{"id" => 1, "key" => "tickera_event_id", "value" => Integer.to_string(external_event_id)}]
   end
 
+  defp order_header_certificate_fields(%Order{} = order) do
+    %{
+      status: order.status,
+      currency: order.currency,
+      created_at_source: order.created_at_source,
+      completed_at: order.completed_at,
+      paid_at: order.paid_at,
+      raw_total: order.raw_total,
+      raw_discount_total: order.raw_discount_total,
+      raw_tax_total: order.raw_tax_total
+    }
+  end
+
   defp dimension_identity_certificate_fields(%OrderItem{} = item) do
     %{
       event_id: item.event_id,
@@ -1461,14 +1496,34 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
       woo_product_id: item.woo_product_id,
       woo_variation_id: item.woo_variation_id,
       quantity: item.quantity,
+      line_subtotal: item.line_subtotal,
       line_total: item.line_total,
       line_total_tax: item.line_total_tax,
+      discount_total: item.discount_total,
       mapping_status: item.mapping_status,
       item_kind: item.item_kind
     }
   end
 
-  defp assert_only_certificate_field_changed!(
+  defp assert_identity_only_historical_mutation!(
+         before_header,
+         %Order{} = after_order,
+         before_line,
+         %OrderItem{} = after_item,
+         changed_line_field,
+         expected_value
+       ) do
+    assert order_header_certificate_fields(after_order) == before_header
+
+    assert_only_line_certificate_field_changed!(
+      before_line,
+      after_item,
+      changed_line_field,
+      expected_value
+    )
+  end
+
+  defp assert_only_line_certificate_field_changed!(
          before_fields,
          %OrderItem{} = after_item,
          field,
