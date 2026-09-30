@@ -1,11 +1,13 @@
 defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
   use EventSales.DataCase, async: false
 
+  import Ecto.Query
+
   require Ash.Query
 
   alias EventSales.Analytics.Workers.RefreshSnapshotWorker
   alias EventSales.Catalog
-  alias EventSales.Catalog.Resources.ProductMapping
+  alias EventSales.Catalog.Resources.{ProductMapping, TicketType}
   alias EventSales.Ingestion
   alias EventSales.Ingestion.HistoricalCoverageInvalidator
   alias EventSales.Ingestion.HistoricalCoverageResolver
@@ -688,6 +690,193 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
 
     assert {:ok, current} = HistoricalCoverageResolver.resolve_current(event.id)
     assert current.id == run.id
+  end
+
+  test "same-event ticket_type_id change requests snapshot refresh for that event", %{
+    source: source,
+    event: event,
+    ticket: ticket
+  } do
+    alternate_ticket =
+      SalesHelpers.create_ticket_type!(event, %{name: "Alternate Ticket Type"})
+
+    initial_payload = payload(@historical_created_at)
+    assert {:ok, order} = OrderUpserter.upsert_order(source.id, initial_payload)
+    assert [%OrderItem{id: item_id, ticket_type_id: ticket_id}] = order_items(order.id)
+    assert ticket_id == ticket.id
+    _run = certified_run!(event)
+
+    Repo.update_all(
+      from(oi in OrderItem, where: oi.id == ^item_id),
+      set: [ticket_type_id: Ecto.UUID.dump!(alternate_ticket.id)]
+    )
+
+    test_pid = self()
+
+    changed_payload =
+      initial_payload
+      |> Map.put("date_modified_gmt", woo_datetime(~U[2026-08-05 13:00:00.000000Z]))
+      |> Map.put("total", "901.00")
+      |> put_in(["line_items", Access.at(0), "quantity"], 2)
+
+    assert {:ok, _updated} =
+             OrderUpserter.upsert_order(
+               source.id,
+               changed_payload,
+               snapshot_refresh_scheduler: fn event_ids ->
+                 send(test_pid, {:snapshot_refresh_requested, event_ids})
+                 :ok
+               end
+             )
+
+    assert_receive {:snapshot_refresh_requested, [event_id]}
+    assert event_id == event.id
+
+    assert [%OrderItem{event_id: ^event_id, ticket_type_id: final_ticket_id}] =
+             order_items(order.id)
+
+    assert final_ticket_id in [ticket.id, alternate_ticket.id]
+  end
+
+  test "same-event woo_product_id change requests snapshot refresh for that event", %{
+    source: source,
+    event: event
+  } do
+    initial_payload = payload(@historical_created_at)
+    assert {:ok, order} = OrderUpserter.upsert_order(source.id, initial_payload)
+    _run = certified_run!(event)
+    test_pid = self()
+
+    changed_payload =
+      initial_payload
+      |> Map.put("date_modified_gmt", woo_datetime(~U[2026-08-05 13:00:00.000000Z]))
+      |> Map.put("total", "901.00")
+      |> put_in(["line_items", Access.at(0), "product_id"], 777)
+
+    assert {:ok, _updated} =
+             OrderUpserter.upsert_order(
+               source.id,
+               changed_payload,
+               snapshot_refresh_scheduler: fn event_ids ->
+                 send(test_pid, {:snapshot_refresh_requested, event_ids})
+                 :ok
+               end
+             )
+
+    assert_receive {:snapshot_refresh_requested, [event_id]}
+    assert event_id == event.id
+    assert [%OrderItem{woo_product_id: 777}] = order_items(order.id)
+  end
+
+  test "same-event woo_variation_id change requests snapshot refresh for that event", %{
+    source: source,
+    event: event
+  } do
+    initial_payload = payload(@historical_created_at)
+    assert {:ok, order} = OrderUpserter.upsert_order(source.id, initial_payload)
+    _run = certified_run!(event)
+    test_pid = self()
+
+    changed_payload =
+      initial_payload
+      |> Map.put("date_modified_gmt", woo_datetime(~U[2026-08-05 13:00:00.000000Z]))
+      |> Map.put("total", "901.00")
+      |> put_in(["line_items", Access.at(0), "variation_id"], 888)
+
+    assert {:ok, _updated} =
+             OrderUpserter.upsert_order(
+               source.id,
+               changed_payload,
+               snapshot_refresh_scheduler: fn event_ids ->
+                 send(test_pid, {:snapshot_refresh_requested, event_ids})
+                 :ok
+               end
+             )
+
+    assert_receive {:snapshot_refresh_requested, [event_id]}
+    assert event_id == event.id
+    assert [%OrderItem{woo_variation_id: 888}] = order_items(order.id)
+  end
+
+  test "ProductMapping-only mutation does not enqueue analytics snapshot refresh", %{
+    source: source,
+    event: event,
+    ticket: ticket
+  } do
+    initial_payload = payload(@historical_created_at)
+    assert {:ok, order} = OrderUpserter.upsert_order(source.id, initial_payload)
+    _run = certified_run!(event)
+    jobs_before = refresh_job_count(event.id)
+    test_pid = self()
+
+    other_ticket =
+      SalesHelpers.create_variation_ticket_type!(event, 909, 919, %{
+        name: "Mapping-only Ticket"
+      })
+
+    Ash.create!(
+      ProductMapping,
+      %{
+        source_system_id: source.id,
+        event_id: event.id,
+        ticket_type_id: other_ticket.id,
+        woo_product_id: 909,
+        woo_variation_id: 919,
+        original_label: "New mapping",
+        current_label: "New mapping",
+        active: true
+      },
+      action: :create,
+      domain: Catalog
+    )
+
+    assert {:ok, replayed} =
+             OrderUpserter.upsert_order(
+               source.id,
+               initial_payload,
+               snapshot_refresh_scheduler: fn event_ids ->
+                 send(test_pid, {:unexpected_snapshot_refresh, event_ids})
+                 :ok
+               end
+             )
+
+    assert replayed.id == order.id
+    refute_receive {:unexpected_snapshot_refresh, _}
+    assert refresh_job_count(event.id) == jobs_before
+  end
+
+  test "TicketType catalogue-only mutation does not enqueue analytics snapshot refresh", %{
+    source: source,
+    event: event,
+    ticket: ticket
+  } do
+    initial_payload = payload(@historical_created_at)
+    assert {:ok, order} = OrderUpserter.upsert_order(source.id, initial_payload)
+    _run = certified_run!(event)
+    jobs_before = refresh_job_count(event.id)
+    test_pid = self()
+
+    Ash.update!(
+      ticket,
+      %{name: "Renamed Ticket", capacity: 99, active: false},
+      action: :update,
+      domain: Catalog
+    )
+
+    assert {:ok, replayed} =
+             OrderUpserter.upsert_order(
+               source.id,
+               initial_payload,
+               snapshot_refresh_scheduler: fn event_ids ->
+                 send(test_pid, {:unexpected_snapshot_refresh, event_ids})
+                 :ok
+               end
+             )
+
+    assert replayed.id == order.id
+    refute_receive {:unexpected_snapshot_refresh, _}
+    assert refresh_job_count(event.id) == jobs_before
+    assert Ash.get!(TicketType, ticket.id, domain: Catalog).name == "Renamed Ticket"
   end
 
   test "identical replay and updated_at_source-only advancement do not invalidate", %{

@@ -6,7 +6,12 @@ defmodule EventSales.Analytics.EventSnapshotRefreshConcurrencyTest do
   require Ash.Query
 
   alias EventSales.Analytics.{EventSnapshotRefreshFence, SnapshotRefresh}
-  alias EventSales.Analytics.Resources.EventAggregateSnapshot
+
+  alias EventSales.Analytics.Resources.{
+    EventAggregateSnapshot,
+    EventDimensionAggregateSnapshot
+  }
+
   alias EventSales.Catalog.Resources.{Event, SourceSystem, TicketType}
   alias EventSales.Repo
   alias EventSales.Sales
@@ -263,6 +268,81 @@ defmodule EventSales.Analytics.EventSnapshotRefreshConcurrencyTest do
     refute Enum.any?(durable, fn row -> row.gross_ticket_quantity != 1 end)
   end
 
+  test "overlapping refresh_event calls leave one coherent dimensional set" do
+    fixture = create_committed_fixture!()
+    on_exit(fn -> cleanup_committed_fixture!(fixture) end)
+
+    assert {:ok, _} =
+             UnboxedPostgres.with_connection(fn ->
+               SnapshotRefresh.refresh_event(fixture.event_id)
+             end)
+
+    parent = self()
+
+    holder =
+      Task.async(fn ->
+        UnboxedPostgres.with_connection(fn ->
+          EventSnapshotRefreshFence.with_serial_event_refresh(fixture.event_id, fn ->
+            send(parent, :dimension_holder_ready)
+
+            receive do
+              :release_dimension_fence -> :ok
+            after
+              20_000 -> :timeout
+            end
+          end)
+        end)
+      end)
+
+    assert_receive :dimension_holder_ready, 5_000
+
+    UnboxedPostgres.with_connection(fn ->
+      delete_items_for_order!(fixture.usd_order_id)
+    end)
+
+    first_refresh =
+      Task.async(fn ->
+        UnboxedPostgres.with_connection(fn ->
+          backend = EventSnapshotRefreshFence.connection_backend_pid()
+          send(parent, {:dimension_refresh_waiter, backend})
+          SnapshotRefresh.refresh_event(fixture.event_id)
+        end)
+      end)
+
+    second_refresh =
+      Task.async(fn ->
+        UnboxedPostgres.with_connection(fn ->
+          backend = EventSnapshotRefreshFence.connection_backend_pid()
+          send(parent, {:dimension_refresh_waiter, backend})
+          SnapshotRefresh.refresh_event(fixture.event_id)
+        end)
+      end)
+
+    assert_receive {:dimension_refresh_waiter, first_backend}, 5_000
+    assert_receive {:dimension_refresh_waiter, second_backend}, 5_000
+    assert first_backend != second_backend
+
+    EventSnapshotRefreshTestSupport.wait_for_advisory_lock_wait!(first_backend)
+    EventSnapshotRefreshTestSupport.wait_for_advisory_lock_wait!(second_backend)
+
+    send(holder.pid, :release_dimension_fence)
+
+    assert {:ok, _} = Task.await(first_refresh, 20_000)
+    assert {:ok, _} = Task.await(second_refresh, 20_000)
+
+    final_rows =
+      UnboxedPostgres.with_connection(fn ->
+        EventDimensionAggregateSnapshot
+        |> Ash.Query.filter(event_id == ^fixture.event_id)
+        |> Ash.read!(domain: EventSales.Analytics)
+      end)
+
+    assert final_rows != []
+    assert Enum.all?(final_rows, &(&1.currency == "ZAR"))
+    refute Enum.any?(final_rows, &(&1.currency == "USD"))
+    assert Enum.uniq(Enum.map(final_rows, & &1.refreshed_at)) |> length() == 1
+  end
+
   defp create_committed_fixture! do
     suffix = System.unique_integer([:positive])
 
@@ -367,6 +447,10 @@ defmodule EventSales.Analytics.EventSnapshotRefreshConcurrencyTest do
     UnboxedPostgres.with_exclusive_setup(fn ->
       Repo.delete_all(
         from(snapshot in EventAggregateSnapshot, where: snapshot.event_id == ^event_id)
+      )
+
+      Repo.delete_all(
+        from(snapshot in EventDimensionAggregateSnapshot, where: snapshot.event_id == ^event_id)
       )
 
       Repo.delete_all(from(item in OrderItem, where: item.event_id == ^event_id))

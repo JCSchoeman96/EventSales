@@ -4,7 +4,12 @@ defmodule EventSales.Analytics.EventSnapshotRefreshRollbackTest do
   require Ash.Query
 
   alias EventSales.Analytics.{DashboardCache, SnapshotRefresh}
-  alias EventSales.Analytics.Resources.EventAggregateSnapshot
+
+  alias EventSales.Analytics.Resources.{
+    EventAggregateSnapshot,
+    EventDimensionAggregateSnapshot
+  }
+
   alias EventSales.Repo
   alias EventSales.Sales
   alias EventSales.TestSupport.{SalesHelpers, UnboxedPostgres}
@@ -12,6 +17,95 @@ defmodule EventSales.Analytics.EventSnapshotRefreshRollbackTest do
   setup do
     DashboardCache.ensure_table!()
     :ok
+  end
+
+  test "failed dimensional bulk insert rolls back event and dimension projections and leaves cache intact" do
+    with_unboxed_connection(fn ->
+      source = SalesHelpers.create_source_system!()
+
+      event =
+        SalesHelpers.create_event!(source, %{
+          name: "Dimension Rollback Event",
+          slug: "dim-rollback-#{System.unique_integer([:positive])}"
+        })
+
+      ticket = SalesHelpers.create_ticket_type!(event, %{name: "GA"})
+
+      assert {:ok, event_snapshot} =
+               Ash.create(
+                 EventAggregateSnapshot,
+                 snapshot_attrs(event.id, "ZAR", 9),
+                 action: :create_snapshot,
+                 domain: EventSales.Analytics
+               )
+
+      assert {:ok, dimension_snapshot} =
+               Ash.create(
+                 EventDimensionAggregateSnapshot,
+                 %{
+                   event_id: event.id,
+                   currency: "ZAR",
+                   dimension_kind: :ticket_type,
+                   ticket_type_id: ticket.id,
+                   gross_ticket_quantity: 2,
+                   gross_ticket_value: Decimal.new("20"),
+                   refreshed_at: ~U[2026-05-18 08:00:00.000000Z]
+                 },
+                 action: :create_snapshot,
+                 domain: EventSales.Analytics
+               )
+
+      order =
+        create_order!(source, :completed,
+          woo_order_id: 94_010,
+          currency: "ZAR",
+          completed_at: ~U[2026-05-17 08:00:00.000000Z]
+        )
+
+      create_item!(order, event, ticket,
+        woo_line_item_id: 1,
+        line_total: Decimal.new("450.00"),
+        line_total_tax: Decimal.new("67.50")
+      )
+
+      assert :ok = DashboardCache.put_event_summary(event.id, %{total_sold: 42})
+
+      constraint = "evt_dim_block_insert_#{System.unique_integer([:positive])}"
+
+      try do
+        Repo.query!(
+          "ALTER TABLE analytics_event_dimension_aggregate_snapshots ADD CONSTRAINT #{constraint} CHECK (NOT (currency = 'ZAR' AND dimension_kind = 'ticket_type')) NOT VALID"
+        )
+
+        assert {:error, _reason} = SnapshotRefresh.refresh_event(event.id)
+
+        assert {:ok, persisted_event} =
+                 Ash.get(EventAggregateSnapshot, event_snapshot.id, domain: EventSales.Analytics)
+
+        assert {:ok, persisted_dimension} =
+                 Ash.get(
+                   EventDimensionAggregateSnapshot,
+                   dimension_snapshot.id,
+                   domain: EventSales.Analytics
+                 )
+
+        assert persisted_event.gross_ticket_quantity == 9
+        assert persisted_dimension.gross_ticket_quantity == 2
+        assert {:ok, cached} = DashboardCache.get_event_summary(event.id)
+        assert cached.total_sold == 42
+      after
+        Repo.query!(
+          "ALTER TABLE analytics_event_dimension_aggregate_snapshots DROP CONSTRAINT IF EXISTS #{constraint}"
+        )
+
+        cleanup_unboxed_fixture!(
+          event.id,
+          source.id,
+          [event_snapshot.id],
+          [dimension_snapshot.id]
+        )
+      end
+    end)
   end
 
   test "failed multi-currency refresh rolls back and leaves cache intact" do
@@ -99,11 +193,19 @@ defmodule EventSales.Analytics.EventSnapshotRefreshRollbackTest do
     end)
   end
 
-  defp cleanup_unboxed_fixture!(event_id, source_id, snapshot_ids) do
+  defp cleanup_unboxed_fixture!(event_id, source_id, snapshot_ids, dimension_snapshot_ids \\ []) do
     import Ecto.Query
 
     alias EventSales.Catalog.Resources.{Event, SourceSystem, TicketType}
     alias EventSales.Sales.Resources.{Order, OrderItem}
+
+    if dimension_snapshot_ids != [] do
+      Repo.delete_all(
+        from(snapshot in EventDimensionAggregateSnapshot,
+          where: snapshot.id in ^dimension_snapshot_ids
+        )
+      )
+    end
 
     Repo.delete_all(from(snapshot in EventAggregateSnapshot, where: snapshot.id in ^snapshot_ids))
     Repo.delete_all(from(item in OrderItem, where: item.event_id == ^event_id))
