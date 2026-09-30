@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-406
+407
 
 ## Files
 
@@ -36,6 +36,7 @@ Project root: `.`
 - `lib/event_sales/analytics/cache_keys.ex`
 - `lib/event_sales/analytics/dashboard_cache.ex`
 - `lib/event_sales/analytics/dashboard_pub_sub.ex`
+- `lib/event_sales/analytics/dimension_snapshot_reader.ex`
 - `lib/event_sales/analytics/event_detail.ex`
 - `lib/event_sales/analytics/event_scoped_dashboard.ex`
 - `lib/event_sales/analytics/event_snapshot_refresh_fence.ex`
@@ -534,6 +535,12 @@ Project root: `.`
   - specs?: true
   - docs_count: 4
   - public_funs: `event_topic/1`, `subscribe_event/1`, `broadcast_hot_state_updated/2`, `broadcast_source_freshness_updated/1`
+  - uses: _none_
+- `EventSales.Analytics.DimensionSnapshotReader` - `lib/event_sales/analytics/dimension_snapshot_reader.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `list_for_event/2`
   - uses: _none_
 - `EventSales.Analytics.EventDetail` - `lib/event_sales/analytics/event_detail.ex`
   - moduledoc?: true
