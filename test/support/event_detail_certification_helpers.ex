@@ -29,7 +29,24 @@ defmodule EventSales.TestSupport.EventDetailCertificationHelpers do
     end
   end
 
+  @doc """
+  Creates the current M3 historical coverage certificate only.
+
+  Call after final sales facts and `SnapshotRefresh.refresh_event/1`.
+  """
+  def certify_m3_coverage!(event) do
+    FinancialReconciliationHelpers.certified_run!(event)
+  end
+
+  def finalize_mismatched_reconciliation!(event) do
+    finalize_terminal_reconciliation!(event, :mismatched)
+  end
+
   def finalize_matched_reconciliation!(event) do
+    finalize_terminal_reconciliation!(event, :matched)
+  end
+
+  defp finalize_terminal_reconciliation!(event, disposition) do
     {:ok, %{financial_reconciliation_run: run}} =
       FinancialReconciliationRuns.queue_system_for_event(event.id,
         internal?: true,
@@ -47,7 +64,7 @@ defmodule EventSales.TestSupport.EventDetailCertificationHelpers do
       FinancialReconciliationRuns.finalize_evidence(
         running,
         %{
-          disposition: :matched,
+          disposition: disposition,
           comparisons: [],
           metric_mismatches: [],
           structural_findings: []

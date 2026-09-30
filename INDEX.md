@@ -2742,8 +2742,8 @@ Project root: `.`
 - `EventSales.TestSupport.EventDetailCertificationHelpers` - `test/support/event_detail_certification_helpers.ex`
   - moduledoc?: true
   - specs?: false
-  - docs_count: 1
-  - public_funs: `certify_analytics_ready!/1`, `finalize_matched_reconciliation!/1`
+  - docs_count: 2
+  - public_funs: `certify_analytics_ready!/1`, `certify_m3_coverage!/1`, `finalize_mismatched_reconciliation!/1`, `finalize_matched_reconciliation!/1`
   - uses: _none_
 - `EventSales.TestSupport.EventSnapshotRefreshTestSupport` - `test/support/event_snapshot_refresh_test_support.ex`
   - moduledoc?: true

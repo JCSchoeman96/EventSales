@@ -8983,7 +8983,7 @@
       "uses": []
     },
     {
-      "docs_count": 1,
+      "docs_count": 2,
       "moduledoc?": true,
       "name": "EventSales.TestSupport.EventDetailCertificationHelpers",
       "parse_error": null,
@@ -8992,6 +8992,14 @@
         {
           "arity": 1,
           "name": "certify_analytics_ready!"
+        },
+        {
+          "arity": 1,
+          "name": "certify_m3_coverage!"
+        },
+        {
+          "arity": 1,
+          "name": "finalize_mismatched_reconciliation!"
         },
         {
           "arity": 1,

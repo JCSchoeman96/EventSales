@@ -172,6 +172,61 @@ defmodule EventSales.Analytics.EventDetailTest do
              EventDetail.get_event_detail(event.id, actor: admin)
   end
 
+  test "get_event_detail propagates financial reconciliation pending readiness", %{
+    admin: admin,
+    source: source,
+    event: event,
+    ga: ga
+  } do
+    completed = create_order!(source, :completed, woo_order_id: 202)
+
+    create_item!(completed, event, ga,
+      quantity: 1,
+      line_total: Decimal.new("100.00"),
+      line_total_tax: Decimal.new("0.00"),
+      woo_product_id: 8201,
+      woo_variation_id: 8202
+    )
+
+    assert {:ok, _} = SnapshotRefresh.refresh_event(event.id)
+    EventDetailCertificationHelpers.certify_m3_coverage!(event)
+
+    assert {:ok, readiness} = AnalyticsReadinessResolver.resolve(event.id)
+    assert readiness.analytics_ready? == false
+    assert readiness.blocking_reason == :financial_reconciliation_pending
+
+    assert {:error, {:analytics_not_ready, :financial_reconciliation_pending}} =
+             EventDetail.get_event_detail(event.id, actor: admin)
+  end
+
+  test "get_event_detail propagates failed mismatched reconciliation readiness", %{
+    admin: admin,
+    source: source,
+    event: event,
+    ga: ga
+  } do
+    completed = create_order!(source, :completed, woo_order_id: 203)
+
+    create_item!(completed, event, ga,
+      quantity: 2,
+      line_total: Decimal.new("200.00"),
+      line_total_tax: Decimal.new("0.00"),
+      woo_product_id: 8301,
+      woo_variation_id: 8302
+    )
+
+    assert {:ok, _} = SnapshotRefresh.refresh_event(event.id)
+    EventDetailCertificationHelpers.certify_m3_coverage!(event)
+    EventDetailCertificationHelpers.finalize_mismatched_reconciliation!(event)
+
+    assert {:ok, readiness} = AnalyticsReadinessResolver.resolve(event.id)
+    assert readiness.analytics_ready? == false
+    assert readiness.blocking_reason == :financial_reconciliation_failed
+
+    assert {:error, {:analytics_not_ready, :financial_reconciliation_failed}} =
+             EventDetail.get_event_detail(event.id, actor: admin)
+  end
+
   test "get_event_detail returns snapshot_not_ready when projections are missing after readiness",
        %{
          admin: admin,
