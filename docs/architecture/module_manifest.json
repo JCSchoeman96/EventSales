@@ -24,6 +24,7 @@
     "lib/event_sales/analytics/cache_keys.ex",
     "lib/event_sales/analytics/dashboard_cache.ex",
     "lib/event_sales/analytics/dashboard_pub_sub.ex",
+    "lib/event_sales/analytics/dimension_snapshot_reader.ex",
     "lib/event_sales/analytics/event_detail.ex",
     "lib/event_sales/analytics/event_scoped_dashboard.ex",
     "lib/event_sales/analytics/event_snapshot_refresh_fence.ex",
@@ -781,6 +782,21 @@
         {
           "arity": 1,
           "name": "broadcast_source_freshness_updated"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.DimensionSnapshotReader",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/dimension_snapshot_reader.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "list_for_event"
         }
       ],
       "specs?": true,
