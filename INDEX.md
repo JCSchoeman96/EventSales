@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-407
+408
 
 ## Files
 
@@ -402,6 +402,7 @@ Project root: `.`
 - `test/support/conn_case.ex`
 - `test/support/data_case.ex`
 - `test/support/db_topology_helpers.ex`
+- `test/support/event_detail_certification_helpers.ex`
 - `test/support/event_snapshot_refresh_test_support.ex`
 - `test/support/fakes/fake_tickera_attendee_client.ex`
 - `test/support/financial_reconciliation_helpers.ex`
@@ -2737,6 +2738,12 @@ Project root: `.`
   - specs?: false
   - docs_count: 0
   - public_funs: _none_
+  - uses: _none_
+- `EventSales.TestSupport.EventDetailCertificationHelpers` - `test/support/event_detail_certification_helpers.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 2
+  - public_funs: `certify_analytics_ready!/1`, `certify_m3_coverage!/1`, `finalize_mismatched_reconciliation!/1`, `finalize_matched_reconciliation!/1`
   - uses: _none_
 - `EventSales.TestSupport.EventSnapshotRefreshTestSupport` - `test/support/event_snapshot_refresh_test_support.ex`
   - moduledoc?: true

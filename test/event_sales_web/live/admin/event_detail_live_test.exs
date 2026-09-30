@@ -7,10 +7,11 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLiveTest do
 
   alias EventSales.Accounts
   alias EventSales.Accounts.Resources.{Role, User, UserRole}
-  alias EventSales.Analytics.{DashboardPubSub, HotStateAggregator}
+  alias EventSales.Analytics.{DashboardPubSub, HotStateAggregator, SnapshotRefresh}
   alias EventSales.Catalog.Resources.{Event, TicketType}
   alias EventSales.Sales
   alias EventSales.Sales.Resources.{Order, OrderItem}
+  alias EventSales.TestSupport.EventDetailCertificationHelpers
   alias EventSales.TestSupport.SalesHelpers
 
   setup do
@@ -65,7 +66,13 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLiveTest do
     other_ticket = SalesHelpers.create_ticket_type!(other_event, %{name: "Other GA"})
 
     mixed_order = create_order!(source, :completed, order_number: "MIXED-DETAIL")
-    create_item!(mixed_order, event, ga, quantity: 3, line_total: Decimal.new("300.00"))
+
+    create_item!(mixed_order, event, ga,
+      quantity: 3,
+      line_total: Decimal.new("300.00"),
+      woo_product_id: 9900,
+      woo_variation_id: 9902
+    )
 
     create_item!(mixed_order, other_event, other_ticket,
       quantity: 6,
@@ -79,6 +86,8 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLiveTest do
       mapping_status: :pending_mapping_resolution,
       item_kind: :unknown
     )
+
+    certify_detail_page!(event)
 
     {:ok, _view, html} =
       conn
@@ -114,7 +123,14 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLiveTest do
     ticket = SalesHelpers.create_ticket_type!(event, %{name: "GA"})
 
     order = create_order!(source, :completed)
-    create_item!(order, event, ticket, quantity: 2)
+
+    create_item!(order, event, ticket,
+      quantity: 2,
+      woo_product_id: 8801,
+      woo_variation_id: 8802
+    )
+
+    certify_detail_page!(event)
 
     {:ok, _view, html} =
       conn
@@ -144,7 +160,11 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLiveTest do
           updated_at_source: DateTime.add(~U[2026-05-18 08:00:00Z], index, :second)
         )
 
-      create_item!(order, event, ticket, woo_line_item_id: 2_200 + index)
+      create_item!(order, event, ticket,
+        woo_line_item_id: 2_200 + index,
+        woo_product_id: 5_200 + index,
+        woo_variation_id: 6_200 + index
+      )
 
       create_item!(order, event, ticket,
         name: "Unmapped #{index}",
@@ -154,6 +174,8 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLiveTest do
         item_kind: :unknown
       )
     end
+
+    certify_detail_page!(event)
 
     {:ok, view, html} =
       conn
@@ -186,7 +208,13 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLiveTest do
     ticket = SalesHelpers.create_ticket_type!(event, %{name: "GA"})
 
     order = create_order!(source, :completed, order_number: "ORIGINAL-ORDER")
-    create_item!(order, event, ticket, quantity: 1, woo_line_item_id: 10)
+
+    create_item!(order, event, ticket,
+      quantity: 1,
+      woo_line_item_id: 10,
+      woo_product_id: 1010,
+      woo_variation_id: 1011
+    )
 
     create_item!(order, event, ticket,
       name: "Original Unmapped",
@@ -195,6 +223,8 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLiveTest do
       mapping_status: :pending_mapping_resolution,
       item_kind: :unknown
     )
+
+    certify_detail_page!(event)
 
     {:ok, view, html} =
       conn
@@ -210,7 +240,12 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLiveTest do
         updated_at_source: ~U[2026-05-18 09:00:00Z]
       )
 
-    create_item!(new_order, event, ticket, quantity: 4, woo_line_item_id: 12)
+    create_item!(new_order, event, ticket,
+      quantity: 4,
+      woo_line_item_id: 12,
+      woo_product_id: 1012,
+      woo_variation_id: 1013
+    )
 
     create_item!(new_order, event, ticket,
       name: "New Unmapped After Mount",
@@ -219,6 +254,8 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLiveTest do
       mapping_status: :pending_mapping_resolution,
       item_kind: :unknown
     )
+
+    certify_detail_page!(event)
 
     send(view.pid, {:hot_state_updated, event.id, DateTime.utc_now()})
 
@@ -241,6 +278,11 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLiveTest do
         name: "Freshness Event",
         slug: unique_slug("freshness")
       })
+
+    ticket = SalesHelpers.create_ticket_type!(event, %{name: "GA"})
+    order = create_order!(source, :completed)
+    create_item!(order, event, ticket, woo_product_id: 7701, woo_variation_id: 7702)
+    certify_detail_page!(event)
 
     {:ok, view, _html} =
       conn
@@ -277,6 +319,11 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLiveTest do
         slug: unique_slug("placeholder")
       })
 
+    ticket = SalesHelpers.create_ticket_type!(event, %{name: "GA"})
+    order = create_order!(source, :completed)
+    create_item!(order, event, ticket, woo_product_id: 7801, woo_variation_id: 7802)
+    certify_detail_page!(event)
+
     {:ok, _view, html} =
       conn
       |> sign_in_as(admin)
@@ -305,6 +352,11 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLiveTest do
         ] do
       refute source =~ forbidden
     end
+  end
+
+  defp certify_detail_page!(event) do
+    assert {:ok, _} = SnapshotRefresh.refresh_event(event.id)
+    EventDetailCertificationHelpers.certify_analytics_ready!(event)
   end
 
   defp sign_in_as(conn, user) do
@@ -379,6 +431,7 @@ defmodule EventSalesWeb.Live.Admin.EventDetailLiveTest do
       quantity: 1,
       line_subtotal: Decimal.new("100.00"),
       line_total: Decimal.new("100.00"),
+      line_total_tax: Decimal.new("0"),
       discount_total: Decimal.new("0"),
       item_kind: :ticket,
       mapping_status: :mapped

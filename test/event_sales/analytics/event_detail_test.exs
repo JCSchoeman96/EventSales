@@ -6,11 +6,13 @@ defmodule EventSales.Analytics.EventDetailTest do
   alias EventSales.Accounts
   alias EventSales.Accounts.Resources.{Role, User, UserRole}
   alias EventSales.Analytics
-  alias EventSales.Analytics.{DashboardCache, EventDetail, HotStateAggregator}
+  alias EventSales.Analytics.{DashboardCache, EventDetail, HotStateAggregator, SnapshotRefresh}
   alias EventSales.Analytics.Resources.EventAggregateSnapshot
   alias EventSales.Catalog.Resources.{Event, TicketType}
+  alias EventSales.Ingestion.AnalyticsReadinessResolver
   alias EventSales.Sales
   alias EventSales.Sales.Resources.{Order, OrderItem}
+  alias EventSales.TestSupport.EventDetailCertificationHelpers
   alias EventSales.TestSupport.SalesHelpers
 
   setup do
@@ -40,6 +42,10 @@ defmodule EventSales.Analytics.EventDetailTest do
 
     ga = SalesHelpers.create_ticket_type!(event, %{name: "GA", capacity: 8})
     vip = SalesHelpers.create_ticket_type!(event, %{name: "VIP", capacity: nil})
+
+    inactive =
+      SalesHelpers.create_ticket_type!(event, %{name: "Retired", capacity: 2, active: false})
+
     other_ticket = SalesHelpers.create_ticket_type!(other_event, %{name: "Other GA"})
 
     %{
@@ -50,6 +56,7 @@ defmodule EventSales.Analytics.EventDetailTest do
       other_event: other_event,
       ga: ga,
       vip: vip,
+      inactive: inactive,
       other_ticket: other_ticket
     }
   end
@@ -148,6 +155,89 @@ defmodule EventSales.Analytics.EventDetailTest do
     assert {:error, :forbidden} = EventDetail.unmapped_items(event.id, actor: staff)
   end
 
+  test "get_event_detail blocks when analytics are not ready", %{
+    admin: admin,
+    source: source,
+    event: event,
+    ga: ga
+  } do
+    completed = create_order!(source, :completed, woo_order_id: 201)
+    create_item!(completed, event, ga, quantity: 1, line_total: Decimal.new("100.00"))
+    assert {:ok, _} = SnapshotRefresh.refresh_event(event.id)
+
+    assert {:ok, readiness} = AnalyticsReadinessResolver.resolve(event.id)
+    assert readiness.analytics_ready? == false
+
+    assert {:error, {:analytics_not_ready, :historical_coverage_not_current}} =
+             EventDetail.get_event_detail(event.id, actor: admin)
+  end
+
+  test "get_event_detail propagates financial reconciliation pending readiness", %{
+    admin: admin,
+    source: source,
+    event: event,
+    ga: ga
+  } do
+    completed = create_order!(source, :completed, woo_order_id: 202)
+
+    create_item!(completed, event, ga,
+      quantity: 1,
+      line_total: Decimal.new("100.00"),
+      line_total_tax: Decimal.new("0.00"),
+      woo_product_id: 8201,
+      woo_variation_id: 8202
+    )
+
+    assert {:ok, _} = SnapshotRefresh.refresh_event(event.id)
+    EventDetailCertificationHelpers.certify_m3_coverage!(event)
+
+    assert {:ok, readiness} = AnalyticsReadinessResolver.resolve(event.id)
+    assert readiness.analytics_ready? == false
+    assert readiness.blocking_reason == :financial_reconciliation_pending
+
+    assert {:error, {:analytics_not_ready, :financial_reconciliation_pending}} =
+             EventDetail.get_event_detail(event.id, actor: admin)
+  end
+
+  test "get_event_detail propagates failed mismatched reconciliation readiness", %{
+    admin: admin,
+    source: source,
+    event: event,
+    ga: ga
+  } do
+    completed = create_order!(source, :completed, woo_order_id: 203)
+
+    create_item!(completed, event, ga,
+      quantity: 2,
+      line_total: Decimal.new("200.00"),
+      line_total_tax: Decimal.new("0.00"),
+      woo_product_id: 8301,
+      woo_variation_id: 8302
+    )
+
+    assert {:ok, _} = SnapshotRefresh.refresh_event(event.id)
+    EventDetailCertificationHelpers.certify_m3_coverage!(event)
+    EventDetailCertificationHelpers.finalize_mismatched_reconciliation!(event)
+
+    assert {:ok, readiness} = AnalyticsReadinessResolver.resolve(event.id)
+    assert readiness.analytics_ready? == false
+    assert readiness.blocking_reason == :financial_reconciliation_failed
+
+    assert {:error, {:analytics_not_ready, :financial_reconciliation_failed}} =
+             EventDetail.get_event_detail(event.id, actor: admin)
+  end
+
+  test "get_event_detail returns snapshot_not_ready when projections are missing after readiness",
+       %{
+         admin: admin,
+         event: event
+       } do
+    EventDetailCertificationHelpers.certify_analytics_ready!(event)
+
+    assert {:error, :snapshot_not_ready} =
+             EventDetail.get_event_detail(event.id, actor: admin)
+  end
+
   test "get_event_detail computes nil capacity safely", %{
     admin: admin,
     source: source,
@@ -155,7 +245,14 @@ defmodule EventSales.Analytics.EventDetailTest do
     other_ticket: ticket
   } do
     completed = create_order!(source, :completed, woo_order_id: 201)
-    create_item!(completed, event, ticket, quantity: 3, line_total: Decimal.new("300.00"))
+
+    create_item!(completed, event, ticket,
+      quantity: 3,
+      line_total: Decimal.new("300.00"),
+      line_total_tax: Decimal.new("0.00")
+    )
+
+    certify_detail_ready!(event)
 
     assert {:ok, detail} = EventDetail.get_event_detail(event.id, actor: admin)
 
@@ -163,25 +260,64 @@ defmodule EventSales.Analytics.EventDetailTest do
     assert detail.sold == 3
     assert detail.remaining == nil
     assert detail.revenue == Decimal.new("300.00")
+    assert detail.refreshed_at == nil
   end
 
-  test "get_event_detail computes remaining with capacity", %{
+  test "get_event_detail computes remaining with capacity and unsold ticket types", %{
     admin: admin,
     source: source,
     event: event,
-    ga: ga
+    ga: ga,
+    vip: vip
   } do
     completed = create_order!(source, :completed, woo_order_id: 301)
-    create_item!(completed, event, ga, quantity: 4, line_total: Decimal.new("450.00"))
+
+    create_item!(completed, event, ga,
+      quantity: 4,
+      line_total: Decimal.new("400.00"),
+      line_total_tax: Decimal.new("50.00"),
+      woo_product_id: 501,
+      woo_variation_id: 601
+    )
+
+    certify_detail_ready!(event)
 
     assert {:ok, detail} = EventDetail.get_event_detail(event.id, actor: admin)
 
     assert detail.capacity == 10
     assert detail.sold == 4
     assert detail.remaining == 6
-    assert detail.status_breakdown == %{"completed" => 4}
+    assert detail.revenue == Decimal.new("450.00")
+    assert detail.currency == "ZAR"
+    assert detail.refreshed_at == nil
+
     ga_row = Enum.find(detail.ticket_types, &(&1.ticket_type_id == ga.id))
-    assert %{sold: 4, remaining: 4} = ga_row
+    vip_row = Enum.find(detail.ticket_types, &(&1.ticket_type_id == vip.id))
+    assert ga_row.sold == 4
+    assert ga_row.remaining == 4
+    assert ga_row.revenue == Decimal.new("450.00")
+    assert vip_row.sold == 0
+    assert vip_row.remaining == nil
+    assert vip_row.revenue == Decimal.new("0")
+  end
+
+  test "operational status_breakdown is current-state context not financial totals", %{
+    admin: admin,
+    source: source,
+    event: event,
+    ga: ga
+  } do
+    completed = create_order!(source, :completed, woo_order_id: 302)
+    create_item!(completed, event, ga, quantity: 4, line_total: Decimal.new("400.00"))
+
+    pending = create_order!(source, :pending, woo_order_id: 303, completed_at: nil)
+    create_item!(pending, event, ga, quantity: 2, line_total: Decimal.new("200.00"))
+
+    certify_detail_ready!(event)
+
+    assert {:ok, detail} = EventDetail.get_event_detail(event.id, actor: admin)
+    assert detail.status_breakdown == %{"completed" => 4, "pending" => 2}
+    assert detail.sold == 4
   end
 
   test "mixed-event orders are filtered by selected event line items", %{
@@ -193,8 +329,23 @@ defmodule EventSales.Analytics.EventDetailTest do
     other_ticket: other_ticket
   } do
     order = create_order!(source, :completed, woo_order_id: 401, order_number: "MIXED-1")
-    create_item!(order, event, ga, quantity: 2, line_total: Decimal.new("200.00"))
-    create_item!(order, other_event, other_ticket, quantity: 7, line_total: Decimal.new("700.00"))
+
+    create_item!(order, event, ga,
+      quantity: 2,
+      line_total: Decimal.new("200.00"),
+      line_total_tax: Decimal.new("0.00"),
+      woo_product_id: 701,
+      woo_variation_id: 801
+    )
+
+    create_item!(order, other_event, other_ticket,
+      quantity: 7,
+      line_total: Decimal.new("700.00"),
+      woo_product_id: 702,
+      woo_variation_id: 802
+    )
+
+    certify_detail_ready!(event)
 
     assert {:ok, detail} = EventDetail.get_event_detail(event.id, actor: admin)
     assert detail.sold == 2
@@ -205,6 +356,127 @@ defmodule EventSales.Analytics.EventDetailTest do
     assert recent.customer_email == "private@example.test"
     assert recent.customer_name == "Private Customer"
     refute Map.has_key?(recent, :payment_gateway_transaction_id)
+  end
+
+  test "historical completion includes refunded orders with completion evidence", %{
+    admin: admin,
+    source: source,
+    event: event,
+    ga: ga
+  } do
+    order =
+      create_order!(source, :refunded,
+        woo_order_id: 410,
+        completed_at: ~U[2026-05-17 08:00:00.000000Z]
+      )
+
+    create_item!(order, event, ga,
+      quantity: 2,
+      line_total: Decimal.new("100.00"),
+      line_total_tax: Decimal.new("15.00"),
+      woo_product_id: 711,
+      woo_variation_id: nil
+    )
+
+    certify_detail_ready!(event)
+
+    assert {:ok, detail} = EventDetail.get_event_detail(event.id, actor: admin)
+    assert detail.sold == 2
+    assert detail.revenue == Decimal.new("115.00")
+  end
+
+  test "inactive historical ticket type remains visible", %{
+    admin: admin,
+    source: source,
+    event: event,
+    inactive: inactive
+  } do
+    order = create_order!(source, :completed, woo_order_id: 411)
+
+    create_item!(order, event, inactive,
+      quantity: 1,
+      line_total: Decimal.new("50.00"),
+      line_total_tax: Decimal.new("0.00"),
+      woo_product_id: 712,
+      woo_variation_id: 713
+    )
+
+    certify_detail_ready!(event)
+
+    assert {:ok, detail} = EventDetail.get_event_detail(event.id, actor: admin)
+    row = Enum.find(detail.ticket_types, &(&1.ticket_type_id == inactive.id))
+    assert row.sold == 1
+    assert row.remaining == 1
+  end
+
+  test "mixed currency events fail closed on scalar detail", %{
+    admin: admin,
+    source: source,
+    event: event,
+    ga: ga,
+    vip: vip
+  } do
+    zar = create_order!(source, :completed, woo_order_id: 420)
+
+    create_item!(zar, event, ga,
+      quantity: 1,
+      line_total: Decimal.new("10.00"),
+      line_total_tax: Decimal.new("0.00"),
+      woo_product_id: 721,
+      woo_variation_id: 821
+    )
+
+    usd =
+      create_order!(source, :completed,
+        currency: "USD",
+        woo_order_id: 421
+      )
+
+    create_item!(usd, event, vip,
+      quantity: 1,
+      line_total: Decimal.new("9.00"),
+      line_total_tax: Decimal.new("0.00"),
+      woo_product_id: 722,
+      woo_variation_id: 822
+    )
+
+    certify_detail_ready!(event)
+
+    assert {:error, :mixed_currency} = EventDetail.get_event_detail(event.id, actor: admin)
+  end
+
+  test "projection rollback aborts outer transaction with snapshot_not_ready", %{
+    admin: admin,
+    event: event
+  } do
+    EventDetailCertificationHelpers.certify_analytics_ready!(event)
+
+    Ash.create!(
+      EventAggregateSnapshot,
+      %{
+        event_id: event.id,
+        currency: "ZAR",
+        snapshot_version: 2,
+        gross_ticket_quantity: 1,
+        gross_ticket_value: Decimal.new("10.00"),
+        refund_ticket_quantity: 0,
+        refund_ticket_value: Decimal.new("0"),
+        recognised_order_count: 1,
+        total_sold: 0,
+        total_revenue: Decimal.new("0"),
+        today_sold: 0,
+        today_revenue: Decimal.new("0"),
+        status_breakdown: %{},
+        business_timezone: "Africa/Johannesburg",
+        refreshed_at: ~U[2026-05-18 07:00:00.000000Z],
+        source_row_count: 1
+      },
+      action: :create_snapshot,
+      domain: Analytics
+    )
+
+    assert {:error, :snapshot_not_ready} =
+             EventDetail.get_event_detail(event.id, actor: admin)
   end
 
   test "unmapped items are visible for the selected event and capped", %{
@@ -257,6 +529,11 @@ defmodule EventSales.Analytics.EventDetailTest do
 
   test "unknown event returns not_found", %{admin: admin} do
     assert :not_found = EventDetail.get_event_detail(Ecto.UUID.generate(), actor: admin)
+  end
+
+  defp certify_detail_ready!(event) do
+    assert {:ok, _} = SnapshotRefresh.refresh_event(event.id)
+    EventDetailCertificationHelpers.certify_analytics_ready!(event)
   end
 
   defp create_snapshot!(%Event{} = event, attrs) do
@@ -316,6 +593,7 @@ defmodule EventSales.Analytics.EventDetailTest do
       quantity: 1,
       line_subtotal: Decimal.new("100.00"),
       line_total: Decimal.new("100.00"),
+      line_total_tax: Decimal.new("0"),
       discount_total: Decimal.new("0"),
       item_kind: :ticket,
       mapping_status: :mapped

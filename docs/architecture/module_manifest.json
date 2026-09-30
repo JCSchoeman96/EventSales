@@ -390,6 +390,7 @@
     "test/support/conn_case.ex",
     "test/support/data_case.ex",
     "test/support/db_topology_helpers.ex",
+    "test/support/event_detail_certification_helpers.ex",
     "test/support/event_snapshot_refresh_test_support.ex",
     "test/support/fakes/fake_tickera_attendee_client.ex",
     "test/support/financial_reconciliation_helpers.ex",
@@ -8978,6 +8979,33 @@
       "parse_error": null,
       "path": "test/support/db_topology_helpers.ex",
       "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 2,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.EventDetailCertificationHelpers",
+      "parse_error": null,
+      "path": "test/support/event_detail_certification_helpers.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "certify_analytics_ready!"
+        },
+        {
+          "arity": 1,
+          "name": "certify_m3_coverage!"
+        },
+        {
+          "arity": 1,
+          "name": "finalize_mismatched_reconciliation!"
+        },
+        {
+          "arity": 1,
+          "name": "finalize_matched_reconciliation!"
+        }
+      ],
       "specs?": false,
       "uses": []
     },
