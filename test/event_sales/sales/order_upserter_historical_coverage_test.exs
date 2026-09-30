@@ -11,6 +11,7 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
   alias EventSales.Ingestion
   alias EventSales.Ingestion.HistoricalCoverageInvalidator
   alias EventSales.Ingestion.HistoricalCoverageResolver
+  alias EventSales.Ingestion.Parsers.WoocommerceOrderParser
   alias EventSales.Ingestion.Resources.SyncRun
   alias EventSales.Repo
   alias EventSales.Sales
@@ -702,61 +703,84 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
 
     initial_payload = payload(@historical_created_at)
     assert {:ok, order} = OrderUpserter.upsert_order(source.id, initial_payload)
-    assert [%OrderItem{id: item_id, ticket_type_id: ticket_id}] = order_items(order.id)
+    assert [%OrderItem{ticket_type_id: ticket_id}] = order_items(order.id)
     assert ticket_id == ticket.id
+    before_certificate = dimension_identity_certificate_fields(hd(order_items(order.id)))
+    before_order = Ash.get!(Order, order.id, domain: Sales)
     _run = certified_run!(event)
 
-    Repo.update_all(
-      from(oi in OrderItem, where: oi.id == ^item_id),
-      set: [ticket_type_id: Ecto.UUID.dump!(alternate_ticket.id)]
-    )
+    {:ok, normalized} = WoocommerceOrderParser.parse(initial_payload)
+    [item] = order_items(order.id)
+
+    replay_normalized =
+      normalized
+      |> Map.put(:updated_at_source, ~U[2026-08-05 13:00:00.000000Z])
+      |> put_in(
+        [:line_items, Access.at(0)],
+        mapped_import_line_from_item(item, %{ticket_type_id: alternate_ticket.id})
+      )
 
     test_pid = self()
 
-    changed_payload =
-      initial_payload
-      |> Map.put("date_modified_gmt", woo_datetime(~U[2026-08-05 13:00:00.000000Z]))
-      |> Map.put("total", "901.00")
-      |> put_in(["line_items", Access.at(0), "quantity"], 2)
-
-    assert {:ok, _updated} =
-             OrderUpserter.upsert_order(
+    assert {:ok, updated} =
+             OrderUpserter.upsert_normalized_order(
                source.id,
-               changed_payload,
+               replay_normalized,
                snapshot_refresh_scheduler: fn event_ids ->
                  send(test_pid, {:snapshot_refresh_requested, event_ids})
                  :ok
                end
              )
 
+    assert updated.id == order.id
+    assert updated.raw_total == before_order.raw_total
+    assert updated.status == before_order.status
+
     assert_receive {:snapshot_refresh_requested, [event_id]}
     assert event_id == event.id
 
-    assert [%OrderItem{event_id: ^event_id, ticket_type_id: final_ticket_id}] =
-             order_items(order.id)
+    after_item = hd(order_items(order.id))
 
-    assert final_ticket_id in [ticket.id, alternate_ticket.id]
+    assert_only_certificate_field_changed!(
+      before_certificate,
+      after_item,
+      :ticket_type_id,
+      alternate_ticket.id
+    )
   end
 
   test "same-event woo_product_id change requests snapshot refresh for that event", %{
     source: source,
-    event: event
+    event: event,
+    ticket: ticket
   } do
     initial_payload = payload(@historical_created_at)
     assert {:ok, order} = OrderUpserter.upsert_order(source.id, initial_payload)
+    before_certificate = dimension_identity_certificate_fields(hd(order_items(order.id)))
     _run = certified_run!(event)
+
+    mapping =
+      ProductMapping
+      |> Ash.Query.filter(
+        source_system_id == ^source.id and woo_product_id == 501 and woo_variation_id == 601
+      )
+      |> Ash.read_one!(domain: Catalog)
+
+    clear_ticket_type_parent_product_identity!(ticket.id)
+
+    Ash.update!(mapping, %{woo_product_id: 777}, action: :remap, domain: Catalog)
+
     test_pid = self()
 
-    changed_payload =
+    replay_payload =
       initial_payload
       |> Map.put("date_modified_gmt", woo_datetime(~U[2026-08-05 13:00:00.000000Z]))
-      |> Map.put("total", "901.00")
       |> put_in(["line_items", Access.at(0), "product_id"], 777)
 
     assert {:ok, _updated} =
              OrderUpserter.upsert_order(
                source.id,
-               changed_payload,
+               replay_payload,
                snapshot_refresh_scheduler: fn event_ids ->
                  send(test_pid, {:snapshot_refresh_requested, event_ids})
                  :ok
@@ -765,28 +789,43 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
 
     assert_receive {:snapshot_refresh_requested, [event_id]}
     assert event_id == event.id
-    assert [%OrderItem{woo_product_id: 777}] = order_items(order.id)
+
+    after_item = hd(order_items(order.id))
+    assert_only_certificate_field_changed!(before_certificate, after_item, :woo_product_id, 777)
   end
 
   test "same-event woo_variation_id change requests snapshot refresh for that event", %{
     source: source,
-    event: event
+    event: event,
+    ticket: ticket
   } do
     initial_payload = payload(@historical_created_at)
     assert {:ok, order} = OrderUpserter.upsert_order(source.id, initial_payload)
+    before_certificate = dimension_identity_certificate_fields(hd(order_items(order.id)))
     _run = certified_run!(event)
+
+    mapping =
+      ProductMapping
+      |> Ash.Query.filter(
+        source_system_id == ^source.id and woo_product_id == 501 and woo_variation_id == 601
+      )
+      |> Ash.read_one!(domain: Catalog)
+
+    set_ticket_type_woo_variation_identity!(ticket.id, 501, 888)
+
+    Ash.update!(mapping, %{woo_variation_id: 888}, action: :remap, domain: Catalog)
+
     test_pid = self()
 
-    changed_payload =
+    replay_payload =
       initial_payload
       |> Map.put("date_modified_gmt", woo_datetime(~U[2026-08-05 13:00:00.000000Z]))
-      |> Map.put("total", "901.00")
       |> put_in(["line_items", Access.at(0), "variation_id"], 888)
 
     assert {:ok, _updated} =
              OrderUpserter.upsert_order(
                source.id,
-               changed_payload,
+               replay_payload,
                snapshot_refresh_scheduler: fn event_ids ->
                  send(test_pid, {:snapshot_refresh_requested, event_ids})
                  :ok
@@ -795,7 +834,9 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
 
     assert_receive {:snapshot_refresh_requested, [event_id]}
     assert event_id == event.id
-    assert [%OrderItem{woo_variation_id: 888}] = order_items(order.id)
+
+    after_item = hd(order_items(order.id))
+    assert_only_certificate_field_changed!(before_certificate, after_item, :woo_variation_id, 888)
   end
 
   test "ProductMapping-only mutation does not enqueue analytics snapshot refresh", %{
@@ -1411,6 +1452,79 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
 
   defp tickera_event_meta(external_event_id) do
     [%{"id" => 1, "key" => "tickera_event_id", "value" => Integer.to_string(external_event_id)}]
+  end
+
+  defp dimension_identity_certificate_fields(%OrderItem{} = item) do
+    %{
+      event_id: item.event_id,
+      ticket_type_id: item.ticket_type_id,
+      woo_product_id: item.woo_product_id,
+      woo_variation_id: item.woo_variation_id,
+      quantity: item.quantity,
+      line_total: item.line_total,
+      line_total_tax: item.line_total_tax,
+      mapping_status: item.mapping_status,
+      item_kind: item.item_kind
+    }
+  end
+
+  defp assert_only_certificate_field_changed!(
+         before_fields,
+         %OrderItem{} = after_item,
+         field,
+         expected_value
+       ) do
+    after_fields = dimension_identity_certificate_fields(after_item)
+    assert Map.fetch!(after_fields, field) == expected_value
+
+    unchanged_keys = Map.keys(before_fields) -- [field]
+    assert Map.take(after_fields, unchanged_keys) == Map.take(before_fields, unchanged_keys)
+  end
+
+  defp clear_ticket_type_parent_product_identity!(ticket_id) do
+    Repo.query!(
+      """
+      UPDATE catalog_ticket_types
+      SET external_product_id = NULL
+      WHERE id = $1
+      """,
+      [Ecto.UUID.dump!(ticket_id)]
+    )
+  end
+
+  defp set_ticket_type_woo_variation_identity!(ticket_id, woo_product_id, woo_variation_id) do
+    Repo.query!(
+      """
+      UPDATE catalog_ticket_types
+      SET external_ticket_type_kind = 'woo_variation',
+          external_ticket_type_id = $2,
+          external_product_id = $1,
+          external_variation_id = $2
+      WHERE id = $3
+      """,
+      [woo_product_id, woo_variation_id, Ecto.UUID.dump!(ticket_id)]
+    )
+  end
+
+  defp mapped_import_line_from_item(%OrderItem{} = item, overrides) when is_map(overrides) do
+    %{
+      woo_line_item_id: item.woo_line_item_id,
+      woo_product_id: item.woo_product_id,
+      woo_variation_id: item.woo_variation_id,
+      name: item.name,
+      quantity: item.quantity,
+      line_subtotal: item.line_subtotal,
+      line_total: item.line_total,
+      line_total_tax: item.line_total_tax,
+      discount_total: item.discount_total,
+      event_id: item.event_id,
+      ticket_type_id: item.ticket_type_id,
+      item_kind: item.item_kind,
+      mapping_status: item.mapping_status,
+      source_tickera_event_id: item.source_tickera_event_id,
+      attribution_status_reason: item.attribution_status_reason
+    }
+    |> Map.merge(overrides)
   end
 
   defp refresh_job_count(event_id) do

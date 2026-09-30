@@ -336,6 +336,7 @@ defmodule EventSales.Analytics.SnapshotRefresh do
     fun.()
   rescue
     e in Postgrex.Error -> {:error, {:dimension_snapshot_persist_failed, e}}
+    e in DBConnection.ConnectionError -> {:error, {:dimension_snapshot_persist_failed, e}}
   end
 
   defp uuid_from_repo(id) when is_binary(id) do

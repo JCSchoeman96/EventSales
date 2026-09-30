@@ -7,6 +7,7 @@ defmodule EventSales.Analytics.EventDimensionSnapshotRefreshTest do
 
   alias EventSales.Analytics.{DashboardCache, SnapshotRefresh}
   alias EventSales.Analytics.Resources.{EventAggregateSnapshot, EventDimensionAggregateSnapshot}
+  alias EventSales.Catalog.Resources.{Event, SourceSystem, TicketType}
   alias EventSales.Repo
   alias EventSales.Sales
   alias EventSales.Sales.Resources.{Order, OrderItem}
@@ -184,10 +185,19 @@ defmodule EventSales.Analytics.EventDimensionSnapshotRefreshTest do
   end
 
   test "cross-event TicketType mismatch fails closed without persisting dimensions" do
-    with_unboxed(fn ->
-      %{source: source, event: event_a, other_ticket: other_ticket} = fixture!()
+    UnboxedPostgres.with_exclusive_setup(fn ->
+      suffix = System.unique_integer([:positive])
+      source = SalesHelpers.create_source_system!(%{name: "Dim xref src #{suffix}"})
 
-      ticket_a = SalesHelpers.create_ticket_type!(event_a, %{name: "A"})
+      event_a =
+        SalesHelpers.create_event!(source, %{name: "Dim xref event a #{suffix}"})
+
+      other_event =
+        SalesHelpers.create_event!(source, %{name: "Dim xref other #{suffix}"})
+
+      ticket_a = SalesHelpers.create_ticket_type!(event_a, %{name: "Dim xref ticket a"})
+      other_ticket = SalesHelpers.create_ticket_type!(other_event, %{name: "Dim xref foreign"})
+
       order = create_order!(source, :completed)
       item = create_item!(order, event_a, ticket_a)
 
@@ -196,27 +206,45 @@ defmodule EventSales.Analytics.EventDimensionSnapshotRefreshTest do
         set: [ticket_type_id: Ecto.UUID.dump!(other_ticket.id)]
       )
 
-      seed_dimension_snapshot!(event_a.id, ticket_a.id)
-      seed_event_snapshot!(event_a.id, gross_qty: 11)
+      dimension_snapshot = seed_dimension_snapshot!(event_a.id, ticket_a.id)
+      event_snapshot = seed_event_snapshot!(event_a.id, gross_qty: 11)
 
       assert :ok = DashboardCache.put_event_summary(event_a.id, %{total_sold: 99})
 
-      assert {:error, :dimension_ticket_type_event_mismatch} =
-               SnapshotRefresh.refresh_event(event_a.id)
+      cleanup_ctx = %{
+        event_ids: [event_a.id, other_event.id],
+        order_ids: [order.id],
+        source_system_ids: [source.id],
+        ticket_type_ids: [ticket_a.id, other_ticket.id],
+        event_snapshot_ids: [event_snapshot.id],
+        dimension_snapshot_ids: [dimension_snapshot.id],
+        cache_event_ids: [event_a.id]
+      }
 
-      assert [%{gross_ticket_quantity: 11}] = event_snapshot_quantities!(event_a.id)
-      assert length(dimension_rows!(event_a.id)) == 1
-      assert {:ok, cached} = DashboardCache.get_event_summary(event_a.id)
-      assert cached.total_sold == 99
+      try do
+        assert {:error, :dimension_ticket_type_event_mismatch} =
+                 SnapshotRefresh.refresh_event(event_a.id)
+
+        assert [%{gross_ticket_quantity: 11}] = event_snapshot_quantities!(event_a.id)
+        assert length(dimension_rows!(event_a.id)) == 1
+        assert {:ok, cached} = DashboardCache.get_event_summary(event_a.id)
+        assert cached.total_sold == 99
+      after
+        cleanup_unboxed_invariant_fixture!(cleanup_ctx)
+      end
     end)
   end
 
   test "cross-source Event mismatch fails closed without persisting dimensions" do
-    with_unboxed(fn ->
-      source_a = SalesHelpers.create_source_system!(%{name: "Source A"})
-      source_b = SalesHelpers.create_source_system!(%{name: "Source B"})
-      event_a = SalesHelpers.create_event!(source_a, %{name: "Event A"})
-      ticket_a = SalesHelpers.create_ticket_type!(event_a, %{name: "Ticket A"})
+    UnboxedPostgres.with_exclusive_setup(fn ->
+      suffix = System.unique_integer([:positive])
+      source_a = SalesHelpers.create_source_system!(%{name: "Dim xsrc a #{suffix}"})
+      source_b = SalesHelpers.create_source_system!(%{name: "Dim xsrc b #{suffix}"})
+
+      event_a =
+        SalesHelpers.create_event!(source_a, %{name: "Dim xsrc event #{suffix}"})
+
+      ticket_a = SalesHelpers.create_ticket_type!(event_a, %{name: "Dim xsrc ticket"})
 
       order =
         create_order!(source_a, :completed, woo_order_id: System.unique_integer([:positive]))
@@ -234,14 +262,28 @@ defmodule EventSales.Analytics.EventDimensionSnapshotRefreshTest do
         set: [source_system_id: Ecto.UUID.dump!(source_b.id)]
       )
 
-      seed_dimension_snapshot!(event_a.id, ticket_a.id)
-      seed_event_snapshot!(event_a.id, gross_qty: 12)
+      dimension_snapshot = seed_dimension_snapshot!(event_a.id, ticket_a.id)
+      event_snapshot = seed_event_snapshot!(event_a.id, gross_qty: 12)
 
-      assert {:error, :dimension_source_event_mismatch} =
-               SnapshotRefresh.refresh_event(event_a.id)
+      cleanup_ctx = %{
+        event_ids: [event_a.id],
+        order_ids: [order.id],
+        source_system_ids: [source_a.id, source_b.id],
+        ticket_type_ids: [ticket_a.id],
+        event_snapshot_ids: [event_snapshot.id],
+        dimension_snapshot_ids: [dimension_snapshot.id],
+        cache_event_ids: []
+      }
 
-      assert [%{gross_ticket_quantity: 12}] = event_snapshot_quantities!(event_a.id)
-      assert length(dimension_rows!(event_a.id)) == 1
+      try do
+        assert {:error, :dimension_source_event_mismatch} =
+                 SnapshotRefresh.refresh_event(event_a.id)
+
+        assert [%{gross_ticket_quantity: 12}] = event_snapshot_quantities!(event_a.id)
+        assert length(dimension_rows!(event_a.id)) == 1
+      after
+        cleanup_unboxed_invariant_fixture!(cleanup_ctx)
+      end
     end)
   end
 
@@ -368,5 +410,46 @@ defmodule EventSales.Analytics.EventDimensionSnapshotRefreshTest do
     |> Enum.map(&Map.take(&1, [:gross_ticket_quantity]))
   end
 
-  defp with_unboxed(fun), do: UnboxedPostgres.with_connection(fun)
+  defp cleanup_unboxed_invariant_fixture!(ctx) do
+    Enum.each(ctx[:cache_event_ids] || [], &DashboardCache.invalidate_event(&1, :test_teardown))
+
+    dimension_snapshot_ids = ctx[:dimension_snapshot_ids] || []
+    event_snapshot_ids = ctx[:event_snapshot_ids] || []
+    event_ids = ctx[:event_ids] || []
+    order_ids = ctx[:order_ids] || []
+    ticket_type_ids = ctx[:ticket_type_ids] || []
+    source_system_ids = ctx[:source_system_ids] || []
+
+    if dimension_snapshot_ids != [] do
+      Repo.delete_all(
+        from(d in EventDimensionAggregateSnapshot, where: d.id in ^dimension_snapshot_ids)
+      )
+    end
+
+    if event_snapshot_ids != [] do
+      Repo.delete_all(from(d in EventAggregateSnapshot, where: d.id in ^event_snapshot_ids))
+    end
+
+    if event_ids != [] do
+      Repo.delete_all(from(d in EventDimensionAggregateSnapshot, where: d.event_id in ^event_ids))
+      Repo.delete_all(from(d in EventAggregateSnapshot, where: d.event_id in ^event_ids))
+    end
+
+    if order_ids != [] do
+      Repo.delete_all(from(oi in OrderItem, where: oi.order_id in ^order_ids))
+      Repo.delete_all(from(o in Order, where: o.id in ^order_ids))
+    end
+
+    if ticket_type_ids != [] do
+      Repo.delete_all(from(tt in TicketType, where: tt.id in ^ticket_type_ids))
+    end
+
+    if event_ids != [] do
+      Repo.delete_all(from(e in Event, where: e.id in ^event_ids))
+    end
+
+    if source_system_ids != [] do
+      Repo.delete_all(from(s in SourceSystem, where: s.id in ^source_system_ids))
+    end
+  end
 end
