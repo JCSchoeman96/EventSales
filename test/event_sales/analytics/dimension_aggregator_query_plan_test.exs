@@ -142,9 +142,10 @@ defmodule EventSales.Analytics.DimensionAggregatorQueryPlanTest do
 
   defp refund_line_index_access?(node) do
     index_key = Map.get(@refund_line_index_keys, node["Index Name"])
+    index_condition = String.downcase(Map.get(node, "Index Cond", ""))
 
     node["Node Type"] in @refund_index_access_types and is_binary(index_key) and
-      is_binary(node["Index Cond"])
+      String.contains?(index_condition, index_key)
   end
 
   defp refund_header_index_access?(node) do

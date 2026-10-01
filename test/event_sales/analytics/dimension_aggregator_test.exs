@@ -476,7 +476,7 @@ defmodule EventSales.Analytics.DimensionAggregatorTest do
     row!(rows, dimension_kind, identity)
   end
 
-  test "financial_rows_for_event merges gross and refund grains with refund-only product rows" do
+  test "financial_rows_for_event merges gross and refund across separate ticket-type grains" do
     %{source: source, event: event, ticket: ticket, second_ticket: second_ticket} = fixture!()
     order = create_order!(source, :completed)
 
@@ -526,6 +526,74 @@ defmodule EventSales.Analytics.DimensionAggregatorTest do
              rows,
              &(&1.dimension_kind == :source_variation and &1.woo_product_id == 2101)
            )
+  end
+
+  test "retains refund-only grains with zero gross primitives when gross query omits the parent line" do
+    %{source: source, event: event, ticket: ticket} = fixture!()
+    order = create_order!(source, :completed)
+    product_id = 3001
+
+    item =
+      create_item!(order, event, ticket,
+        woo_product_id: product_id,
+        woo_variation_id: nil,
+        quantity: 1,
+        line_total: Decimal.new("25.00"),
+        line_total_tax: Decimal.new("2.50")
+      )
+
+    refund = create_refund!(source, order, 920_040)
+    create_refund_line!(refund, item, qty: 1, total: "20.00", tax: "2.00")
+
+    Repo.query!(
+      "UPDATE sales_order_items SET quantity = 0 WHERE id = $1",
+      [Ecto.UUID.dump!(item.id)]
+    )
+
+    assert {:ok, gross_rows} = DimensionAggregator.gross_rows_for_event(event.id)
+
+    refute Enum.any?(
+             gross_rows,
+             &(&1.dimension_kind == :source_product and &1.woo_product_id == product_id)
+           )
+
+    assert {:ok, rows} = DimensionAggregator.financial_rows_for_event(event.id)
+
+    refund_only_product =
+      financial_row!(rows, :source_product,
+        source_system_id: source.id,
+        woo_product_id: product_id
+      )
+
+    assert refund_only_product.gross_ticket_quantity == 0
+    assert Decimal.equal?(refund_only_product.gross_ticket_value, Decimal.new("0"))
+    assert refund_only_product.refund_ticket_quantity == 1
+    assert Decimal.equal?(refund_only_product.refund_ticket_value, Decimal.new("22.00"))
+  end
+
+  test "defaults refund primitives to zero when gross grain has no matching refund" do
+    %{source: source, event: event, ticket: ticket} = fixture!()
+    order = create_order!(source, :completed)
+
+    create_item!(order, event, ticket,
+      woo_product_id: 3101,
+      quantity: 2,
+      line_total: Decimal.new("40.00"),
+      line_total_tax: Decimal.new("4.00")
+    )
+
+    assert {:ok, rows} = DimensionAggregator.financial_rows_for_event(event.id)
+
+    gross_only =
+      financial_row!(rows, :source_product,
+        source_system_id: source.id,
+        woo_product_id: 3101
+      )
+
+    assert gross_only.gross_ticket_quantity == 2
+    assert Decimal.equal?(gross_only.gross_ticket_value, Decimal.new("44.00"))
+    assert gross_only.refund_ticket_quantity == 0
+    assert Decimal.equal?(gross_only.refund_ticket_value, Decimal.new("0"))
   end
 
   test "counts value-only refunds without quantity" do
