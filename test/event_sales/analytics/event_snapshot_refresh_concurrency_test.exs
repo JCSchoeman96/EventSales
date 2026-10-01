@@ -15,9 +15,11 @@ defmodule EventSales.Analytics.EventSnapshotRefreshConcurrencyTest do
   alias EventSales.Catalog.Resources.{Event, SourceSystem, TicketType}
   alias EventSales.Repo
   alias EventSales.Sales
-  alias EventSales.Sales.Resources.{Order, OrderItem}
+  alias EventSales.Sales.RefundUpserter
+  alias EventSales.Sales.Resources.{Order, OrderItem, Refund, RefundLine}
   alias EventSales.TestSupport.EventSnapshotRefreshTestSupport
   alias EventSales.TestSupport.{SalesHelpers, UnboxedPostgres}
+  alias Oban.Job
 
   test "concurrent refresh_event calls block on the PostgreSQL session fence" do
     fixture = create_committed_fixture!()
@@ -268,6 +270,72 @@ defmodule EventSales.Analytics.EventSnapshotRefreshConcurrencyTest do
     refute Enum.any?(durable, fn row -> row.gross_ticket_quantity != 1 end)
   end
 
+  test "two concurrent refreshes keep event and dimension refund primitives coherent" do
+    fixture = create_committed_fixture!()
+    on_exit(fn -> cleanup_committed_fixture!(fixture) end)
+
+    first =
+      Task.async(fn ->
+        UnboxedPostgres.with_connection(fn -> SnapshotRefresh.refresh_event(fixture.event_id) end)
+      end)
+
+    second =
+      Task.async(fn ->
+        UnboxedPostgres.with_connection(fn -> SnapshotRefresh.refresh_event(fixture.event_id) end)
+      end)
+
+    assert {:ok, _} = Task.await(first, 20_000)
+    assert {:ok, _} = Task.await(second, 20_000)
+
+    durable =
+      UnboxedPostgres.with_connection(fn ->
+        Ash.read!(
+          EventAggregateSnapshot
+          |> Ash.Query.filter(event_id == ^fixture.event_id and snapshot_version == 2),
+          domain: EventSales.Analytics
+        )
+      end)
+
+    dimensions =
+      UnboxedPostgres.with_connection(fn ->
+        EventDimensionAggregateSnapshot
+        |> Ash.Query.filter(event_id == ^fixture.event_id)
+        |> Ash.read!(domain: EventSales.Analytics)
+      end)
+
+    assert Enum.uniq(Enum.map(durable, & &1.refreshed_at)) |> length() == 1
+    assert Enum.uniq(Enum.map(dimensions, & &1.refreshed_at)) |> length() == 1
+
+    assert Enum.map(durable, & &1.refreshed_at) |> Enum.uniq() ==
+             Enum.map(dimensions, & &1.refreshed_at) |> Enum.uniq()
+
+    zar_snapshot = Enum.find(durable, &(&1.currency == "ZAR"))
+    usd_snapshot = Enum.find(durable, &(&1.currency == "USD"))
+    assert zar_snapshot.refund_ticket_quantity == 1
+    assert Decimal.equal?(zar_snapshot.refund_ticket_value, Decimal.new("57.50"))
+    assert usd_snapshot.refund_ticket_quantity == 0
+    assert Decimal.equal?(usd_snapshot.refund_ticket_value, Decimal.new("0"))
+
+    assert Enum.all?(dimensions, fn row ->
+             if row.currency == "ZAR" do
+               row.refund_ticket_quantity == 1 and
+                 Decimal.equal?(row.refund_ticket_value, Decimal.new("57.50"))
+             else
+               row.refund_ticket_quantity == 0 and
+                 Decimal.equal?(row.refund_ticket_value, Decimal.new("0"))
+             end
+           end)
+
+    assert length(dimensions) ==
+             dimensions
+             |> Enum.map(fn row ->
+               {row.currency, row.dimension_kind, row.ticket_type_id, row.source_system_id,
+                row.woo_product_id, row.woo_variation_id}
+             end)
+             |> Enum.uniq()
+             |> length()
+  end
+
   test "overlapping refresh_event calls leave one coherent dimensional set" do
     fixture = create_committed_fixture!()
     on_exit(fn -> cleanup_committed_fixture!(fixture) end)
@@ -375,12 +443,13 @@ defmodule EventSales.Analytics.EventSnapshotRefreshConcurrencyTest do
           completed_at: ~U[2026-05-17 08:00:00.000000Z]
         )
 
-      create_item!(zar_order, event, ticket,
-        woo_line_item_id: 1,
-        quantity: 1,
-        line_total: Decimal.new("450.00"),
-        line_total_tax: Decimal.new("67.50")
-      )
+      zar_item =
+        create_item!(zar_order, event, ticket,
+          woo_line_item_id: 1,
+          quantity: 1,
+          line_total: Decimal.new("450.00"),
+          line_total_tax: Decimal.new("67.50")
+        )
 
       create_item!(usd_order, event, ticket,
         woo_line_item_id: 2,
@@ -388,6 +457,13 @@ defmodule EventSales.Analytics.EventSnapshotRefreshConcurrencyTest do
         line_total: Decimal.new("50.00"),
         line_total_tax: Decimal.new("7.50")
       )
+
+      assert {:ok, _refund} =
+               RefundUpserter.upsert_normalized_refund(
+                 source.id,
+                 zar_order.woo_order_id,
+                 normalized_refund(93_003, [normalized_refund_line(3, zar_item)])
+               )
 
       %{
         event_id: event.id,
@@ -446,6 +522,24 @@ defmodule EventSales.Analytics.EventSnapshotRefreshConcurrencyTest do
   defp cleanup_committed_fixture!(%{event_id: event_id, source_id: source_id}) do
     UnboxedPostgres.with_exclusive_setup(fn ->
       Repo.delete_all(
+        from(job in Job,
+          where: fragment("(? ->> 'event_id') = ?", job.args, ^event_id)
+        )
+      )
+
+      refund_ids =
+        Refund
+        |> Ash.Query.filter(source_system_id == ^source_id)
+        |> Ash.Query.select([:id])
+        |> Ash.read!(domain: Sales)
+        |> Enum.map(& &1.id)
+
+      if refund_ids != [] do
+        Repo.delete_all(from(line in RefundLine, where: line.refund_id in ^refund_ids))
+        Repo.delete_all(from(refund in Refund, where: refund.id in ^refund_ids))
+      end
+
+      Repo.delete_all(
         from(snapshot in EventAggregateSnapshot, where: snapshot.event_id == ^event_id)
       )
 
@@ -466,5 +560,35 @@ defmodule EventSales.Analytics.EventSnapshotRefreshConcurrencyTest do
       "DELETE FROM sales_order_items WHERE order_id = $1",
       [Ecto.UUID.dump!(order_id)]
     )
+  end
+
+  defp normalized_refund(refund_id, line_items) do
+    %{
+      woo_refund_id: refund_id,
+      header_amount: Decimal.new("57.50"),
+      reason: "customer request",
+      source_created_at: ~U[2026-05-17 10:00:00.000000Z],
+      line_items: line_items,
+      shipping_refund_amount: nil,
+      shipping_refund_tax: nil,
+      fee_refund_amount: nil,
+      fee_refund_tax: nil,
+      unallocated_header_amount: Decimal.new("0.00")
+    }
+  end
+
+  defp normalized_refund_line(line_id, item) do
+    %{
+      woo_refund_line_item_id: line_id,
+      woo_refunded_item_id: item.woo_line_item_id,
+      woo_product_id: item.woo_product_id,
+      woo_variation_id: item.woo_variation_id,
+      refunded_quantity: 1,
+      refund_subtotal_amount: Decimal.new("50.00"),
+      refund_total_amount: Decimal.new("50.00"),
+      refund_total_tax: Decimal.new("7.50"),
+      binding_reason: nil,
+      validation_reason: nil
+    }
   end
 end

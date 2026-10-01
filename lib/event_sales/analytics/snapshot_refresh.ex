@@ -114,7 +114,7 @@ defmodule EventSales.Analytics.SnapshotRefresh do
     persisted_at = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
     with {:ok, summaries} <- EventAggregator.financial_summaries_for_event(event_id),
-         {:ok, dimension_rows} <- DimensionAggregator.gross_rows_for_event(event_id),
+         {:ok, dimension_rows} <- DimensionAggregator.financial_rows_for_event(event_id),
          {:ok, legacy_summary} <- legacy_summary_for_refresh(event_id, timezone, now),
          {:ok, event} <- fetch_event(event_id),
          :ok <- validate_dimension_rows_for_persist!(event, dimension_rows) do
@@ -326,6 +326,8 @@ defmodule EventSales.Analytics.SnapshotRefresh do
       woo_variation_id: row.woo_variation_id,
       gross_ticket_quantity: row.gross_ticket_quantity,
       gross_ticket_value: row.gross_ticket_value,
+      refund_ticket_quantity: row.refund_ticket_quantity,
+      refund_ticket_value: row.refund_ticket_value,
       refreshed_at: projection_refreshed_at,
       inserted_at: persisted_at,
       updated_at: persisted_at
