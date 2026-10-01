@@ -658,7 +658,7 @@
       "uses": []
     },
     {
-      "docs_count": 1,
+      "docs_count": 2,
       "moduledoc?": true,
       "name": "EventSales.Analytics.Aggregators.DimensionAggregator",
       "parse_error": null,
@@ -667,13 +667,17 @@
         {
           "arity": 1,
           "name": "gross_rows_for_event"
+        },
+        {
+          "arity": 1,
+          "name": "financial_rows_for_event"
         }
       ],
       "specs?": true,
       "uses": []
     },
     {
-      "docs_count": 5,
+      "docs_count": 6,
       "moduledoc?": true,
       "name": "EventSales.Analytics.Aggregators.EventAggregator",
       "parse_error": null,
@@ -698,6 +702,10 @@
         {
           "arity": 1,
           "name": "recognised_sale_item_filters"
+        },
+        {
+          "arity": 0,
+          "name": "refund_primitives_filters"
         }
       ],
       "specs?": true,

@@ -13,11 +13,143 @@ defmodule EventSales.Analytics.DimensionAggregatorQueryPlanTest do
 
   @index_node_types ["Index Scan", "Bitmap Index Scan", "Index Only Scan"]
 
+  @refund_index_access_types ["Index Scan", "Bitmap Index Scan", "Index Only Scan"]
+
+  @allowed_refund_header_indexes [
+    "sales_refunds_order_id_idx",
+    "sales_refunds_pkey",
+    "sales_refunds_unique_source_order_refund_index"
+  ]
+
+  @refund_line_index_keys %{
+    "sales_refund_lines_order_item_id_idx" => "order_item_id",
+    "sales_refund_lines_unique_refund_line_index" => "refund_id"
+  }
+
+  test "financial_rows_for_event uses six bounded dimensional aggregates under selective data" do
+    for iteration <- 1..3 do
+      fixture = EventAggregatorQueryPlanFixture.seed!()
+      certify_financial_iteration!(fixture, iteration)
+    end
+  end
+
   test "all three dimensional aggregates use event-first indexed plans under selective data" do
     for iteration <- 1..3 do
       fixture = EventAggregatorQueryPlanFixture.seed!()
       certify_iteration!(fixture, iteration)
     end
+  end
+
+  defp certify_financial_iteration!(fixture, iteration) do
+    event_id = fixture.target_event.id
+
+    {result, captured_queries} =
+      capture_sql(fn -> DimensionAggregator.financial_rows_for_event(event_id) end)
+
+    assert {:ok, rows} = result
+    assert length(rows) == 3
+
+    dimensional_queries = select_queries(captured_queries)
+    assert length(dimensional_queries) == 6
+
+    classified =
+      Enum.group_by(dimensional_queries, fn {sql, _params} ->
+        classify_financial_query!(sql)
+      end)
+
+    assert Map.keys(classified) |> Enum.sort() ==
+             [
+               {:gross, :source_product},
+               {:gross, :source_variation},
+               {:gross, :ticket_type},
+               {:refund, :source_product},
+               {:refund, :source_variation},
+               {:refund, :ticket_type}
+             ]
+
+    for {{side, path}, queries} <- classified do
+      assert length(queries) == 1
+      {sql, params} = hd(queries)
+      plan = explain_plan_json(sql, params)
+
+      case side do
+        :gross ->
+          assert_event_scope!(sql, params, event_id, path, iteration)
+          assert_item_access!(plan, path, iteration)
+          assert_no_seq_scan!(plan, "sales_order_items", path, iteration)
+          assert_order_access!(plan, path, iteration)
+          assert_no_seq_scan!(plan, "sales_orders", path, iteration)
+
+        :refund ->
+          assert_event_scope!(sql, params, event_id, path, iteration)
+          assert_refund_path_index_use!(plan, path, iteration)
+      end
+    end
+
+    ticket_row = Enum.find(rows, &(&1.dimension_kind == :ticket_type))
+    assert ticket_row.gross_ticket_quantity == 2
+    assert ticket_row.refund_ticket_quantity == 1
+    assert Decimal.equal?(ticket_row.gross_ticket_value, Decimal.new("92.00"))
+    assert Decimal.equal?(ticket_row.refund_ticket_value, Decimal.new("46.00"))
+
+    assert fixture.noise_line_count >= 800
+    assert fixture.noise_refund_count >= 800
+  end
+
+  defp classify_financial_query!(sql) do
+    side = if String.contains?(sql, "sales_refund_lines"), do: :refund, else: :gross
+    group_by = group_by_clause!(sql)
+
+    family =
+      cond do
+        source_variation_group?(group_by) -> :source_variation
+        source_product_group?(group_by) -> :source_product
+        ticket_type_group?(group_by) -> :ticket_type
+        true -> flunk("unclassified dimensional GROUP BY: #{group_by}")
+      end
+
+    {side, family}
+  end
+
+  defp assert_refund_path_index_use!(plan, path, iteration) do
+    assert_no_seq_scan!(plan, "sales_refund_lines", path, iteration)
+    assert_no_seq_scan!(plan, "sales_refunds", path, iteration)
+
+    refund_line_nodes = relation_nodes(plan, "sales_refund_lines")
+
+    assert refund_line_nodes != [],
+           "#{path} iteration #{iteration}: expected sales_refund_lines in refund dimensional plan"
+
+    assert Enum.any?(refund_line_nodes, &refund_line_index_access?/1),
+           "#{path} iteration #{iteration}: expected bounded sales_refund_lines index access"
+
+    refund_nodes = relation_nodes(plan, "sales_refunds")
+
+    assert refund_nodes != [],
+           "#{path} iteration #{iteration}: expected sales_refunds in refund dimensional plan"
+
+    assert Enum.any?(refund_nodes, &refund_header_index_access?/1),
+           "#{path} iteration #{iteration}: expected bounded sales_refunds index access"
+
+    item_nodes = relation_nodes(plan, "sales_order_items")
+
+    assert Enum.any?(item_nodes, fn node ->
+             node["Node Type"] in @index_node_types and
+               node["Index Name"] in @event_first_order_item_indexes
+           end),
+           "#{path} iteration #{iteration}: expected event-first sales_order_items access in refund dimensional plan"
+  end
+
+  defp refund_line_index_access?(node) do
+    index_key = Map.get(@refund_line_index_keys, node["Index Name"])
+
+    node["Node Type"] in @refund_index_access_types and is_binary(index_key) and
+      is_binary(node["Index Cond"])
+  end
+
+  defp refund_header_index_access?(node) do
+    node["Node Type"] in @refund_index_access_types and
+      node["Index Name"] in @allowed_refund_header_indexes
   end
 
   defp certify_iteration!(fixture, iteration) do
