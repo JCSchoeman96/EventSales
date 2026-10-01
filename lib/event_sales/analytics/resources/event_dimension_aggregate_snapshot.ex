@@ -88,6 +88,14 @@ defmodule EventSales.Analytics.Resources.EventDimensionAggregateSnapshot do
         name: "analytics_event_dim_agg_snapshots_gross_ticket_value_check",
         check: "gross_ticket_value >= 0"
 
+      check_constraint :refund_ticket_quantity,
+        name: "analytics_event_dim_agg_snapshots_refund_ticket_quantity_check",
+        check: "refund_ticket_quantity >= 0"
+
+      check_constraint :refund_ticket_value,
+        name: "analytics_event_dim_agg_snapshots_refund_ticket_value_check",
+        check: "refund_ticket_value >= 0"
+
       check_constraint :woo_product_id,
         name: "analytics_event_dim_agg_snapshots_woo_product_id_check",
         check: "woo_product_id IS NULL OR woo_product_id > 0"
@@ -112,6 +120,8 @@ defmodule EventSales.Analytics.Resources.EventDimensionAggregateSnapshot do
         :woo_variation_id,
         :gross_ticket_quantity,
         :gross_ticket_value,
+        :refund_ticket_quantity,
+        :refund_ticket_value,
         :refreshed_at
       ]
 
@@ -125,6 +135,8 @@ defmodule EventSales.Analytics.Resources.EventDimensionAggregateSnapshot do
       accept [
         :gross_ticket_quantity,
         :gross_ticket_value,
+        :refund_ticket_quantity,
+        :refund_ticket_value,
         :refreshed_at
       ]
 
@@ -167,6 +179,20 @@ defmodule EventSales.Analytics.Resources.EventDimensionAggregateSnapshot do
     end
 
     attribute :gross_ticket_value, :decimal do
+      allow_nil? false
+      default Decimal.new("0")
+      constraints min: 0
+      public? true
+    end
+
+    attribute :refund_ticket_quantity, :integer do
+      allow_nil? false
+      default 0
+      constraints min: 0
+      public? true
+    end
+
+    attribute :refund_ticket_value, :decimal do
       allow_nil? false
       default Decimal.new("0")
       constraints min: 0
