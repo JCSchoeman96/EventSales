@@ -348,6 +348,255 @@ defmodule EventSales.Analytics.DimensionSnapshotReaderTest do
              DimensionSnapshotReader.list_for_event(event.id, actor: admin)
   end
 
+  test "visible caller receives derived net quantities and money fields", %{
+    source: source,
+    event: event,
+    admin: admin
+  } do
+    ticket = SalesHelpers.create_ticket_type!(event, %{name: "GA"})
+
+    seed_ready_v2!(event, "ZAR",
+      gross_qty: 3,
+      refund_qty: 1,
+      gross_value: Decimal.new("90"),
+      refund_value: Decimal.new("20"),
+      refreshed_at: @refreshed_at
+    )
+
+    seed_dimension!(event, :ticket_type, %{
+      currency: "ZAR",
+      ticket_type_id: ticket.id,
+      gross_ticket_quantity: 3,
+      refund_ticket_quantity: 1,
+      gross_ticket_value: Decimal.new("90"),
+      refund_ticket_value: Decimal.new("20"),
+      refreshed_at: @refreshed_at
+    })
+
+    seed_dimension!(event, :source_product, %{
+      currency: "ZAR",
+      source_system_id: source.id,
+      woo_product_id: 601,
+      gross_ticket_quantity: 3,
+      refund_ticket_quantity: 1,
+      gross_ticket_value: Decimal.new("90"),
+      refund_ticket_value: Decimal.new("20"),
+      refreshed_at: @refreshed_at
+    })
+
+    assert {:ok, result} = DimensionSnapshotReader.list_for_event(event.id, actor: admin)
+    row = hd(hd(result.currencies).dimensions.ticket_type)
+
+    assert row.gross_ticket_quantity == 3
+    assert row.refund_ticket_quantity == 1
+    assert row.net_ticket_quantity == 2
+    assert is_integer(row.gross_ticket_quantity)
+    assert row.gross_ticket_value == Decimal.new("90")
+    assert row.refund_ticket_value == Decimal.new("20")
+    assert row.net_ticket_value == Decimal.new("70")
+    assert row.average_ticket_value == Decimal.new("35")
+  end
+
+  test "value-only refund value derives net and ATV", %{
+    source: source,
+    event: event,
+    admin: admin
+  } do
+    ticket = SalesHelpers.create_ticket_type!(event, %{name: "GA"})
+
+    seed_ready_v2!(event, "ZAR",
+      gross_qty: 2,
+      refund_qty: 0,
+      gross_value: Decimal.new("100"),
+      refund_value: Decimal.new("25"),
+      refreshed_at: @refreshed_at
+    )
+
+    for kind <- [:ticket_type, :source_product] do
+      attrs =
+        %{
+          currency: "ZAR",
+          gross_ticket_quantity: 2,
+          refund_ticket_quantity: 0,
+          gross_ticket_value: Decimal.new("100"),
+          refund_ticket_value: Decimal.new("25"),
+          refreshed_at: @refreshed_at
+        }
+        |> Map.merge(
+          case kind do
+            :ticket_type -> %{ticket_type_id: ticket.id}
+            :source_product -> %{source_system_id: source.id, woo_product_id: 602}
+          end
+        )
+
+      seed_dimension!(event, kind, attrs)
+    end
+
+    assert {:ok, result} = DimensionSnapshotReader.list_for_event(event.id, actor: admin)
+    row = hd(hd(result.currencies).dimensions.ticket_type)
+    assert row.net_ticket_quantity == 2
+    assert row.net_ticket_value == Decimal.new("75")
+    assert row.average_ticket_value == Decimal.new("37.5")
+  end
+
+  test "over-refund row preserves negative net and positive ATV magnitude", %{
+    source: source,
+    event: event,
+    admin: admin
+  } do
+    ticket = SalesHelpers.create_ticket_type!(event, %{name: "GA"})
+
+    seed_ready_v2!(event, "ZAR",
+      gross_qty: 1,
+      refund_qty: 2,
+      gross_value: Decimal.new("50"),
+      refund_value: Decimal.new("120"),
+      refreshed_at: @refreshed_at
+    )
+
+    seed_dimension!(event, :ticket_type, %{
+      currency: "ZAR",
+      ticket_type_id: ticket.id,
+      gross_ticket_quantity: 1,
+      refund_ticket_quantity: 2,
+      gross_ticket_value: Decimal.new("50"),
+      refund_ticket_value: Decimal.new("120"),
+      refreshed_at: @refreshed_at
+    })
+
+    seed_dimension!(event, :source_product, %{
+      currency: "ZAR",
+      source_system_id: source.id,
+      woo_product_id: 603,
+      gross_ticket_quantity: 1,
+      refund_ticket_quantity: 2,
+      gross_ticket_value: Decimal.new("50"),
+      refund_ticket_value: Decimal.new("120"),
+      refreshed_at: @refreshed_at
+    })
+
+    assert {:ok, result} = DimensionSnapshotReader.list_for_event(event.id, actor: admin)
+    row = hd(hd(result.currencies).dimensions.ticket_type)
+    assert row.net_ticket_quantity == -1
+    assert row.net_ticket_value == Decimal.new("-70")
+    assert row.average_ticket_value == Decimal.new("70")
+  end
+
+  test "zero net quantity yields nil average ticket value on rows", %{
+    source: source,
+    event: event,
+    admin: admin
+  } do
+    ticket = SalesHelpers.create_ticket_type!(event, %{name: "GA"})
+
+    seed_ready_v2!(event, "ZAR",
+      gross_qty: 2,
+      refund_qty: 2,
+      gross_value: Decimal.new("40"),
+      refund_value: Decimal.new("10"),
+      refreshed_at: @refreshed_at
+    )
+
+    seed_dimension!(event, :ticket_type, %{
+      currency: "ZAR",
+      ticket_type_id: ticket.id,
+      gross_ticket_quantity: 2,
+      refund_ticket_quantity: 2,
+      gross_ticket_value: Decimal.new("40"),
+      refund_ticket_value: Decimal.new("10"),
+      refreshed_at: @refreshed_at
+    })
+
+    seed_dimension!(event, :source_product, %{
+      currency: "ZAR",
+      source_system_id: source.id,
+      woo_product_id: 604,
+      gross_ticket_quantity: 2,
+      refund_ticket_quantity: 2,
+      gross_ticket_value: Decimal.new("40"),
+      refund_ticket_value: Decimal.new("10"),
+      refreshed_at: @refreshed_at
+    })
+
+    assert {:ok, result} = DimensionSnapshotReader.list_for_event(event.id, actor: admin)
+    row = hd(hd(result.currencies).dimensions.ticket_type)
+    assert row.net_ticket_quantity == 0
+    assert row.average_ticket_value == nil
+  end
+
+  test "value-only refund on event requires ticket_type and source_product families", %{
+    event: event,
+    admin: admin
+  } do
+    ticket = SalesHelpers.create_ticket_type!(event, %{name: "GA"})
+
+    seed_ready_v2!(event, "ZAR",
+      gross_qty: 0,
+      refund_qty: 0,
+      gross_value: Decimal.new("0"),
+      refund_value: Decimal.new("25"),
+      refreshed_at: @refreshed_at
+    )
+
+    seed_dimension!(event, :ticket_type, %{
+      currency: "ZAR",
+      ticket_type_id: ticket.id,
+      gross_ticket_quantity: 0,
+      refund_ticket_quantity: 0,
+      gross_ticket_value: Decimal.new("0"),
+      refund_ticket_value: Decimal.new("25"),
+      refreshed_at: @refreshed_at
+    })
+
+    assert {:error, :snapshot_not_ready} =
+             DimensionSnapshotReader.list_for_event(event.id, actor: admin)
+  end
+
+  test "gross value only on event requires required families", %{event: event, admin: admin} do
+    ticket = SalesHelpers.create_ticket_type!(event, %{name: "GA"})
+
+    seed_ready_v2!(event, "ZAR",
+      gross_qty: 0,
+      refund_qty: 0,
+      gross_value: Decimal.new("15"),
+      refund_value: Decimal.new("0"),
+      refreshed_at: @refreshed_at
+    )
+
+    seed_dimension!(event, :ticket_type, %{
+      currency: "ZAR",
+      ticket_type_id: ticket.id,
+      gross_ticket_quantity: 0,
+      gross_ticket_value: Decimal.new("15"),
+      refreshed_at: @refreshed_at
+    })
+
+    assert {:error, :snapshot_not_ready} =
+             DimensionSnapshotReader.list_for_event(event.id, actor: admin)
+  end
+
+  test "filtered ticket_type still fails when source_product family missing", %{
+    event: event,
+    admin: admin
+  } do
+    ticket = SalesHelpers.create_ticket_type!(event, %{name: "GA"})
+    seed_ready_v2!(event, "ZAR", gross_qty: 2, refreshed_at: @refreshed_at)
+
+    seed_dimension!(event, :ticket_type, %{
+      currency: "ZAR",
+      ticket_type_id: ticket.id,
+      gross_ticket_quantity: 2,
+      gross_ticket_value: Decimal.new("20.00"),
+      refreshed_at: @refreshed_at
+    })
+
+    assert {:error, :snapshot_not_ready} =
+             DimensionSnapshotReader.list_for_event(event.id,
+               actor: admin,
+               dimension_kind: :ticket_type
+             )
+  end
+
   test "zero gross with no dimension rows returns successful empty bucket", %{
     event: event,
     admin: admin
@@ -442,7 +691,13 @@ defmodule EventSales.Analytics.DimensionSnapshotReaderTest do
   defp seed_projection_rows!(event, source, row_count) do
     refreshed_at = @refreshed_at
 
-    seed_ready_v2!(event, "ZAR", gross_qty: row_count, refreshed_at: refreshed_at)
+    seed_ready_v2!(event, "ZAR",
+      gross_qty: row_count,
+      refund_qty: 1,
+      gross_value: Decimal.new("#{row_count}.00"),
+      refund_value: Decimal.new("0.50"),
+      refreshed_at: refreshed_at
+    )
 
     batch_id = System.unique_integer([:positive])
 
@@ -453,7 +708,9 @@ defmodule EventSales.Analytics.DimensionSnapshotReaderTest do
         currency: "ZAR",
         ticket_type_id: ticket.id,
         gross_ticket_quantity: 1,
+        refund_ticket_quantity: 0,
         gross_ticket_value: Decimal.new("1.00"),
+        refund_ticket_value: Decimal.new("0"),
         refreshed_at: refreshed_at
       })
     end
@@ -463,7 +720,9 @@ defmodule EventSales.Analytics.DimensionSnapshotReaderTest do
       source_system_id: source.id,
       woo_product_id: 9000 + row_count,
       gross_ticket_quantity: row_count,
+      refund_ticket_quantity: 1,
       gross_ticket_value: Decimal.new("#{row_count}.00"),
+      refund_ticket_value: Decimal.new("0.50"),
       refreshed_at: refreshed_at
     })
   end
@@ -518,6 +777,14 @@ defmodule EventSales.Analytics.DimensionSnapshotReaderTest do
   defp seed_ready_v2!(event, currency, opts) do
     gross_qty = Keyword.fetch!(opts, :gross_qty)
     refreshed_at = Keyword.fetch!(opts, :refreshed_at)
+    refund_qty = Keyword.get(opts, :refund_qty, 0)
+
+    gross_value =
+      Keyword.get_lazy(opts, :gross_value, fn ->
+        if gross_qty > 0, do: Decimal.new("100"), else: Decimal.new("0")
+      end)
+
+    refund_value = Keyword.get(opts, :refund_value, Decimal.new("0"))
 
     Ash.create!(
       EventAggregateSnapshot,
@@ -528,9 +795,9 @@ defmodule EventSales.Analytics.DimensionSnapshotReaderTest do
         today_sold: 0,
         today_revenue: Decimal.new("0"),
         gross_ticket_quantity: gross_qty,
-        refund_ticket_quantity: 0,
-        gross_ticket_value: Decimal.new("100"),
-        refund_ticket_value: Decimal.new("0"),
+        refund_ticket_quantity: refund_qty,
+        gross_ticket_value: gross_value,
+        refund_ticket_value: refund_value,
         recognised_order_count: max(gross_qty, 1),
         currency: currency,
         business_timezone: "Africa/Johannesburg",
@@ -548,7 +815,9 @@ defmodule EventSales.Analytics.DimensionSnapshotReaderTest do
       event_id: event.id,
       dimension_kind: kind,
       gross_ticket_quantity: 0,
+      refund_ticket_quantity: 0,
       gross_ticket_value: Decimal.new("0"),
+      refund_ticket_value: Decimal.new("0"),
       refreshed_at: @refreshed_at
     }
 
