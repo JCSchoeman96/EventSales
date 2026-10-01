@@ -1,6 +1,6 @@
 defmodule EventSales.Analytics.DimensionSnapshotReader do
   @moduledoc """
-  Cold derived read facade for event-scoped dimensional gross ticket aggregates.
+  Cold derived read facade for event-scoped dimensional financial aggregates.
 
   Reads durable `EventDimensionAggregateSnapshot` rows only. Authorization runs
   before any catalog or projection access. Canonical v2 and dimensional rows are
@@ -15,6 +15,7 @@ defmodule EventSales.Analytics.DimensionSnapshotReader do
   alias EventSales.Accounts.Policies
   alias EventSales.Analytics
   alias EventSales.Analytics.EventSnapshotRefreshFence
+  alias EventSales.Analytics.MetricRules
   alias EventSales.Analytics.Resources.{EventAggregateSnapshot, EventDimensionAggregateSnapshot}
   alias EventSales.Catalog
   alias EventSales.Catalog.Resources.{Event, SourceSystem, TicketType}
@@ -34,8 +35,13 @@ defmodule EventSales.Analytics.DimensionSnapshotReader do
 
   @type ticket_type_row :: %{
           ticket_type_id: Ecto.UUID.t(),
-          gross_ticket_quantity: non_neg_integer(),
+          gross_ticket_quantity: integer(),
+          refund_ticket_quantity: integer(),
+          net_ticket_quantity: integer(),
           gross_ticket_value: Decimal.t() | nil,
+          refund_ticket_value: Decimal.t() | nil,
+          net_ticket_value: Decimal.t() | nil,
+          average_ticket_value: Decimal.t() | nil,
           ticket_type_name: String.t() | nil,
           capacity: non_neg_integer() | nil,
           active: boolean() | nil,
@@ -46,8 +52,13 @@ defmodule EventSales.Analytics.DimensionSnapshotReader do
   @type source_product_row :: %{
           source_system_id: Ecto.UUID.t(),
           woo_product_id: pos_integer(),
-          gross_ticket_quantity: non_neg_integer(),
+          gross_ticket_quantity: integer(),
+          refund_ticket_quantity: integer(),
+          net_ticket_quantity: integer(),
           gross_ticket_value: Decimal.t() | nil,
+          refund_ticket_value: Decimal.t() | nil,
+          net_ticket_value: Decimal.t() | nil,
+          average_ticket_value: Decimal.t() | nil,
           source_system_name: String.t() | nil,
           source_system_display: :ok | :missing,
           refreshed_at: DateTime.t()
@@ -57,8 +68,13 @@ defmodule EventSales.Analytics.DimensionSnapshotReader do
           source_system_id: Ecto.UUID.t(),
           woo_product_id: pos_integer(),
           woo_variation_id: pos_integer(),
-          gross_ticket_quantity: non_neg_integer(),
+          gross_ticket_quantity: integer(),
+          refund_ticket_quantity: integer(),
+          net_ticket_quantity: integer(),
           gross_ticket_value: Decimal.t() | nil,
+          refund_ticket_value: Decimal.t() | nil,
+          net_ticket_value: Decimal.t() | nil,
+          average_ticket_value: Decimal.t() | nil,
           source_system_name: String.t() | nil,
           source_system_display: :ok | :missing,
           refreshed_at: DateTime.t()
@@ -205,13 +221,32 @@ defmodule EventSales.Analytics.DimensionSnapshotReader do
   end
 
   defp validate_currency_projection!(dims, %EventAggregateSnapshot{} = v2) do
-    with :ok <- validate_positive_gross_families!(dims, v2) do
+    with :ok <- validate_event_additive_primitives!(v2),
+         :ok <- validate_dimension_additive_primitives!(dims),
+         :ok <- validate_required_families!(dims, v2) do
       validate_generation_timestamps!(dims, v2)
     end
   end
 
-  defp validate_positive_gross_families!(dims, v2) do
-    if v2.gross_ticket_quantity > 0 do
+  defp validate_event_additive_primitives!(v2) do
+    case MetricRules.derive_financial_metrics(additive_primitives_from_v2(v2)) do
+      {:ok, _metrics} -> :ok
+      {:error, _} -> {:error, :snapshot_not_ready}
+    end
+  end
+
+  defp validate_dimension_additive_primitives!(dims) do
+    dims
+    |> Enum.reduce_while(:ok, fn row, :ok ->
+      case MetricRules.derive_financial_metrics(additive_primitives_from_dimension(row)) do
+        {:ok, _metrics} -> {:cont, :ok}
+        {:error, _} -> {:halt, {:error, :snapshot_not_ready}}
+      end
+    end)
+  end
+
+  defp validate_required_families!(dims, v2) do
+    if financial_primitives_present?(v2) do
       kinds = MapSet.new(dims, & &1.dimension_kind)
 
       if MapSet.member?(kinds, :ticket_type) and MapSet.member?(kinds, :source_product) do
@@ -222,6 +257,37 @@ defmodule EventSales.Analytics.DimensionSnapshotReader do
     else
       :ok
     end
+  end
+
+  defp financial_primitives_present?(%EventAggregateSnapshot{} = v2) do
+    v2.gross_ticket_quantity != 0 or
+      v2.refund_ticket_quantity != 0 or
+      primitive_value_nonzero?(v2.gross_ticket_value) or
+      primitive_value_nonzero?(v2.refund_ticket_value)
+  end
+
+  defp primitive_value_nonzero?(nil), do: false
+
+  defp primitive_value_nonzero?(%Decimal{} = value) do
+    not Decimal.equal?(value, Decimal.new(0))
+  end
+
+  defp additive_primitives_from_v2(%EventAggregateSnapshot{} = v2) do
+    %{
+      gross_ticket_quantity: Decimal.new(v2.gross_ticket_quantity),
+      refund_ticket_quantity: Decimal.new(v2.refund_ticket_quantity),
+      gross_ticket_value: v2.gross_ticket_value,
+      refund_ticket_value: v2.refund_ticket_value
+    }
+  end
+
+  defp additive_primitives_from_dimension(%EventDimensionAggregateSnapshot{} = row) do
+    %{
+      gross_ticket_quantity: Decimal.new(row.gross_ticket_quantity),
+      refund_ticket_quantity: Decimal.new(row.refund_ticket_quantity),
+      gross_ticket_value: row.gross_ticket_value,
+      refund_ticket_value: row.refund_ticket_value
+    }
   end
 
   defp validate_generation_timestamps!(dims, v2) do
@@ -300,71 +366,99 @@ defmodule EventSales.Analytics.DimensionSnapshotReader do
          ticket_types,
          source_systems
        ) do
-    value =
-      if revenue_visible? do
-        row.gross_ticket_value
-      else
-        nil
-      end
+    {:ok, metrics} =
+      MetricRules.derive_financial_metrics(additive_primitives_from_dimension(row))
+
+    financial_fields = financial_output_fields(metrics, revenue_visible?)
 
     case row.dimension_kind do
       :ticket_type ->
-        enrich_ticket_type_row(row, value, ticket_types)
+        enrich_ticket_type_row(row, financial_fields, ticket_types)
 
       :source_product ->
-        enrich_source_product_row(row, value, source_systems)
+        enrich_source_product_row(row, financial_fields, source_systems)
 
       :source_variation ->
-        enrich_source_variation_row(row, value, source_systems)
+        enrich_source_variation_row(row, financial_fields, source_systems)
     end
   end
 
-  defp enrich_ticket_type_row(row, gross_ticket_value, ticket_types) do
+  defp financial_output_fields(metrics, revenue_visible?) do
+    quantity_fields = %{
+      gross_ticket_quantity: row_quantity_to_integer(metrics.gross_ticket_quantity),
+      refund_ticket_quantity: row_quantity_to_integer(metrics.refund_ticket_quantity),
+      net_ticket_quantity: row_quantity_to_integer(metrics.net_ticket_quantity)
+    }
+
+    money_fields =
+      if revenue_visible? do
+        %{
+          gross_ticket_value: metrics.gross_ticket_value,
+          refund_ticket_value: metrics.refund_ticket_value,
+          net_ticket_value: metrics.net_ticket_value,
+          average_ticket_value: metrics.average_ticket_value
+        }
+      else
+        %{
+          gross_ticket_value: nil,
+          refund_ticket_value: nil,
+          net_ticket_value: nil,
+          average_ticket_value: nil
+        }
+      end
+
+    Map.merge(quantity_fields, money_fields)
+  end
+
+  defp row_quantity_to_integer(%Decimal{} = quantity) do
+    quantity |> Decimal.round(0) |> Decimal.to_integer()
+  end
+
+  defp enrich_ticket_type_row(row, financial_fields, ticket_types) do
     ticket_type = Map.get(ticket_types, row.ticket_type_id)
 
-    case ticket_type do
-      %TicketType{} = tt ->
-        %{
-          ticket_type_id: row.ticket_type_id,
-          gross_ticket_quantity: row.gross_ticket_quantity,
-          gross_ticket_value: gross_ticket_value,
-          ticket_type_name: tt.name,
-          capacity: tt.capacity,
-          active: tt.active,
-          ticket_type_display: :ok,
-          refreshed_at: row.refreshed_at
-        }
+    identity =
+      case ticket_type do
+        %TicketType{} = tt ->
+          %{
+            ticket_type_id: row.ticket_type_id,
+            ticket_type_name: tt.name,
+            capacity: tt.capacity,
+            active: tt.active,
+            ticket_type_display: :ok,
+            refreshed_at: row.refreshed_at
+          }
 
-      _ ->
-        %{
-          ticket_type_id: row.ticket_type_id,
-          gross_ticket_quantity: row.gross_ticket_quantity,
-          gross_ticket_value: gross_ticket_value,
-          ticket_type_name: nil,
-          capacity: nil,
-          active: nil,
-          ticket_type_display: :missing,
-          refreshed_at: row.refreshed_at
-        }
-    end
+        _ ->
+          %{
+            ticket_type_id: row.ticket_type_id,
+            ticket_type_name: nil,
+            capacity: nil,
+            active: nil,
+            ticket_type_display: :missing,
+            refreshed_at: row.refreshed_at
+          }
+      end
+
+    Map.merge(identity, financial_fields)
   end
 
-  defp enrich_source_product_row(row, gross_ticket_value, source_systems) do
-    label_source_system(row, gross_ticket_value, source_systems, include_variation_id: false)
+  defp enrich_source_product_row(row, financial_fields, source_systems) do
+    label_source_system(row, financial_fields, source_systems, include_variation_id: false)
   end
 
-  defp enrich_source_variation_row(row, gross_ticket_value, source_systems) do
-    label_source_system(row, gross_ticket_value, source_systems, include_variation_id: true)
+  defp enrich_source_variation_row(row, financial_fields, source_systems) do
+    label_source_system(row, financial_fields, source_systems, include_variation_id: true)
   end
 
-  defp label_source_system(row, gross_ticket_value, systems, opts) do
-    base = %{
-      source_system_id: row.source_system_id,
-      woo_product_id: row.woo_product_id,
-      gross_ticket_quantity: row.gross_ticket_quantity,
-      gross_ticket_value: gross_ticket_value,
-      refreshed_at: row.refreshed_at
-    }
+  defp label_source_system(row, financial_fields, systems, opts) do
+    base =
+      %{
+        source_system_id: row.source_system_id,
+        woo_product_id: row.woo_product_id,
+        refreshed_at: row.refreshed_at
+      }
+      |> Map.merge(financial_fields)
 
     base =
       if Keyword.get(opts, :include_variation_id, false) do

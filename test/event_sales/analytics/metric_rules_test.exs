@@ -286,6 +286,100 @@ defmodule EventSales.Analytics.MetricRulesTest do
     end
   end
 
+  describe "derive_financial_metrics/1" do
+    test "standard net and ATV derivation" do
+      assert {:ok, metrics} =
+               MetricRules.derive_financial_metrics(%{
+                 gross_ticket_quantity: Decimal.new(2),
+                 refund_ticket_quantity: Decimal.new(1),
+                 gross_ticket_value: Decimal.new("115"),
+                 refund_ticket_value: Decimal.new("57.50")
+               })
+
+      assert metrics.net_ticket_quantity == Decimal.new(1)
+      assert metrics.net_ticket_value == Decimal.new("57.50")
+      assert metrics.average_ticket_value == Decimal.new("57.50")
+    end
+
+    test "value-only refund adjusts net value and ATV" do
+      assert {:ok, metrics} =
+               MetricRules.derive_financial_metrics(%{
+                 gross_ticket_quantity: Decimal.new(2),
+                 refund_ticket_quantity: Decimal.new(0),
+                 gross_ticket_value: Decimal.new("100"),
+                 refund_ticket_value: Decimal.new("25")
+               })
+
+      assert metrics.net_ticket_quantity == Decimal.new(2)
+      assert metrics.net_ticket_value == Decimal.new("75")
+      assert metrics.average_ticket_value == Decimal.new("37.5")
+    end
+
+    test "over-refund preserves negative net without clamping" do
+      assert {:ok, metrics} =
+               MetricRules.derive_financial_metrics(%{
+                 gross_ticket_quantity: Decimal.new(1),
+                 refund_ticket_quantity: Decimal.new(2),
+                 gross_ticket_value: Decimal.new("50"),
+                 refund_ticket_value: Decimal.new("120")
+               })
+
+      assert metrics.net_ticket_quantity == Decimal.new(-1)
+      assert metrics.net_ticket_value == Decimal.new("-70")
+      assert metrics.average_ticket_value == Decimal.new("70")
+    end
+
+    test "zero net ticket quantity yields nil average ticket value" do
+      assert {:ok, metrics} =
+               MetricRules.derive_financial_metrics(%{
+                 gross_ticket_quantity: Decimal.new(2),
+                 refund_ticket_quantity: Decimal.new(2),
+                 gross_ticket_value: Decimal.new("200"),
+                 refund_ticket_value: Decimal.new("50")
+               })
+
+      assert Decimal.equal?(metrics.net_ticket_quantity, Decimal.new(0))
+      assert metrics.average_ticket_value == nil
+    end
+
+    test "rejects invalid primitive inputs" do
+      valid_base = %{
+        gross_ticket_quantity: Decimal.new(1),
+        refund_ticket_quantity: Decimal.new(0),
+        gross_ticket_value: Decimal.new("10"),
+        refund_ticket_value: Decimal.new("0")
+      }
+
+      assert MetricRules.derive_financial_metrics(%{}) == {:error, :invalid_primitive_totals}
+
+      assert MetricRules.derive_financial_metrics(Map.delete(valid_base, :gross_ticket_value)) ==
+               {:error, :invalid_primitive_totals}
+
+      assert MetricRules.derive_financial_metrics(
+               Map.put(valid_base, :gross_ticket_quantity, Decimal.new("1.5"))
+             ) == {:error, :invalid_primitive_totals}
+
+      assert MetricRules.derive_financial_metrics(
+               Map.put(valid_base, :refund_ticket_quantity, Decimal.new("-1"))
+             ) == {:error, :invalid_primitive_totals}
+
+      assert MetricRules.derive_financial_metrics(
+               Map.put(valid_base, :gross_ticket_value, Decimal.new("-0.01"))
+             ) == {:error, :invalid_primitive_totals}
+
+      assert MetricRules.derive_financial_metrics(
+               Map.put(valid_base, :refund_ticket_value, Decimal.new("-0.01"))
+             ) == {:error, :invalid_primitive_totals}
+
+      assert MetricRules.derive_financial_metrics(Map.put(valid_base, :gross_ticket_value, 1.0)) ==
+               {:error, :invalid_primitive_totals}
+
+      assert MetricRules.derive_financial_metrics(
+               Map.put(valid_base, :refund_ticket_value, "10.00")
+             ) == {:error, :invalid_primitive_totals}
+    end
+  end
+
   describe "financial_summary/3" do
     test "derives tax-inclusive canonical summary from primitive totals and order count" do
       primitives =
@@ -379,6 +473,25 @@ defmodule EventSales.Analytics.MetricRulesTest do
 
       assert MetricRules.financial_summary("ZAR", primitives, 1) ==
                {:error, :invalid_primitive_totals}
+    end
+
+    test "delegates net and ATV semantics through derive_financial_metrics/1" do
+      primitives =
+        FinancialPrimitives.empty_totals()
+        |> Map.merge(%{
+          gross_ticket_quantity: Decimal.new(2),
+          refund_ticket_quantity: Decimal.new(0),
+          gross_ticket_value: Decimal.new("100"),
+          refund_ticket_value: Decimal.new("25")
+        })
+
+      assert {:ok, summary} = MetricRules.financial_summary("ZAR", primitives, 3)
+      assert {:ok, derived} = MetricRules.derive_financial_metrics(primitives)
+
+      assert summary.net_ticket_value == derived.net_ticket_value
+      assert summary.average_ticket_value == derived.average_ticket_value
+      assert summary.recognised_order_count == 3
+      assert summary.currency == "ZAR"
     end
 
     test "historical gross totals remain when refund adjustment facts are present" do

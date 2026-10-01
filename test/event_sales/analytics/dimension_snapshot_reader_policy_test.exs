@@ -49,6 +49,9 @@ defmodule EventSales.Analytics.DimensionSnapshotReaderPolicyTest do
     assert result.revenue_visible?
     row = hd(hd(result.currencies).dimensions.ticket_type)
     assert %Decimal{} = row.gross_ticket_value
+    assert %Decimal{} = row.refund_ticket_value
+    assert %Decimal{} = row.net_ticket_value
+    assert row.average_ticket_value == nil or match?(%Decimal{}, row.average_ticket_value)
   end
 
   test "event owner hides revenue by default", %{event: event, owner: owner} do
@@ -58,7 +61,12 @@ defmodule EventSales.Analytics.DimensionSnapshotReaderPolicyTest do
     refute result.revenue_visible?
     row = hd(hd(result.currencies).dimensions.ticket_type)
     assert row.gross_ticket_quantity > 0
+    assert row.refund_ticket_quantity >= 0
+    assert row.net_ticket_quantity > 0
     assert row.gross_ticket_value == nil
+    assert row.refund_ticket_value == nil
+    assert row.net_ticket_value == nil
+    assert row.average_ticket_value == nil
   end
 
   test "event owner and staff revenue follows dashboard settings", %{
@@ -81,7 +89,11 @@ defmodule EventSales.Analytics.DimensionSnapshotReaderPolicyTest do
              DimensionSnapshotReader.list_for_event(event.id, actor: event_staff)
 
     refute staff_result.revenue_visible?
-    assert hd(hd(staff_result.currencies).dimensions.ticket_type).gross_ticket_value == nil
+    staff_row = hd(hd(staff_result.currencies).dimensions.ticket_type)
+    assert staff_row.gross_ticket_value == nil
+    assert staff_row.refund_ticket_value == nil
+    assert staff_row.net_ticket_value == nil
+    assert staff_row.average_ticket_value == nil
 
     update_dashboard_setting!(event, %{revenue_visible_to_event_staff: true})
 

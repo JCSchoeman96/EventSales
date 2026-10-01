@@ -35,6 +35,13 @@ defmodule EventSales.Analytics.MetricRules do
 
   @zero Decimal.new("0")
 
+  @additive_primitive_keys [
+    :gross_ticket_quantity,
+    :refund_ticket_quantity,
+    :gross_ticket_value,
+    :refund_ticket_value
+  ]
+
   @doc """
   Returns the configured business timezone used for date-bucketed metrics.
   """
@@ -125,60 +132,87 @@ defmodule EventSales.Analytics.MetricRules do
   end
 
   @doc """
+  Derives net ticket metrics and average ticket value from canonical additive primitives.
+
+  Accepts a map containing at least `gross_ticket_quantity`, `refund_ticket_quantity`,
+  `gross_ticket_value`, and `refund_ticket_value` as `Decimal` values. Quantities must be
+  non-negative and integral; values must be non-negative. Net quantities and values may be
+  negative when refunds exceed gross components.
+  """
+  @spec derive_financial_metrics(map()) ::
+          {:ok,
+           %{
+             gross_ticket_quantity: Decimal.t(),
+             refund_ticket_quantity: Decimal.t(),
+             net_ticket_quantity: Decimal.t(),
+             gross_ticket_value: Decimal.t(),
+             refund_ticket_value: Decimal.t(),
+             net_ticket_value: Decimal.t(),
+             average_ticket_value: Decimal.t() | nil
+           }}
+          | {:error, :invalid_primitive_totals}
+  def derive_financial_metrics(primitives) do
+    with :ok <- validate_additive_primitives(primitives),
+         {:ok, additive} <- extract_validated_additive(primitives) do
+      totals = FinancialPrimitives.derive_net_totals(additive)
+      net_quantity = Map.fetch!(totals, :net_ticket_quantity)
+      net_value = Map.fetch!(totals, :net_ticket_value)
+
+      {:ok,
+       %{
+         gross_ticket_quantity: Map.fetch!(additive, :gross_ticket_quantity),
+         refund_ticket_quantity: Map.fetch!(additive, :refund_ticket_quantity),
+         net_ticket_quantity: net_quantity,
+         gross_ticket_value: Map.fetch!(additive, :gross_ticket_value),
+         refund_ticket_value: Map.fetch!(additive, :refund_ticket_value),
+         net_ticket_value: net_value,
+         average_ticket_value: average_ticket_value(net_value, net_quantity)
+       }}
+    end
+  end
+
+  @doc """
   Derives the canonical financial summary for one currency partition.
 
   Accepts additive gross/refund primitive totals (typically produced by bounded
   aggregation in later slices) plus a distinct recognised-order count for the
   same scope. Net metrics and average ticket value are derived via
-  `FinancialPrimitives`; they are not persisted here.
+  `derive_financial_metrics/1`; they are not persisted here.
   """
   @spec financial_summary(String.t(), FinancialPrimitives.totals(), non_neg_integer()) ::
           {:ok, financial_summary()} | {:error, :invalid_currency | :invalid_primitive_totals}
   def financial_summary(currency, primitive_totals, recognised_order_count)
       when is_integer(recognised_order_count) and recognised_order_count >= 0 do
     with :ok <- validate_currency(currency),
-         :ok <- validate_primitive_totals(primitive_totals) do
-      totals = FinancialPrimitives.derive_net_totals(primitive_totals)
-      net_quantity = Map.fetch!(totals, :net_ticket_quantity)
-      net_value = Map.fetch!(totals, :net_ticket_value)
-
+         {:ok, metrics} <- derive_financial_metrics(primitive_totals) do
       {:ok,
-       %{
+       Map.merge(metrics, %{
          currency: currency,
-         gross_ticket_quantity: Map.fetch!(totals, :gross_ticket_quantity),
-         refund_ticket_quantity: Map.fetch!(totals, :refund_ticket_quantity),
-         net_ticket_quantity: net_quantity,
-         gross_ticket_value: Map.fetch!(totals, :gross_ticket_value),
-         refund_ticket_value: Map.fetch!(totals, :refund_ticket_value),
-         net_ticket_value: net_value,
-         recognised_order_count: recognised_order_count,
-         average_ticket_value: average_ticket_value(net_value, net_quantity)
-       }}
+         recognised_order_count: recognised_order_count
+       })}
     end
   end
 
   defp validate_currency(currency) when is_binary(currency) and byte_size(currency) > 0, do: :ok
   defp validate_currency(_currency), do: {:error, :invalid_currency}
 
-  defp validate_primitive_totals(%{} = totals) do
-    required_keys = [
-      :gross_ticket_quantity,
-      :refund_ticket_quantity,
-      :gross_ticket_value,
-      :refund_ticket_value
-    ]
-
-    if Enum.all?(required_keys, &Map.has_key?(totals, &1)) do
-      case validate_quantity_primitive(Map.fetch!(totals, :gross_ticket_quantity)) do
-        :ok -> validate_quantity_primitive(Map.fetch!(totals, :refund_ticket_quantity))
-        error -> error
+  defp validate_additive_primitives(%{} = totals) do
+    if Enum.all?(@additive_primitive_keys, &Map.has_key?(totals, &1)) do
+      with :ok <- validate_quantity_primitive(Map.fetch!(totals, :gross_ticket_quantity)),
+           :ok <- validate_quantity_primitive(Map.fetch!(totals, :refund_ticket_quantity)),
+           :ok <- validate_value_primitive(Map.fetch!(totals, :gross_ticket_value)) do
+        validate_value_primitive(Map.fetch!(totals, :refund_ticket_value))
       end
     else
       {:error, :invalid_primitive_totals}
     end
   end
 
-  defp validate_primitive_totals(_totals), do: {:error, :invalid_primitive_totals}
+  defp validate_additive_primitives(_totals), do: {:error, :invalid_primitive_totals}
+
+  defp extract_validated_additive(totals) do
+    {:ok, Map.take(totals, @additive_primitive_keys)}
+  end
 
   defp validate_quantity_primitive(%Decimal{} = quantity) do
     if FinancialPrimitives.integral_quantity?(quantity),
@@ -187,6 +221,14 @@ defmodule EventSales.Analytics.MetricRules do
   end
 
   defp validate_quantity_primitive(_quantity), do: {:error, :invalid_primitive_totals}
+
+  defp validate_value_primitive(%Decimal{} = value) do
+    if Decimal.compare(value, @zero) == :lt,
+      do: {:error, :invalid_primitive_totals},
+      else: :ok
+  end
+
+  defp validate_value_primitive(_value), do: {:error, :invalid_primitive_totals}
 
   defp average_ticket_value(net_value, %Decimal{} = net_quantity) do
     if Decimal.equal?(net_quantity, @zero) do
