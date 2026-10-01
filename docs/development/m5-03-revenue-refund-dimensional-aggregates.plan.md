@@ -168,7 +168,12 @@ EventSales.Sales.FinancialPrimitives remains the arithmetic authority.
     average_ticket_value = net_ticket_value / net_ticket_quantity
     net_ticket_quantity == 0 -> nil
 
-All stored additive quantities and values are non-negative magnitudes. Net values are not clamped. A source over-refund therefore may produce negative net quantity or value. The existing MetricRules.financial_summary/3 tests already prove this arithmetic and the zero-denominator ATV rule.
+All stored additive quantities and values are non-negative magnitudes. Net values are not clamped after canonical qualification. A line with a
+`validation_reason` is not admitted to the primitives, so this no-clamp rule
+does not override validation-failure exclusion. Qualifying refund primitives
+may still exceed gross totals and produce negative net quantity or value. The
+existing MetricRules.financial_summary/3 tests already prove this arithmetic
+and the zero-denominator ATV rule.
 
 M5-03E adds one pure `MetricRules.derive_financial_metrics/1` entry point and
 refactors `financial_summary/3` to use it, so row readers do not copy
