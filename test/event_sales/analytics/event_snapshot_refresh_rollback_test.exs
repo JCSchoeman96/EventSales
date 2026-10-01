@@ -31,10 +31,16 @@ defmodule EventSales.Analytics.EventSnapshotRefreshRollbackTest do
 
       ticket = SalesHelpers.create_ticket_type!(event, %{name: "GA"})
 
+      generation_g1 = ~U[2026-05-18 08:00:00.000000Z]
+
       assert {:ok, event_snapshot} =
                Ash.create(
                  EventAggregateSnapshot,
-                 snapshot_attrs(event.id, "ZAR", 9),
+                 snapshot_attrs(event.id, "ZAR", 9,
+                   refund_ticket_quantity: 1,
+                   refund_ticket_value: Decimal.new("6"),
+                   refreshed_at: generation_g1
+                 ),
                  action: :create_snapshot,
                  domain: EventSales.Analytics
                )
@@ -49,7 +55,9 @@ defmodule EventSales.Analytics.EventSnapshotRefreshRollbackTest do
                    ticket_type_id: ticket.id,
                    gross_ticket_quantity: 2,
                    gross_ticket_value: Decimal.new("20"),
-                   refreshed_at: ~U[2026-05-18 08:00:00.000000Z]
+                   refund_ticket_quantity: 1,
+                   refund_ticket_value: Decimal.new("6"),
+                   refreshed_at: generation_g1
                  },
                  action: :create_snapshot,
                  domain: EventSales.Analytics
@@ -62,17 +70,23 @@ defmodule EventSales.Analytics.EventSnapshotRefreshRollbackTest do
           completed_at: ~U[2026-05-17 08:00:00.000000Z]
         )
 
-      create_item!(order, event, ticket,
-        woo_line_item_id: 1,
-        line_total: Decimal.new("450.00"),
-        line_total_tax: Decimal.new("67.50")
-      )
+      item =
+        create_item!(order, event, ticket,
+          woo_line_item_id: 1,
+          line_total: Decimal.new("450.00"),
+          line_total_tax: Decimal.new("67.50")
+        )
 
       assert :ok = DashboardCache.put_event_summary(event.id, %{total_sold: 42})
 
       constraint = "evt_dim_block_insert_#{System.unique_integer([:positive])}"
 
       try do
+        Repo.query!(
+          "UPDATE sales_order_items SET line_total = $1, line_total_tax = $2 WHERE id = $3",
+          [Decimal.new("999.00"), Decimal.new("1.00"), Ecto.UUID.dump!(item.id)]
+        )
+
         Repo.query!(
           "ALTER TABLE analytics_event_dimension_aggregate_snapshots ADD CONSTRAINT #{constraint} CHECK (NOT (currency = 'ZAR' AND dimension_kind = 'ticket_type')) NOT VALID"
         )
@@ -90,7 +104,22 @@ defmodule EventSales.Analytics.EventSnapshotRefreshRollbackTest do
                  )
 
         assert persisted_event.gross_ticket_quantity == 9
+        assert persisted_event.refund_ticket_quantity == 1
+        assert Decimal.equal?(persisted_event.refund_ticket_value, Decimal.new("6"))
+        assert persisted_event.refreshed_at == generation_g1
         assert persisted_dimension.gross_ticket_quantity == 2
+        assert persisted_dimension.refund_ticket_quantity == 1
+        assert Decimal.equal?(persisted_dimension.refund_ticket_value, Decimal.new("6"))
+        assert persisted_dimension.refreshed_at == generation_g1
+
+        assert [%{id: restored_dimension_id}] =
+                 Ash.read!(
+                   EventDimensionAggregateSnapshot
+                   |> Ash.Query.filter(event_id == ^event.id),
+                   domain: EventSales.Analytics
+                 )
+
+        assert restored_dimension_id == dimension_snapshot.id
         assert {:ok, cached} = DashboardCache.get_event_summary(event.id)
         assert cached.total_sold == 42
       after
@@ -215,7 +244,7 @@ defmodule EventSales.Analytics.EventSnapshotRefreshRollbackTest do
     Repo.delete_all(from(source in SourceSystem, where: source.id == ^source_id))
   end
 
-  defp snapshot_attrs(event_id, currency, gross_qty) do
+  defp snapshot_attrs(event_id, currency, gross_qty, opts \\ []) do
     %{
       event_id: event_id,
       total_sold: 0,
@@ -223,13 +252,13 @@ defmodule EventSales.Analytics.EventSnapshotRefreshRollbackTest do
       today_sold: 0,
       today_revenue: Decimal.new("0"),
       gross_ticket_quantity: gross_qty,
-      refund_ticket_quantity: 0,
+      refund_ticket_quantity: Keyword.get(opts, :refund_ticket_quantity, 0),
       gross_ticket_value: Decimal.new("100"),
-      refund_ticket_value: Decimal.new("0"),
+      refund_ticket_value: Keyword.get(opts, :refund_ticket_value, Decimal.new("0")),
       recognised_order_count: 1,
       currency: currency,
       business_timezone: "Africa/Johannesburg",
-      refreshed_at: ~U[2026-05-18 08:00:00.000000Z],
+      refreshed_at: Keyword.get(opts, :refreshed_at, ~U[2026-05-18 08:00:00.000000Z]),
       source_row_count: 0,
       snapshot_version: 2
     }

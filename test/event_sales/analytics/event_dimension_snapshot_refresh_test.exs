@@ -5,11 +5,13 @@ defmodule EventSales.Analytics.EventDimensionSnapshotRefreshTest do
 
   require Ash.Query
 
+  alias EventSales.Analytics.Aggregators.DimensionAggregator
   alias EventSales.Analytics.{DashboardCache, SnapshotRefresh}
   alias EventSales.Analytics.Resources.{EventAggregateSnapshot, EventDimensionAggregateSnapshot}
   alias EventSales.Catalog.Resources.{Event, SourceSystem, TicketType}
   alias EventSales.Repo
   alias EventSales.Sales
+  alias EventSales.Sales.RefundUpserter
   alias EventSales.Sales.Resources.{Order, OrderItem}
   alias EventSales.TestSupport.{SalesHelpers, UnboxedPostgres}
 
@@ -46,6 +48,60 @@ defmodule EventSales.Analytics.EventDimensionSnapshotRefreshTest do
              rows,
              &(&1.dimension_kind == :source_variation and &1.woo_variation_id == 601)
            )
+  end
+
+  test "initial refresh persists refund primitives for every applicable variation grain" do
+    %{source: source, event: event, ticket: ticket} = fixture!()
+    order = create_order!(source, :completed)
+
+    item =
+      create_item!(order, event, ticket,
+        woo_line_item_id: 70_001,
+        woo_product_id: 501,
+        woo_variation_id: 601,
+        quantity: 2,
+        line_total: Decimal.new("20.00"),
+        line_total_tax: Decimal.new("2.00")
+      )
+
+    assert {:ok, _refund} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               order.woo_order_id,
+               normalized_refund(80_001, [normalized_refund_line(90_001, item)])
+             )
+
+    assert {:ok, _snapshots} = SnapshotRefresh.refresh_event(event.id)
+
+    rows = dimension_rows!(event.id)
+    assert {:ok, aggregate_rows} = DimensionAggregator.financial_rows_for_event(event.id)
+    assert length(aggregate_rows) == 3
+
+    for aggregate <- aggregate_rows do
+      assert persisted =
+               Enum.find(rows, fn row ->
+                 row.currency == aggregate.currency and
+                   row.dimension_kind == aggregate.dimension_kind and
+                   row.ticket_type_id == aggregate.ticket_type_id and
+                   row.source_system_id == aggregate.source_system_id and
+                   row.woo_product_id == aggregate.woo_product_id and
+                   row.woo_variation_id == aggregate.woo_variation_id
+               end)
+
+      assert persisted.gross_ticket_quantity == aggregate.gross_ticket_quantity
+      assert Decimal.equal?(persisted.gross_ticket_value, aggregate.gross_ticket_value)
+      assert persisted.refund_ticket_quantity == aggregate.refund_ticket_quantity
+      assert Decimal.equal?(persisted.refund_ticket_value, aggregate.refund_ticket_value)
+    end
+
+    for kind <- [:ticket_type, :source_product, :source_variation] do
+      row = Enum.find(rows, &(&1.dimension_kind == kind))
+
+      assert row.gross_ticket_quantity == 2
+      assert Decimal.equal?(row.gross_ticket_value, Decimal.new("22.00"))
+      assert row.refund_ticket_quantity == 1
+      assert Decimal.equal?(row.refund_ticket_value, Decimal.new("6.00"))
+    end
   end
 
   test "repeated same-grain source rows aggregate into one dimensional row per grain" do
@@ -93,6 +149,277 @@ defmodule EventSales.Analytics.EventDimensionSnapshotRefreshTest do
     rows = dimension_rows!(event.id)
     kinds = Enum.map(rows, & &1.dimension_kind) |> Enum.sort()
     assert kinds == [:source_product, :ticket_type]
+  end
+
+  test "product-only refund persists on ticket and product grains without variation" do
+    %{source: source, event: event, ticket: ticket} = fixture!()
+    order = create_order!(source, :completed)
+
+    item =
+      create_item!(order, event, ticket,
+        woo_line_item_id: 70_002,
+        woo_product_id: 777,
+        woo_variation_id: nil,
+        quantity: 1,
+        line_total: Decimal.new("15.00"),
+        line_total_tax: Decimal.new("0.00")
+      )
+
+    assert {:ok, _refund} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               order.woo_order_id,
+               normalized_refund(80_002, [normalized_refund_line(90_002, item)])
+             )
+
+    assert {:ok, _} = SnapshotRefresh.refresh_event(event.id)
+
+    rows = dimension_rows!(event.id)
+    assert Enum.map(rows, & &1.dimension_kind) |> Enum.sort() == [:source_product, :ticket_type]
+
+    for kind <- [:ticket_type, :source_product] do
+      row = Enum.find(rows, &(&1.dimension_kind == kind))
+      assert row.refund_ticket_quantity == 1
+      assert Decimal.equal?(row.refund_ticket_value, Decimal.new("6.00"))
+    end
+
+    refute Enum.any?(rows, &(&1.dimension_kind == :source_variation))
+  end
+
+  test "value-only refund persists a positive value with zero refund quantity" do
+    %{source: source, event: event, ticket: ticket} = fixture!()
+    order = create_order!(source, :completed)
+
+    item =
+      create_item!(order, event, ticket,
+        woo_line_item_id: 70_003,
+        woo_product_id: 778,
+        woo_variation_id: 602,
+        quantity: 1,
+        line_total: Decimal.new("15.00"),
+        line_total_tax: Decimal.new("0.00")
+      )
+
+    assert {:ok, _refund} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               order.woo_order_id,
+               normalized_refund(
+                 80_003,
+                 [
+                   normalized_refund_line(90_003, item,
+                     refunded_quantity: 0,
+                     refund_subtotal_amount: Decimal.new("30.00"),
+                     refund_total_amount: Decimal.new("30.00"),
+                     refund_total_tax: Decimal.new("4.50")
+                   )
+                 ],
+                 header_amount: Decimal.new("34.50")
+               )
+             )
+
+    assert {:ok, _} = SnapshotRefresh.refresh_event(event.id)
+
+    rows = dimension_rows!(event.id)
+
+    assert Enum.all?(rows, fn row ->
+             row.refund_ticket_quantity == 0 and
+               Decimal.equal?(row.refund_ticket_value, Decimal.new("34.50"))
+           end)
+  end
+
+  test "header-only refund does not allocate dimensional ticket refunds" do
+    %{source: source, event: event, ticket: ticket} = fixture!()
+    order = create_order!(source, :completed)
+
+    create_item!(order, event, ticket,
+      woo_product_id: 784,
+      woo_variation_id: 607,
+      quantity: 1,
+      line_total: Decimal.new("15.00"),
+      line_total_tax: Decimal.new("1.50")
+    )
+
+    assert {:ok, _refund} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               order.woo_order_id,
+               normalized_refund(
+                 80_007,
+                 [],
+                 header_amount: Decimal.new("20.00"),
+                 unallocated_header_amount: Decimal.new("20.00")
+               )
+             )
+
+    assert {:ok, _} = SnapshotRefresh.refresh_event(event.id)
+
+    assert Enum.all?(dimension_rows!(event.id), fn row ->
+             row.refund_ticket_quantity == 0 and
+               Decimal.equal?(row.refund_ticket_value, Decimal.new("0"))
+           end)
+  end
+
+  test "voided refund refresh removes dimensional refund primitives and keeps gross" do
+    %{source: source, event: event, ticket: ticket} = fixture!()
+    order = create_order!(source, :completed)
+
+    item =
+      create_item!(order, event, ticket,
+        woo_line_item_id: 70_004,
+        woo_product_id: 779,
+        woo_variation_id: 603,
+        quantity: 2,
+        line_total: Decimal.new("20.00"),
+        line_total_tax: Decimal.new("2.00")
+      )
+
+    assert {:ok, refund} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               order.woo_order_id,
+               normalized_refund(80_004, [normalized_refund_line(90_004, item)])
+             )
+
+    assert {:ok, _} = SnapshotRefresh.refresh_event(event.id)
+    assert Enum.any?(dimension_rows!(event.id), &(&1.refund_ticket_quantity == 1))
+
+    assert {:ok, %{source_state: :voided}} =
+             RefundUpserter.mark_source_deleted(
+               source.id,
+               order.woo_order_id,
+               refund.woo_refund_id,
+               ~U[2026-05-17 11:00:00.000000Z]
+             )
+
+    assert {:ok, _} = SnapshotRefresh.refresh_event(event.id)
+
+    assert Enum.all?(dimension_rows!(event.id), fn row ->
+             row.gross_ticket_quantity == 2 and
+               Decimal.equal?(row.gross_ticket_value, Decimal.new("22.00")) and
+               row.refund_ticket_quantity == 0 and
+               Decimal.equal?(row.refund_ticket_value, Decimal.new("0"))
+           end)
+  end
+
+  test "unresolved refund refresh removes prior dimensional refund primitives" do
+    %{source: source, event: event, ticket: ticket} = fixture!()
+    order = create_order!(source, :completed)
+
+    item =
+      create_item!(order, event, ticket,
+        woo_line_item_id: 70_005,
+        woo_product_id: 780,
+        woo_variation_id: 604,
+        quantity: 2,
+        line_total: Decimal.new("20.00"),
+        line_total_tax: Decimal.new("2.00")
+      )
+
+    assert {:ok, refund} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               order.woo_order_id,
+               normalized_refund(80_005, [normalized_refund_line(90_005, item)])
+             )
+
+    assert {:ok, _} = SnapshotRefresh.refresh_event(event.id)
+    assert Enum.any?(dimension_rows!(event.id), &(&1.refund_ticket_quantity == 1))
+
+    assert {:ok, %{detail_status: :unresolved}} =
+             RefundUpserter.upsert_refund(
+               source.id,
+               order.woo_order_id,
+               malformed_refund_payload(refund.woo_refund_id)
+             )
+
+    assert {:ok, _} = SnapshotRefresh.refresh_event(event.id)
+
+    assert Enum.all?(dimension_rows!(event.id), fn row ->
+             row.gross_ticket_quantity == 2 and row.refund_ticket_quantity == 0 and
+               Decimal.equal?(row.refund_ticket_value, Decimal.new("0"))
+           end)
+  end
+
+  test "full replacement removes a refund-only grain when source aggregation no longer returns it" do
+    %{source: source, event: event, ticket: ticket} = fixture!()
+    order = create_order!(source, :completed)
+
+    item =
+      create_item!(order, event, ticket,
+        woo_line_item_id: 70_006,
+        woo_product_id: 781,
+        woo_variation_id: nil,
+        quantity: 1,
+        line_total: Decimal.new("25.00"),
+        line_total_tax: Decimal.new("2.50")
+      )
+
+    assert {:ok, refund} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               order.woo_order_id,
+               normalized_refund(80_006, [normalized_refund_line(90_006, item)])
+             )
+
+    Repo.query!("UPDATE sales_order_items SET quantity = 0 WHERE id = $1", [
+      Ecto.UUID.dump!(item.id)
+    ])
+
+    assert {:ok, _} = SnapshotRefresh.refresh_event(event.id)
+
+    assert Enum.any?(dimension_rows!(event.id), fn row ->
+             row.dimension_kind == :source_product and row.refund_ticket_quantity == 1
+           end)
+
+    assert {:ok, %{source_state: :voided}} =
+             RefundUpserter.mark_source_deleted(
+               source.id,
+               order.woo_order_id,
+               refund.woo_refund_id,
+               ~U[2026-05-17 12:00:00.000000Z]
+             )
+
+    assert {:ok, _} = SnapshotRefresh.refresh_event(event.id)
+
+    refute Enum.any?(dimension_rows!(event.id), &(&1.woo_product_id == 781))
+  end
+
+  test "multi-currency dimensional rows and event snapshots share one generation" do
+    %{source: source, event: event, ticket: ticket, second_ticket: second_ticket} = fixture!()
+    zar_order = create_order!(source, :completed, currency: "ZAR")
+    usd_order = create_order!(source, :completed, currency: "USD")
+
+    create_item!(zar_order, event, ticket,
+      woo_product_id: 782,
+      woo_variation_id: 605,
+      quantity: 1,
+      line_total: Decimal.new("10.00"),
+      line_total_tax: Decimal.new("1.00")
+    )
+
+    create_item!(usd_order, event, second_ticket,
+      woo_product_id: 783,
+      woo_variation_id: 606,
+      quantity: 1,
+      line_total: Decimal.new("20.00"),
+      line_total_tax: Decimal.new("2.00")
+    )
+
+    generation = ~U[2026-06-01 10:00:00.000000Z]
+    assert {:ok, _} = SnapshotRefresh.refresh_event(event.id, refreshed_at: generation)
+
+    dimensions = dimension_rows!(event.id)
+
+    snapshots =
+      EventAggregateSnapshot
+      |> Ash.Query.filter(event_id == ^event.id and snapshot_version == 2)
+      |> Ash.read!(domain: EventSales.Analytics)
+
+    assert Enum.map(dimensions, & &1.currency) |> Enum.uniq() |> Enum.sort() == ["USD", "ZAR"]
+    assert Enum.all?(dimensions, &(&1.refreshed_at == generation))
+    assert Enum.all?(snapshots, &(&1.refreshed_at == generation))
+    assert Enum.map(snapshots, & &1.currency) |> Enum.sort() == ["USD", "ZAR"]
   end
 
   test "second refresh removes obsolete dimensional grains" do
@@ -350,6 +677,48 @@ defmodule EventSales.Analytics.EventDimensionSnapshotRefreshTest do
       action: :create_normalized,
       domain: Sales
     )
+  end
+
+  defp normalized_refund(refund_id, line_items, attrs \\ []) do
+    defaults = %{
+      woo_refund_id: refund_id,
+      header_amount: Decimal.new("6.00"),
+      reason: "customer request",
+      source_created_at: ~U[2026-05-17 10:00:00.000000Z],
+      line_items: line_items,
+      shipping_refund_amount: nil,
+      shipping_refund_tax: nil,
+      fee_refund_amount: nil,
+      fee_refund_tax: nil,
+      unallocated_header_amount: Decimal.new("0.00")
+    }
+
+    Map.merge(defaults, Map.new(attrs))
+  end
+
+  defp normalized_refund_line(line_id, item, attrs \\ []) do
+    defaults = %{
+      woo_refund_line_item_id: line_id,
+      woo_refunded_item_id: item.woo_line_item_id,
+      woo_product_id: item.woo_product_id,
+      woo_variation_id: item.woo_variation_id,
+      refunded_quantity: 1,
+      refund_subtotal_amount: Decimal.new("5.00"),
+      refund_total_amount: Decimal.new("5.00"),
+      refund_total_tax: Decimal.new("1.00"),
+      binding_reason: nil,
+      validation_reason: nil
+    }
+
+    Map.merge(defaults, Map.new(attrs))
+  end
+
+  defp malformed_refund_payload(refund_id) do
+    %{
+      "id" => refund_id,
+      "amount" => "6.00",
+      "line_items" => "not-a-list"
+    }
   end
 
   defp dimension_rows!(event_id) do
