@@ -552,6 +552,34 @@ defmodule EventSales.Analytics.DimensionSnapshotReaderTest do
              DimensionSnapshotReader.list_for_event(event.id, actor: admin)
   end
 
+  test "refund quantity only on event requires ticket_type and source_product families", %{
+    event: event,
+    admin: admin
+  } do
+    ticket = SalesHelpers.create_ticket_type!(event, %{name: "GA"})
+
+    seed_ready_v2!(event, "ZAR",
+      gross_qty: 0,
+      refund_qty: 1,
+      gross_value: Decimal.new("0"),
+      refund_value: Decimal.new("0"),
+      refreshed_at: @refreshed_at
+    )
+
+    seed_dimension!(event, :ticket_type, %{
+      currency: "ZAR",
+      ticket_type_id: ticket.id,
+      gross_ticket_quantity: 0,
+      refund_ticket_quantity: 1,
+      gross_ticket_value: Decimal.new("0"),
+      refund_ticket_value: Decimal.new("0"),
+      refreshed_at: @refreshed_at
+    })
+
+    assert {:error, :snapshot_not_ready} =
+             DimensionSnapshotReader.list_for_event(event.id, actor: admin)
+  end
+
   test "gross value only on event requires required families", %{event: event, admin: admin} do
     ticket = SalesHelpers.create_ticket_type!(event, %{name: "GA"})
 
