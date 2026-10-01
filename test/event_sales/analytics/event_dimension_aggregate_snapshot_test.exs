@@ -9,6 +9,8 @@ defmodule EventSales.Analytics.EventDimensionAggregateSnapshotTest do
   @refreshed_at ~U[2026-05-18 08:00:00.000000Z]
   @grain_shape_constraint "analytics_event_dim_agg_snapshots_grain_shape_check"
   @source_product_unique_index "analytics_event_dim_agg_snapshots_unique_source_product_idx"
+  @refund_quantity_constraint "analytics_event_dim_agg_snapshots_refund_ticket_quantity_check"
+  @refund_value_constraint "analytics_event_dim_agg_snapshots_refund_ticket_value_check"
 
   setup do
     source_a = SalesHelpers.create_source_system!(%{name: "Dimension Source A"})
@@ -108,6 +110,79 @@ defmodule EventSales.Analytics.EventDimensionAggregateSnapshotTest do
 
       assert snapshot.gross_ticket_quantity == 0
       assert Decimal.equal?(snapshot.gross_ticket_value, Decimal.new("0"))
+    end
+
+    test "refund fields default to zero when omitted", %{event_a: event, ticket: ticket} do
+      snapshot =
+        create_snapshot!(%{
+          event_id: event.id,
+          dimension_kind: :ticket_type,
+          ticket_type_id: ticket.id
+        })
+
+      assert snapshot.refund_ticket_quantity == 0
+      assert Decimal.equal?(snapshot.refund_ticket_value, Decimal.new("0"))
+    end
+
+    test "explicit refund values persist for each grain kind", %{
+      event_a: event,
+      ticket: ticket,
+      source_a: source
+    } do
+      refund_qty = 1
+      refund_val = Decimal.new("25.50")
+
+      ticket_type_snapshot =
+        create_snapshot!(%{
+          event_id: event.id,
+          dimension_kind: :ticket_type,
+          ticket_type_id: ticket.id,
+          refund_ticket_quantity: refund_qty,
+          refund_ticket_value: refund_val
+        })
+
+      assert ticket_type_snapshot.refund_ticket_quantity == refund_qty
+      assert Decimal.equal?(ticket_type_snapshot.refund_ticket_value, refund_val)
+
+      product_snapshot =
+        create_snapshot!(%{
+          event_id: event.id,
+          dimension_kind: :source_product,
+          source_system_id: source.id,
+          woo_product_id: 88_001,
+          refund_ticket_quantity: refund_qty,
+          refund_ticket_value: refund_val
+        })
+
+      assert product_snapshot.refund_ticket_quantity == refund_qty
+      assert Decimal.equal?(product_snapshot.refund_ticket_value, refund_val)
+
+      variation_snapshot =
+        create_snapshot!(%{
+          event_id: event.id,
+          dimension_kind: :source_variation,
+          source_system_id: source.id,
+          woo_product_id: 88_002,
+          woo_variation_id: 98_002,
+          refund_ticket_quantity: refund_qty,
+          refund_ticket_value: refund_val
+        })
+
+      assert variation_snapshot.refund_ticket_quantity == refund_qty
+      assert Decimal.equal?(variation_snapshot.refund_ticket_value, refund_val)
+    end
+  end
+
+  describe "schema non-goals" do
+    test "dimension snapshot does not persist derived net or average fields" do
+      attributes =
+        EventDimensionAggregateSnapshot
+        |> Ash.Resource.Info.attributes()
+        |> Enum.map(& &1.name)
+
+      refute :net_ticket_quantity in attributes
+      refute :net_ticket_value in attributes
+      refute :average_ticket_value in attributes
     end
   end
 
@@ -385,6 +460,26 @@ defmodule EventSales.Analytics.EventDimensionAggregateSnapshotTest do
                  gross_ticket_value: Decimal.new("-0.01")
                })
     end
+
+    test "negative refund_ticket_quantity fails", %{event_a: event, ticket: ticket} do
+      assert {:error, _} =
+               create_snapshot(%{
+                 event_id: event.id,
+                 dimension_kind: :ticket_type,
+                 ticket_type_id: ticket.id,
+                 refund_ticket_quantity: -1
+               })
+    end
+
+    test "negative refund_ticket_value fails", %{event_a: event, ticket: ticket} do
+      assert {:error, _} =
+               create_snapshot(%{
+                 event_id: event.id,
+                 dimension_kind: :ticket_type,
+                 ticket_type_id: ticket.id,
+                 refund_ticket_value: Decimal.new("-0.01")
+               })
+    end
   end
 
   describe "database constraints" do
@@ -421,6 +516,36 @@ defmodule EventSales.Analytics.EventDimensionAggregateSnapshotTest do
                })
 
       assert constraint == @source_product_unique_index
+    end
+
+    test "postgres refund_ticket_quantity check rejects negative values", %{
+      event_a: event,
+      ticket: ticket
+    } do
+      assert {:error, %Postgrex.Error{postgres: %{constraint: constraint}}} =
+               insert_raw_snapshot(%{
+                 event_id: event.id,
+                 dimension_kind: "ticket_type",
+                 ticket_type_id: ticket.id,
+                 refund_ticket_quantity: -1
+               })
+
+      assert constraint == @refund_quantity_constraint
+    end
+
+    test "postgres refund_ticket_value check rejects negative values", %{
+      event_a: event,
+      ticket: ticket
+    } do
+      assert {:error, %Postgrex.Error{postgres: %{constraint: constraint}}} =
+               insert_raw_snapshot(%{
+                 event_id: event.id,
+                 dimension_kind: "ticket_type",
+                 ticket_type_id: ticket.id,
+                 refund_ticket_value: Decimal.new("-0.01")
+               })
+
+      assert constraint == @refund_value_constraint
     end
   end
 
@@ -469,6 +594,8 @@ defmodule EventSales.Analytics.EventDimensionAggregateSnapshotTest do
       woo_variation_id: nil,
       gross_ticket_quantity: 0,
       gross_ticket_value: Decimal.new("0"),
+      refund_ticket_quantity: 0,
+      refund_ticket_value: Decimal.new("0"),
       refreshed_at: @refreshed_at,
       inserted_at: DateTime.utc_now(),
       updated_at: DateTime.utc_now()
@@ -481,8 +608,8 @@ defmodule EventSales.Analytics.EventDimensionAggregateSnapshotTest do
       INSERT INTO analytics_event_dimension_aggregate_snapshots
       (id, event_id, currency, dimension_kind, ticket_type_id, source_system_id,
        woo_product_id, woo_variation_id, gross_ticket_quantity, gross_ticket_value,
-       refreshed_at, inserted_at, updated_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       refund_ticket_quantity, refund_ticket_value, refreshed_at, inserted_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
       """,
       [
         Ecto.UUID.dump!(row.id),
@@ -495,6 +622,8 @@ defmodule EventSales.Analytics.EventDimensionAggregateSnapshotTest do
         row.woo_variation_id,
         row.gross_ticket_quantity,
         row.gross_ticket_value,
+        row.refund_ticket_quantity,
+        row.refund_ticket_value,
         row.refreshed_at,
         row.inserted_at,
         row.updated_at
