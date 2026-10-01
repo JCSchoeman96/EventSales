@@ -368,7 +368,8 @@ defmodule EventSales.Analytics.Aggregators.EventAggregator do
       select: %{id: oi.id, order_id: oi.order_id, woo_line_item_id: oi.woo_line_item_id}
   end
 
-  defp refund_primitives_filters do
+  @doc false
+  def refund_primitives_filters do
     dynamic(
       [rl, r, o],
       r.source_state == "active" and r.detail_status == "complete" and

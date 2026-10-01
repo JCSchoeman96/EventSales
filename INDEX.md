@@ -510,14 +510,14 @@ Project root: `.`
 - `EventSales.Analytics.Aggregators.DimensionAggregator` - `lib/event_sales/analytics/aggregators/dimension_aggregator.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 1
-  - public_funs: `gross_rows_for_event/1`
+  - docs_count: 2
+  - public_funs: `gross_rows_for_event/1`, `financial_rows_for_event/1`
   - uses: _none_
 - `EventSales.Analytics.Aggregators.EventAggregator` - `lib/event_sales/analytics/aggregators/event_aggregator.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 5
-  - public_funs: `financial_summaries_for_event/1`, `financial_summaries_for_event_period/2`, `summary_for_event/2`, `operational_status_breakdown_for_event/2`, `recognised_sale_item_filters/1`
+  - docs_count: 6
+  - public_funs: `financial_summaries_for_event/1`, `financial_summaries_for_event_period/2`, `summary_for_event/2`, `operational_status_breakdown_for_event/2`, `recognised_sale_item_filters/1`, `refund_primitives_filters/0`
   - uses: _none_
 - `EventSales.Analytics.CacheKeys` - `lib/event_sales/analytics/cache_keys.ex`
   - moduledoc?: true
