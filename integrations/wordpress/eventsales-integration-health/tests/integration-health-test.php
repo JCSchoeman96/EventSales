@@ -234,6 +234,40 @@ function eventsales_load_order_line_producer(): void
     }
 }
 
+function eventsales_delivery_telemetry_record(string $state, ?string $failure_category = null): array
+{
+    $attempt_at = '2026-10-02T12:00:00Z';
+    $success = $state === 'SUCCEEDED' ? $attempt_at : null;
+    $terminal_failure = $state === 'TERMINAL_FAILURE' ? $attempt_at : null;
+    $status = [
+        'NEVER_ATTEMPTED' => null,
+        'RETRY_SCHEDULED' => 503,
+        'SUCCEEDED' => 200,
+        'TERMINAL_FAILURE' => 401,
+    ][$state];
+    $category = [
+        'NEVER_ATTEMPTED' => null,
+        'RETRY_SCHEDULED' => 'retryable_http',
+        'SUCCEEDED' => null,
+        'TERMINAL_FAILURE' => 'non_retryable_http',
+    ][$state];
+    if ($failure_category !== null) {
+        $category = $failure_category;
+        $status = 503;
+    }
+
+    return [
+        'telemetry_version' => '2026-10-02.v1',
+        'state' => $state,
+        'last_attempt_at_gmt' => $state === 'NEVER_ATTEMPTED' ? null : $attempt_at,
+        'last_success_at_gmt' => $success,
+        'last_terminal_failure_at_gmt' => $terminal_failure,
+        'last_http_status' => $status,
+        'last_failure_category' => $category,
+        'last_attempt_number' => $state === 'NEVER_ATTEMPTED' ? null : 2,
+    ];
+}
+
 function eventsales_catalog_bootstrap_php(): string
 {
     $plugin_dir = WP_PLUGIN_DIR;
@@ -298,6 +332,74 @@ T::ok('catalog auth is boolean', is_bool(EventSales_Integration_Health_Catalog::
 T::same('catalog schema', '2026-08-07.v3', EventSales_Integration_Health_Catalog::evaluate()['schema_version']);
 T::same('catalog contract', 'source_risk.v3', EventSales_Integration_Health_Catalog::evaluate()['canonical_contract_version']);
 T::same('catalog producer', '2026-08-07.1', EventSales_Integration_Health_Catalog::evaluate()['producer_version']);
+
+// --- Catalogue-change delivery telemetry -----------------------------------
+
+$default_sender = EventSales_Integration_Health_Catalog_Change_Sender::evaluate();
+T::same('supported producer with no telemetry option keeps disabled readiness', EventSales_Integration_Health_States::DISABLED, $default_sender['status']);
+T::same('supported producer with no telemetry option reports support', true, $default_sender['delivery_telemetry_supported'] ?? null);
+T::same('supported producer with no telemetry option reports NEVER_ATTEMPTED', 'NEVER_ATTEMPTED', $default_sender['delivery_state'] ?? null);
+
+$telemetry_states = ['NEVER_ATTEMPTED', 'RETRY_SCHEDULED', 'SUCCEEDED', 'TERMINAL_FAILURE'];
+foreach ($telemetry_states as $delivery_state) {
+    $GLOBALS['options']['eventsales_catalog_change_delivery_telemetry'] = eventsales_delivery_telemetry_record($delivery_state)
+        + [
+            'raw_body' => 'RAW_BODY_DO_NOT_PERSIST',
+            'secret' => 'SUPER_SECRET_DO_NOT_RENDER',
+            'endpoint' => 'https://example.test/hooks/PATH_TOKEN_DO_NOT_RENDER',
+        ];
+    $options_before_health = $GLOBALS['options'];
+    $effects_before_health = $GLOBALS['side_effects'];
+    $sender_report = EventSales_Integration_Health_Catalog_Change_Sender::evaluate();
+    T::same($delivery_state . ' does not change disabled readiness', EventSales_Integration_Health_States::DISABLED, $sender_report['status']);
+    T::same($delivery_state . ' telemetry support is reported', true, $sender_report['delivery_telemetry_supported'] ?? null);
+    T::same($delivery_state . ' is visible in sender snapshot', $delivery_state, $sender_report['delivery_state'] ?? null);
+    T::same($delivery_state . ' version is separate from feed identity', '2026-10-02.v1', $sender_report['delivery_telemetry_version'] ?? null);
+    $expected_health_telemetry = eventsales_delivery_telemetry_record($delivery_state);
+    $expected_health_telemetry['delivery_telemetry_version'] = $expected_health_telemetry['telemetry_version'];
+    $expected_health_telemetry['delivery_state'] = $expected_health_telemetry['state'];
+    unset($expected_health_telemetry['telemetry_version'], $expected_health_telemetry['state']);
+    $actual_health_telemetry = array_intersect_key(
+        $sender_report,
+        array_fill_keys(array_keys($expected_health_telemetry), true)
+    );
+    ksort($expected_health_telemetry);
+    ksort($actual_health_telemetry);
+    T::same($delivery_state . ' has only sanitized telemetry fields', $expected_health_telemetry, $actual_health_telemetry);
+    $debug_output = json_encode(EventSales_Integration_Health_Site_Health::register_debug([])) ?: '';
+    T::contains_none($delivery_state . ' debug output is redacted', $debug_output, [
+        'RAW_BODY_DO_NOT_PERSIST', 'SUPER_SECRET_DO_NOT_RENDER', 'PATH_TOKEN_DO_NOT_RENDER',
+    ]);
+    T::same($delivery_state . ' health reads do not change options', $options_before_health, $GLOBALS['options']);
+    T::same($delivery_state . ' health reads do not cause side effects', $effects_before_health, $GLOBALS['side_effects']);
+}
+
+$GLOBALS['options']['eventsales_catalog_change_delivery_telemetry'] = eventsales_delivery_telemetry_record('NEVER_ATTEMPTED');
+$never_attempted_sender = EventSales_Integration_Health_Catalog_Change_Sender::evaluate();
+T::same('never attempted remains distinct from delivery failure', 'NEVER_ATTEMPTED', $never_attempted_sender['delivery_state'] ?? null);
+$GLOBALS['options']['eventsales_catalog_change_delivery_telemetry'] = eventsales_delivery_telemetry_record('RETRY_SCHEDULED');
+T::same('retry scheduled remains distinct from terminal failure', 'RETRY_SCHEDULED', EventSales_Integration_Health_Catalog_Change_Sender::evaluate()['delivery_state'] ?? null);
+$GLOBALS['options']['eventsales_catalog_change_delivery_telemetry'] = eventsales_delivery_telemetry_record('TERMINAL_FAILURE', 'retry_schedule_failed');
+$schedule_failed_sender = EventSales_Integration_Health_Catalog_Change_Sender::evaluate();
+T::same('retry scheduling failure category passes health allowlist', 'retry_schedule_failed', $schedule_failed_sender['last_failure_category'] ?? null);
+
+eventsales_run_isolated_probe(
+    "final class EventSales_Tickera_Catalog_Feed {}\n"
+    . "\$GLOBALS['plugin_registry']['" . EventSales_Integration_Health_Plugins::CATALOG_BASENAME . "'] = ['Version' => '0.1.0'];\n"
+    . "\$GLOBALS['active_plugins'][] = '" . EventSales_Integration_Health_Plugins::CATALOG_BASENAME . "';\n"
+    . "define('EVENTSALES_CATALOG_CHANGE_SENDER_ENABLED', true);\n"
+    . "define('EVENTSALES_CATALOG_CHANGE_ENDPOINT', 'https://example.test/hooks/token');\n"
+    . "define('EVENTSALES_CATALOG_CHANGE_KEY_ID', 'kid');\n"
+    . "define('EVENTSALES_CATALOG_CHANGE_SECRET', 'secret');\n"
+    . "function as_enqueue_async_action(...\$args) { return 1; }\n"
+    . "function as_schedule_single_action(...\$args) { return 1; }\n"
+    . 'require ' . var_export($EVENTSALES_HEALTH_INCLUDES, true) . ";\n"
+    . "\$report = EventSales_Integration_Health_Catalog_Change_Sender::evaluate();\n"
+    . "if (\$report['status'] !== EventSales_Integration_Health_States::READY || (\$report['delivery_telemetry_supported'] ?? null) !== false || (\$report['delivery_state'] ?? null) !== null) { exit(2); }\n"
+    . "fwrite(STDOUT, \$report['status']);\n",
+    EventSales_Integration_Health_States::READY,
+    'older catalog producer without telemetry accessor'
+);
 
 // --- Sender (isolated PHP processes because sender constants cannot be undefined) ---
 

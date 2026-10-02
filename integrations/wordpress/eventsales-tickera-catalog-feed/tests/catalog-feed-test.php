@@ -314,6 +314,7 @@ $declared = $defined_constants[1];
 sort($declared, SORT_STRING);
 T::same('plugin declares only the expected constants', [
     'ABSPATH',
+    'EVENTSALES_CATALOG_CHANGE_TELEMETRY_VERSION',
     'EVENTSALES_TICKERA_CATALOG_CANONICAL_CONTRACT_VERSION',
     'EVENTSALES_TICKERA_CATALOG_NAMESPACE',
     'EVENTSALES_TICKERA_CATALOG_PRODUCER_VERSION',
@@ -325,6 +326,7 @@ T::ok('plugin exposes no filter hook', strpos($plugin_source, 'apply_filters') =
 T::same('schema version constant', '2026-08-07.v3', EVENTSALES_TICKERA_CATALOG_SCHEMA_VERSION);
 T::same('canonical contract version constant', 'source_risk.v3', EVENTSALES_TICKERA_CATALOG_CANONICAL_CONTRACT_VERSION);
 T::same('producer version constant', '2026-08-07.1', EVENTSALES_TICKERA_CATALOG_PRODUCER_VERSION);
+T::same('telemetry version has a separate identity', '2026-10-02.v1', EVENTSALES_CATALOG_CHANGE_TELEMETRY_VERSION);
 T::same('rest namespace unchanged', 'eventsales/v1', EVENTSALES_TICKERA_CATALOG_NAMESPACE);
 T::same('rest route unchanged', '/tickera-catalog', EVENTSALES_TICKERA_CATALOG_ROUTE);
 

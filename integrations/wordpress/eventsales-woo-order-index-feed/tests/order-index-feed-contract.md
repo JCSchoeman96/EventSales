@@ -209,4 +209,9 @@ record total identity-space size, matching identities, rows examined, source
 chunks, snapshot wall time, PHP peak memory, largest emitted ID gap, and the
 query plan/key. No unsupported scale claim is made.
 
-The Tickera catalog plugin remains byte-for-byte unchanged.
+The Tickera catalogue producer is isolated from the order-index contract: it
+does not declare or consume any `EVENTSALES_WOO_ORDER_INDEX_*` credentials or
+contract constants. Order-index tests verify this namespace boundary directly,
+without pinning the catalogue producer's file bytes. Catalogue-feed changes
+must preserve that isolation while remaining free to evolve within their own
+contract.

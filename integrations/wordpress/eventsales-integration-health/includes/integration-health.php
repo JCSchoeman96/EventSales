@@ -252,18 +252,31 @@ final class EventSales_Integration_Health_Catalog_Change_Sender
         $producer_active = EventSales_Integration_Health_Plugins::catalog_producer_active();
 
         if (!$installed) {
-            return self::report(false, false, false, false, false, false, false, EventSales_Integration_Health_States::ABSENT);
+            return self::with_delivery_telemetry(
+                self::report(false, false, false, false, false, false, false, EventSales_Integration_Health_States::ABSENT)
+            );
         }
 
         if (!$producer_active) {
-            return self::report(true, false, false, false, false, false, false, EventSales_Integration_Health_States::INACTIVE);
+            return self::with_delivery_telemetry(
+                self::report(true, false, false, false, false, false, false, EventSales_Integration_Health_States::INACTIVE)
+            );
         }
 
         $enabled = defined('EVENTSALES_CATALOG_CHANGE_SENDER_ENABLED')
             && EVENTSALES_CATALOG_CHANGE_SENDER_ENABLED;
 
         if (!$enabled) {
-            return self::report(true, true, false, false, false, false, self::scheduler_available(), EventSales_Integration_Health_States::DISABLED);
+            return self::with_delivery_telemetry(self::report(
+                true,
+                true,
+                false,
+                false,
+                false,
+                false,
+                self::scheduler_available(),
+                EventSales_Integration_Health_States::DISABLED
+            ));
         }
 
         $endpoint = self::non_empty_constant('EVENTSALES_CATALOG_CHANGE_ENDPOINT');
@@ -278,7 +291,7 @@ final class EventSales_Integration_Health_Catalog_Change_Sender
             $status = EventSales_Integration_Health_States::DEPENDENCY_UNAVAILABLE;
         }
 
-        return self::report(true, true, true, $endpoint, $key_id, $secret, $scheduler, $status);
+        return self::with_delivery_telemetry(self::report(true, true, true, $endpoint, $key_id, $secret, $scheduler, $status));
     }
 
     /**
@@ -304,6 +317,102 @@ final class EventSales_Integration_Health_Catalog_Change_Sender
             'scheduler_available' => $scheduler_available,
             'status' => $status,
         ];
+    }
+
+    /**
+     * Add sanitized producer telemetry without changing readiness.
+     *
+     * @param array<string, mixed> $report
+     * @return array<string, mixed>
+     */
+    private static function with_delivery_telemetry(array $report): array
+    {
+        $telemetry_fields = [
+            'delivery_telemetry_supported' => false,
+            'delivery_telemetry_version' => null,
+            'delivery_state' => null,
+            'last_attempt_at_gmt' => null,
+            'last_success_at_gmt' => null,
+            'last_terminal_failure_at_gmt' => null,
+            'last_http_status' => null,
+            'last_failure_category' => null,
+            'last_attempt_number' => null,
+        ];
+
+        if (!EventSales_Integration_Health_Plugins::catalog_producer_active()
+            || !method_exists('EventSales_Tickera_Catalog_Feed', 'catalog_change_delivery_telemetry')) {
+            return array_merge($report, $telemetry_fields);
+        }
+
+        $telemetry_fields['delivery_telemetry_supported'] = true;
+
+        try {
+            $telemetry = EventSales_Tickera_Catalog_Feed::catalog_change_delivery_telemetry();
+        } catch (Throwable $error) {
+            return array_merge($report, $telemetry_fields);
+        }
+
+        if (!is_array($telemetry)) {
+            return array_merge($report, $telemetry_fields);
+        }
+
+        $version = $telemetry['telemetry_version'] ?? null;
+        if (is_string($version) && preg_match('/^[0-9]{4}-[0-9]{2}-[0-9]{2}\\.v[0-9]+$/', $version) === 1) {
+            $telemetry_fields['delivery_telemetry_version'] = $version;
+        }
+
+        $state = $telemetry['state'] ?? null;
+        if (!in_array($state, ['NEVER_ATTEMPTED', 'RETRY_SCHEDULED', 'SUCCEEDED', 'TERMINAL_FAILURE'], true)) {
+            return array_merge($report, $telemetry_fields);
+        }
+
+        $telemetry_fields['delivery_state'] = $state;
+        if ($state === 'NEVER_ATTEMPTED') {
+            return array_merge($report, $telemetry_fields);
+        }
+
+        $failure_category = $telemetry['last_failure_category'] ?? null;
+        $categories = ['transport_error', 'retryable_http', 'non_retryable_http', 'retry_schedule_failed'];
+        $telemetry_fields['last_attempt_at_gmt'] = self::valid_telemetry_timestamp($telemetry['last_attempt_at_gmt'] ?? null);
+        $telemetry_fields['last_success_at_gmt'] = self::valid_telemetry_timestamp($telemetry['last_success_at_gmt'] ?? null);
+        $telemetry_fields['last_terminal_failure_at_gmt'] = self::valid_telemetry_timestamp($telemetry['last_terminal_failure_at_gmt'] ?? null);
+        $telemetry_fields['last_http_status'] = self::valid_telemetry_http_status($telemetry['last_http_status'] ?? null);
+        $telemetry_fields['last_failure_category'] = in_array($failure_category, $categories, true) ? $failure_category : null;
+        $telemetry_fields['last_attempt_number'] = self::valid_telemetry_attempt($telemetry['last_attempt_number'] ?? null);
+
+        return array_merge($report, $telemetry_fields);
+    }
+
+    private static function valid_telemetry_timestamp($value): ?string
+    {
+        if (!is_string($value) || preg_match('/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$/', $value) !== 1) {
+            return null;
+        }
+
+        $timestamp = strtotime($value);
+        if ($timestamp === false || gmdate('Y-m-d\\TH:i:s\\Z', $timestamp) !== $value) {
+            return null;
+        }
+
+        return $value;
+    }
+
+    private static function valid_telemetry_http_status($value): ?int
+    {
+        if (!is_int($value) || ($value !== 0 && ($value < 100 || $value > 599))) {
+            return null;
+        }
+
+        return $value;
+    }
+
+    private static function valid_telemetry_attempt($value): ?int
+    {
+        if (!is_int($value) || $value < 1 || $value > 5) {
+            return null;
+        }
+
+        return $value;
     }
 
     private static function scheduler_available(): bool
