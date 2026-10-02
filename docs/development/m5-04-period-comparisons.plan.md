@@ -9,15 +9,16 @@
 - `v3` — JC-312 comparison kernels, rolling-edge lock, M5-04C contribution contract (this revision)
 - `v4` — JC-312 review correction: durable generation/readiness coherence, locked AnalyticsContributionFact contract, request-anchor scope, PR #287 rebase base
 - `v5` — remove stale “one coherent generation” and “unresolved bucket resolution” wording (final re-review doc cleanup)
+- `v6` — remove remaining stale design-gate wording; scope generation mismatch to atomic identity sets
 
-**Plan version:** `v5`
+**Plan version:** `v6`
 **Status:** M5-04B kernels on PR #287; durable authority pending merge
 **Last updated:** 2026-10-02
-**Change summary (v5):** Align Section 11 and Section 12 diagrams with locked §12.1/§12.2 generation and rolling-edge semantics.
+**Change summary (v6):** Top-level architecture and backward-planning gates aligned with locked rolling-edge strategy; §7.8 generation mismatch scoped to atomic replacement sets.
 
 **Goal:** Define a canonical, currency-safe period comparison read model for event and required dimensional grains without promoting the legacy daily-v1 snapshot or inventing comparison semantics.
 
-**Architecture:** Keep `TimeRules` and the certified `EventAggregator.financial_summaries_for_event_period/2` as the current semantic and event-level query authorities. The recommended target is a new additive Postgres time-bucket projection family for event and dimensional rows, with Net, ATV, comparison deltas, and percentages derived by a projection-only reader. Previous-equivalent comparison semantics are locked by owner decision (JC-310). Exact rolling-edge bucket resolution remains an M5-04B design gate.
+**Architecture:** Keep `TimeRules` and the certified `EventAggregator.financial_summaries_for_event_period/2` as the current semantic and event-level query authorities. The recommended target is a new additive Postgres time-bucket projection family for event and dimensional rows, with Net, ATV, comparison deltas, and percentages derived by a projection-only reader. Previous-equivalent comparison semantics are locked by owner decision (JC-310). Exact rolling-edge resolution is locked by JC-312 as `FIXED_INTERIOR_BUCKETS_PLUS_DURABLE_EXACT_CONTRIBUTION_EDGE`. That architecture becomes durable authority only after PR #287 merges; physical resources remain deferred to M5-04C+.
 
 **Tech stack:** Ash 3.x, AshPostgres, PostgreSQL 18, Ecto query plans, Oban `RefreshSnapshotWorker`, Phoenix PubSub, ETS `DashboardCache`, optional existing Redis snapshot adapter, and the existing `Policies`, `FinancialPrimitives`, `MetricRules`, `TimeRules`, `EventAggregator`, and `DimensionAggregator` modules.
 
@@ -197,7 +198,9 @@ The target is reached in this order:
 8. Read only projection components after UUID validation, authorization, readiness checks, and one coherent DB snapshot.
 9. Add hot or warm acceleration only after measured demand proves the cold projection read insufficient.
 
-Steps 4 through 9 remain blocked until M5-04B locks exact bucket resolution for rolling windows and subsequent slices certify resources, rebuilds, and readers. Step 1 authority is recorded; do not infer product rules from stale planning packs.
+Step 4 is locked by JC-312 on PR #287.
+
+M5-04C+ implementation remains blocked until JC-312 is independently reviewed and merged. Subsequent resource, rebuild, reader, and certification gates remain owned by M5-04C through M5-04G. Step 1 authority is recorded; do not infer product rules from stale planning packs.
 
 ## 4. Current repository truth
 
@@ -566,13 +569,18 @@ The following do **not** mean zero and must fail closed into the appropriate com
 ```text
 absent
 stale
+refresh_pending
 rebuilding
 unavailable
 currency mismatch
 semantic mismatch
 incomplete coverage
-generation mismatch
+atomic identity-set generation mismatch
 ```
+
+`atomic identity-set generation mismatch` is invalid only where rows that belong to the same atomic bucket or contribution replacement are required to share that rebuild `generation_id`. Different `generation_id` values across independently refreshed reusable buckets are allowed when every required identity is CURRENT and has compatible `semantic_version` and `coverage_identity` (see §§12.2 and 13.2).
+
+The reader must still fail closed for absent, stale, refresh_pending, rebuilding, unavailable, incomplete coverage, semantic incompatibility, and invalid generation coherence **inside one atomic identity set**. Do not treat differing historical `generation_id` values across unrelated CURRENT buckets as a comparison failure by itself.
 
 Do not substitute zero for missing projection data.
 
