@@ -39,7 +39,7 @@ telemetry values are empty. Health does not read the producer option directly.
 | Delivery state | Meaning |
 |----------------|---------|
 | `NEVER_ATTEMPTED` | No delivery outcome is recorded. |
-| `RETRY_SCHEDULED` | A retryable attempt requested the existing Action Scheduler retry. |
+| `RETRY_SCHEDULED` | Action Scheduler returned a positive action ID for the retry. |
 | `SUCCEEDED` | The attempt received a 2xx response. |
 | `TERMINAL_FAILURE` | The attempt stopped without another retry. |
 
@@ -49,6 +49,12 @@ response body, WordPress error text, exception details, customer data, order
 data, payment data, or ticket-holder data. It keeps no event history. The
 success and terminal-failure timestamps describe the attempt in the current
 record; they are empty for other states.
+
+Failure categories use a closed vocabulary: `transport_error`,
+`retryable_http`, `non_retryable_http`, and `retry_schedule_failed`.
+`retry_schedule_failed` means Action Scheduler was unavailable or did not
+return a positive integer action ID. Health does not report
+`RETRY_SCHEDULED` for a failed scheduling call.
 
 Action Scheduler may run deliveries concurrently. The attempt number belongs
 to the recorded attempt, and the option reflects the write that completed last.

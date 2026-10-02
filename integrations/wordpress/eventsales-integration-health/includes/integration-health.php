@@ -372,7 +372,7 @@ final class EventSales_Integration_Health_Catalog_Change_Sender
         }
 
         $failure_category = $telemetry['last_failure_category'] ?? null;
-        $categories = ['transport_error', 'retryable_http', 'non_retryable_http', 'retry_scheduler_unavailable'];
+        $categories = ['transport_error', 'retryable_http', 'non_retryable_http', 'retry_schedule_failed'];
         $telemetry_fields['last_attempt_at_gmt'] = self::valid_telemetry_timestamp($telemetry['last_attempt_at_gmt'] ?? null);
         $telemetry_fields['last_success_at_gmt'] = self::valid_telemetry_timestamp($telemetry['last_success_at_gmt'] ?? null);
         $telemetry_fields['last_terminal_failure_at_gmt'] = self::valid_telemetry_timestamp($telemetry['last_terminal_failure_at_gmt'] ?? null);

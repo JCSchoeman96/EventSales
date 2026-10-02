@@ -234,7 +234,7 @@ function eventsales_load_order_line_producer(): void
     }
 }
 
-function eventsales_delivery_telemetry_record(string $state): array
+function eventsales_delivery_telemetry_record(string $state, ?string $failure_category = null): array
 {
     $attempt_at = '2026-10-02T12:00:00Z';
     $success = $state === 'SUCCEEDED' ? $attempt_at : null;
@@ -251,6 +251,10 @@ function eventsales_delivery_telemetry_record(string $state): array
         'SUCCEEDED' => null,
         'TERMINAL_FAILURE' => 'non_retryable_http',
     ][$state];
+    if ($failure_category !== null) {
+        $category = $failure_category;
+        $status = 503;
+    }
 
     return [
         'telemetry_version' => '2026-10-02.v1',
@@ -375,6 +379,9 @@ $never_attempted_sender = EventSales_Integration_Health_Catalog_Change_Sender::e
 T::same('never attempted remains distinct from delivery failure', 'NEVER_ATTEMPTED', $never_attempted_sender['delivery_state'] ?? null);
 $GLOBALS['options']['eventsales_catalog_change_delivery_telemetry'] = eventsales_delivery_telemetry_record('RETRY_SCHEDULED');
 T::same('retry scheduled remains distinct from terminal failure', 'RETRY_SCHEDULED', EventSales_Integration_Health_Catalog_Change_Sender::evaluate()['delivery_state'] ?? null);
+$GLOBALS['options']['eventsales_catalog_change_delivery_telemetry'] = eventsales_delivery_telemetry_record('TERMINAL_FAILURE', 'retry_schedule_failed');
+$schedule_failed_sender = EventSales_Integration_Health_Catalog_Change_Sender::evaluate();
+T::same('retry scheduling failure category passes health allowlist', 'retry_schedule_failed', $schedule_failed_sender['last_failure_category'] ?? null);
 
 eventsales_run_isolated_probe(
     "final class EventSales_Tickera_Catalog_Feed {}\n"

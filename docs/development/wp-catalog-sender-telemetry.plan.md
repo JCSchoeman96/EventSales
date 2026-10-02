@@ -23,12 +23,12 @@ The telemetry write belongs after the asynchronous HTTP attempt and retry decisi
 | Delivery result | Persisted state | Failure category | Retry behavior |
 |---|---|---|---|
 | 2xx | `SUCCEEDED` | `null` | No retry |
-| Retryable status, attempt below 5, retry scheduler function exists | `RETRY_SCHEDULED` | `transport_error` for status 0; otherwise `retryable_http` | Existing retry call and arguments |
-| Retryable status, attempt below 5, retry scheduler function absent | `TERMINAL_FAILURE` | `retry_scheduler_unavailable` | No alternate retry |
+| Retryable status, attempt below 5, retry scheduler returns a positive action ID | `RETRY_SCHEDULED` | `transport_error` for status 0; otherwise `retryable_http` | Existing retry call and arguments |
+| Retryable status, attempt below 5, retry scheduler function absent or returns no positive action ID | `TERMINAL_FAILURE` | `retry_schedule_failed` | No alternate retry |
 | Retryable status, attempt 5 | `TERMINAL_FAILURE` | `transport_error` for status 0; otherwise `retryable_http` | No retry |
 | Other non-2xx status | `TERMINAL_FAILURE` | `non_retryable_http` | No retry |
 
-The closed delivery-state vocabulary is `NEVER_ATTEMPTED`, `RETRY_SCHEDULED`, `SUCCEEDED`, and `TERMINAL_FAILURE`. The closed failure-category vocabulary is `transport_error`, `retryable_http`, `non_retryable_http`, and `retry_scheduler_unavailable`. Configuration-disabled or incomplete calls do not create an attempt record.
+The closed delivery-state vocabulary is `NEVER_ATTEMPTED`, `RETRY_SCHEDULED`, `SUCCEEDED`, and `TERMINAL_FAILURE`. The closed failure-category vocabulary is `transport_error`, `retryable_http`, `non_retryable_http`, and `retry_schedule_failed`. `RETRY_SCHEDULED` requires a positive integer action ID from `as_schedule_single_action()`. The API returns zero when it cannot schedule an action, so an unavailable function or a non-positive/non-integer result records terminal failure. Configuration-disabled or incomplete calls do not create an attempt record.
 
 ## Storage and producer read contract
 
@@ -69,4 +69,4 @@ The schema identity remains `2026-08-07.v3`, canonical contract identity remains
 
 ## Focused validation
 
-The producer trigger test will cover the default state, 2xx, retryable HTTP, transport error, retry exhaustion, non-retryable HTTP, missing retry scheduler, exact record keys, non-autoload writes, retry body preservation, redaction, and unchanged feed constants. The Integration Health test will cover old producers without the accessor, sanitized supported states, unchanged readiness, output redaction, and read-only/no-network evaluation.
+The producer trigger test will cover the default state, 2xx, retryable HTTP, transport error, retry exhaustion, non-retryable HTTP, missing retry scheduler, scheduler return value zero, positive action IDs, exact record keys, non-autoload writes, retry body preservation, redaction, and unchanged feed constants. The Integration Health test will cover old producers without the accessor, sanitized supported states and failure categories, unchanged readiness, output redaction, and read-only/no-network evaluation.

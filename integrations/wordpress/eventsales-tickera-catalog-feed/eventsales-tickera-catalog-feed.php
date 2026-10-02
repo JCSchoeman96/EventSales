@@ -448,7 +448,7 @@ final class EventSales_Tickera_Catalog_Feed
 
         $terminal_category_valid = ($http_status === 0 && $failure_category === 'transport_error' && $attempt_number === 5)
             || (self::catalog_change_status_is_retryable($http_status) && $failure_category === 'retryable_http' && $attempt_number === 5)
-            || (self::catalog_change_status_is_retryable($http_status) && $failure_category === 'retry_scheduler_unavailable' && $attempt_number < 5)
+            || (self::catalog_change_status_is_retryable($http_status) && $failure_category === 'retry_schedule_failed' && $attempt_number < 5)
             || (!self::catalog_change_status_is_retryable($http_status) && $failure_category === 'non_retryable_http');
         if (!$terminal_category_valid || $success_at !== null || $terminal_failure_at !== $attempt_at) {
             return $default;
@@ -492,14 +492,19 @@ final class EventSales_Tickera_Catalog_Feed
 
         if (self::catalog_change_status_is_retryable($status) && $attempt < 5) {
             if (!function_exists('as_schedule_single_action')) {
-                self::persist_catalog_change_delivery_telemetry('TERMINAL_FAILURE', $attempt_at, $status, 'retry_scheduler_unavailable', $attempt);
+                self::persist_catalog_change_delivery_telemetry('TERMINAL_FAILURE', $attempt_at, $status, 'retry_schedule_failed', $attempt);
 
                 return;
             }
 
             $delays = [1 => 30, 2 => 120, 3 => 600, 4 => 1800];
-            as_schedule_single_action(time() + $delays[$attempt], 'eventsales_catalog_change_deliver',
+            $scheduled_action_id = as_schedule_single_action(time() + $delays[$attempt], 'eventsales_catalog_change_deliver',
                 ['raw_body' => $raw_body, 'attempt' => $attempt + 1], 'eventsales-catalog-change');
+            if (!is_int($scheduled_action_id) || $scheduled_action_id <= 0) {
+                self::persist_catalog_change_delivery_telemetry('TERMINAL_FAILURE', $attempt_at, $status, 'retry_schedule_failed', $attempt);
+
+                return;
+            }
 
             self::persist_catalog_change_delivery_telemetry(
                 'RETRY_SCHEDULED',

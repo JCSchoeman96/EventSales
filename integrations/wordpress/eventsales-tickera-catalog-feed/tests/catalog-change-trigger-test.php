@@ -21,6 +21,8 @@ $actions = [];
 $scheduled = [];
 $remote_requests = [];
 $retry_actions = [];
+$retry_schedule_calls = 0;
+$retry_schedule_result = 1;
 $options = [];
 $option_writes = [];
 $option_autoload = [];
@@ -67,7 +69,12 @@ function wp_remote_post($url, $args) { global $remote_requests, $remote_response
 function wp_remote_retrieve_response_code($response) { return $response['response']['code']; }
 function is_wp_error($value) { return $value instanceof WP_Error; }
 function as_enqueue_async_action($hook, $args, $group) { global $scheduled; $scheduled[] = compact('hook', 'args', 'group'); }
-function as_schedule_single_action($timestamp, $hook, $args, $group) { global $retry_actions; $retry_actions[] = compact('timestamp', 'hook', 'args', 'group'); return count($retry_actions); }
+function as_schedule_single_action($timestamp, $hook, $args, $group) {
+    global $retry_actions, $retry_schedule_calls, $retry_schedule_result;
+    $retry_schedule_calls++;
+    if ($retry_schedule_result > 0) $retry_actions[] = compact('timestamp', 'hook', 'args', 'group');
+    return $retry_schedule_result;
+}
 
 function fire_test_action($hook, ...$args)
 {
@@ -286,6 +293,8 @@ check('retry preserves the raw body and attempt', count($retry_actions) === 1
 check('attempt one retains its 30 second retry delay', ($retry_actions[0]['timestamp'] ?? 0) >= $retry_before + 30
     && ($retry_actions[0]['timestamp'] ?? 0) <= $retry_after + 30);
 check('503 attempt is recorded as retry scheduled', (delivery_telemetry()['state'] ?? null) === 'RETRY_SCHEDULED');
+check('positive Action Scheduler ID records retry scheduled', $retry_schedule_result > 0
+    && (delivery_telemetry()['state'] ?? null) === 'RETRY_SCHEDULED');
 check('retry telemetry records only the closed HTTP category', (delivery_telemetry()['last_failure_category'] ?? null) === 'retryable_http');
 check('retry telemetry records safe HTTP status and attempt', (delivery_telemetry()['last_http_status'] ?? null) === 503
     && (delivery_telemetry()['last_attempt_number'] ?? null) === 1);
@@ -367,6 +376,27 @@ check('non-retryable HTTP response has closed category and status', ($non_retrya
     && ($non_retryable_telemetry['last_http_status'] ?? null) === 401);
 check('non-retryable HTTP response schedules no retry', $retry_actions === []);
 
+// --- retry scheduler returning zero is a terminal scheduling failure -------
+$retry_schedule_result = 0;
+$retry_schedule_calls = 0;
+$retry_actions = [];
+$remote_requests = [];
+$remote_response = ['response' => ['code' => 503]];
+$failed_schedule_body = 'RAW_BODY_FAILED_SCHEDULE_DO_NOT_PERSIST';
+EventSales_Tickera_Catalog_Feed::deliver_catalog_change($failed_schedule_body, 1);
+$failed_schedule_telemetry = delivery_telemetry();
+check('zero scheduler result follows only one original HTTP attempt', count($remote_requests) === 1 && $retry_schedule_calls === 1);
+check('zero scheduler result creates no usable retry action', $retry_actions === []);
+check('zero scheduler result is a terminal delivery failure', ($failed_schedule_telemetry['state'] ?? null) === 'TERMINAL_FAILURE'
+    && is_string($failed_schedule_telemetry['last_terminal_failure_at_gmt'] ?? null));
+check('zero scheduler result uses the closed retry scheduling category', ($failed_schedule_telemetry['last_failure_category'] ?? null) === 'retry_schedule_failed');
+check('zero scheduler result retains safe HTTP status and attempt', ($failed_schedule_telemetry['last_http_status'] ?? null) === 503
+    && ($failed_schedule_telemetry['last_attempt_number'] ?? null) === 1);
+check('zero scheduler result telemetry excludes payload and secrets', strpos(telemetry_json(), $failed_schedule_body) === false
+    && strpos(telemetry_json(), 'SUPER_SECRET_DO_NOT_RENDER') === false
+    && strpos(telemetry_json(), 'PATH_TOKEN_DO_NOT_RENDER') === false);
+$retry_schedule_result = 1;
+
 // --- persisted option redaction and scheduler-unavailable terminal state ----
 $sentinels = [
     'SUPER_SECRET_DO_NOT_RENDER', 'PATH_TOKEN_DO_NOT_RENDER', 'KEY_ID_DO_NOT_PERSIST',
@@ -417,7 +447,7 @@ check('missing retry scheduler probe returns clean JSON', is_array($no_scheduler
 check('missing scheduler creates no alternate retry function', ($no_scheduler_result['scheduler'] ?? null) === false);
 check('missing scheduler performs only the original HTTP attempt', ($no_scheduler_result['remote_calls'] ?? null) === 1);
 check('missing scheduler records terminal delivery failure', ($no_scheduler_result['record']['state'] ?? null) === 'TERMINAL_FAILURE');
-check('missing scheduler uses closed failure category', ($no_scheduler_result['record']['last_failure_category'] ?? null) === 'retry_scheduler_unavailable');
+check('missing scheduler uses closed failure category', ($no_scheduler_result['record']['last_failure_category'] ?? null) === 'retry_schedule_failed');
 check('missing scheduler writes telemetry without autoload', ($no_scheduler_result['autoload'] ?? null) === false);
 
 $disabled_sender_script = "<?php\n"
