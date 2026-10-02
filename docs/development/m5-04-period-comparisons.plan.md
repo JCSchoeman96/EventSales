@@ -8,11 +8,12 @@
 - `v2` — JC-310 owner comparison authority merged to `main`
 - `v3` — JC-312 comparison kernels, rolling-edge lock, M5-04C contribution contract (this revision)
 - `v4` — JC-312 review correction: durable generation/readiness coherence, locked AnalyticsContributionFact contract, request-anchor scope, PR #287 rebase base
+- `v5` — remove stale “one coherent generation” and “unresolved bucket resolution” wording (final re-review doc cleanup)
 
-**Plan version:** `v4`
+**Plan version:** `v5`
 **Status:** M5-04B kernels on PR #287; durable authority pending merge
 **Last updated:** 2026-10-02
-**Change summary (v4):** Resolve generation-coherence conflict; lock contribution resource contract; clarify `coverage_identity` and `captured_now_utc` scopes; M5-04C file list includes contribution resource.
+**Change summary (v5):** Align Section 11 and Section 12 diagrams with locked §12.1/§12.2 generation and rolling-edge semantics.
 
 **Goal:** Define a canonical, currency-safe period comparison read model for event and required dimensional grains without promoting the legacy daily-v1 snapshot or inventing comparison semantics.
 
@@ -755,7 +756,7 @@ DECISION = RECOMMEND / NEW
 
 The proposed `EventPeriodAggregateSnapshot` and `EventDimensionPeriodAggregateSnapshot` store only additive primitives keyed by event, currency, fixed bucket identity, and required dimension identity. Net, ATV, deltas, and percentages remain reader-derived. Rows replaced in the same atomic transaction for one affected bucket identity share one `generation_id`; unrelated buckets may carry different `generation_id` values and remain jointly readable when all are CURRENT.
 
-Performance is bounded by requested event, currency, bucket count, and dimension cardinality. Reads avoid raw `Order`, `OrderItem`, `Refund`, and `RefundLine` queries. Rebuilds may run bounded SQL in Oban. Migration is additive and does not change lifetime v2 rows or Daily v1. The unresolved design point is the atomic bucket resolution required to represent exact rolling windows without overcounting a partial boundary bucket.
+Performance is bounded by requested event, currency, bucket count, and dimension cardinality. Reads avoid raw `Order`, `OrderItem`, `Refund`, and `RefundLine` queries. Rebuilds may run bounded SQL in Oban. Migration is additive and does not change lifetime v2 rows or Daily v1. Exact rolling-boundary resolution is now locked by JC-312: fully covered rolling interiors use fixed UTC-hour buckets, while partial boundary fragments use bounded reads from `AnalyticsContributionFact`. Physical resources and queries remain deferred to M5-04C+.
 
 ### D. Request-time composition from `EventAggregator` only
 
@@ -774,11 +775,24 @@ Order / OrderItem / Refund / RefundLine
         ↓ effective-time and identity-aware rebuild
 EventPeriodAggregateSnapshot
 EventDimensionPeriodAggregateSnapshot
-        ↓ one coherent generation
+AnalyticsContributionFact
+        ↓ coherent CURRENT projection components
+          read in one DB snapshot
 PeriodComparisonReader
         ↓ policy, readiness, derivation, redaction
 management caller
 ```
+
+```text
+mixed historical generation_id values = ALLOWED
+guard =
+  every required identity CURRENT
+  + compatible semantic_version
+  + compatible coverage_identity
+  + one coherent DB transaction snapshot
+```
+
+Do not reintroduce a whole-history generation epoch.
 
 The existing `EventAggregator.financial_summaries_for_event_period/2` remains the event-level semantic reference and can be used for parity or a temporary, explicitly approved bring-up check while the projection is certified. It is not a final interactive fallback and is not replaced by a second financial formula. Period-aware dimensional code must reuse `DimensionAggregator` recognition, refund, binder, currency, and identity rules.
 
