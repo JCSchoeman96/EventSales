@@ -7,7 +7,7 @@
 | Status | IN REVIEW (manual merge required) |
 | Programme base SHA | `c2a4d7eb181ed7c8f84d2e98d7e3116b915df176` |
 | Programme base tree | `8c07cfc096a668a9977ff2f83c2d99f84b6b2970` |
-| M5-03F PR | PENDING |
+| M5-03F PR | [#282](https://github.com/JCSchoeman96/EventSales/pull/282) |
 | M5-03F merge | PENDING |
 | Last updated | 2026-10-02 |
 
@@ -31,7 +31,7 @@ quantity refund, an exact value-only refund, and a complete header-only refund.
 | M5-03C | [#279](https://github.com/JCSchoeman96/EventSales/pull/279) | `c89b5ddd172d25bb1de9af11a046615016ea8768` |
 | M5-03D | [#280](https://github.com/JCSchoeman96/EventSales/pull/280) | `e247ab84a495148653eee2f48b91d99129768358` |
 | M5-03E | [#281](https://github.com/JCSchoeman96/EventSales/pull/281) | `c2a4d7eb181ed7c8f84d2e98d7e3116b915df176` |
-| M5-03F | PENDING | PENDING |
+| M5-03F | [#282](https://github.com/JCSchoeman96/EventSales/pull/282) | PENDING |
 
 ## Acceptance matrix
 
@@ -106,7 +106,7 @@ bash scripts/dev_local.sh test test/event_sales/analytics/m5_03_revenue_refund_d
                                       PASS (1 test)
 bash scripts/dev_local.sh test <focused M5-02/M5-03 evidence set>
                                       PASS (225 tests)
-git diff --check                       PENDING final HEAD
+git diff --check                       PASS
 bash scripts/dev_local.sh quality-pr  PASS (2731 tests, 0 failures)
 exact-head GitHub CI                   PENDING PR final HEAD
 ```
