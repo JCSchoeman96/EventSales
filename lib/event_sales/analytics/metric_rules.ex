@@ -228,7 +228,12 @@ defmodule EventSales.Analytics.MetricRules do
 
   @doc """
   Returns true when two ready projection scopes share currency, grain, period scope,
-  semantic version, and coverage identity.
+  semantic version, and compatible coverage contract identity.
+
+  `coverage_identity` is the versioned coverage completeness/readiness contract under which
+  both operands were established. It is not bucket bounds, `captured_now_utc`, `generation_id`,
+  or `refreshed_at`. Current and previous comparison periods intentionally cover different
+  timestamps; comparability requires compatible coverage semantics, not identical time ranges.
   """
   @spec projections_comparable?(comparison_projection_scope(), comparison_projection_scope()) ::
           boolean()

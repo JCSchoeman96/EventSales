@@ -7,11 +7,12 @@
 - `v1` — M5-04A audit (JC-309)
 - `v2` — JC-310 owner comparison authority merged to `main`
 - `v3` — JC-312 comparison kernels, rolling-edge lock, M5-04C contribution contract (this revision)
+- `v4` — JC-312 review correction: durable generation/readiness coherence, locked AnalyticsContributionFact contract, request-anchor scope, PR #287 rebase base
 
-**Plan version:** `v3`
-**Status:** M5-04B implemented on branch; M5-04C not started
+**Plan version:** `v4`
+**Status:** M5-04B kernels on PR #287; durable authority pending merge
 **Last updated:** 2026-10-02
-**Change summary (v3):** Record JC-312 APIs, hybrid rolling-edge decision, remove B merge gate, extend C scope for durable contribution projection.
+**Change summary (v4):** Resolve generation-coherence conflict; lock contribution resource contract; clarify `coverage_identity` and `captured_now_utc` scopes; M5-04C file list includes contribution resource.
 
 **Goal:** Define a canonical, currency-safe period comparison read model for event and required dimensional grains without promoting the legacy daily-v1 snapshot or inventing comparison semantics.
 
@@ -62,6 +63,14 @@ BASE_TREE = d84cd88f1b1b74b75110e5eee341c6ad41844ba0
 WORKTREE  = clean at preflight
 BRANCH    = feature/jc-312-m5-04b-comparison-kernel
 LINEAR    = JC-312
+```
+
+JC-312 PR #287 rebase preflight (unrelated `origin/main` movement PR #285 / JC-311):
+
+```text
+REAUTHORIZED_BASE_SHA  = 4404865dc7f29ab6922853253f57d171f6698d36
+REAUTHORIZED_BASE_TREE = c5a17ebf3265f753112311687ce5bf3707a0a5be
+BASE_MOVEMENT_CLASS    = NON-CONFLICTING / UNRELATED TO JC-312
 ```
 
 If `origin/main` moves before any implementation slice starts, that slice must stop and re-verify its own accepted base.
@@ -134,7 +143,10 @@ M1_07_REWRITE = NO
 CUSTOM_COMPARISON = DEFERRED
 M5_04B_AUTHORIZATION_PENDING_MERGE = NO
 JC_310_MERGED = YES (MERGE_SHA 3bb62061f5ff01cbe3f670944f4ad04d6f346882)
-IMPLEMENTATION_READY = M5-04C (resources/migrations) after JC-312 merge
+JC_312_STATUS = IN_REVIEW
+M5_04B_IMPLEMENTED_ON_BRANCH = YES
+M5_04B_DURABLE_AUTHORITY = PENDING_MERGE
+M5_04C_AUTHORIZED = NO
 ROLLING_EDGE_STRATEGY = FIXED_INTERIOR_BUCKETS_PLUS_DURABLE_EXACT_CONTRIBUTION_EDGE (JC-312)
 ROLLING_EDGE_IMPLEMENTATION_DEFERRED_TO = M5-04C
 STOP_CONDITION_TRIGGERED = NONE
@@ -180,8 +192,8 @@ The target is reached in this order:
 4. Choose an additive bucket identity that can represent each approved period exactly, including rolling boundary behavior.
 5. Persist only additive primitives at event and dimensional grains.
 6. Rebuild every affected old and new bucket after source mutations.
-7. Publish one coherent generation for event and dimensional rows under the existing event fence.
-8. Read only the period projection after UUID validation, authorization, readiness checks, and generation validation.
+7. Publish coherent replacement transactions for affected bucket/contribution identities under the existing event fence.
+8. Read only projection components after UUID validation, authorization, readiness checks, and one coherent DB snapshot.
 9. Add hot or warm acceleration only after measured demand proves the cold projection read insufficient.
 
 Steps 4 through 9 remain blocked until M5-04B locks exact bucket resolution for rolling windows and subsequent slices certify resources, rebuilds, and readers. Step 1 authority is recorded; do not infer product rules from stale planning packs.
@@ -288,10 +300,10 @@ The target is a new period projection family, not an extension of current/lifeti
 | --- | --- |
 | Purpose | Durable additive event values for a fixed time bucket |
 | Grain | `(event_id, currency, bucket_kind, bucket_start_utc, bucket_end_utc)` |
-| Identity | Exact event, currency, bucket kind, and UTC bounds |
+| Identity | Exact event, currency, bucket kind, and UTC bounds only. **Not** `captured_now_utc`. |
 | Relationships | `belongs_to :event`; no Product or TicketType relationship |
 | Stored fields | Gross/refund quantities and values; event `recognised_order_count` only if bucket additivity is certified |
-| Generation metadata | `generation_id`, captured `now_utc`, timezone, scope/version, semantic version, coverage/readiness, refreshed-at, and source watermark; either stored on each row or in a generation envelope referenced by each row |
+| Generation metadata | `generation_id` (one atomic rebuild transaction for this bucket replacement), timezone, scope/version, semantic version, coverage/readiness, refreshed-at, and source watermark |
 | Source truth | `Order`, `OrderItem`, `Refund`, and `RefundLine`; projection is derived |
 | Mutation owner | Existing order/refund/attribution seams through `RefreshSnapshotWorker` and `SnapshotRefresh` |
 | Read owner | Period comparison reader after policy/readiness checks |
@@ -307,33 +319,134 @@ The target is a new period projection family, not an extension of current/lifeti
 | Identity | Event, currency, bucket, dimension kind, and exact historical dimension tuple |
 | Relationships | Event plus conditional TicketType/SourceSystem relationships matching M5-02/M5-03 checks |
 | Stored fields | Gross/refund quantities and values only |
-| Generation metadata | Same generation envelope as the event row, including captured `now_utc`, timezone, scope/version, semantic version, coverage/readiness, refreshed-at, and source watermark |
+| Generation metadata | Same per-bucket `generation_id` semantics as event period rows; no request `captured_now_utc` in bucket identity |
 | Source truth | Historical `OrderItem` identities and exact bound `RefundLine` parent identities |
 | Mutation owner | Existing order/refund candidates with before/after period and identity unions |
 | Read owner | Period comparison reader; no LiveView raw joins |
-| Lifecycle | Same generation as event period rows for each rebuilt bucket |
+| Lifecycle | Per-bucket current/stale/rebuilding/unavailable; not tied to a single comparison request anchor |
 | Invalidation | Full old/new bucket and old/new dimension identity union; families are never summed |
 
 M5-04A does not create either resource.
 
-#### `AnalyticsContributionFact` (proposed, JC-312 locked contract for M5-04C)
+#### `AnalyticsContributionFact` (locked JC-312 contract for M5-04C)
 
-| Field | Planned contract |
-| --- | --- |
-| Purpose | Durable normalized additive contribution rows for **exact partial-edge** period composition |
-| Grain | Event (and later dimension identity) plus currency plus immutable contribution identity |
-| Identity | Enough to attribute one additive sale or refund contribution with `effective_at`, sale vs refund role, ticket/product/variation historical identity, and primitive magnitudes |
-| Source truth | Written when financial recognition/refund/binding is already resolved; not recomputed from raw history on reads |
-| Read owner | Bounded edge composition in period reader/rebuild only; **not** full-window scans when interior fixed buckets exist |
-| Lifecycle | Append/replace via the same invalidation seams as period buckets |
+Resource name (conceptual): `AnalyticsContributionFact` (`lib/event_sales/analytics/resources/analytics_contribution_fact.ex`).
 
-JC-312 locks the need for this projection; JC-312 does **not** create the Ash resource or migration.
+JC-312 locks this contract. JC-312 does **not** create the Ash resource or migration.
+
+**Lifecycle:** one durable normalized contribution per resolved source financial contribution. Uniqueness prevents multiple live rows for the same canonical source contribution identity.
+
+**Sale contribution identity**
+
+```text
+contribution_kind = :sale
+source_contribution_id = OrderItem.id
+effective_at = COALESCE(Order.paid_at, Order.completed_at)
+```
+
+Historical recognition unchanged: `Order.status == :completed OR Order.completed_at != nil`. A later `refunded` / `cancelled` status does not erase the contribution when durable historical completion remains.
+
+Primitives on a qualifying sale line:
+
+```text
+gross_ticket_quantity = historically recognised ticket quantity
+gross_ticket_value = tax-inclusive historical sale value
+refund_ticket_quantity = 0
+refund_ticket_value = 0
+```
+
+**Refund contribution identity**
+
+Only an exact qualifying active+complete bound refund line produces a row:
+
+```text
+contribution_kind = :refund
+source_contribution_id = RefundLine.id
+effective_at = Refund.source_created_at
+gross_ticket_quantity = 0
+gross_ticket_value = 0
+refund_ticket_quantity = qualifying refunded quantity
+refund_ticket_value = qualifying tax-inclusive refund value
+```
+
+Value-only refund (`refund_ticket_quantity = 0`, `refund_ticket_value > 0`) is valid. No clamp.
+
+**Refund exclusions (no allocated financial contribution row)**
+
+```text
+reference_only refund detail
+unresolved refund detail
+header-only amount without exact line attribution
+missing exact parent OrderItem binder
+voided refund
+```
+
+Transitions:
+
+```text
+active+complete -> voided     => remove/replace prior contribution (BEFORE+AFTER invalidation)
+active+complete -> unresolved => remove/replace prior contribution
+unresolved -> complete        => add contribution
+exact replay unchanged truth  => no semantic change
+```
+
+**Required conceptual fields (M5-04C must implement)**
+
+```text
+id
+
+contribution_kind
+source_contribution_id
+
+event_id
+currency
+effective_at
+
+ticket_type_id
+
+source_system_id
+woo_product_id
+woo_variation_id
+
+gross_ticket_quantity
+gross_ticket_value
+refund_ticket_quantity
+refund_ticket_value
+
+semantic_version
+coverage/readiness metadata per approved projection lifecycle
+
+inserted_at
+updated_at
+```
+
+**Historical dimension identity at write time (all columns on the row)**
+
+```text
+ticket_type family: ticket_type_id
+source_product family: source_system_id + woo_product_id
+source_variation family: source_system_id + woo_product_id + woo_variation_id (non-null variation only)
+```
+
+ProductMapping, display names, SKUs, or current catalogue bindings must never rewrite contribution history. Edge aggregation groups each family set-wise without another raw source join.
+
+**Edge query contract**
+
+Set-based reads only:
+
+```text
+event + currency + effective_at range
+```
+
+plus grouped sums for `ticket_type`, `source_product`, and `source_variation`. Query count must not grow with dimension row cardinality.
 
 Coverage metadata is required even when a bucket has no rows. A complete
 generation with an explicit empty coverage result means zero activity; absent,
 stale, rebuilding, or unavailable coverage means the comparison cannot
-fabricate zero. The generation envelope must also bind current and comparison
-rows to one captured `now_utc`, timezone, scope/version, and semantic version.
+fabricate zero. Request-scoped comparison metadata binds `captured_now_utc`,
+timezone, scope/version, and semantic version for **bounds derivation and reader
+orchestration only**. It is not part of reusable fixed-bucket or contribution
+row identity.
 
 ## 6. Period-kind authority matrix
 
@@ -551,7 +664,7 @@ COMPARISON_STATE_VOCABULARY =
 | `baseline_zero` | The comparison projection/grain exists and is complete, but the specific comparison metric denominator is zero. Percentage is unavailable. Distinct from missing projection data. |
 | `current_missing` | Current projection is absent, stale, rebuilding, unavailable, or otherwise not ready. Do not substitute zero. |
 | `comparison_missing` | Previous projection is absent, stale, rebuilding, unavailable, or otherwise not ready. Do not substitute zero. |
-| `not_comparable` | Both projections are ready, but comparable identity or scope cannot be established: currency mismatch, grain mismatch, period-scope mismatch, semantic-version mismatch, or **compatible-coverage mismatch** between ready projections. Does not apply to a projection that is itself stale, incomplete, or not ready; those use `current_missing` or `comparison_missing`. No cross-currency comparison. |
+| `not_comparable` | Both projections are ready, but comparable identity or scope cannot be established: currency mismatch, grain mismatch, period-scope mismatch, semantic-version mismatch, or **compatible-coverage mismatch** between ready projections. **`coverage_identity` compares compatible coverage contracts, not identical time bounds.** Does not apply to a projection that is itself stale, incomplete, or not ready; those use `current_missing` or `comparison_missing`. No cross-currency comparison. |
 
 ### 10.2 Locked comparison-state precedence (JC-310)
 
@@ -640,7 +753,7 @@ Daily v1 has scalar legacy fields, a completed-at refresh path, no canonical ref
 DECISION = RECOMMEND / NEW
 ```
 
-The proposed `EventPeriodAggregateSnapshot` and `EventDimensionPeriodAggregateSnapshot` store only additive primitives keyed by event, currency, fixed bucket identity, and required dimension identity. Net, ATV, deltas, and percentages remain reader-derived. Event and dimension rows share a generation token for a coherent refresh.
+The proposed `EventPeriodAggregateSnapshot` and `EventDimensionPeriodAggregateSnapshot` store only additive primitives keyed by event, currency, fixed bucket identity, and required dimension identity. Net, ATV, deltas, and percentages remain reader-derived. Rows replaced in the same atomic transaction for one affected bucket identity share one `generation_id`; unrelated buckets may carry different `generation_id` values and remain jointly readable when all are CURRENT.
 
 Performance is bounded by requested event, currency, bucket count, and dimension cardinality. Reads avoid raw `Order`, `OrderItem`, `Refund`, and `RefundLine` queries. Rebuilds may run bounded SQL in Oban. Migration is additive and does not change lifetime v2 rows or Daily v1. The unresolved design point is the atomic bucket resolution required to represent exact rolling windows without overcounting a partial boundary bucket.
 
@@ -709,6 +822,52 @@ fixed aggregate buckets   exact partial-edge reads
 
 M5-04C implements fixed-bucket period snapshots **plus** the durable contribution projection required for exact edge composition. M5-04G must certify edge-query cost, rebuild cost, latency, connection use, and fan-out before any scale claim.
 
+**Bounded edge scope (locked)**
+
+With UTC-hour interior buckets for rolling windows:
+
+```text
+MAX_PARTIAL_EDGE_SPAN = strictly less than one UTC hour per partial fragment
+MAX_PARTIAL_EDGE_FRAGMENTS_PER_COMPARISON = 4
+  (optional leading + optional trailing partial fragment for current rolling window
+   + optional leading + optional trailing partial fragment for previous rolling window)
+INTERIOR_RULE = fully enclosed UTC hours must be read from fixed buckets, not contribution scans
+COMPARISON_PAIR_RULE = contribution scans only for partial boundary fragments required by the two windows; never full 7d/30d contribution history when interior buckets exist
+RAW_HISTORY_INTERACTIVE_READ = FORBIDDEN
+```
+
+Elapsed civil-day comparisons may use full Johannesburg-day interior buckets where applicable; partial civil edges follow the same bounded contribution rule.
+
+## 12.2 Request anchor, bucket identity, and generation semantics (JC-312 review lock)
+
+```text
+REQUEST_ANCHOR =
+  captured_now_utc + timezone + comparison scope/version + semantic version
+  (request-scoped only; derives bounds via TimeRules.comparison_windows/3)
+
+DURABLE_BUCKET_IDENTITY =
+  event + currency + bucket_kind + bucket_start_utc + bucket_end_utc
+  (must NOT include captured_now_utc)
+
+generation_id =
+  identity of one atomic rebuild/replacement transaction for one affected bucket/contribution identity set
+  (observability + verifying rows produced together in that transaction; NOT a whole-history epoch)
+
+DURABLE_READINESS =
+  coherent DB transaction snapshot
+  + per-required-identity currentness (CURRENT vs STALE/REFRESH_PENDING/REBUILDING/UNAVAILABLE)
+  + compatible semantic_version
+  + compatible coverage contract
+
+coverage_identity (MetricRules.projections_comparable?/2) =
+  versioned coverage completeness/readiness contract under which operands were established
+  (NOT bucket bounds, captured_now_utc, generation_id, or refreshed_at)
+```
+
+**Incremental refresh rule:** on relevant BEFORE/AFTER mutation, mark affected BEFORE and AFTER bucket/contribution identities STALE/REFRESH_PENDING. The worker replaces only that union inside the event fence and transaction. Unaffected buckets remain CURRENT and reusable. No global historical rebake.
+
+**Reader coherence rule:** open one coherent DB snapshot; resolve all required interior buckets and edge contribution ranges; fail closed if any required identity is absent, stale, rebuilding, unavailable, semantically incompatible, or has incomplete coverage; compose only fully ready components; derive comparison state after readiness/comparability. Mixed readiness states are forbidden. Mixed historical `generation_id` values across reusable buckets are allowed when every selected identity is CURRENT and coverage-compatible.
+
 ## 13. Lifecycle and state machines
 
 ### 13.1 Projection lifecycle
@@ -742,7 +901,9 @@ There is no terminal projection state. A prior coherent generation remains disti
 
 ### 13.2 Coherent read and write
 
-The writer replaces all affected event and dimension rows under the existing event advisory fence and one transaction. The reader uses coherent transaction options and accepts only one matching generation for the requested current and comparison buckets. Generation mismatch, orphan currency, or missing required family fails closed. The reader must not assemble one result from mixed generations.
+**Write:** replace only affected BEFORE and AFTER bucket/contribution identities under the existing event advisory fence and one transaction. Mark those identities STALE/REFRESH_PENDING before they may be served as CURRENT again. Unaffected identities stay CURRENT.
+
+**Read:** use one coherent DB transaction snapshot. Require every selected interior bucket and edge contribution range identity to be CURRENT with compatible `semantic_version` and `coverage_identity`. Do **not** require all buckets across a 7d/30d comparison to share one literal historical `generation_id`. Reject mixed readiness (for example one bucket CURRENT and another STALE). Reject orphan currency, missing required family, or incomplete coverage. Derive comparison metrics only after readiness and `MetricRules.projections_comparable?/2` succeed.
 
 ## 14. Mutation and invalidation matrix
 
@@ -798,7 +959,7 @@ The rebuild transaction must:
 2. resolve the complete before/after event and dimension bucket union;
 3. query committed source facts with separate sale and refund paths;
 4. delete or replace only the affected projection identities;
-5. write event and dimensional rows with one generation token;
+5. write event and dimensional rows for the affected identity union, sharing one `generation_id` per atomic replacement transaction;
 6. commit before cache invalidation and PubSub;
 7. release the fence.
 
@@ -840,7 +1001,7 @@ If a period result is cached:
 
 - the cache key includes event, currency, current/comparison period identity, dimension family, authorization-relevant scope, and generation;
 - the value is invalidated only after the durable replacement transaction commits;
-- a generation mismatch is a miss, never a reason to serve a mixed result;
+- a generation mismatch on a **single bucket identity** is a miss; differing `generation_id` values across independently refreshed buckets are not inherently invalid when all identities are CURRENT;
 - cache stampedes are prevented with the existing event-scoped refresh/coalescing seam, not a global mutex;
 - Redis remains optional and must not be added without measured need;
 - any Redis TTL must be explicit, project/environment scoped, and shorter than the acceptable freshness window.
@@ -899,7 +1060,8 @@ The proposed projection is the only architecture in this plan that can satisfy t
 | ~~Public comparison-state vocabulary is not locked~~ | JC-310 Sections 10.1–10.2 | ~~Blocks stable reader contract~~ | **Resolved (JC-310)**; precedence locked in Section 10.2 |
 | Distinct-order dimensional semantics are not additive | One order can span multiple dimensions | Blocks dimensional recognized-order count | Omit dimensional count or define a separate non-additive contract |
 | Period write-query plans do not exist | No period projection resource or rebuild SQL is implemented | Blocks index decision and write certification | Implement selective proof in M5-04D/E |
-| Period readiness metadata is not yet represented | Existing readers have generation checks but no period resource | Blocks coherent period read implementation | Reuse generation pattern in the approved resource slice |
+| Period readiness metadata is not yet represented | Existing readers have generation checks but no period resource | Blocks coherent period read implementation | Implement metadata in M5-04C; reader uses Section 12.2 coherence rules |
+| ~~Durable generation coherence conflict (single generation_id vs incremental bucket refresh)~~ | Plan Sections 13.2 and 12.2 previously conflicted | ~~Blocks M5-04C reader/rebuild design~~ | **Resolved (JC-312 review correction)** — per-identity readiness + coherent snapshot; mixed `generation_id` allowed |
 
 ## 22. Owner decisions (JC-310 recorded)
 
@@ -908,13 +1070,16 @@ OWNER_DECISION_REQUIRED = NO
 OWNER_DECISION = APPROVED
 COMPARISON_AUTHORITY_LOCKED = YES
 M5_04B_AUTHORIZATION_PENDING_MERGE = NO
-JC_312_STATUS = IN_REVIEW after PR open
+JC_312_STATUS = IN_REVIEW
+M5_04B_IMPLEMENTED_ON_BRANCH = YES
+M5_04B_DURABLE_AUTHORITY = PENDING_MERGE
+M5_04C_AUTHORIZED = NO
 ```
 
 Remaining gates after JC-312 merge:
 
-1. M5-04C additive period resources, **contribution projection**, and migration.
-2. M5-04D/E rebuild and invalidation with hybrid composition.
+1. Authorize and implement M5-04C (fixed period bucket resources, **AnalyticsContributionFact**, migration, domain registration only).
+2. M5-04D/E rebuild population/invalidation with hybrid composition.
 3. M5-04F reader and M5-04G certification (latency, edge-query cost, rebuild cost, connection use, fan-out).
 
 Do not bypass the contribution projection when implementing exact rolling edges in C+.
@@ -925,13 +1090,17 @@ The following sequence is conditional. Each phase starts only after the precedin
 
 ### M5-04B - comparison kernel and boundary contract (JC-312)
 
-Scope: **shipped on branch** — owner-approved previous mapping (Section 7), captured-now behavior, comparison states (Section 10.1–10.2), decimal comparison arithmetic, rolling-edge architecture lock (Section 12.1). No Ash resources or migrations.
+Scope: owner-approved previous mapping (Section 7), captured-now behavior, comparison states (Section 10.1–10.2), decimal comparison arithmetic, rolling-edge architecture lock (Sections 12.1–12.2), and locked **AnalyticsContributionFact** contract. Pure kernels on PR #287. No Ash resources or migrations until merge.
 
 ```text
 TIME_COMPARISON_API = TimeRules.comparison_windows/3
+COMPARISON_WINDOWS_REQUEST_TYPE = :today | :yesterday | {:rolling_days, 7 | 30}
 COMPARISON_HELPER_API = MetricRules.projections_comparable?/2, classify_comparison_state/1, derive_comparison_deltas/3
 ROLLING_EDGE_STRATEGY = FIXED_INTERIOR_BUCKETS_PLUS_DURABLE_EXACT_CONTRIBUTION_EDGE
-M5_04B_AUTHORIZATION_PENDING_MERGE = NO
+JC_312_STATUS = IN_REVIEW
+M5_04B_IMPLEMENTED_ON_BRANCH = YES
+M5_04B_DURABLE_AUTHORITY = PENDING_MERGE
+M5_04C_AUTHORIZED = NO
 PRODUCTION_RESOURCE_CHANGE = NONE
 MIGRATION = NONE
 NEW_INDEX = NONE
@@ -958,15 +1127,16 @@ CUSTOM_COMPARISON = DEFERRED
 
 ### M5-04C - additive period resources, contribution projection, and migration
 
-Scope: add the approved event and dimensional period resources, **durable normalized contribution facts for exact edge composition**, exact identity, generation/freshness metadata, and migration. Persist primitives only.
+Scope: implement fixed period bucket resources, durable **AnalyticsContributionFact** projection, schema/migration, and domain registration **only**. Rebuild population and invalidation belong to M5-04D/E.
 
 Likely files:
 
 ```text
 lib/event_sales/analytics/resources/event_period_aggregate_snapshot.ex
 lib/event_sales/analytics/resources/event_dimension_period_aggregate_snapshot.ex
+lib/event_sales/analytics/resources/analytics_contribution_fact.ex
 lib/event_sales/analytics.ex
-priv/repo/migrations/*_create_period_aggregate_snapshots.exs
+priv/repo/migrations/*_create_period_aggregate_snapshots_and_contribution_facts.exs
 ```
 
 Do not alter the identity or semantics of `EventAggregateSnapshot`, `EventDimensionAggregateSnapshot`, or Daily v1.
@@ -1145,14 +1315,14 @@ For M5-04A, stop condition 2 was active until JC-310. JC-310 merge cleared compa
 
 ```text
 STOP_CONDITION_TRIGGERED = NONE
-IMPLEMENTATION_READY = M5-04C after JC-312 merge
-M5_04B_AUTHORIZATION_PENDING_MERGE = NO
+M5_04B_DURABLE_AUTHORITY = PENDING_MERGE (PR #287)
+M5_04C_AUTHORIZED = NO
 ROLLING_EDGE_STRATEGY = FIXED_INTERIOR_BUCKETS_PLUS_DURABLE_EXACT_CONTRIBUTION_EDGE
 ```
 
 ## 27. Verdict
 
-M5-04A audited the repository, identified the comparison-authority conflict, and rejected Daily v1 rehabilitation and an unbounded request-time comparison reader. JC-310 records the approved previous-equivalent contract without modifying M1-07. JC-312 implements pure comparison kernels and locks hybrid rolling-edge architecture. The target remains a new additive event/dimensional time-bucket projection plus durable contribution edge reads, with projection-only comparison derivation.
+M5-04A audited the repository, identified the comparison-authority conflict, and rejected Daily v1 rehabilitation and an unbounded request-time comparison reader. JC-310 records the approved previous-equivalent contract without modifying M1-07. JC-312 implements pure comparison kernels and locks hybrid rolling-edge plus contribution contracts on PR #287. Durable authority merges with PR #287; M5-04C remains unauthorized until then.
 
 ```text
 DAILY_V1_DECISION = LEGACY / NON-CANONICAL FOR M5 PERIOD REPORTING
@@ -1164,10 +1334,12 @@ M1_07_REWRITE = NO
 OWNER_DECISION_REQUIRED = NO
 OWNER_DECISION = APPROVED
 COMPARISON_AUTHORITY_LOCKED = YES
-M5_04B_AUTHORIZATION_PENDING_MERGE = NO
+JC_312_STATUS = IN_REVIEW
+M5_04B_IMPLEMENTED_ON_BRANCH = YES
+M5_04B_DURABLE_AUTHORITY = PENDING_MERGE
+M5_04C_AUTHORIZED = NO
 ROLLING_EDGE_STRATEGY = FIXED_INTERIOR_BUCKETS_PLUS_DURABLE_EXACT_CONTRIBUTION_EDGE
 ROLLING_EDGE_IMPLEMENTATION_DEFERRED_TO = M5-04C
-IMPLEMENTATION_READY = M5-04C (resources/migrations) after JC-312 merge
 ```
 
-The smallest next action after JC-312 merge is M5-04C: create approved fixed-bucket period resources, the durable contribution projection, migration, and rebuild/read paths—without revisiting comparison period semantics or storage model choice.
+The smallest next action after JC-312 merge is M5-04C: create approved fixed-bucket period resources, **AnalyticsContributionFact**, migration, and domain registration without revisiting comparison period semantics or storage model choice.

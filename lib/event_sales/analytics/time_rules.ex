@@ -46,7 +46,9 @@ defmodule EventSales.Analytics.TimeRules do
     @enforce_keys [:captured_now_utc, :request, :current, :previous]
     defstruct [:captured_now_utc, :request, :current, :previous, :timezone]
 
-    @type request :: :today | :yesterday | {:rolling_days, pos_integer()}
+    @type rolling_comparison_days :: 7 | 30
+
+    @type request :: :today | :yesterday | {:rolling_days, rolling_comparison_days()}
 
     @type t :: %__MODULE__{
             captured_now_utc: DateTime.t(),

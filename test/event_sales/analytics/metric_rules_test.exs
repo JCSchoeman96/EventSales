@@ -661,15 +661,27 @@ defmodule EventSales.Analytics.MetricRulesTest do
       assert MetricRules.derive_comparison_deltas(state, Decimal.new("10"), Decimal.new("0")) ==
                %{absolute_delta: nil, percentage_delta: nil}
     end
+
+    test "projections_comparable? requires compatible coverage contract, not identical time bounds" do
+      current_scope = scope("ZAR", :event, :m5_04_coverage_v1)
+      comparison_scope = scope("ZAR", :event, :m5_04_coverage_v1)
+
+      assert MetricRules.projections_comparable?(current_scope, comparison_scope)
+
+      incompatible_coverage =
+        Map.put(comparison_scope, :coverage_identity, :legacy_coverage_v0)
+
+      refute MetricRules.projections_comparable?(current_scope, incompatible_coverage)
+    end
   end
 
-  defp scope(currency, grain) do
+  defp scope(currency, grain, coverage_identity \\ :m5_04_coverage_v1) do
     %{
       currency: currency,
       grain: grain,
-      period_scope: :event,
+      period_scope: :event_currency_preset,
       semantic_version: 1,
-      coverage_identity: :complete
+      coverage_identity: coverage_identity
     }
   end
 
