@@ -1,0 +1,865 @@
+# M5-04A period comparisons planning and conformance audit
+
+> For agentic workers: this document is a planning and conformance artifact. It does not authorize production changes. Use the repository's implementation and review workflow for each approved M5-04B+ slice.
+
+**Goal:** Define a canonical, currency-safe period comparison read model for event and required dimensional grains without promoting the legacy daily-v1 snapshot or inventing comparison semantics.
+
+**Architecture:** Keep `TimeRules` and the certified `EventAggregator.financial_summaries_for_event_period/2` as the current semantic and event-level query authorities. The recommended target is a new additive Postgres time-bucket projection family for event and dimensional rows, with Net, ATV, comparison deltas, and percentages derived by a projection-only reader. The target remains implementation-blocked until the older comparison planning contract is reconciled with current M1-07 and M5-03 authority.
+
+**Tech stack:** Ash 3.x, AshPostgres, PostgreSQL 18, Ecto query plans, Oban `RefreshSnapshotWorker`, Phoenix PubSub, ETS `DashboardCache`, optional existing Redis snapshot adapter, and the existing `Policies`, `FinancialPrimitives`, `MetricRules`, `TimeRules`, `EventAggregator`, and `DimensionAggregator` modules.
+
+---
+
+## 1. Authority and verified base
+
+### 1.1 Accepted base
+
+The branch was created only after the required preflight commands ran:
+
+```text
+git fetch origin
+git rev-parse origin/main
+git rev-parse origin/main^{tree}
+git status --short
+```
+
+Observed values:
+
+```text
+BASE_SHA  = 388938a8c443ecfca3fa63476ecbcfc452b456a9
+BASE_TREE = 29e183da52d9bd193fcc3cae239d9c4d021feb13
+WORKTREE  = clean at preflight
+BRANCH    = docs/jc-309-m5-04a-period-comparisons
+```
+
+`origin/main` matched the accepted merge of M5-03F / PR #282. If `origin/main` moves before any implementation slice starts, that slice must stop and re-verify its own accepted base.
+
+### 1.2 Linear and scope
+
+```text
+LINEAR = JC-309
+TITLE  = EventSales M5-04A - Period comparisons planning and conformance audit
+SCOPE  = documentation and repository conformance only
+```
+
+Only this file is in scope for M5-04A. There are no production, test, migration, index, dependency, cache, Redis, worker, scheduler, or UI changes.
+
+### 1.3 Authority order
+
+The audit follows the repository authority order in `AGENTS.md`:
+
+1. `docs/path-1/path-1-phase-breakdown.md`
+2. `docs/path-1/m1-07-timestamp-johannesburg-period-and-freshness-contract.md`
+3. `docs/development/pre-m5-time-foundation-implementation.plan.md`
+4. `docs/evidence/pre-m5-time-g-certification.md`
+5. `docs/development/pre-m5-02-metrics-foundation.plan.md`
+6. `docs/evidence/pre-m5-02f-metrics-certification.md`
+7. `docs/development/m5-01-base-event-aggregates.plan.md`
+8. `docs/development/m5-02-ticket-product-variation-aggregates.plan.md`
+9. `docs/development/m5-03-revenue-refund-dimensional-aggregates.plan.md`
+10. M5-02 and M5-03 certification evidence
+11. Current production modules and focused tests named by JC-309
+
+The repository also contains older VS-27B.1 and VS-27B.2 planning packs in `slices/*.zip`. Their `pack.json` files explicitly set `execution_authority: false`, and their README files authorize reconnaissance and planning only. They are useful evidence of prior intended comparison and bucket rules, not current implementation authority.
+
+### 1.4 Certified facts used by this plan
+
+- `TimeRules` owns sale/refund effective clocks and period boundaries.
+- Reporting periods are half-open `[start_utc, end_utc)`.
+- `today` and `yesterday` use `Africa/Johannesburg` civil midnights converted once to UTC.
+- Rolling 7-day and 30-day periods use exact UTC durations ending at `now`.
+- Sale placement uses `COALESCE(Order.paid_at, Order.completed_at)` and withholds a recognised sale with neither clock.
+- Historical sale recognition uses the canonical predicate `Order.status == "completed" OR Order.completed_at is present`. A later `refunded` or `cancelled` status does not erase historical Gross while `completed_at` remains present. A financial recognition transition occurs only when this predicate changes from true to false or from false to true; non-completed status labels or status-only downgrades do not establish that change without evaluating `completed_at`.
+- Refund placement uses `Refund.source_created_at` and withholds a qualifying refund without that clock.
+- Gross remains in the sale period when a refund is posted in another period.
+- `CUSTOM_RANGE_MAX = 90` Johannesburg civil days is an owner decision, but `EventAggregator.financial_summaries_for_event_period/2` deliberately rejects `:custom`.
+- `EventAggregator.financial_summaries_for_event_period/2` is canonical for supported preset event-level financials and has bounded/indexed query-plan evidence.
+- `DailySalesAggregateSnapshot` v1 is legacy and non-canonical for M5 period reporting.
+- `EventAggregateSnapshot` v2 is one row per `(event_id, currency)` and stores additive event primitives only.
+- `EventDimensionAggregateSnapshot` is the normalized parallel family for `ticket_type`, `source_product`, and `source_variation`; its M5-03 refund fields are additive primitives.
+- Refund quantities and values are stored as positive qualifying magnitudes; Net subtracts those magnitudes from Gross.
+- `MetricRules` and `FinancialPrimitives` derive Net and ATV. Neither treats Net or ATV as additive storage.
+- `SnapshotRefresh` writes event and dimension projections under the existing per-event advisory fence and coherent transaction.
+- Existing readers perform authorization before projection work, use coherent reads, and redact monetary values through `Policies.can_view_revenue?/2`.
+
+### 1.5 Current blocking result
+
+An older VS-27B.1 `COMPARISON_CONTRACT.md` does define prior comparison rules, including equal-duration rolling/custom windows, a previous business day for a partial `today_to_now` window, and the full business day before yesterday. It is not executable authority. It conflicts with current authority in two material ways:
+
+1. the current canonical `:today` is a full Johannesburg civil day, while the pack defines `today_to_now` as a partial day;
+2. the pack's `METRIC_DEFINITIONS.md` attributes refunds back to the original sale window, while M1-07, PRE-M5-TIME, and M5-03 lock independent refund placement by `source_created_at`.
+
+The older pack also uses a 366-day planning maximum, while the current owner decision is 90 Johannesburg civil days. Current authority wins these conflicts. The prior comparison mapping needs an explicit owner reconciliation before implementation can start.
+
+```text
+OWNER_DECISION_REQUIRED = YES
+IMPLEMENTATION_READY    = NO
+STOP_CONDITION_TRIGGERED = COMPARISON_AUTHORITY_CONFLICTS_CURRENT_M1_07
+```
+
+## 2. Ultimate goal
+
+An authorized management caller must read deterministic financial comparisons for one event, one currency, and a requested reporting period without a raw-history dashboard scan. The result must contain:
+
+```text
+current period:
+  gross_ticket_quantity
+  refund_ticket_quantity
+  net_ticket_quantity
+  gross_ticket_value
+  refund_ticket_value
+  net_ticket_value
+  average_ticket_value
+
+comparison period:
+  the same fields, when the comparison is available and comparable
+
+comparison:
+  absolute deltas where both values exist
+  percentage deltas only when the denominator is mathematically defined
+```
+
+The event-level result may also include `recognised_order_count` only if its
+event-bucket additivity and coverage contract are certified. It is not a
+required dimensional metric in the M5 MVP.
+
+If dimensional comparison remains in M5, the same result must be available independently for `ticket_type`, `source_product`, and `source_variation`. The families are parallel views. A reader must never sum all three families into one management total.
+
+Currency conversion is outside the goal. `ZAR` and `USD` remain independent partitions.
+
+## 3. Backward planning
+
+The target is reached in this order:
+
+1. Reconcile the older comparison contract with current M1-07 and M5-03 authority.
+2. Lock a single captured `now`, current bounds, previous bounds, and comparison output states.
+3. Keep effective-time, recognition, refund qualification, and currency rules unchanged.
+4. Choose an additive bucket identity that can represent each approved period exactly, including rolling boundary behavior.
+5. Persist only additive primitives at event and dimensional grains.
+6. Rebuild every affected old and new bucket after source mutations.
+7. Publish one coherent generation for event and dimensional rows under the existing event fence.
+8. Read only the period projection after UUID validation, authorization, readiness checks, and generation validation.
+9. Add hot or warm acceleration only after measured demand proves the cold projection read insufficient.
+
+Steps 2 through 9 are blocked until step 1 is recorded by owner authority. This document does not infer a product rule from a stale planning pack.
+
+## 4. Current repository truth
+
+### 4.1 Time and effective clocks
+
+`lib/event_sales/analytics/time_rules.ex` is pure and side-effect free. It provides `TimeRules.Period`, sale/refund effective selectors, Johannesburg business dates, Today/Yesterday bounds, rolling bounds, custom civil normalization, half-open membership, and source-freshness classification. `Period` has no comparison-period field and no previous-equivalent operation.
+
+### 4.2 Event period aggregation
+
+`EventAggregator.financial_summaries_for_event_period/2` currently:
+
+- accepts only `:today`, `:yesterday`, `{:rolling_days, 7}`, and `{:rolling_days, 30}`;
+- rejects `:custom` with `{:error, :unsupported_period_kind}`;
+- checks missing recognised-sale and qualifying-refund clocks before aggregation;
+- applies sale-period predicates to `COALESCE(paid_at, completed_at)`;
+- applies refund-period predicates to `source_created_at`;
+- keeps gross and refunds in separate SQL queries to avoid join multiplication;
+- returns currency-keyed financial summaries with Net and ATV derived by `MetricRules`;
+- has event-first and refund-path `EXPLAIN (FORMAT JSON)` evidence in `EventAggregatorFinancialQueryPlanTest`.
+
+This is a canonical event-level period source. It is not a persisted period read model and not a dimensional period API.
+
+### 4.3 Dimensional aggregation
+
+`DimensionAggregator.financial_rows_for_event/1` runs six bounded grouped queries:
+
+```text
+gross:  ticket_type, source_product, source_variation
+refund: ticket_type, source_product, source_variation
+```
+
+The refund queries use the shared `EventAggregator.refund_primitives_filters/0`, the exact parent-line binder, and parent historical identities. M5-03 evidence proves value-only refunds, header-only refunds, voided and unresolved transitions, replay behavior, currency isolation, family non-additivity, and six-query plan bounds.
+
+There is no period argument, bucket key, or period-dimension reader in this module.
+
+### 4.4 Existing projections and readers
+
+`EventAggregateSnapshot` is canonical v2 event/currency storage. `EventDimensionAggregateSnapshot` is canonical dimensional storage. `DailySalesAggregateSnapshot` v1 stores legacy scalar fields:
+
+```text
+total_sold
+total_revenue
+today_sold
+today_revenue
+```
+
+Its refresh path filters rows by `completed_at`, uses scalar legacy semantics, and has the identity `(event_id, business_date, business_timezone)`. It does not store the M5-03 additive financial primitives, independent refund effective time, comparison identity, or the currency-safe canonical v2 contract.
+
+`SnapshotReader.daily_summary_for_event/3` remains a compatibility reader for Daily v1. It must not be reused as the M5-04 period authority.
+
+`SnapshotRefresh.refresh_event/2` calculates event and dimensional projections, replaces the full dimensional set, invalidates `DashboardCache` after commit, and runs under `EventSnapshotRefreshFence`.
+
+`SnapshotReader` and `DimensionSnapshotReader` are cold projection readers. `DimensionSnapshotReader` reads all dimensional rows in one coherent transaction, validates generation timestamps, performs bounded catalogue enrichment, and does not itself consult `AnalyticsReadinessResolver`.
+
+### 4.5 Invalidation and operational seams
+
+M5-01 B23 and M5-03 reuse `RefreshSnapshotWorker` and existing mutation candidate resolvers. Relevant order, attribution, mapping recovery, and refund mutations enqueue event refresh intent transactionally. ProductMapping-only catalogue changes and TicketType display-only changes do not enqueue refresh.
+
+`HotStateAggregator` and `DashboardCache` own current hot summaries, not period truth. The existing Redis adapter is optional and currently receives a one-hour TTL for hot snapshots when configured. Phoenix PubSub broadcasts after durable/read-model changes. Browser polling is not the update mechanism.
+
+## 5. Domain and resource map
+
+### 5.1 Existing durable source resources
+
+| Resource | Purpose | Canonical grain and identity | Source-of-truth relationship | Mutation ownership | Read ownership | Lifecycle/invalidation |
+| --- | --- | --- | --- | --- | --- | --- |
+| `Event` | Event scope and authorization target | `event.id` | Catalog durable truth | Catalog writers and audited attribution seams | Policies and management facades | Affected period rows follow order-item event candidates |
+| `TicketType` | Internal reportable ticket category | `ticket_type.id` within an event | Catalog identity, not historical line authority | Catalog writers | Bounded reader enrichment | Name/capacity/active changes do not alter historical period grain |
+| `Order` | Sale lifecycle, currency, paid/completed clocks | `(source_system_id, woo_order_id)` | Sales durable truth | `OrderUpserter` | Aggregators and refresh workers only | Sale-clock correction invalidates old and new buckets |
+| `OrderItem` | Historical ticket attribution and financial primitives | `(order_id, woo_line_item_id)` | Sales durable truth for event and dimension identity | `OrderUpserter`, attribution correction, mapping recovery | Aggregators and rebuilds only | Event, ticket, product, variation, quantity, or value changes invalidate before/after identities |
+| `Refund` | Independent financial adjustment header | Source-scoped refund identity | Sales durable truth | `RefundUpserter` | Refund aggregators and rebuilds only | Active/complete, unresolved, and voided transitions invalidate refund buckets |
+| `RefundLine` | Exact bound refund-line primitives | Refund-line identity plus exact parent binder | Sales durable truth | `RefundUpserter` and binder | Refund aggregators only | Binder changes can move an adjustment between event/dimension identities |
+
+### 5.2 Existing analytics modules and projections
+
+| Component | Current contract | Period role |
+| --- | --- | --- |
+| `TimeRules.Period` | Normalized half-open UTC current bounds | Extend only after comparison authority is locked |
+| `EventAggregator` | Bounded event financial aggregation, including supported presets | Reuse for parity and certification; not an interactive source fallback and not a dimensional store |
+| `DimensionAggregator` | Bounded event/dimensional gross/refund aggregation | Extend only in an approved period projection slice |
+| `EventAggregateSnapshot` | Lifetime/current event/currency v2 projection | Do not add period identity |
+| `EventDimensionAggregateSnapshot` | Lifetime/current dimensional projection | Do not add period identity |
+| `DailySalesAggregateSnapshot` | Legacy v1 daily scalar compatibility | Non-canonical for M5-04 |
+| `SnapshotRefresh` | Coherent event and dimension replacement under fence | Reuse fence and transaction; no second scheduler |
+| `SnapshotReader` | Snapshot-only event reads and Daily v1 compatibility | Add a separate period reader |
+| `DimensionSnapshotReader` | Coherent dimensional reads with derivation/redaction | Add a period comparison reader with the same boundary rules |
+| `Policies` | Event access and revenue visibility | Run before projection work; redact money when hidden |
+| `DashboardCache` | ETS current-summary cache | Targeted invalidation if period data is cached |
+| `HotStateAggregator` | Hot current-summary recompute, optional Redis mirror, PubSub | Not durable period truth |
+| `RefreshSnapshotWorker` | Oban event refresh intent and rebuild | Reuse with explicit bucket scope after an approved slice |
+| `DashboardPubSub` | Post-commit live update notification | Notify after period generation commit |
+
+### 5.3 Proposed period projection resources
+
+The target is a new period projection family, not an extension of current/lifetime rows. Two resources preserve the certified event and dimensional ownership boundaries.
+
+#### `EventPeriodAggregateSnapshot` (proposed)
+
+| Field | Planned contract |
+| --- | --- |
+| Purpose | Durable additive event values for a fixed time bucket |
+| Grain | `(event_id, currency, bucket_kind, bucket_start_utc, bucket_end_utc)` |
+| Identity | Exact event, currency, bucket kind, and UTC bounds |
+| Relationships | `belongs_to :event`; no Product or TicketType relationship |
+| Stored fields | Gross/refund quantities and values; event `recognised_order_count` only if bucket additivity is certified |
+| Generation metadata | `generation_id`, captured `now_utc`, timezone, scope/version, semantic version, coverage/readiness, refreshed-at, and source watermark; either stored on each row or in a generation envelope referenced by each row |
+| Source truth | `Order`, `OrderItem`, `Refund`, and `RefundLine`; projection is derived |
+| Mutation owner | Existing order/refund/attribution seams through `RefreshSnapshotWorker` and `SnapshotRefresh` |
+| Read owner | Period comparison reader after policy/readiness checks |
+| Lifecycle | Absent, current, stale, rebuilding, unavailable; metadata can express this without a state enum |
+| Invalidation | Every affected before and after event bucket |
+
+#### `EventDimensionPeriodAggregateSnapshot` (proposed)
+
+| Field | Planned contract |
+| --- | --- |
+| Purpose | Durable additive values for a bucket at each parallel dimension family |
+| Grain | Event plus `ticket_type`, `source_product`, or `source_variation` identity |
+| Identity | Event, currency, bucket, dimension kind, and exact historical dimension tuple |
+| Relationships | Event plus conditional TicketType/SourceSystem relationships matching M5-02/M5-03 checks |
+| Stored fields | Gross/refund quantities and values only |
+| Generation metadata | Same generation envelope as the event row, including captured `now_utc`, timezone, scope/version, semantic version, coverage/readiness, refreshed-at, and source watermark |
+| Source truth | Historical `OrderItem` identities and exact bound `RefundLine` parent identities |
+| Mutation owner | Existing order/refund candidates with before/after period and identity unions |
+| Read owner | Period comparison reader; no LiveView raw joins |
+| Lifecycle | Same generation as event period rows for each rebuilt bucket |
+| Invalidation | Full old/new bucket and old/new dimension identity union; families are never summed |
+
+M5-04A does not create either resource.
+
+Coverage metadata is required even when a bucket has no rows. A complete
+generation with an explicit empty coverage result means zero activity; absent,
+stale, rebuilding, or unavailable coverage means the comparison cannot
+fabricate zero. The generation envelope must also bind current and comparison
+rows to one captured `now_utc`, timezone, scope/version, and semantic version.
+
+## 6. Period-kind authority matrix
+
+| Period kind | Current boundary rule | Authority | Status |
+| --- | --- | --- | --- |
+| `today` | Johannesburg civil day containing `now`, `[start, end)` | `TimeRules.today_bounds/2`, M1-07 T17-T20, TIME-G | `LOCKED` |
+| `yesterday` | Preceding Johannesburg civil day, `[start, end)` | `TimeRules.yesterday_bounds/2`, M1-07 T20, TIME-G | `LOCKED` |
+| rolling 7 days | Exact UTC `[now - 7*24h, now)` | `TimeRules.last_7_days_bounds/1`, M1-07 T21, TIME-G | `LOCKED` |
+| rolling 30 days | Exact UTC `[now - 30*24h, now)` | `TimeRules.last_30_days_bounds/1`, M1-07 T22, TIME-G | `LOCKED` |
+| `custom` | Johannesburg civil `[start, end)`, max 90 civil days | `TimeRules.custom_civil_bounds/3`, TIME-G owner decision | `DERIVED_FROM_LOCKED_RULE` for normalization; `OUT_OF_SCOPE` for financial aggregation |
+
+The current boundary authority is complete. It does not settle the comparison boundary.
+
+## 7. Previous-equivalent-period matrix
+
+The old VS-27B.1 pack provides a candidate mapping, but its `execution_authority` is false and it conflicts with current M1-07. The mapping is therefore recorded as a candidate, not a lock.
+
+| Period kind | Current boundary rule | Candidate comparison rule from old pack | Current authority disposition | Status |
+| --- | --- | --- | --- | --- |
+| `today` | Full Johannesburg civil day | Old pack defines `today_to_now` as prior business day midnight through the same elapsed local time | No current `today_to_now` kind; must not reinterpret current `today` silently | `OWNER_DECISION_REQUIRED` |
+| `yesterday` | Full preceding Johannesburg civil day | Full business day before yesterday | Candidate only; requires activation against current period names | `OWNER_DECISION_REQUIRED` |
+| rolling 7 days | Exact UTC 7x24h ending at captured `now` | Equal-duration adjacent window ending at current start | Candidate only; current authority has no comparison operation | `OWNER_DECISION_REQUIRED` |
+| rolling 30 days | Exact UTC 30x24h ending at captured `now` | Generic equal-duration adjacent rule from the old pack | Candidate only; current authority has no comparison operation | `OWNER_DECISION_REQUIRED` |
+| `custom` | Current financial API rejects `:custom`; cap is 90 civil days | Equal-duration adjacent window; old pack's 366-day planning bound conflicts with current 90-day cap | Keep disabled; no comparison API until separately authorized | `OWNER_DECISION_REQUIRED` / `OUT_OF_SCOPE` |
+
+The old pack's percentage states (`comparable`, `flat_zero`, `new_activity`, and explicit missing/incomplete/currency states) are useful candidates. They are not public authority until reconciled with current policy and readiness semantics.
+
+### 7.1 Smallest owner decision
+
+The owner must approve one current contract that defines:
+
+```text
+comparison period names and mapping for today and yesterday
+one captured now for current and comparison bounds
+adjacent equal-duration rule for rolling windows, or a named alternative
+custom comparison disposition while :custom aggregation is disabled
+whether the old pack's comparison states become the public vocabulary
+```
+
+The current `today` versus old `today_to_now` conflict is not a naming detail. It changes which sale and refund facts are included.
+
+## 8. MVP period-kind decision
+
+```text
+PERIOD_MVP = presets only
+```
+
+MVP includes `today`, `yesterday`, rolling 7 days, and rolling 30 days. Custom remains disabled even though its 90-day maximum is known. The current rejection of `:custom` remains in force until comparison semantics, authorization, exact placement, bounded reads, and focused tests are approved.
+
+The old pack's 15/30/60-minute windows are not part of the current M5-04 MVP. They require a separate current authority and are not inferred from the roadmap.
+
+## 9. Event and dimensional grain matrix
+
+| Scope | Canonical identity | Period identity | Currency rule | Family rule |
+| --- | --- | --- | --- | --- |
+| Event | `event_id` | `bucket_kind + bucket_start_utc + bucket_end_utc` | One row set per `Order.currency` | Event totals are not dimension-family totals |
+| Ticket type | `event_id + currency + ticket_type_id` | Same bucket identity | Currency comes from parent `Order` | Sum only within the ticket-type family |
+| Source product | `event_id + currency + source_system_id + woo_product_id` | Same bucket identity | Currency comes from parent `Order` | Source product is a separate family |
+| Source variation | `event_id + currency + source_system_id + woo_product_id + woo_variation_id` | Same bucket identity | Currency comes from parent `Order` | Only non-null historical variations produce rows |
+
+Historical `OrderItem` identities remain authoritative. ProductMapping, names, SKUs, and refund-line product evidence do not rewrite period identity. The three dimensional families must never be summed together.
+
+### 9.1 Recognised order count
+
+Distinct order count is additive across disjoint event time buckets because one recognised order has one selected sale-effective instant. It is not additive across ticket-type, source-product, or source-variation rows because one order can contain multiple lines in multiple dimensions. The MVP permits event-bucket recognised order count only after implementation proves the order clock and bucket replacement rules. Dimensional period rows omit recognised order count until a separate distinct-count contract exists.
+
+## 10. Additive and derived metric matrix
+
+| Metric | Storage decision | Arithmetic and guard |
+| --- | --- | --- |
+| `gross_ticket_quantity` | Persist additive primitive | Historical recognised ticket quantity; no status regression |
+| `refund_ticket_quantity` | Persist additive primitive | Qualifying bound-line refund magnitude; value-only refund contributes zero quantity |
+| `gross_ticket_value` | Persist additive primitive | Tax-inclusive `line_total + line_total_tax` in sale bucket |
+| `refund_ticket_value` | Persist additive primitive | Positive tax-inclusive qualifying refund magnitude in refund bucket; Net subtracts it |
+| `recognised_order_count` | Event bucket only if certified; omit dimensional MVP | Distinct by source-scoped order identity; never sum overlapping dimensions |
+| `net_ticket_quantity` | Derived only | `gross - refund`, including negative results |
+| `net_ticket_value` | Derived only | `gross - refund`, including negative results |
+| `ATV` | Derived only | `net_ticket_value / net_ticket_quantity`; nil or N/A when net quantity is zero |
+| Absolute delta | Derived only | `current - comparison` when both operands exist |
+| Percentage delta | Derived only | Numeric only for a non-zero comparison denominator |
+
+ATV is never persisted as additive truth, never summed, and never averaged across rows. Percentage values are also never persisted.
+
+### 10.1 Comparison output states
+
+The following are candidate states, not yet the locked public vocabulary. The
+implementation contract must choose their precedence before code starts:
+
+| State | Meaning |
+| --- | --- |
+| `available` | Both operands exist and the percentage denominator is non-zero |
+| `flat_zero` | Current and comparison values are both zero |
+| `new_activity` | Candidate period-level state when the comparison grain has no activity at all and current activity is positive; absolute delta is available, percentage is not |
+| `baseline_zero` | Candidate metric-level state when this metric's comparison denominator is zero but the comparison grain has other activity; no percentage is defined |
+| `current_missing` | Current projection is unavailable or not ready |
+| `comparison_missing` | Comparison grain or currency has no coherent projection; do not fabricate zero |
+| `not_comparable` | Period, grain, currency, or semantic versions do not match |
+
+The old pack uses a similar vocabulary but names `comparable`, `flat_zero`, `new_activity`, `not_comparable_incomplete`, `not_comparable_currency`, and `not_comparable_missing`. M5-04B must choose one public vocabulary and the precedence between `new_activity` and `baseline_zero` after owner review. No infinity, NaN, or fabricated 100% result is permitted.
+
+## 11. Resource alternatives
+
+### A. Extend existing current/lifetime snapshots
+
+```text
+DECISION = REJECT
+```
+
+Adding period identity to `EventAggregateSnapshot` breaks its certified uniqueness `(event_id, currency)`, v2 reader contract, and current hot-cache key. Adding period identity to `EventDimensionAggregateSnapshot` mixes lifetime rows and period rows under partial family indexes and makes generation/refresh semantics ambiguous. Both are current/lifetime projections, not time-series storage.
+
+Performance remains bounded only if every reader carries extra bucket predicates. Migration requires semantic versioning and re-certification of all existing readers. Concurrency would couple lifetime refresh and period rebuilds. This is more risk than reuse provides.
+
+### B. Rehabilitate or version `DailySalesAggregateSnapshot`
+
+```text
+DECISION = REJECT
+```
+
+Daily v1 has scalar legacy fields, a completed-at refresh path, no canonical refund primitive contract, no exact sale/refund placement, and no comparison identity. Silently reusing `total_sold`, `total_revenue`, `today_sold`, or `today_revenue` would redefine existing fields. A new version would still need a separate dimensional projection and rolling-boundary strategy. Leave v1 as compatibility data and create a new projection family.
+
+### C. New canonical additive time-bucket projection
+
+```text
+DECISION = RECOMMEND / NEW
+```
+
+The proposed `EventPeriodAggregateSnapshot` and `EventDimensionPeriodAggregateSnapshot` store only additive primitives keyed by event, currency, fixed bucket identity, and required dimension identity. Net, ATV, deltas, and percentages remain reader-derived. Event and dimension rows share a generation token for a coherent refresh.
+
+Performance is bounded by requested event, currency, bucket count, and dimension cardinality. Reads avoid raw `Order`, `OrderItem`, `Refund`, and `RefundLine` queries. Rebuilds may run bounded SQL in Oban. Migration is additive and does not change lifetime v2 rows or Daily v1. The unresolved design point is the atomic bucket resolution required to represent exact rolling windows without overcounting a partial boundary bucket.
+
+### D. Request-time composition from `EventAggregator` only
+
+```text
+DECISION = REJECT AS FINAL M5-04 ARCHITECTURE
+```
+
+The current event period SQL is bounded, indexed, and useful as semantic parity evidence or a bounded pre-projection bring-up reference. It has no dimensional period API. A request-time dimensional implementation would multiply aggregate work for each comparison and family and would put raw-history work on the interactive path. That does not prove safety for management concurrency. It must not be the final management reader. Any temporary use is restricted to certification or an explicitly approved bounded bring-up path with EXPLAIN evidence.
+
+## 12. Chosen architecture
+
+The target architecture is a new additive time-bucket projection family in cold Postgres:
+
+```text
+Order / OrderItem / Refund / RefundLine
+        ↓ effective-time and identity-aware rebuild
+EventPeriodAggregateSnapshot
+EventDimensionPeriodAggregateSnapshot
+        ↓ one coherent generation
+PeriodComparisonReader
+        ↓ policy, readiness, derivation, redaction
+management caller
+```
+
+The existing `EventAggregator.financial_summaries_for_event_period/2` remains the event-level semantic reference and can be used for parity or a temporary, explicitly approved bring-up check while the projection is certified. It is not a final interactive fallback and is not replaced by a second financial formula. Period-aware dimensional code must reuse `DimensionAggregator` recognition, refund, binder, currency, and identity rules.
+
+### 12.1 Bucket contract that M5-04B must lock
+
+The projection identity must include `bucket_start_utc`, `bucket_end_utc`, `bucket_kind`, and timezone metadata. Johannesburg civil-day buckets are directly derivable from `TimeRules`. Rolling 7-day and 30-day windows can cut through arbitrary instants, so M5-04B must choose one explicit strategy:
+
+1. an atomic bucket resolution fine enough to represent exact rolling boundaries;
+2. exact boundary fragments plus fixed buckets; or
+3. exact boundary fragments read from a durable contribution projection, with a documented bounded edge exception. A query over raw Orders, OrderItems, Refunds, or RefundLines is not an approved interactive exception.
+
+The old VS-27B.2 pack proposes UTC hour buckets, Johannesburg day buckets, and bounded exact edge reads over a durable contribution projection. That is a useful candidate topology, but its `execution_authority` is also false and its metric/refund contract inherits the unresolved B.1 conflict. It cannot be adopted without M5-04B reconciliation.
+
+## 13. Lifecycle and state machines
+
+### 13.1 Projection lifecycle
+
+Use the existing M5-01/M5-02 lifecycle vocabulary without adding a persisted state enum unless metadata proves insufficient:
+
+```text
+ABSENT
+  └─ successful complete generation ─> CURRENT
+CURRENT
+  └─ relevant durable mutation ─> STALE / REFRESH_PENDING
+STALE / REFRESH_PENDING
+  └─ worker claims event fence ─> REBUILDING
+REBUILDING
+  ├─ commit complete event+dimension generation ─> CURRENT
+  └─ rollback or retryable failure ─> STALE (old generation retained)
+ABSENT or STALE
+  └─ required source/projection unavailable ─> UNAVAILABLE
+```
+
+| Transition | Guard | Durable effect | Recovery |
+| --- | --- | --- | --- |
+| Absent to current | All event and dimensional rows build successfully | Insert one complete generation in a transaction | Retry from durable source facts |
+| Current to stale | B23 candidate resolver reports a relevant before/after mutation | Persist refresh intent after source transaction | Oban uniqueness coalesces pending work |
+| Pending to rebuilding | Existing worker and per-event fence | No partial publish | Retry on worker failure |
+| Rebuilding to current | Old/new buckets replace and generation validates | Commit, invalidate cache, broadcast PubSub | Reader accepts generation only after commit |
+| Rebuilding to stale | Aggregation, validation, or persistence fails | Roll back; preserve prior generation | Oban retry or bounded operator rebuild |
+| Any to unavailable | Required clock, currency, identity, or generation is missing | Return explicit unavailable/readiness result | Correct source or complete rebuild |
+
+There is no terminal projection state. A prior coherent generation remains distinguishable from an in-progress or failed generation.
+
+### 13.2 Coherent read and write
+
+The writer replaces all affected event and dimension rows under the existing event advisory fence and one transaction. The reader uses coherent transaction options and accepts only one matching generation for the requested current and comparison buckets. Generation mismatch, orphan currency, or missing required family fails closed. The reader must not assemble one result from mixed generations.
+
+## 14. Mutation and invalidation matrix
+
+Every row below invalidates the union of before and after identities. A mutation that changes a period or dimension is never handled by one-sided invalidation.
+
+| Mutation | Before event/bucket | After event/bucket | Before dimension identity | After dimension identity | Required action |
+| --- | --- | --- | --- | --- | --- |
+| New recognised sale | None | Sale-effective bucket | None | Ticket type/product/variation on line | Rebuild new event bucket and present family rows |
+| Historical recognition predicate true to false | Prior sale-effective bucket | None | Prior historical line identities | None | Remove sale primitives only when `status == completed OR completed_at is present` changes from true to false; retain source evidence and mark coverage/readiness accordingly |
+| Historical recognition predicate false to true | None | Selected sale-effective bucket | None | Historical line identities | Rebuild the new event and dimensional buckets; evaluate the full predicate because `status == completed` is sufficient while a non-completed status label alone is not |
+| Completed to refunded or cancelled with `completed_at` retained | Same sale-effective bucket | Same sale-effective bucket | Same historical line identities | Same historical line identities | Financial recognition remains true; Gross and sale-period primitives are unchanged. Operational status context may change separately |
+| `paid_at` or `completed_at` correction | Old selected sale bucket | New selected sale bucket | Same unless line also changed | Same unless line also changed | Rebuild both old and new buckets |
+| Selected sale clock removed | Prior selected sale bucket | None | Prior historical line identities | None | Remove sale primitives and fail closed for the affected source fact |
+| Event attribution correction A to B | Event A sale bucket | Event B sale bucket | Event A keys | Event B keys | Rebuild both events and identities |
+| Ticket type correction | Same event bucket | Same event bucket | Old `ticket_type_id` | New `ticket_type_id` | Rebuild old/new ticket rows and event if primitives changed |
+| Product/variation correction | Same event bucket | Same event bucket | Old source tuple | New source tuple | Rebuild old/new family rows; do not read current mapping |
+| Currency correction | Old currency bucket | New currency bucket | Old currency family rows | New currency family rows | Rebuild both currency partitions; never merge or fabricate FX |
+| Same-identity quantity/value/tax correction | Same bucket | Same bucket | Same historical identities | Same historical identities | Replace the bucket even when identity is unchanged |
+| New recognised sale with missing clock | No authority | None | None | None | Persist source fact but withhold period projection/readiness |
+| New refund | None | Refund `source_created_at` bucket | None | Exact bound parent identities | Rebuild event and qualifying families |
+| Refund effective correction | Old refund bucket | New refund bucket | Same parent identities | Same parent identities | Rebuild both old and new refund buckets |
+| Refund effective clock removed | Prior refund bucket | None | Prior qualifying keys | None | Remove refund primitives from the old bucket and fail closed |
+| Refund amount/tax correction | Same refund bucket | Same refund bucket | Same qualifying keys | Same qualifying keys | Replace refund primitives in the same bucket |
+| Refund active to voided | Prior active bucket | None | Prior qualifying keys | None | Rebuild old bucket; preserve sale Gross |
+| Refund unresolved to complete | None | New refund bucket | None | Exact qualifying keys | Rebuild new bucket |
+| Refund complete to unresolved | Prior refund bucket | None | Prior qualifying keys | None | Rebuild old bucket and remove refund primitives |
+| Binder correction | Prior unallocated/old parent bucket | New exact parent bucket | Prior parent or none | New parent identity | Rebuild every before/after event and bucket |
+| Value-only refund | None | Refund bucket | None | Exact bound parent identities | Refund value changes, refund quantity remains zero |
+| Exact replay | Same | Same | Same | Same | No new generation or invalidation |
+| Historical backfill/catch-up | All known old identities/buckets | All new identities/buckets | Union of old keys | Union of new keys | Batch affected unions; never global flush |
+
+The event row is refreshed when its additive result changes or when the same-event detector reports a relevant historical line change, even if a coincidental total is unchanged. This preserves the M5-01 B23 rule.
+
+## 15. Concurrency and transaction model
+
+M5-04 should compose with the existing same-event advisory fence rather than introduce a global lock.
+
+| Race | Required behavior |
+| --- | --- |
+| Same-event concurrent rebuilds | Serialize through the existing event fence; the later complete generation wins. |
+| Overlapping bucket rebuilds | Claim one event fence and replace the affected old/new bucket union in one transaction. |
+| Sale and refund race | Source transactions enqueue refresh intent; the worker reads committed source state and rebuilds both financial families without joining sale and refund rows into one multiplicative query. |
+| Refund transition during rebuild | Re-read committed refund status and exact parent-line binder inside the fenced transaction; stale active or unresolved rows cannot survive a complete replacement. |
+| Backfill while live sales continue | Backfill uses the same event fence and generation contract. It may be batched by event, but must not publish partial event/dimension generations. |
+| Old/new bucket invalidation race | Candidate resolution carries both identities. A later correction cannot remove only the new bucket or only the old bucket. |
+| Multi-node workers | Oban uniqueness plus the database fence coalesces duplicate intent and serializes per-event replacement across nodes. |
+
+The known residual risk remains: dense same-event advisory-lock waiters can occupy database connections. M5-04 does not replace that pattern with a global lock. A later implementation slice may measure queue depth and connection pressure, but no redesign is authorized here.
+
+The rebuild transaction must:
+
+1. claim the existing event fence;
+2. resolve the complete before/after event and dimension bucket union;
+3. query committed source facts with separate sale and refund paths;
+4. delete or replace only the affected projection identities;
+5. write event and dimensional rows with one generation token;
+6. commit before cache invalidation and PubSub;
+7. release the fence.
+
+## 16. Authorization and read boundary
+
+The period reader must preserve the existing security ordering:
+
+```text
+UUID validation
+-> event authorization
+-> period and currency validation
+-> projection readiness/generation checks
+-> one coherent projection read
+-> metric derivation
+-> revenue redaction
+```
+
+`Policies.can_view_revenue?/2` controls every monetary current, comparison, and delta field. When revenue is hidden, the reader must not leak gross value, refund value, net value, ATV, or monetary deltas through an alternate field or comparison state. Ticket quantities may remain visible only according to the existing event dashboard policy.
+
+The reader must not perform raw `Order`, `OrderItem`, `Refund`, or `RefundLine` work before policy checks. It must return no PII and must not use catalogue names as historical identity. A missing current or comparison projection is a readiness/result state, not an instruction to fall back silently to an unbounded raw-history query.
+
+## 17. Hot, warm, and cold architecture
+
+| Layer | Proposed role | 100k-concurrent-user assessment | Calls and invalidation |
+| --- | --- | --- | --- |
+| COLD | Postgres source truth plus durable period projection rows | Safe only through indexed projection reads and bounded batch rebuilds; no dashboard raw-history scans | Source mutations and completed generations are authoritative |
+| HOT | ETS/`DashboardCache` for high-demand current summaries only | Useful for repeated current reads; not period truth and not required for correctness | Invalidate after commit; no per-dimension database call |
+| WARM | Existing Redis snapshot adapter only if measured read demand requires it | Not justified by this planning evidence; never the durable source | One project/environment namespace, explicit TTL, generation-aware replacement |
+| REALTIME | Phoenix PubSub and LiveView push | Pushes committed generation notifications; browser polling remains out of scope | Broadcast after commit on an event-scoped topic |
+| HEAVY REBUILD | Existing Oban `RefreshSnapshotWorker` seam | Asynchronous and bounded by event/bucket work; no new scheduler | Transactional intent and uniqueness coalesce duplicate work |
+
+The interactive path must use one projection query for event rows and one bounded batched query for each requested dimensional family, or an equivalent set-based query. Query count must not grow with the number of dimension rows. The reader must not calculate each row with an individual database call. A bounded edge read, if approved in M5-04B, reads a durable contribution projection rather than raw financial history and remains part of the projection read contract.
+
+## 18. TTL, invalidation, and PubSub rules
+
+The durable period projection has no correctness TTL. A row is current, stale, rebuilding, or unavailable by generation metadata and source invalidation, not by wall-clock expiry.
+
+If a period result is cached:
+
+- the cache key includes event, currency, current/comparison period identity, dimension family, authorization-relevant scope, and generation;
+- the value is invalidated only after the durable replacement transaction commits;
+- a generation mismatch is a miss, never a reason to serve a mixed result;
+- cache stampedes are prevented with the existing event-scoped refresh/coalescing seam, not a global mutex;
+- Redis remains optional and must not be added without measured need;
+- any Redis TTL must be explicit, project/environment scoped, and shorter than the acceptable freshness window.
+
+PubSub publishes an event-scoped committed-generation notification after the transaction. LiveView clients push a refresh or payload update from that notification. No polling loop is part of the design.
+
+## 19. Query and index audit
+
+Current repository evidence is sufficient for the existing event-level period source and current dimensional rebuilds:
+
+- `EventAggregatorFinancialQueryPlanTest` proves selective sale and refund period paths use bounded indexed plans and reject broad sequential scans for the certified fixture.
+- `DimensionAggregatorQueryPlanTest` proves the six current dimensional gross/refund paths are bounded for the selective fixture.
+- M5-03 reconciliation tests prove exact refund binders, identity predicates, and currency predicates are present in the current query paths.
+
+The period projection write path is not yet implemented, so there is no honest EXPLAIN evidence for its bucket replacement query. M5-04B must add selective fixtures and plan assertions before proposing an index.
+
+```text
+INDEX_DECISION = NONE
+```
+
+No new index is justified by M5-04A. Any future index requires all of:
+
+```text
+selective fixture
+EXPLAIN evidence on the actual critical path
+measured deficiency against the existing indexes
+```
+
+The current read target is projection-only. The bounded EventAggregator SQL remains a semantic parity and bring-up reference, not a reason to add an index speculatively.
+
+## 20. Performance and scaling review
+
+The proposed projection is the only architecture in this plan that can satisfy the roadmap's pre-aggregated management-read intent for event and dimensional comparisons without raw-history work on every request. It still requires measurement before a 100k-concurrent-user claim:
+
+- current reads are fixed by requested family and bucket count, not by one database call per row;
+- event and dimensional projection reads are set-based and currency-partitioned;
+- rebuilds are asynchronous, event-scoped, and bounded to affected old/new bucket identities;
+- source history is not scanned on the interactive dashboard path;
+- Net, ATV, deltas, and percentages are cheap deterministic reader derivations;
+- a Redis representation is optional and has no correctness role;
+- a cache stampede cannot publish incomplete generations;
+- exact rolling boundary handling remains a blocking design gap until bucket resolution is locked.
+
+`EventAggregator.financial_summaries_for_event_period/2` is suitable for a bounded event-level comparison experiment and certification oracle. It is not sufficient evidence for dimensional period comparison at management concurrency and is not an interactive raw-history fallback. M5-04G must measure projection read latency, rebuild latency, connection use under fence contention, cache hit/miss behavior if enabled, and PubSub update fan-out before making a scale claim.
+
+## 21. Gap ledger
+
+| Gap | Evidence | Impact | Smallest resolution |
+| --- | --- | --- | --- |
+| Previous-equivalent mapping is not locked in current authority | `TimeRules` has no comparison helper; old VS-27B.1 pack is non-authoritative and conflicts with current `today`/refund semantics | Blocks comparison period kernel and all implementation phases that depend on it | Owner approves a current comparison contract |
+| Exact bucket strategy for rolling windows is not locked | Current rolling windows end at arbitrary UTC instants; old B.2 hour/day proposal is non-authoritative | Blocks canonical bucket identity and exact rebuild/read behavior | M5-04B chooses atomic, edge-fragment, or bounded-edge strategy and proves no overcount |
+| Custom financial aggregation is disabled | EventAggregator rejects `:custom`; only civil-bound normalization is certified | Blocks custom MVP and custom comparisons | Keep deferred or separately authorize implementation and tests |
+| Public comparison-state vocabulary is not locked | Old pack and current readiness conventions use different names | Blocks stable reader contract | Owner selects states and missing/currency semantics |
+| Distinct-order dimensional semantics are not additive | One order can span multiple dimensions | Blocks dimensional recognized-order count | Omit dimensional count or define a separate non-additive contract |
+| Period write-query plans do not exist | No period projection resource or rebuild SQL is implemented | Blocks index decision and write certification | Implement selective proof in M5-04D/E |
+| Period readiness metadata is not yet represented | Existing readers have generation checks but no period resource | Blocks coherent period read implementation | Reuse generation pattern in the approved resource slice |
+
+## 22. Owner decisions required
+
+```text
+OWNER_DECISION_REQUIRED = YES
+```
+
+The one blocking owner decision is not whether to revive Daily v1. It is which previous-equivalent period contract is current. The decision must explicitly reconcile:
+
+1. whether `today` compares as a full prior Johannesburg day or as a partial `today_to_now` window;
+2. the exact previous mapping for `yesterday`, rolling 7 days, and rolling 30 days;
+3. whether custom remains out of scope and, if not, its comparison rule under the 90-day cap;
+4. one captured `now` and timezone/scope/version identity for both periods;
+5. the public missing, zero-baseline, incomplete, and currency-state vocabulary;
+6. confirmation that current M1-07/M5-03 refund placement by `Refund.source_created_at` remains unchanged.
+
+The implementation-ready verdict stays negative until this decision is recorded in current authority. No code, migration, test, index, cache, worker, scheduler, or UI work should begin as a way to bypass it.
+
+## 23. M5-04B+ implementation sequence
+
+The following sequence is conditional. Each phase starts only after the preceding authority and certification gates pass.
+
+### M5-04B - comparison kernel and boundary contract
+
+Scope: record the owner-approved previous mapping, captured-now behavior, comparison states, currency behavior, and exact bucket-resolution strategy.
+
+Likely files:
+
+```text
+lib/event_sales/analytics/time_rules.ex
+lib/event_sales/analytics/metric_rules.ex
+test/event_sales/analytics/time_rules_test.exs
+test/event_sales/analytics/pre_m5_time_certification_test.exs
+docs/development/m5-04-period-comparisons.plan.md
+```
+
+No resource or migration should be introduced in B until the time/comparison contract is locked. Record the owner decision in later M5-04 authority, such as this plan's approved revision or a dedicated M5-04 comparison contract. Do not rewrite the locked M1-07 history. Custom remains disabled unless explicitly included in that authority.
+
+```text
+M1_07_REWRITE = NO
+```
+
+### M5-04C - additive period resources and migration
+
+Scope: add the approved event and dimensional period resources, exact identity, generation/freshness metadata, and migration. Persist primitives only.
+
+Likely files:
+
+```text
+lib/event_sales/analytics/resources/event_period_aggregate_snapshot.ex
+lib/event_sales/analytics/resources/event_dimension_period_aggregate_snapshot.ex
+lib/event_sales/analytics.ex
+priv/repo/migrations/*_create_period_aggregate_snapshots.exs
+```
+
+Do not alter the identity or semantics of `EventAggregateSnapshot`, `EventDimensionAggregateSnapshot`, or Daily v1.
+
+### M5-04D - event period rebuild and invalidation
+
+Scope: build event additive buckets, exact old/new invalidation, refund independence, source-clock fail-closed behavior, generation replacement, and Oban refresh integration.
+
+Likely files:
+
+```text
+lib/event_sales/analytics/aggregators/event_aggregator.ex
+lib/event_sales/analytics/snapshot_refresh.ex
+lib/event_sales/analytics/workers/refresh_snapshot_worker.ex
+lib/event_sales/ingestion/historical_order_mutation_detector.ex
+lib/event_sales/ingestion/historical_refund_mutation_detector.ex
+lib/event_sales/ingestion/historical_coverage_invalidator.ex
+lib/event_sales/ingestion/historical_refund_coverage_invalidator.ex
+test/event_sales/analytics/event_aggregator_test.exs
+test/event_sales/analytics/event_aggregator_financial_query_plan_test.exs
+```
+
+Separate sale and refund query paths. Add selective EXPLAIN evidence before any index proposal.
+
+### M5-04E - dimensional period rebuild and reconciliation
+
+Scope: ticket-type, source-product, and source-variation rows as parallel families; exact historical identity; refund-line binder; no cross-family summation; batch reads.
+
+Likely files:
+
+```text
+lib/event_sales/analytics/aggregators/dimension_aggregator.ex
+lib/event_sales/analytics/snapshot_refresh.ex
+lib/event_sales/analytics/dimension_snapshot_reader.ex
+test/event_sales/analytics/m5_04_period_dimension_reconciliation_test.exs
+test/event_sales/analytics/dimension_aggregator_query_plan_test.exs
+```
+
+Dimensional recognized-order count remains out of scope unless separately certified as non-additive-safe.
+
+### M5-04F - reader, comparison derivation, policy, and redaction
+
+Scope: UUID/auth/readiness ordering, coherent current/comparison generation read, currency partition, primitive derivation, percentage guards, and monetary redaction.
+
+Likely files:
+
+```text
+lib/event_sales/analytics/period_comparison_reader.ex
+lib/event_sales/analytics/snapshot_reader.ex
+lib/event_sales/analytics/dimension_snapshot_reader.ex
+lib/event_sales/accounts/policies.ex
+lib/event_sales_web/live/admin/dashboard_live.ex
+lib/event_sales_web/live/admin/event_detail_live.ex
+test/event_sales/analytics/period_comparison_reader_test.exs
+```
+
+No raw-history fallback on the interactive path. UI design remains outside M5-04A and should not be pulled into F beyond the reader contract.
+
+### M5-04G - reconciliation, performance, and certification
+
+Scope: historical backfill/catch-up, concurrency races, exact replay, late refunds, query plans, freshness, cache behavior if justified, PubSub notifications, and management-read load evidence.
+
+Likely files:
+
+```text
+test/event_sales/analytics/m5_04_period_reconciliation_test.exs
+test/event_sales/analytics/m5_04_period_query_plan_test.exs
+test/event_sales/analytics/m5_04_period_concurrency_test.exs
+docs/evidence/m5-04-period-comparisons-certification.md
+```
+
+This phase is the first point at which a scale statement or optional Redis representation can be considered.
+
+## 24. File-level scope for M5-04A
+
+```text
+CHANGED_FILES = docs/development/m5-04-period-comparisons.plan.md
+PRODUCTION_CODE_CHANGE = NONE
+TEST_CHANGE = NONE
+MIGRATION = NONE
+INDEX = NONE
+DEPENDENCY = NONE
+CACHE_CHANGE = NONE
+REDIS_CHANGE = NONE
+WORKER_CHANGE = NONE
+SCHEDULER_CHANGE = NONE
+UI_CHANGE = NONE
+```
+
+The generated indexes and manifests are intentionally untouched:
+
+```text
+INDEX.md
+docs/architecture/domain_map.json
+docs/architecture/module_manifest.json
+```
+
+## 25. Test and certification strategy
+
+M5-04A is documentation-only. The focused validation for this slice is repository conformance and diff hygiene:
+
+```text
+git diff --check
+git status --short
+git diff --name-only <BASE_SHA>...HEAD
+```
+
+No production test or migration is required for the plan itself. Conditional implementation certification must cover, at minimum:
+
+- all four preset boundary mappings with one captured `now`;
+- owner-approved previous-period semantics and explicit custom behavior;
+- historical recognition predicate transitions, including selected-clock removal;
+- completed to refunded/cancelled with `completed_at` retained leaves financial recognition and original sale-period Gross unchanged while the refund remains independently placed by `Refund.source_created_at`;
+- sale paid-at precedence and completed-at fallback;
+- missing sale/refund clocks fail closed;
+- gross in sale period and late refund in refund period;
+- positive refund magnitudes and same-identity quantity/value/tax corrections;
+- normal, value-only, voided, unresolved-to-complete, complete-to-unresolved, binder-correction, header-only, and exact-replay refunds;
+- event and all three dimensional families without cross-family totals;
+- currency mismatch and absent-comparison states without fabricated zero;
+- before/after bucket and identity invalidation;
+- generation coherence under concurrent rebuild and reader access;
+- authorization before expensive financial work and complete monetary redaction;
+- selective EXPLAIN evidence for every new write/read critical path;
+- bounded backfill and no raw-history interactive query;
+- PubSub after commit and cache invalidation after commit if a cache is approved.
+
+## 26. Risks and STOP conditions
+
+### Risks
+
+- A stale comparison pack may be mistaken for current product authority.
+- A bucket resolution that cannot represent exact rolling edges may silently double-count or omit facts.
+- Dimensional recognized-order counts may appear plausible while being non-additive.
+- A fallback to bounded event SQL may be mistaken for proof of dimensional management-scale safety.
+- A cache or Redis mirror may be introduced before measurement and become an accidental source of truth.
+- Dense same-event advisory waiters may increase database connection pressure during backfill.
+
+### STOP conditions
+
+Stop the slice if any of the following occurs:
+
+1. `origin/main` moves from the accepted SHA/tree.
+2. Previous-equivalent semantics remain unapproved or current authority still conflicts with the candidate contract.
+3. Custom must be enabled but its period, authorization, and bounded-read semantics are not locked.
+4. Event, currency, period, or dimension identity cannot be represented without double-counting.
+5. Correctness would require persisted Net, ATV, or percentage values.
+6. ATV would be summed or averaged.
+7. Late refunds require rewriting original Gross period history.
+8. Effective-time corrections cannot invalidate both old and new buckets.
+9. The management read path needs raw unbounded financial history.
+10. Query count grows with dimension cardinality.
+11. A new index lacks selective EXPLAIN proof.
+12. Redis, cache, worker, scheduler, or UI work is proposed without current-slice authority and measured need.
+13. M1-07 or M5-03 semantics need to change.
+14. Production code, tests, migrations, or generated architecture files become necessary in M5-04A.
+15. A secret, production endpoint, remote database, or non-local WordPress target is encountered.
+
+For this slice, stop condition 2 is active:
+
+```text
+STOP_CONDITION_TRIGGERED = COMPARISON_AUTHORITY_CONFLICTS_CURRENT_M1_07
+IMPLEMENTATION_READY = NO
+```
+
+## 27. Verdict
+
+M5-04A has audited the current repository, identified the unresolved comparison-authority conflict, and rejected both Daily v1 rehabilitation and an unbounded request-time comparison reader. The recommended target is a new additive event/dimensional time-bucket projection with projection-only comparison derivation, but exact previous-equivalent semantics and exact rolling-edge bucket resolution remain owner/implementation gates.
+
+```text
+DAILY_V1_DECISION = LEGACY / NON-CANONICAL FOR M5 PERIOD REPORTING
+CANONICAL_PERIOD_SOURCE = TimeRules + EventAggregator for current preset semantics; future approved additive period projection for management comparisons
+PERIOD_MVP = today, yesterday, rolling 7 days, rolling 30 days
+CUSTOM_RANGE_DECISION = DEFERRED; keep EventAggregator :custom rejection in force
+M1_07_REWRITE = NO
+OWNER_DECISION_REQUIRED = YES
+IMPLEMENTATION_READY = NO
+```
+
+No implementation should be started from the old roadmap phrase alone. The smallest next action is an owner decision that records the current previous-equivalent contract and confirms that M1-07/M5-03 refund placement remains authoritative.
