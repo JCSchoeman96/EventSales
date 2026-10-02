@@ -514,9 +514,68 @@ COMPARISON_STATE_VOCABULARY =
 | `baseline_zero` | The comparison projection/grain exists and is complete, but the specific comparison metric denominator is zero. Percentage is unavailable. Distinct from missing projection data. |
 | `current_missing` | Current projection is absent, stale, rebuilding, unavailable, or otherwise not ready. Do not substitute zero. |
 | `comparison_missing` | Previous projection is absent, stale, rebuilding, unavailable, or otherwise not ready. Do not substitute zero. |
-| `not_comparable` | Comparable identity cannot be established, including currency mismatch, period-scope mismatch, grain mismatch, semantic-version mismatch, or completeness mismatch. No cross-currency comparison. |
+| `not_comparable` | Both projections are ready, but comparable identity or scope cannot be established: currency mismatch, grain mismatch, period-scope mismatch, semantic-version mismatch, or **compatible-coverage mismatch** between ready projections. Does not apply to a projection that is itself stale, incomplete, or not ready; those use `current_missing` or `comparison_missing`. No cross-currency comparison. |
 
-Precedence between `new_activity` and `baseline_zero` must be implemented consistently in M5-04B/F. No infinity, NaN, or fabricated 100% result is permitted. See Section 7.8 for zero-baseline and missing-projection rules.
+### 10.2 Locked comparison-state precedence (JC-310)
+
+Public state selection is deterministic. M5-04B/F **implements** this order; it does not invent alternate precedence.
+
+Evaluate states in strict order; return the first match:
+
+```text
+COMPARISON_STATE_PRECEDENCE =
+
+1. current_missing
+   Current projection is absent, stale, rebuilding, unavailable,
+   incomplete/not-ready, or otherwise unusable.
+
+2. comparison_missing
+   Current projection is ready, but previous projection is absent,
+   stale, rebuilding, unavailable, incomplete/not-ready, or otherwise unusable.
+
+3. not_comparable
+   Both projections are ready, but comparable identity/scope cannot
+   be established, including:
+   - currency mismatch
+   - grain mismatch
+   - period-scope mismatch
+   - semantic-version mismatch
+   - compatible-coverage mismatch (incompatible ready coverage identities/scopes)
+
+4. flat_zero
+   Both projections are complete and comparable;
+   current metric == 0 and comparison metric == 0.
+
+5. new_activity
+   Both projections are complete and comparable;
+   comparison grain has confirmed zero activity;
+   current metric > 0.
+
+6. baseline_zero
+   Both projections are complete and comparable;
+   comparison denominator == 0;
+   neither flat_zero nor new_activity applies.
+
+7. available
+   Both projections are complete/comparable and
+   comparison denominator != 0.
+```
+
+Locked ordering rules:
+
+```text
+flat_zero PRECEDES baseline_zero
+new_activity PRECEDES baseline_zero
+readiness states PRECEDE metric-state evaluation
+not_comparable PRECEDES percentage/delta state evaluation
+STATE_PRECEDENCE_LOCKED = YES
+```
+
+When **both** current and comparison projections are unavailable or not ready, **`current_missing` wins** because step 1 is evaluated before step 2. This is intentional, not accidental.
+
+`not_comparable` **compatible-coverage mismatch** means incompatible ready coverage identities or scopes between two ready projections. It does not subsume stale, incomplete, rebuilding, or unavailable coverage; those fail closed through `current_missing` or `comparison_missing` first.
+
+No infinity, NaN, or fabricated 100% result is permitted. See Section 7.8 for zero-baseline and missing-projection rules.
 
 ## 11. Resource alternatives
 
@@ -767,7 +826,7 @@ The proposed projection is the only architecture in this plan that can satisfy t
 | ~~Previous-equivalent mapping is not locked in current authority~~ | JC-310 Section 7 | ~~Blocks comparison period kernel~~ | **Resolved (JC-310)** |
 | Exact bucket strategy for rolling windows is not locked | Current rolling windows end at arbitrary UTC instants; old B.2 hour/day proposal is non-authoritative | Blocks canonical bucket identity and exact rebuild/read behavior | M5-04B chooses atomic fine-grained buckets, exact boundary fragments + fixed buckets, or durable contribution projection + bounded edge composition; certify one approach |
 | Custom financial aggregation is disabled | EventAggregator rejects `:custom`; only civil-bound normalization is certified | Blocks custom MVP and custom comparisons | `CUSTOM_COMPARISON = DEFERRED` until separately authorized |
-| ~~Public comparison-state vocabulary is not locked~~ | JC-310 Section 10.1 | ~~Blocks stable reader contract~~ | **Resolved (JC-310)**; M5-04B/F implements precedence |
+| ~~Public comparison-state vocabulary is not locked~~ | JC-310 Sections 10.1–10.2 | ~~Blocks stable reader contract~~ | **Resolved (JC-310)**; precedence locked in Section 10.2 |
 | Distinct-order dimensional semantics are not additive | One order can span multiple dimensions | Blocks dimensional recognized-order count | Omit dimensional count or define a separate non-additive contract |
 | Period write-query plans do not exist | No period projection resource or rebuild SQL is implemented | Blocks index decision and write certification | Implement selective proof in M5-04D/E |
 | Period readiness metadata is not yet represented | Existing readers have generation checks but no period resource | Blocks coherent period read implementation | Reuse generation pattern in the approved resource slice |
