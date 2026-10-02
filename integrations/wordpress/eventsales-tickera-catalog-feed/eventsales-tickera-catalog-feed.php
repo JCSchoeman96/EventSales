@@ -23,6 +23,10 @@ if (!defined('EVENTSALES_TICKERA_CATALOG_PRODUCER_VERSION')) {
     define('EVENTSALES_TICKERA_CATALOG_PRODUCER_VERSION', '2026-08-07.1');
 }
 
+if (!defined('EVENTSALES_CATALOG_CHANGE_TELEMETRY_VERSION')) {
+    define('EVENTSALES_CATALOG_CHANGE_TELEMETRY_VERSION', '2026-10-02.v1');
+}
+
 if (!defined('EVENTSALES_TICKERA_CATALOG_NAMESPACE')) {
     define('EVENTSALES_TICKERA_CATALOG_NAMESPACE', 'eventsales/v1');
 }
@@ -50,6 +54,7 @@ final class EventSales_Tickera_Catalog_Feed
     private const CACHE_VERSION_OPTION = 'eventsales_tickera_catalog_feed_cache_version';
     private const SNAPSHOT_GENERATION_OPTION = 'eventsales_tickera_catalog_snapshot_generation';
     private const SECRET_OPTION = 'eventsales_tickera_catalog_secret';
+    private const CATALOG_CHANGE_DELIVERY_TELEMETRY_OPTION = 'eventsales_catalog_change_delivery_telemetry';
     private const CACHE_TTL_OPTION = 'eventsales_tickera_catalog_cache_ttl';
     private const MAX_TIMESTAMP_SKEW_SECONDS = 300;
     private const DEFAULT_PER_PAGE = 100;
@@ -361,6 +366,106 @@ final class EventSales_Tickera_Catalog_Feed
         self::$catalog_change_targets = [];
     }
 
+    /**
+     * Return the sanitized current catalogue-change delivery outcome.
+     *
+     * @return array{
+     *   telemetry_version: string,
+     *   state: string,
+     *   last_attempt_at_gmt: ?string,
+     *   last_success_at_gmt: ?string,
+     *   last_terminal_failure_at_gmt: ?string,
+     *   last_http_status: ?int,
+     *   last_failure_category: ?string,
+     *   last_attempt_number: ?int
+     * }
+     */
+    public static function catalog_change_delivery_telemetry(): array
+    {
+        $default = self::default_catalog_change_delivery_telemetry();
+        $stored = get_option(self::CATALOG_CHANGE_DELIVERY_TELEMETRY_OPTION, null);
+
+        if (!is_array($stored) || ($stored['telemetry_version'] ?? null) !== EVENTSALES_CATALOG_CHANGE_TELEMETRY_VERSION) {
+            return $default;
+        }
+
+        $state = $stored['state'] ?? null;
+        if (!in_array($state, ['NEVER_ATTEMPTED', 'RETRY_SCHEDULED', 'SUCCEEDED', 'TERMINAL_FAILURE'], true)) {
+            return $default;
+        }
+
+        if ($state === 'NEVER_ATTEMPTED') {
+            return $default;
+        }
+
+        $attempt_at = self::valid_catalog_change_telemetry_timestamp($stored['last_attempt_at_gmt'] ?? null);
+        $http_status = self::valid_catalog_change_telemetry_http_status($stored['last_http_status'] ?? null);
+        $attempt_number = self::valid_catalog_change_telemetry_attempt($stored['last_attempt_number'] ?? null);
+        $success_at = self::valid_catalog_change_telemetry_timestamp($stored['last_success_at_gmt'] ?? null);
+        $terminal_failure_at = self::valid_catalog_change_telemetry_timestamp($stored['last_terminal_failure_at_gmt'] ?? null);
+        $failure_category = $stored['last_failure_category'] ?? null;
+
+        if ($attempt_at === null || $http_status === null || $attempt_number === null) {
+            return $default;
+        }
+
+        if ($state === 'SUCCEEDED') {
+            if ($http_status < 200 || $http_status >= 300 || $success_at !== $attempt_at
+                || $terminal_failure_at !== null || $failure_category !== null) {
+                return $default;
+            }
+
+            return [
+                'telemetry_version' => EVENTSALES_CATALOG_CHANGE_TELEMETRY_VERSION,
+                'state' => 'SUCCEEDED',
+                'last_attempt_at_gmt' => $attempt_at,
+                'last_success_at_gmt' => $success_at,
+                'last_terminal_failure_at_gmt' => null,
+                'last_http_status' => $http_status,
+                'last_failure_category' => null,
+                'last_attempt_number' => $attempt_number,
+            ];
+        }
+
+        if ($state === 'RETRY_SCHEDULED') {
+            $category_valid = ($http_status === 0 && $failure_category === 'transport_error')
+                || (self::catalog_change_status_is_retryable($http_status) && $failure_category === 'retryable_http');
+            if (!$category_valid || $attempt_number >= 5 || $success_at !== null || $terminal_failure_at !== null) {
+                return $default;
+            }
+
+            return [
+                'telemetry_version' => EVENTSALES_CATALOG_CHANGE_TELEMETRY_VERSION,
+                'state' => 'RETRY_SCHEDULED',
+                'last_attempt_at_gmt' => $attempt_at,
+                'last_success_at_gmt' => null,
+                'last_terminal_failure_at_gmt' => null,
+                'last_http_status' => $http_status,
+                'last_failure_category' => $failure_category,
+                'last_attempt_number' => $attempt_number,
+            ];
+        }
+
+        $terminal_category_valid = ($http_status === 0 && $failure_category === 'transport_error' && $attempt_number === 5)
+            || (self::catalog_change_status_is_retryable($http_status) && $failure_category === 'retryable_http' && $attempt_number === 5)
+            || (self::catalog_change_status_is_retryable($http_status) && $failure_category === 'retry_schedule_failed' && $attempt_number < 5)
+            || (!self::catalog_change_status_is_retryable($http_status) && $failure_category === 'non_retryable_http');
+        if (!$terminal_category_valid || $success_at !== null || $terminal_failure_at !== $attempt_at) {
+            return $default;
+        }
+
+        return [
+            'telemetry_version' => EVENTSALES_CATALOG_CHANGE_TELEMETRY_VERSION,
+            'state' => 'TERMINAL_FAILURE',
+            'last_attempt_at_gmt' => $attempt_at,
+            'last_success_at_gmt' => null,
+            'last_terminal_failure_at_gmt' => $terminal_failure_at,
+            'last_http_status' => $http_status,
+            'last_failure_category' => $failure_category,
+            'last_attempt_number' => $attempt_number,
+        ];
+    }
+
     public static function deliver_catalog_change(string $raw_body, int $attempt = 1): void
     {
         if (!defined('EVENTSALES_CATALOG_CHANGE_SENDER_ENABLED') || !EVENTSALES_CATALOG_CHANGE_SENDER_ENABLED) return;
@@ -378,11 +483,119 @@ final class EventSales_Tickera_Catalog_Feed
             'X-EventSales-Trigger-Signature' => 'v1=' . hash_hmac('sha256', $base, $secret),
         ]]);
         $status = is_wp_error($response) ? 0 : (int) wp_remote_retrieve_response_code($response);
-        if (($status === 0 || in_array($status, [408, 425, 429], true) || $status >= 500) && $attempt < 5 && function_exists('as_schedule_single_action')) {
-            $delays = [1 => 30, 2 => 120, 3 => 600, 4 => 1800];
-            as_schedule_single_action(time() + $delays[$attempt], 'eventsales_catalog_change_deliver',
-                ['raw_body' => $raw_body, 'attempt' => $attempt + 1], 'eventsales-catalog-change');
+        $attempt_at = gmdate('Y-m-d\\TH:i:s\\Z');
+        if ($status >= 200 && $status < 300) {
+            self::persist_catalog_change_delivery_telemetry('SUCCEEDED', $attempt_at, $status, null, $attempt);
+
+            return;
         }
+
+        if (self::catalog_change_status_is_retryable($status) && $attempt < 5) {
+            if (!function_exists('as_schedule_single_action')) {
+                self::persist_catalog_change_delivery_telemetry('TERMINAL_FAILURE', $attempt_at, $status, 'retry_schedule_failed', $attempt);
+
+                return;
+            }
+
+            $delays = [1 => 30, 2 => 120, 3 => 600, 4 => 1800];
+            $scheduled_action_id = as_schedule_single_action(time() + $delays[$attempt], 'eventsales_catalog_change_deliver',
+                ['raw_body' => $raw_body, 'attempt' => $attempt + 1], 'eventsales-catalog-change');
+            if (!is_int($scheduled_action_id) || $scheduled_action_id <= 0) {
+                self::persist_catalog_change_delivery_telemetry('TERMINAL_FAILURE', $attempt_at, $status, 'retry_schedule_failed', $attempt);
+
+                return;
+            }
+
+            self::persist_catalog_change_delivery_telemetry(
+                'RETRY_SCHEDULED',
+                $attempt_at,
+                $status,
+                $status === 0 ? 'transport_error' : 'retryable_http',
+                $attempt
+            );
+
+            return;
+        }
+
+        $failure_category = self::catalog_change_status_is_retryable($status)
+            ? ($status === 0 ? 'transport_error' : 'retryable_http')
+            : 'non_retryable_http';
+        self::persist_catalog_change_delivery_telemetry('TERMINAL_FAILURE', $attempt_at, $status, $failure_category, $attempt);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function default_catalog_change_delivery_telemetry(): array
+    {
+        return [
+            'telemetry_version' => EVENTSALES_CATALOG_CHANGE_TELEMETRY_VERSION,
+            'state' => 'NEVER_ATTEMPTED',
+            'last_attempt_at_gmt' => null,
+            'last_success_at_gmt' => null,
+            'last_terminal_failure_at_gmt' => null,
+            'last_http_status' => null,
+            'last_failure_category' => null,
+            'last_attempt_number' => null,
+        ];
+    }
+
+    private static function persist_catalog_change_delivery_telemetry(
+        string $state,
+        string $attempt_at,
+        int $http_status,
+        ?string $failure_category,
+        int $attempt
+    ): void {
+        $record = [
+            'telemetry_version' => EVENTSALES_CATALOG_CHANGE_TELEMETRY_VERSION,
+            'state' => $state,
+            'last_attempt_at_gmt' => $attempt_at,
+            'last_success_at_gmt' => $state === 'SUCCEEDED' ? $attempt_at : null,
+            'last_terminal_failure_at_gmt' => $state === 'TERMINAL_FAILURE' ? $attempt_at : null,
+            'last_http_status' => self::valid_catalog_change_telemetry_http_status($http_status),
+            'last_failure_category' => $failure_category,
+            'last_attempt_number' => self::valid_catalog_change_telemetry_attempt($attempt),
+        ];
+
+        update_option(self::CATALOG_CHANGE_DELIVERY_TELEMETRY_OPTION, $record, false);
+    }
+
+    private static function catalog_change_status_is_retryable(int $status): bool
+    {
+        return $status === 0 || in_array($status, [408, 425, 429], true) || $status >= 500;
+    }
+
+    private static function valid_catalog_change_telemetry_timestamp($value): ?string
+    {
+        if (!is_string($value) || preg_match('/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$/', $value) !== 1) {
+            return null;
+        }
+
+        $timestamp = strtotime($value);
+        if ($timestamp === false || gmdate('Y-m-d\\TH:i:s\\Z', $timestamp) !== $value) {
+            return null;
+        }
+
+        return $value;
+    }
+
+    private static function valid_catalog_change_telemetry_http_status($value): ?int
+    {
+        if (!is_int($value) || ($value !== 0 && ($value < 100 || $value > 599))) {
+            return null;
+        }
+
+        return $value;
+    }
+
+    private static function valid_catalog_change_telemetry_attempt($value): ?int
+    {
+        if (!is_int($value) || $value < 1 || $value > 5) {
+            return null;
+        }
+
+        return $value;
     }
 
     private static function reason_priority(string $reason): int
