@@ -13,8 +13,10 @@
 
 ## Scope
 
-M5-03F adds one integrated reconciliation test and this evidence document. It
-does not change production code, resources, migrations, indexes, workers,
+M5-03F adds one integrated reconciliation test, extends the existing
+`DimensionSnapshotReader` test suite with one isolated additive-readiness case
+required during independent review, and adds this evidence document. It does
+not change production code, resources, migrations, indexes, workers,
 schedulers, Redis, Cachex, EventDetail, or UI.
 
 The test uses real sales and refund facts, `SnapshotRefresh.refresh_event/1`,
@@ -65,7 +67,7 @@ quantity refund, an exact value-only refund, and a complete header-only refund.
 | ATV non-additivity | PASS | The M5-03F test uses different row ATVs and derives rolled ATV with `MetricRules.derive_financial_metrics/1`; it rejects both the sum and arithmetic average of row ATVs |
 | EventDetail gross compatibility | PASS | `event_detail_test.exs`: `historical completion includes refunded orders with completion evidence`, `operational status_breakdown is current-state context not financial totals`; M5-03F does not modify EventDetail or redefine `sold`/`revenue` |
 | EventDetail query boundary | PASS | `event_detail_query_bound_test.exs`: `certified get_event_detail succeeds without legacy raw financial helpers in module`, `get_event_detail SQL capture excludes raw financial and ticket aggregates`, `projection rollback emits no operational status SQL after nested rollback` |
-| No new index, cache, Redis, worker, or scheduler | PASS | Changed paths are limited to the M5-03F test and this document. The plan's M5-03F exclusions and `INDEX_DECISION = NONE` remain unchanged |
+| No new index, cache, Redis, worker, or scheduler | PASS | Changed paths are limited to the M5-03F reconciliation test, one focused `DimensionSnapshotReader` readiness-test extension, and this certification document. No production, migration, resource, index, cache, Redis, worker, or scheduler path changed |
 
 ## Canonical arithmetic and reconciliation notes
 
@@ -104,11 +106,13 @@ bash scripts/dev_local.sh status       PASS (DEV/TEST PostgreSQL and Redis reach
 bash scripts/dev_local.sh doctor       PASS (loopback endpoints and ownership checks)
 bash scripts/dev_local.sh test test/event_sales/analytics/m5_03_revenue_refund_dimension_reconciliation_test.exs
                                       PASS (1 test)
+bash scripts/dev_local.sh test <focused correction set>
+                                      PASS (25 tests, 0 failures)
 bash scripts/dev_local.sh test <focused M5-02/M5-03 evidence set>
                                       PASS (225 tests)
 git diff --check                       PASS
-bash scripts/dev_local.sh quality-pr  PASS (2731 tests, 0 failures)
-exact-head GitHub CI                   PENDING PR final HEAD
+bash scripts/dev_local.sh quality-pr  PASS (2732 tests, 0 failures)
+exact-head GitHub CI                   REQUIRED 6/6 ON FINAL REVIEWED HEAD BEFORE MERGE
 ```
 
 No production, schema, migration, index, worker, scheduler, cache, Redis,
