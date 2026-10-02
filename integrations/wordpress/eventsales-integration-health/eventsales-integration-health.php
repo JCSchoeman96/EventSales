@@ -3,6 +3,8 @@
  * Plugin Name: EventSales Integration Health
  * Description: Read-only Site Health observability for EventSales WordPress producer integrations.
  * Version: 0.1.0
+ * Requires at least: 6.4
+ * Requires PHP: 8.0
  * Author: EventSales
  * License: GPL-2.0-or-later
  */
