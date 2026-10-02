@@ -2,7 +2,7 @@
 
 **Plan ID:** wp-integration-health
 
-**Plan version:** v2
+**Plan version:** v3
 
 **Status:** active
 
@@ -12,12 +12,13 @@
 
 **Last updated:** 2026-10-02
 
-**Change summary (v2):** Fail-closed contract identity, sender depends on active catalog producer, full Site Health result shape.
+**Change summary (v3):** Reconnaissance text matches the six-field Site Health test callback result.
 
 ### Revision log
 
 - `v1` — reconnaissance complete; health states, guards, and implementation paths locked.
 - `v2` — READY requires non-empty contract constants; sender lifecycle tied to catalog producer; Site Health callbacks return `badge` and `test`.
+- `v3` — Site Health reconnaissance documents full callback result (`badge`, `test`), not the obsolete four-field shape.
 
 ## Goal
 
@@ -34,7 +35,7 @@ Give administrators a safe, read-only view of EventSales WordPress integration r
 ### Site Health extension points
 
 - `site_status_tests` filter receives `$tests` with groups `direct` and `async`. EventSales adds **direct** tests only (no cron, no remote I/O).
-- Each test is a callable returning `['label' => string, 'status' => 'good'|'recommended'|'critical', 'description' => string, 'actions' => string]`.
+- Each direct test callback returns a completed Site Health result with: `label`, `status` (`good`|`recommended`|`critical`), `badge` (`label`, `color`), `description`, `actions`, and stable `test` (unique id such as `eventsales_catalog_feed`).
 - `debug_information` filter receives `$info` sections; EventSales adds section `eventsales` with nested `fields` (label/value, no secrets).
 
 ### Installed vs active
