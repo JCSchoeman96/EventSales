@@ -73,7 +73,7 @@ final class EventSales_Woo_Order_Line_Identity
             static fn (int $post_id) => get_post($post_id)
         );
 
-        $existing = $item->get_meta(EventSales_Tickera_Event_Resolver::META_TICKERA_EVENT_ID, false);
+        $existing = self::extract_tickera_event_meta_values($item);
         $decision = EventSales_Tickera_Event_Resolver::apply_to_order_item_meta($existing, $resolution);
 
         if ($decision['write'] === null) {
@@ -89,6 +89,42 @@ final class EventSales_Woo_Order_Line_Identity
         if ($persist_immediately && method_exists($item, 'save')) {
             $item->save();
         }
+    }
+
+    /**
+     * WooCommerce returns WC_Meta_Data objects for get_meta($key, false).
+     *
+     * @return array<int, mixed>
+     */
+    public static function extract_tickera_event_meta_values($item): array
+    {
+        if (!is_object($item) || !method_exists($item, 'get_meta')) {
+            return [];
+        }
+
+        $entries = $item->get_meta(EventSales_Tickera_Event_Resolver::META_TICKERA_EVENT_ID, false);
+        if (!is_array($entries)) {
+            return [];
+        }
+
+        $values = [];
+
+        foreach ($entries as $entry) {
+            $values[] = self::extract_meta_entry_value($entry);
+        }
+
+        return $values;
+    }
+
+    private static function extract_meta_entry_value($entry)
+    {
+        if (is_object($entry) && method_exists($entry, 'get_data')) {
+            $data = $entry->get_data();
+
+            return is_array($data) ? ($data['value'] ?? null) : null;
+        }
+
+        return $entry;
     }
 
     /**

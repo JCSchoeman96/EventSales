@@ -1,16 +1,22 @@
 # WP-SOURCE-01 — Woo order-line Tickera event identity
 
-**Plan ID:** wp-order-line-event-identity  
-**Plan version:** v1  
-**Status:** active  
-**Scope:** WordPress producer for `tickera_event_id` order-item metadata  
-**Authority:** This file is the active contract for WP-SOURCE-01.  
-**Last updated:** 2026-10-02  
-**Change summary (v1):** Initial plan after localhost:10059 reconnaissance and producer implementation.
+**Plan ID:** wp-order-line-event-identity
+
+**Plan version:** v2
+
+**Status:** active
+
+**Scope:** WordPress producer for `tickera_event_id` order-item metadata
+
+**Authority:** This file is the active contract for WP-SOURCE-01.
+
+**Last updated:** 2026-10-02
+**Change summary (v2):** Review correction: Woo `WC_Meta_Data` extraction, fail-closed `_event_name` multiplicity, variation parent guard.
 
 ### Revision log
 
 - `v1` — initial plan locked to `_event_name` → `tc_events` authority and checkout/new-order-item hooks.
+- `v2` — merge-review fixes for real Woo meta objects, corrupt `_event_name` rows, and variation/product consistency.
 
 ## Goal
 
@@ -61,6 +67,17 @@ Names, titles, slugs, and labels are never used.
 | existing meta equals resolved ID | idempotent no-op |
 | existing valid meta differs from resolved ID | `CONFLICT_EXISTING`, no overwrite |
 | invalid/non-positive resolved ID | no write |
+| existing invalid or multiply-valued `tickera_event_id` | `CONFLICT_EXISTING`, no write, no repair |
+
+Woo extraction: `get_meta(tickera_event_id, false)` yields `WC_Meta_Data` objects; the plugin extracts `.value` before resolver normalization.
+
+### `_event_name` physical rows
+
+Every physical `_event_name` row must be a positive integer resolving to the same `tc_events` ID. Any malformed row or unresolved positive reference → `CONFLICT` (no write). Duplicate identical valid rows → `RESOLVED`.
+
+### Variation guard
+
+When `variation_id > 0`, the variation post must be `product_variation` and `post_parent` must equal the line `product_id`.
 
 ## Woo hooks
 

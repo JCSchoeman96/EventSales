@@ -20,6 +20,7 @@ final class EventSales_Tickera_Event_Resolver
     public const META_TICKET_FLAG = '_tc_is_ticket';
     public const META_EVENT_REFERENCE = '_event_name';
     public const POST_TYPE_EVENT = 'tc_events';
+    public const POST_TYPE_VARIATION = 'product_variation';
 
     public const STATE_NOT_APPLICABLE = 'NOT_APPLICABLE';
     public const STATE_RESOLVED = 'RESOLVED';
@@ -42,6 +43,10 @@ final class EventSales_Tickera_Event_Resolver
         callable $event_reference_reader,
         callable $post_loader
     ): array {
+        if (!self::variation_line_integrity($product_id, $variation_id, $post_loader)) {
+            return self::resolution(self::STATE_UNRESOLVED, null);
+        }
+
         $authority_product_id = self::authority_product_id($product_id, $variation_id, $post_loader);
 
         if ($authority_product_id === null) {
@@ -61,18 +66,24 @@ final class EventSales_Tickera_Event_Resolver
         $resolved_ids = [];
 
         foreach ($references as $raw_reference) {
-            $parsed = self::positive_int_or_null(self::preserve_raw_meta_value($raw_reference));
+            $raw = self::preserve_raw_meta_value($raw_reference);
+            if ($raw === null) {
+                return self::resolution(self::STATE_CONFLICT, null);
+            }
+
+            $trimmed = trim($raw);
+            if ($trimmed === '') {
+                return self::resolution(self::STATE_CONFLICT, null);
+            }
+
+            $parsed = self::positive_int_or_null($trimmed);
             if ($parsed === null) {
-                continue;
+                return self::resolution(self::STATE_CONFLICT, null);
             }
 
             $event_post = $post_loader($parsed);
-            if (!self::valid_event_post($event_post)) {
-                continue;
-            }
-
-            if ((int) $event_post->ID !== $parsed) {
-                continue;
+            if (!self::valid_event_post($event_post) || (int) $event_post->ID !== $parsed) {
+                return self::resolution(self::STATE_CONFLICT, null);
             }
 
             $resolved_ids[$parsed] = true;
@@ -96,7 +107,17 @@ final class EventSales_Tickera_Event_Resolver
      */
     public static function apply_to_order_item_meta($existing_meta_values, array $resolution): array
     {
-        $existing = self::normalize_existing_event_ids($existing_meta_values);
+        $analysis = self::analyze_existing_event_meta($existing_meta_values);
+
+        if ($analysis['has_invalid']) {
+            return ['outcome' => self::OUTCOME_CONFLICT_EXISTING, 'write' => null];
+        }
+
+        if (count($analysis['valid_ids']) > 1) {
+            return ['outcome' => self::OUTCOME_CONFLICT_EXISTING, 'write' => null];
+        }
+
+        $existing = $analysis['valid_ids'];
 
         if ($resolution['state'] === self::STATE_NOT_APPLICABLE) {
             return ['outcome' => self::OUTCOME_SKIPPED, 'write' => null];
@@ -115,7 +136,7 @@ final class EventSales_Tickera_Event_Resolver
             return ['outcome' => self::OUTCOME_WRITTEN, 'write' => $event_id];
         }
 
-        if (count($existing) === 1 && $existing[0] === $event_id) {
+        if ($existing[0] === $event_id) {
             return ['outcome' => self::OUTCOME_IDEMPOTENT, 'write' => null];
         }
 
@@ -123,37 +144,78 @@ final class EventSales_Tickera_Event_Resolver
     }
 
     /**
-     * @return array<int, int>
+     * @return array{valid_ids: array<int, int>, has_invalid: bool, physical_count: int}
      */
-    public static function normalize_existing_event_ids($values): array
+    public static function analyze_existing_event_meta($values): array
     {
         if (!is_array($values)) {
             $values = [$values];
         }
 
-        $parsed = [];
+        $valid_ids = [];
+        $has_invalid = false;
+        $physical_count = 0;
 
         foreach ($values as $value) {
+            $physical_count++;
             $id = self::positive_int_or_null(self::preserve_raw_meta_value($value));
-            if ($id !== null) {
-                $parsed[] = $id;
+
+            if ($id === null) {
+                $has_invalid = true;
+
+                continue;
             }
+
+            $valid_ids[] = $id;
         }
 
-        return array_values(array_unique($parsed));
+        return [
+            'valid_ids' => array_values(array_unique($valid_ids)),
+            'has_invalid' => $has_invalid,
+            'physical_count' => $physical_count,
+        ];
+    }
+
+    /**
+     * @return array<int, int>
+     */
+    public static function normalize_existing_event_ids($values): array
+    {
+        return self::analyze_existing_event_meta($values)['valid_ids'];
+    }
+
+    public static function variation_line_integrity(int $product_id, int $variation_id, callable $post_loader): bool
+    {
+        if ($variation_id <= 0) {
+            return true;
+        }
+
+        if ($product_id <= 0) {
+            return false;
+        }
+
+        $variation_post = $post_loader($variation_id);
+        if ($variation_post === null) {
+            return false;
+        }
+
+        if ((string) ($variation_post->post_type ?? '') !== self::POST_TYPE_VARIATION) {
+            return false;
+        }
+
+        return (int) ($variation_post->post_parent ?? 0) === $product_id;
     }
 
     public static function authority_product_id(int $product_id, int $variation_id, callable $post_loader): ?int
     {
         if ($variation_id > 0) {
-            $variation_post = $post_loader($variation_id);
-            if ($variation_post === null) {
-                return $product_id > 0 ? $product_id : null;
+            if (!self::variation_line_integrity($product_id, $variation_id, $post_loader)) {
+                return null;
             }
 
-            $parent = (int) ($variation_post->post_parent ?? 0);
+            $variation_post = $post_loader($variation_id);
 
-            return $parent > 0 ? $parent : ($product_id > 0 ? $product_id : null);
+            return $variation_post === null ? null : (int) ($variation_post->post_parent ?? 0);
         }
 
         return $product_id > 0 ? $product_id : null;
