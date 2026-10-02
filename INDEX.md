@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-408
+414
 
 ## Files
 
@@ -45,9 +45,12 @@ Project root: `.`
 - `lib/event_sales/analytics/metric_rules.ex`
 - `lib/event_sales/analytics/order_processed_notifier.ex`
 - `lib/event_sales/analytics/refund_processed_notifier.ex`
+- `lib/event_sales/analytics/resources/analytics_contribution_fact.ex`
 - `lib/event_sales/analytics/resources/daily_sales_aggregate_snapshot.ex`
 - `lib/event_sales/analytics/resources/event_aggregate_snapshot.ex`
 - `lib/event_sales/analytics/resources/event_dimension_aggregate_snapshot.ex`
+- `lib/event_sales/analytics/resources/event_dimension_period_aggregate_snapshot.ex`
+- `lib/event_sales/analytics/resources/event_period_aggregate_snapshot.ex`
 - `lib/event_sales/analytics/resources/event_source_freshness_snapshot.ex`
 - `lib/event_sales/analytics/snapshot_codec.ex`
 - `lib/event_sales/analytics/snapshot_queries.ex`
@@ -59,9 +62,12 @@ Project root: `.`
 - `lib/event_sales/analytics/source_freshness.ex`
 - `lib/event_sales/analytics/time_rules.ex`
 - `lib/event_sales/analytics/validations/canonical_snapshot_financials.ex`
+- `lib/event_sales/analytics/validations/validate_contribution_fact_identity.ex`
+- `lib/event_sales/analytics/validations/validate_contribution_fact_shape.ex`
 - `lib/event_sales/analytics/validations/validate_dimension_aggregate_grain.ex`
 - `lib/event_sales/analytics/validations/validate_dimension_source_event.ex`
 - `lib/event_sales/analytics/validations/validate_dimension_ticket_type_event.ex`
+- `lib/event_sales/analytics/validations/validate_period_bucket_contract.ex`
 - `lib/event_sales/analytics/workers/rebuild_hot_state_worker.ex`
 - `lib/event_sales/analytics/workers/refresh_snapshot_worker.ex`
 - `lib/event_sales/application.ex`
@@ -576,8 +582,8 @@ Project root: `.`
 - `EventSales.Analytics.MetricRules` - `lib/event_sales/analytics/metric_rules.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 11
-  - public_funs: `business_timezone/0`, `business_date/2`, `same_business_date?/3`, `counts_as_sold?/2`, `sold_quantity/2`, `completed_revenue/2`, `visible_in_status_breakdown?/2`, `status_bucket/1`, `summarize/2`, `derive_financial_metrics/1`, `financial_summary/3`
+  - docs_count: 14
+  - public_funs: `business_timezone/0`, `business_date/2`, `same_business_date?/3`, `counts_as_sold?/2`, `sold_quantity/2`, `completed_revenue/2`, `visible_in_status_breakdown?/2`, `status_bucket/1`, `summarize/2`, `derive_financial_metrics/1`, `financial_summary/3`, `projections_comparable?/2`, `classify_comparison_state/1`, `derive_comparison_deltas/3`
   - uses: _none_
 - `EventSales.Analytics.OrderProcessedNotifier` - `lib/event_sales/analytics/order_processed_notifier.ex`
   - moduledoc?: true
@@ -591,6 +597,12 @@ Project root: `.`
   - docs_count: 1
   - public_funs: `notify_refund_applied/2`
   - uses: _none_
+- `EventSales.Analytics.Resources.AnalyticsContributionFact` - `lib/event_sales/analytics/resources/analytics_contribution_fact.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
 - `EventSales.Analytics.Resources.DailySalesAggregateSnapshot` - `lib/event_sales/analytics/resources/daily_sales_aggregate_snapshot.ex`
   - moduledoc?: true
   - specs?: false
@@ -604,6 +616,18 @@ Project root: `.`
   - public_funs: _none_
   - uses: `Ash.Resource`
 - `EventSales.Analytics.Resources.EventDimensionAggregateSnapshot` - `lib/event_sales/analytics/resources/event_dimension_aggregate_snapshot.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
+- `EventSales.Analytics.Resources.EventDimensionPeriodAggregateSnapshot` - `lib/event_sales/analytics/resources/event_dimension_period_aggregate_snapshot.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: `Ash.Resource`
+- `EventSales.Analytics.Resources.EventPeriodAggregateSnapshot` - `lib/event_sales/analytics/resources/event_period_aggregate_snapshot.ex`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
@@ -663,11 +687,17 @@ Project root: `.`
   - docs_count: 5
   - public_funs: `advance_order/2`, `advance_refund/2`, `advance_sync_source_observed/2`, `for_event/2`, `for_events/2`
   - uses: _none_
+- `ComparisonWindows` - `lib/event_sales/analytics/time_rules.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
 - `EventSales.Analytics.TimeRules` - `lib/event_sales/analytics/time_rules.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 13
-  - public_funs: `sale_effective_at/1`, `refund_effective_at/1`, `business_date/2`, `today_bounds/2`, `yesterday_bounds/2`, `rolling_bounds/2`, `last_7_days_bounds/1`, `last_30_days_bounds/1`, `custom_civil_bounds/3`, `period_contains?/2`, `source_age_microseconds/2`, `classify_source_freshness/2`, `freshness_classification/2`
+  - docs_count: 14
+  - public_funs: `sale_effective_at/1`, `refund_effective_at/1`, `business_date/2`, `today_bounds/2`, `yesterday_bounds/2`, `rolling_bounds/2`, `last_7_days_bounds/1`, `last_30_days_bounds/1`, `comparison_windows/3`, `custom_civil_bounds/3`, `period_contains?/2`, `source_age_microseconds/2`, `classify_source_freshness/2`, `freshness_classification/2`
   - uses: _none_
 - `Freshness` - `lib/event_sales/analytics/time_rules.ex`
   - moduledoc?: true
@@ -687,6 +717,18 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `init/1`, `validate/3`
   - uses: `Ash.Resource.Validation`
+- `EventSales.Analytics.Validations.ValidateContributionFactIdentity` - `lib/event_sales/analytics/validations/validate_contribution_fact_identity.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `init/1`, `validate/3`
+  - uses: `Ash.Resource.Validation`
+- `EventSales.Analytics.Validations.ValidateContributionFactShape` - `lib/event_sales/analytics/validations/validate_contribution_fact_shape.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `init/1`, `validate/3`
+  - uses: `Ash.Resource.Validation`
 - `EventSales.Analytics.Validations.ValidateDimensionAggregateGrain` - `lib/event_sales/analytics/validations/validate_dimension_aggregate_grain.ex`
   - moduledoc?: true
   - specs?: false
@@ -700,6 +742,12 @@ Project root: `.`
   - public_funs: `init/1`, `validate/3`
   - uses: `Ash.Resource.Validation`
 - `EventSales.Analytics.Validations.ValidateDimensionTicketTypeEvent` - `lib/event_sales/analytics/validations/validate_dimension_ticket_type_event.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `init/1`, `validate/3`
+  - uses: `Ash.Resource.Validation`
+- `EventSales.Analytics.Validations.ValidatePeriodBucketContract` - `lib/event_sales/analytics/validations/validate_period_bucket_contract.ex`
   - moduledoc?: true
   - specs?: false
   - docs_count: 0
@@ -2862,9 +2910,12 @@ Project root: `.`
 - `EventSales.Accounts.Resources.Role` - `lib/event_sales/accounts/resources/role.ex`
 - `EventSales.Accounts.Resources.User` - `lib/event_sales/accounts/resources/user.ex`
 - `EventSales.Accounts.Resources.UserRole` - `lib/event_sales/accounts/resources/user_role.ex`
+- `EventSales.Analytics.Resources.AnalyticsContributionFact` - `lib/event_sales/analytics/resources/analytics_contribution_fact.ex`
 - `EventSales.Analytics.Resources.DailySalesAggregateSnapshot` - `lib/event_sales/analytics/resources/daily_sales_aggregate_snapshot.ex`
 - `EventSales.Analytics.Resources.EventAggregateSnapshot` - `lib/event_sales/analytics/resources/event_aggregate_snapshot.ex`
 - `EventSales.Analytics.Resources.EventDimensionAggregateSnapshot` - `lib/event_sales/analytics/resources/event_dimension_aggregate_snapshot.ex`
+- `EventSales.Analytics.Resources.EventDimensionPeriodAggregateSnapshot` - `lib/event_sales/analytics/resources/event_dimension_period_aggregate_snapshot.ex`
+- `EventSales.Analytics.Resources.EventPeriodAggregateSnapshot` - `lib/event_sales/analytics/resources/event_period_aggregate_snapshot.ex`
 - `EventSales.Analytics.Resources.EventSourceFreshnessSnapshot` - `lib/event_sales/analytics/resources/event_source_freshness_snapshot.ex`
 - `EventSales.AshBaseline.Resources.AuthUser` - `lib/event_sales/ash_baseline/resources/auth_user.ex`
 - `EventSales.AshBaseline.Resources.PaperTrailProof` - `lib/event_sales/ash_baseline/resources/paper_trail_proof.ex`
@@ -2931,9 +2982,12 @@ Project root: `.`
 ### Validations
 
 - `EventSales.Analytics.Validations.CanonicalSnapshotFinancials` - `lib/event_sales/analytics/validations/canonical_snapshot_financials.ex`
+- `EventSales.Analytics.Validations.ValidateContributionFactIdentity` - `lib/event_sales/analytics/validations/validate_contribution_fact_identity.ex`
+- `EventSales.Analytics.Validations.ValidateContributionFactShape` - `lib/event_sales/analytics/validations/validate_contribution_fact_shape.ex`
 - `EventSales.Analytics.Validations.ValidateDimensionAggregateGrain` - `lib/event_sales/analytics/validations/validate_dimension_aggregate_grain.ex`
 - `EventSales.Analytics.Validations.ValidateDimensionSourceEvent` - `lib/event_sales/analytics/validations/validate_dimension_source_event.ex`
 - `EventSales.Analytics.Validations.ValidateDimensionTicketTypeEvent` - `lib/event_sales/analytics/validations/validate_dimension_ticket_type_event.ex`
+- `EventSales.Analytics.Validations.ValidatePeriodBucketContract` - `lib/event_sales/analytics/validations/validate_period_bucket_contract.ex`
 - `EventSales.Ingestion.Validations.AuthorizedFinancialReconciliationStateMutation` - `lib/event_sales/ingestion/validations/authorized_financial_reconciliation_state_mutation.ex`
 - `EventSales.Ingestion.Validations.AuthorizedTickeraStateMutation` - `lib/event_sales/ingestion/validations/authorized_tickera_state_mutation.ex`
 - `EventSales.Ingestion.Validations.BoundedMetadata` - `lib/event_sales/ingestion/validations/bounded_metadata.ex`
