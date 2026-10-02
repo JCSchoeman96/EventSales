@@ -54,6 +54,10 @@ defmodule EventSales.Analytics.Resources.AnalyticsContributionFact do
     end
 
     check_constraints do
+      check_constraint :coverage_identity,
+        name: "analytics_contribution_facts_coverage_identity_check",
+        check: "char_length(coverage_identity) > 0"
+
       check_constraint :gross_ticket_quantity,
         name: "analytics_contribution_facts_gross_quantity_check",
         check: "gross_ticket_quantity >= 0"
@@ -239,6 +243,7 @@ defmodule EventSales.Analytics.Resources.AnalyticsContributionFact do
 
     attribute :coverage_identity, :string do
       allow_nil? false
+      constraints min_length: 1
       public? true
     end
 

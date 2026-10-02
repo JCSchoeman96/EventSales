@@ -71,6 +71,14 @@ defmodule EventSales.Repo.Migrations.M504cPeriodAggregateResources do
 
     create constraint(
              :analytics_event_dimension_period_aggregate_snapshots,
+             :analytics_dim_period_coverage_identity_check,
+             check: """
+               char_length(coverage_identity) > 0
+             """
+           )
+
+    create constraint(
+             :analytics_event_dimension_period_aggregate_snapshots,
              :analytics_dim_period_bucket_timezone_check,
              check: """
                (
@@ -291,6 +299,14 @@ defmodule EventSales.Repo.Migrations.M504cPeriodAggregateResources do
 
     create constraint(
              :analytics_contribution_facts,
+             :analytics_contribution_facts_coverage_identity_check,
+             check: """
+               char_length(coverage_identity) > 0
+             """
+           )
+
+    create constraint(
+             :analytics_contribution_facts,
              :analytics_contribution_facts_gross_quantity_check,
              check: """
                gross_ticket_quantity >= 0
@@ -409,6 +425,14 @@ defmodule EventSales.Repo.Migrations.M504cPeriodAggregateResources do
           ),
           null: false
     end
+
+    create constraint(
+             :analytics_event_period_aggregate_snapshots,
+             :analytics_event_period_coverage_identity_check,
+             check: """
+               char_length(coverage_identity) > 0
+             """
+           )
 
     create constraint(
              :analytics_event_period_aggregate_snapshots,
@@ -534,6 +558,11 @@ defmodule EventSales.Repo.Migrations.M504cPeriodAggregateResources do
                      :analytics_event_period_bucket_timezone_check
                    )
 
+    drop_if_exists constraint(
+                     :analytics_event_period_aggregate_snapshots,
+                     :analytics_event_period_coverage_identity_check
+                   )
+
     drop constraint(
            :analytics_event_period_aggregate_snapshots,
            "analytics_event_period_aggregate_snapshots_event_id_fkey"
@@ -585,6 +614,11 @@ defmodule EventSales.Repo.Migrations.M504cPeriodAggregateResources do
     drop_if_exists constraint(
                      :analytics_contribution_facts,
                      :analytics_contribution_facts_gross_quantity_check
+                   )
+
+    drop_if_exists constraint(
+                     :analytics_contribution_facts,
+                     :analytics_contribution_facts_coverage_identity_check
                    )
 
     drop constraint(
@@ -696,6 +730,11 @@ defmodule EventSales.Repo.Migrations.M504cPeriodAggregateResources do
     drop_if_exists constraint(
                      :analytics_event_dimension_period_aggregate_snapshots,
                      :analytics_dim_period_bucket_timezone_check
+                   )
+
+    drop_if_exists constraint(
+                     :analytics_event_dimension_period_aggregate_snapshots,
+                     :analytics_dim_period_coverage_identity_check
                    )
 
     drop constraint(

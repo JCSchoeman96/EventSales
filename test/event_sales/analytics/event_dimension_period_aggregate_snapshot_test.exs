@@ -11,6 +11,7 @@ defmodule EventSales.Analytics.EventDimensionPeriodAggregateSnapshotTest do
   @refreshed_at ~U[2026-05-18 09:05:00.000000Z]
 
   @grain_constraint "analytics_dim_period_grain_shape_check"
+  @coverage_identity_constraint "analytics_dim_period_coverage_identity_check"
   @ticket_identity_index "analytics_dim_period_ticket_type_uidx"
   @product_identity_index "analytics_dim_period_source_product_uidx"
   @primitive_constraints %{
@@ -126,6 +127,20 @@ defmodule EventSales.Analytics.EventDimensionPeriodAggregateSnapshotTest do
                source_system_id: source.id,
                woo_product_id: 10_003,
                woo_variation_id: 20_003
+             })
+  end
+
+  test "empty coverage identity fails through Ash", %{
+    event_a: event,
+    source_a: source
+  } do
+    assert {:error, _} =
+             create_snapshot(%{
+               event_id: event.id,
+               dimension_kind: :source_product,
+               source_system_id: source.id,
+               woo_product_id: 50_001,
+               coverage_identity: ""
              })
   end
 
@@ -378,6 +393,20 @@ defmodule EventSales.Analytics.EventDimensionPeriodAggregateSnapshotTest do
                  )
                )
     end
+  end
+
+  test "postgres check rejects an empty coverage identity", %{
+    event_a: event,
+    source_a: source
+  } do
+    assert {:error, %Postgrex.Error{postgres: %{constraint: @coverage_identity_constraint}}} =
+             insert_raw_snapshot(%{
+               event_id: event.id,
+               dimension_kind: "source_product",
+               source_system_id: source.id,
+               woo_product_id: 50_001,
+               coverage_identity: ""
+             })
   end
 
   defp create_snapshot(attrs) do

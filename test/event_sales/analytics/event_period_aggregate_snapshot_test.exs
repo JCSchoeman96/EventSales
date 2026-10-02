@@ -15,6 +15,7 @@ defmodule EventSales.Analytics.EventPeriodAggregateSnapshotTest do
   @bucket_bounds_constraint "analytics_event_period_bucket_bounds_check"
   @projection_state_constraint "analytics_event_period_projection_state_check"
   @semantic_version_constraint "analytics_event_period_semantic_version_check"
+  @coverage_identity_constraint "analytics_event_period_coverage_identity_check"
   @primitive_constraints %{
     gross_ticket_quantity: "analytics_event_period_gross_quantity_check",
     gross_ticket_value: "analytics_event_period_gross_value_check",
@@ -148,6 +149,11 @@ defmodule EventSales.Analytics.EventPeriodAggregateSnapshotTest do
              create_snapshot(%{event_id: event.id, semantic_version: 0})
   end
 
+  test "empty coverage identity fails through Ash", %{event_a: event} do
+    assert {:error, _} =
+             create_snapshot(%{event_id: event.id, coverage_identity: ""})
+  end
+
   test "resource does not persist derived metrics or order count" do
     attributes =
       EventPeriodAggregateSnapshot
@@ -195,6 +201,11 @@ defmodule EventSales.Analytics.EventPeriodAggregateSnapshotTest do
 
     assert {:error, %Postgrex.Error{postgres: %{constraint: @semantic_version_constraint}}} =
              insert_raw_snapshot(%{event_id: event.id, semantic_version: 0})
+  end
+
+  test "postgres check rejects an empty coverage identity", %{event_a: event} do
+    assert {:error, %Postgrex.Error{postgres: %{constraint: @coverage_identity_constraint}}} =
+             insert_raw_snapshot(%{event_id: event.id, coverage_identity: ""})
   end
 
   test "postgres checks reject negative additive primitives", %{event_a: event} do

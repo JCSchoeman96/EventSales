@@ -154,19 +154,6 @@ Use `ast-grep run` or `ast-grep scan` when structural code discovery is material
 
 EventSales is currently developed and certified through a local integration environment.
 
-### Shared workstation infrastructure bootstrap
-
-EventSales uses the workstation-owned `dev-core` services. Repository code and agents MUST NOT start, stop, recreate, delete, or reconfigure that stack.
-
-For a fresh worktree, after an infrastructure-contract change, or after credential rotation, read `.devcore/project.conf` and `.devcore/render-map.tsv`, then run:
-
-```bash
-devcore-project plan
-devcore-project activate
-```
-
-The bootstrap provisions only the allocated EventSales PostgreSQL roles and databases, renders ignored local environment files with mode `0600`, and checks the project Redis namespace. It does not run application migrations or manage shared service lifecycle. Treat `~/.config/dev-core/project-db.env` as the canonical workstation secret source. Never print or commit its values.
-
 ### Agent local-runtime rule
 
 When a task requires any part of the local EventSales runtime, agents must use

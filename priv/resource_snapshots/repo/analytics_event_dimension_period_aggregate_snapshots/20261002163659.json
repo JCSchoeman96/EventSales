@@ -74,6 +74,42 @@
     },
     {
       "allow_nil?": false,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "dimension_kind",
+      "type": "text"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "woo_product_id",
+      "type": "bigint"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "woo_variation_id",
+      "type": "bigint"
+    },
+    {
+      "allow_nil?": false,
       "default": "0",
       "generated?": false,
       "precision": null,
@@ -237,7 +273,7 @@
           "global": null,
           "strategy": null
         },
-        "name": "analytics_event_period_aggregate_snapshots_event_id_fkey",
+        "name": "analytics_event_dimension_period_aggregate_snapshots_event_id_fkey",
         "on_delete": "delete",
         "on_update": "update",
         "primary_key?": true,
@@ -248,17 +284,91 @@
       "size": null,
       "source": "event_id",
       "type": "uuid"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": {
+        "deferrable": false,
+        "destination_attribute": "id",
+        "destination_attribute_default": null,
+        "destination_attribute_generated": null,
+        "index?": false,
+        "index_where": null,
+        "match_tenant?": false,
+        "match_type": null,
+        "match_with": null,
+        "multitenancy": {
+          "attribute": null,
+          "global": null,
+          "strategy": null
+        },
+        "name": "analytics_event_dimension_period_aggregate_snapshots_ticket_type_id_fkey",
+        "on_delete": "restrict",
+        "on_update": "update",
+        "primary_key?": true,
+        "schema": "public",
+        "table": "catalog_ticket_types"
+      },
+      "scale": null,
+      "size": null,
+      "source": "ticket_type_id",
+      "type": "uuid"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": {
+        "deferrable": false,
+        "destination_attribute": "id",
+        "destination_attribute_default": null,
+        "destination_attribute_generated": null,
+        "index?": false,
+        "index_where": null,
+        "match_tenant?": false,
+        "match_type": null,
+        "match_with": null,
+        "multitenancy": {
+          "attribute": null,
+          "global": null,
+          "strategy": null
+        },
+        "name": "analytics_event_dimension_period_aggregate_snapshots_source_system_id_fkey",
+        "on_delete": "restrict",
+        "on_update": "update",
+        "primary_key?": true,
+        "schema": "public",
+        "table": "catalog_source_systems"
+      },
+      "scale": null,
+      "size": null,
+      "source": "source_system_id",
+      "type": "uuid"
     }
   ],
   "base_filter": null,
   "check_constraints": [
     {
       "attribute": [
+        "coverage_identity"
+      ],
+      "base_filter": null,
+      "check": "char_length(coverage_identity) > 0",
+      "name": "analytics_dim_period_coverage_identity_check"
+    },
+    {
+      "attribute": [
         "bucket_timezone"
       ],
       "base_filter": null,
       "check": "(\n  (bucket_kind = 'utc_hour' AND bucket_timezone = 'UTC')\n  OR\n  (bucket_kind = 'johannesburg_day' AND bucket_timezone = 'Africa/Johannesburg')\n)\n",
-      "name": "analytics_event_period_bucket_timezone_check"
+      "name": "analytics_dim_period_bucket_timezone_check"
     },
     {
       "attribute": [
@@ -266,7 +376,7 @@
       ],
       "base_filter": null,
       "check": "bucket_start_utc < bucket_end_utc",
-      "name": "analytics_event_period_bucket_bounds_check"
+      "name": "analytics_dim_period_bucket_bounds_check"
     },
     {
       "attribute": [
@@ -274,7 +384,7 @@
       ],
       "base_filter": null,
       "check": "projection_state IN ('current', 'stale', 'refresh_pending', 'rebuilding', 'unavailable')",
-      "name": "analytics_event_period_projection_state_check"
+      "name": "analytics_dim_period_projection_state_check"
     },
     {
       "attribute": [
@@ -282,7 +392,15 @@
       ],
       "base_filter": null,
       "check": "semantic_version >= 1",
-      "name": "analytics_event_period_semantic_version_check"
+      "name": "analytics_dim_period_semantic_version_check"
+    },
+    {
+      "attribute": [
+        "dimension_kind"
+      ],
+      "base_filter": null,
+      "check": "(\n  (dimension_kind = 'ticket_type'\n   AND ticket_type_id IS NOT NULL\n   AND source_system_id IS NULL\n   AND woo_product_id IS NULL\n   AND woo_variation_id IS NULL)\n  OR\n  (dimension_kind = 'source_product'\n   AND ticket_type_id IS NULL\n   AND source_system_id IS NOT NULL\n   AND woo_product_id IS NOT NULL\n   AND woo_variation_id IS NULL)\n  OR\n  (dimension_kind = 'source_variation'\n   AND ticket_type_id IS NULL\n   AND source_system_id IS NOT NULL\n   AND woo_product_id IS NOT NULL\n   AND woo_variation_id IS NOT NULL)\n)\n",
+      "name": "analytics_dim_period_grain_shape_check"
     },
     {
       "attribute": [
@@ -290,7 +408,7 @@
       ],
       "base_filter": null,
       "check": "gross_ticket_quantity >= 0",
-      "name": "analytics_event_period_gross_quantity_check"
+      "name": "analytics_dim_period_gross_quantity_check"
     },
     {
       "attribute": [
@@ -298,7 +416,7 @@
       ],
       "base_filter": null,
       "check": "gross_ticket_value >= 0",
-      "name": "analytics_event_period_gross_value_check"
+      "name": "analytics_dim_period_gross_value_check"
     },
     {
       "attribute": [
@@ -306,7 +424,7 @@
       ],
       "base_filter": null,
       "check": "refund_ticket_quantity >= 0",
-      "name": "analytics_event_period_refund_quantity_check"
+      "name": "analytics_dim_period_refund_quantity_check"
     },
     {
       "attribute": [
@@ -314,7 +432,23 @@
       ],
       "base_filter": null,
       "check": "refund_ticket_value >= 0",
-      "name": "analytics_event_period_refund_value_check"
+      "name": "analytics_dim_period_refund_value_check"
+    },
+    {
+      "attribute": [
+        "woo_product_id"
+      ],
+      "base_filter": null,
+      "check": "woo_product_id IS NULL OR woo_product_id > 0",
+      "name": "analytics_dim_period_woo_product_id_check"
+    },
+    {
+      "attribute": [
+        "woo_variation_id"
+      ],
+      "base_filter": null,
+      "check": "woo_variation_id IS NULL OR woo_variation_id > 0",
+      "name": "analytics_dim_period_woo_variation_id_check"
     }
   ],
   "create_table_options": null,
@@ -327,7 +461,8 @@
         "currency",
         "bucket_kind",
         "bucket_start_utc",
-        "bucket_end_utc"
+        "bucket_end_utc",
+        "ticket_type_id"
       ],
       "fields": [
         {
@@ -349,23 +484,138 @@
         {
           "type": "atom",
           "value": "bucket_end_utc"
+        },
+        {
+          "type": "atom",
+          "value": "ticket_type_id"
         }
       ],
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "analytics_event_period_aggregate_snapshots_identity_idx",
+      "name": "analytics_dim_period_ticket_type_uidx",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
       "unique": true,
       "using": null,
-      "where": null
+      "where": "dimension_kind = 'ticket_type'"
+    },
+    {
+      "all_tenants?": false,
+      "concurrently": false,
+      "error_fields": [
+        "event_id",
+        "currency",
+        "bucket_kind",
+        "bucket_start_utc",
+        "bucket_end_utc",
+        "source_system_id",
+        "woo_product_id"
+      ],
+      "fields": [
+        {
+          "type": "atom",
+          "value": "event_id"
+        },
+        {
+          "type": "atom",
+          "value": "currency"
+        },
+        {
+          "type": "atom",
+          "value": "bucket_kind"
+        },
+        {
+          "type": "atom",
+          "value": "bucket_start_utc"
+        },
+        {
+          "type": "atom",
+          "value": "bucket_end_utc"
+        },
+        {
+          "type": "atom",
+          "value": "source_system_id"
+        },
+        {
+          "type": "atom",
+          "value": "woo_product_id"
+        }
+      ],
+      "include": null,
+      "include_base_filter?": true,
+      "message": null,
+      "name": "analytics_dim_period_source_product_uidx",
+      "nulls_distinct": true,
+      "prefix": null,
+      "table": null,
+      "unique": true,
+      "using": null,
+      "where": "dimension_kind = 'source_product'"
+    },
+    {
+      "all_tenants?": false,
+      "concurrently": false,
+      "error_fields": [
+        "event_id",
+        "currency",
+        "bucket_kind",
+        "bucket_start_utc",
+        "bucket_end_utc",
+        "source_system_id",
+        "woo_product_id",
+        "woo_variation_id"
+      ],
+      "fields": [
+        {
+          "type": "atom",
+          "value": "event_id"
+        },
+        {
+          "type": "atom",
+          "value": "currency"
+        },
+        {
+          "type": "atom",
+          "value": "bucket_kind"
+        },
+        {
+          "type": "atom",
+          "value": "bucket_start_utc"
+        },
+        {
+          "type": "atom",
+          "value": "bucket_end_utc"
+        },
+        {
+          "type": "atom",
+          "value": "source_system_id"
+        },
+        {
+          "type": "atom",
+          "value": "woo_product_id"
+        },
+        {
+          "type": "atom",
+          "value": "woo_variation_id"
+        }
+      ],
+      "include": null,
+      "include_base_filter?": true,
+      "message": null,
+      "name": "analytics_dim_period_source_variation_uidx",
+      "nulls_distinct": true,
+      "prefix": null,
+      "table": null,
+      "unique": true,
+      "using": null,
+      "where": "dimension_kind = 'source_variation'"
     }
   ],
   "custom_statements": [],
   "has_create_action": true,
-  "hash": "FE3E5A379E0D832430D41B244E1C022833A929A77EA65E53EAAF0C9A832516DE",
+  "hash": "AD969363503EB2B3D6D476F59B13302E72E3C69B198BB751EE2E90EBB57547FD",
   "identities": [],
   "multitenancy": {
     "attribute": null,
@@ -374,5 +624,5 @@
   },
   "repo": "Elixir.EventSales.Repo",
   "schema": null,
-  "table": "analytics_event_period_aggregate_snapshots"
+  "table": "analytics_event_dimension_period_aggregate_snapshots"
 }

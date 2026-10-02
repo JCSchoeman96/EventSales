@@ -21,30 +21,6 @@
       "references": null,
       "scale": null,
       "size": null,
-      "source": "contribution_kind",
-      "type": "text"
-    },
-    {
-      "allow_nil?": false,
-      "default": "nil",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": null,
-      "scale": null,
-      "size": null,
-      "source": "source_contribution_id",
-      "type": "uuid"
-    },
-    {
-      "allow_nil?": false,
-      "default": "nil",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": null,
-      "scale": null,
-      "size": null,
       "source": "currency",
       "type": "text"
     },
@@ -57,7 +33,19 @@
       "references": null,
       "scale": null,
       "size": null,
-      "source": "effective_at",
+      "source": "bucket_kind",
+      "type": "text"
+    },
+    {
+      "allow_nil?": false,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "bucket_start_utc",
       "type": "utc_datetime_usec"
     },
     {
@@ -69,11 +57,11 @@
       "references": null,
       "scale": null,
       "size": null,
-      "source": "woo_product_id",
-      "type": "bigint"
+      "source": "bucket_end_utc",
+      "type": "utc_datetime_usec"
     },
     {
-      "allow_nil?": true,
+      "allow_nil?": false,
       "default": "nil",
       "generated?": false,
       "precision": null,
@@ -81,8 +69,8 @@
       "references": null,
       "scale": null,
       "size": null,
-      "source": "woo_variation_id",
-      "type": "bigint"
+      "source": "bucket_timezone",
+      "type": "text"
     },
     {
       "allow_nil?": false,
@@ -177,6 +165,18 @@
       "references": null,
       "scale": null,
       "size": null,
+      "source": "projection_state",
+      "type": "text"
+    },
+    {
+      "allow_nil?": false,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
       "source": "refreshed_at",
       "type": "utc_datetime_usec"
     },
@@ -237,7 +237,7 @@
           "global": null,
           "strategy": null
         },
-        "name": "analytics_contribution_facts_event_id_fkey",
+        "name": "analytics_event_period_aggregate_snapshots_event_id_fkey",
         "on_delete": "delete",
         "on_update": "update",
         "primary_key?": true,
@@ -248,123 +248,41 @@
       "size": null,
       "source": "event_id",
       "type": "uuid"
-    },
-    {
-      "allow_nil?": false,
-      "default": "nil",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": {
-        "deferrable": false,
-        "destination_attribute": "id",
-        "destination_attribute_default": null,
-        "destination_attribute_generated": null,
-        "index?": false,
-        "index_where": null,
-        "match_tenant?": false,
-        "match_type": null,
-        "match_with": null,
-        "multitenancy": {
-          "attribute": null,
-          "global": null,
-          "strategy": null
-        },
-        "name": "analytics_contribution_facts_ticket_type_id_fkey",
-        "on_delete": "restrict",
-        "on_update": "update",
-        "primary_key?": true,
-        "schema": "public",
-        "table": "catalog_ticket_types"
-      },
-      "scale": null,
-      "size": null,
-      "source": "ticket_type_id",
-      "type": "uuid"
-    },
-    {
-      "allow_nil?": false,
-      "default": "nil",
-      "generated?": false,
-      "precision": null,
-      "primary_key?": false,
-      "references": {
-        "deferrable": false,
-        "destination_attribute": "id",
-        "destination_attribute_default": null,
-        "destination_attribute_generated": null,
-        "index?": false,
-        "index_where": null,
-        "match_tenant?": false,
-        "match_type": null,
-        "match_with": null,
-        "multitenancy": {
-          "attribute": null,
-          "global": null,
-          "strategy": null
-        },
-        "name": "analytics_contribution_facts_source_system_id_fkey",
-        "on_delete": "restrict",
-        "on_update": "update",
-        "primary_key?": true,
-        "schema": "public",
-        "table": "catalog_source_systems"
-      },
-      "scale": null,
-      "size": null,
-      "source": "source_system_id",
-      "type": "uuid"
     }
   ],
   "base_filter": null,
   "check_constraints": [
     {
       "attribute": [
-        "gross_ticket_quantity"
+        "coverage_identity"
       ],
       "base_filter": null,
-      "check": "gross_ticket_quantity >= 0",
-      "name": "analytics_contribution_facts_gross_quantity_check"
+      "check": "char_length(coverage_identity) > 0",
+      "name": "analytics_event_period_coverage_identity_check"
     },
     {
       "attribute": [
-        "gross_ticket_value"
+        "bucket_timezone"
       ],
       "base_filter": null,
-      "check": "gross_ticket_value >= 0",
-      "name": "analytics_contribution_facts_gross_value_check"
+      "check": "(\n  (bucket_kind = 'utc_hour' AND bucket_timezone = 'UTC')\n  OR\n  (bucket_kind = 'johannesburg_day' AND bucket_timezone = 'Africa/Johannesburg')\n)\n",
+      "name": "analytics_event_period_bucket_timezone_check"
     },
     {
       "attribute": [
-        "refund_ticket_quantity"
+        "bucket_end_utc"
       ],
       "base_filter": null,
-      "check": "refund_ticket_quantity >= 0",
-      "name": "analytics_contribution_facts_refund_quantity_check"
+      "check": "bucket_start_utc < bucket_end_utc",
+      "name": "analytics_event_period_bucket_bounds_check"
     },
     {
       "attribute": [
-        "refund_ticket_value"
+        "projection_state"
       ],
       "base_filter": null,
-      "check": "refund_ticket_value >= 0",
-      "name": "analytics_contribution_facts_refund_value_check"
-    },
-    {
-      "attribute": [
-        "woo_product_id"
-      ],
-      "base_filter": null,
-      "check": "woo_product_id > 0",
-      "name": "analytics_contribution_facts_woo_product_id_check"
-    },
-    {
-      "attribute": [
-        "woo_variation_id"
-      ],
-      "base_filter": null,
-      "check": "woo_variation_id IS NULL OR woo_variation_id > 0",
-      "name": "analytics_contribution_facts_woo_variation_id_check"
+      "check": "projection_state IN ('current', 'stale', 'refresh_pending', 'rebuilding', 'unavailable')",
+      "name": "analytics_event_period_projection_state_check"
     },
     {
       "attribute": [
@@ -372,15 +290,39 @@
       ],
       "base_filter": null,
       "check": "semantic_version >= 1",
-      "name": "analytics_contribution_facts_semantic_version_check"
+      "name": "analytics_event_period_semantic_version_check"
     },
     {
       "attribute": [
-        "contribution_kind"
+        "gross_ticket_quantity"
       ],
       "base_filter": null,
-      "check": "(\n  (contribution_kind = 'sale'\n   AND gross_ticket_quantity > 0\n   AND gross_ticket_value >= 0\n   AND refund_ticket_quantity = 0\n   AND refund_ticket_value = 0)\n  OR\n  (contribution_kind = 'refund'\n   AND gross_ticket_quantity = 0\n   AND gross_ticket_value = 0\n   AND refund_ticket_quantity >= 0\n   AND refund_ticket_value >= 0\n   AND (refund_ticket_quantity > 0 OR refund_ticket_value > 0))\n)\n",
-      "name": "analytics_contribution_facts_kind_shape_check"
+      "check": "gross_ticket_quantity >= 0",
+      "name": "analytics_event_period_gross_quantity_check"
+    },
+    {
+      "attribute": [
+        "gross_ticket_value"
+      ],
+      "base_filter": null,
+      "check": "gross_ticket_value >= 0",
+      "name": "analytics_event_period_gross_value_check"
+    },
+    {
+      "attribute": [
+        "refund_ticket_quantity"
+      ],
+      "base_filter": null,
+      "check": "refund_ticket_quantity >= 0",
+      "name": "analytics_event_period_refund_quantity_check"
+    },
+    {
+      "attribute": [
+        "refund_ticket_value"
+      ],
+      "base_filter": null,
+      "check": "refund_ticket_value >= 0",
+      "name": "analytics_event_period_refund_value_check"
     }
   ],
   "create_table_options": null,
@@ -389,23 +331,38 @@
       "all_tenants?": false,
       "concurrently": false,
       "error_fields": [
-        "contribution_kind",
-        "source_contribution_id"
+        "event_id",
+        "currency",
+        "bucket_kind",
+        "bucket_start_utc",
+        "bucket_end_utc"
       ],
       "fields": [
         {
           "type": "atom",
-          "value": "contribution_kind"
+          "value": "event_id"
         },
         {
           "type": "atom",
-          "value": "source_contribution_id"
+          "value": "currency"
+        },
+        {
+          "type": "atom",
+          "value": "bucket_kind"
+        },
+        {
+          "type": "atom",
+          "value": "bucket_start_utc"
+        },
+        {
+          "type": "atom",
+          "value": "bucket_end_utc"
         }
       ],
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "analytics_contribution_facts_source_identity_uidx",
+      "name": "analytics_event_period_aggregate_snapshots_identity_idx",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -416,7 +373,7 @@
   ],
   "custom_statements": [],
   "has_create_action": true,
-  "hash": "32E102F276EDC992311FB4F032E198F80BE06507FF7ECA398DF2F946B446C89F",
+  "hash": "FE3E5A379E0D832430D41B244E1C022833A929A77EA65E53EAAF0C9A832516DE",
   "identities": [],
   "multitenancy": {
     "attribute": null,
@@ -425,5 +382,5 @@
   },
   "repo": "Elixir.EventSales.Repo",
   "schema": null,
-  "table": "analytics_contribution_facts"
+  "table": "analytics_event_period_aggregate_snapshots"
 }

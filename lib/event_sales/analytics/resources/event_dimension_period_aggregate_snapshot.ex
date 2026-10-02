@@ -100,6 +100,10 @@ defmodule EventSales.Analytics.Resources.EventDimensionPeriodAggregateSnapshot d
     end
 
     check_constraints do
+      check_constraint :coverage_identity,
+        name: "analytics_dim_period_coverage_identity_check",
+        check: "char_length(coverage_identity) > 0"
+
       check_constraint :bucket_timezone,
         name: "analytics_dim_period_bucket_timezone_check",
         check: @bucket_timezone_check
@@ -305,6 +309,7 @@ defmodule EventSales.Analytics.Resources.EventDimensionPeriodAggregateSnapshot d
 
     attribute :coverage_identity, :string do
       allow_nil? false
+      constraints min_length: 1
       public? true
     end
 

@@ -11,6 +11,7 @@ defmodule EventSales.Analytics.AnalyticsContributionFactTest do
 
   @source_identity_index "analytics_contribution_facts_source_identity_uidx"
   @primitive_shape_constraint "analytics_contribution_facts_kind_shape_check"
+  @coverage_identity_constraint "analytics_contribution_facts_coverage_identity_check"
   @primitive_constraints %{
     gross_ticket_quantity: "analytics_contribution_facts_gross_quantity_check",
     gross_ticket_value: "analytics_contribution_facts_gross_value_check",
@@ -95,6 +96,20 @@ defmodule EventSales.Analytics.AnalyticsContributionFactTest do
 
     assert fact.refund_ticket_quantity == 0
     assert Decimal.equal?(fact.refund_ticket_value, Decimal.new("25.50"))
+  end
+
+  test "empty coverage identity fails through Ash", %{
+    event_a: event,
+    ticket_a: ticket,
+    source_a: source
+  } do
+    assert {:error, _} =
+             create_fact(%{
+               event_id: event.id,
+               ticket_type_id: ticket.id,
+               source_system_id: source.id,
+               coverage_identity: ""
+             })
   end
 
   test "same kind and source UUID cannot be inserted twice", %{
@@ -266,6 +281,20 @@ defmodule EventSales.Analytics.AnalyticsContributionFactTest do
 
     assert {:error, %Postgrex.Error{postgres: %{constraint: @primitive_shape_constraint}}} =
              insert_raw_fact(attrs)
+  end
+
+  test "postgres check rejects an empty coverage identity", %{
+    event_a: event,
+    ticket_a: ticket,
+    source_a: source
+  } do
+    assert {:error, %Postgrex.Error{postgres: %{constraint: @coverage_identity_constraint}}} =
+             insert_raw_fact(%{
+               event_id: event.id,
+               ticket_type_id: ticket.id,
+               source_system_id: source.id,
+               coverage_identity: ""
+             })
   end
 
   test "postgres checks reject negative primitives and non-positive product IDs", %{
