@@ -251,23 +251,26 @@ defmodule EventSales.Analytics.MetricRules do
   """
   @spec classify_comparison_state(map()) :: comparison_state()
   def classify_comparison_state(%{} = input) do
-    current_readiness = Map.fetch!(input, :current_readiness)
-    comparison_readiness = Map.fetch!(input, :comparison_readiness)
-    comparable? = Map.fetch!(input, :comparable)
-    comparison_grain_zero_activity? = Map.fetch!(input, :comparison_grain_zero_activity)
+    case readiness_state(input) do
+      nil -> metric_comparison_state(input)
+      state -> state
+    end
+  end
+
+  defp readiness_state(%{current_readiness: :not_ready}), do: :current_missing
+
+  defp readiness_state(%{comparison_readiness: :not_ready}), do: :comparison_missing
+
+  defp readiness_state(%{comparable: false}), do: :not_comparable
+
+  defp readiness_state(_input), do: nil
+
+  defp metric_comparison_state(%{} = input) do
     current_metric = Map.fetch!(input, :current_metric)
     comparison_metric = Map.fetch!(input, :comparison_metric)
+    comparison_grain_zero_activity? = Map.fetch!(input, :comparison_grain_zero_activity)
 
     cond do
-      current_readiness != :ready ->
-        :current_missing
-
-      comparison_readiness != :ready ->
-        :comparison_missing
-
-      not comparable? ->
-        :not_comparable
-
       Decimal.equal?(current_metric, @zero) and Decimal.equal?(comparison_metric, @zero) ->
         :flat_zero
 
