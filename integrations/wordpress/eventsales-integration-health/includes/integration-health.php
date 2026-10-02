@@ -91,6 +91,26 @@ final class EventSales_Integration_Health_Plugins
 
         return is_string($path) ? $path : '';
     }
+
+    public static function catalog_producer_active(): bool
+    {
+        $basename = self::CATALOG_BASENAME;
+
+        return self::installed($basename)
+            && self::active($basename)
+            && class_exists('EventSales_Tickera_Catalog_Feed');
+    }
+
+    public static function non_empty_defined_constant(string $constant_name): bool
+    {
+        if (!defined($constant_name)) {
+            return false;
+        }
+
+        $value = constant($constant_name);
+
+        return is_scalar($value) && trim((string) $value) !== '';
+    }
 }
 
 final class EventSales_Integration_Health_Dependencies
@@ -153,7 +173,24 @@ final class EventSales_Integration_Health_Catalog
             return self::report($basename, true, true, EventSales_Integration_Health_States::MISCONFIGURED, $auth);
         }
 
+        if (!self::contract_identity_available()) {
+            return self::report(
+                $basename,
+                true,
+                true,
+                EventSales_Integration_Health_States::DEPENDENCY_UNAVAILABLE,
+                $auth
+            );
+        }
+
         return self::report($basename, true, true, EventSales_Integration_Health_States::READY, $auth);
+    }
+
+    public static function contract_identity_available(): bool
+    {
+        return EventSales_Integration_Health_Plugins::non_empty_defined_constant('EVENTSALES_TICKERA_CATALOG_SCHEMA_VERSION')
+            && EventSales_Integration_Health_Plugins::non_empty_defined_constant('EVENTSALES_TICKERA_CATALOG_CANONICAL_CONTRACT_VERSION')
+            && EventSales_Integration_Health_Plugins::non_empty_defined_constant('EVENTSALES_TICKERA_CATALOG_PRODUCER_VERSION');
     }
 
     public static function authentication_configured(): bool
@@ -210,18 +247,23 @@ final class EventSales_Integration_Health_Catalog_Change_Sender
      */
     public static function evaluate(): array
     {
+        $basename = EventSales_Integration_Health_Plugins::CATALOG_BASENAME;
+        $installed = EventSales_Integration_Health_Plugins::installed($basename);
+        $producer_active = EventSales_Integration_Health_Plugins::catalog_producer_active();
+
+        if (!$installed) {
+            return self::report(false, false, false, false, false, false, false, EventSales_Integration_Health_States::ABSENT);
+        }
+
+        if (!$producer_active) {
+            return self::report(true, false, false, false, false, false, false, EventSales_Integration_Health_States::INACTIVE);
+        }
+
         $enabled = defined('EVENTSALES_CATALOG_CHANGE_SENDER_ENABLED')
             && EVENTSALES_CATALOG_CHANGE_SENDER_ENABLED;
 
         if (!$enabled) {
-            return [
-                'enabled' => false,
-                'endpoint_configured' => false,
-                'key_id_configured' => false,
-                'secret_configured' => false,
-                'scheduler_available' => self::scheduler_available(),
-                'status' => EventSales_Integration_Health_States::DISABLED,
-            ];
+            return self::report(true, true, false, false, false, false, self::scheduler_available(), EventSales_Integration_Health_States::DISABLED);
         }
 
         $endpoint = self::non_empty_constant('EVENTSALES_CATALOG_CHANGE_ENDPOINT');
@@ -236,12 +278,30 @@ final class EventSales_Integration_Health_Catalog_Change_Sender
             $status = EventSales_Integration_Health_States::DEPENDENCY_UNAVAILABLE;
         }
 
+        return self::report(true, true, true, $endpoint, $key_id, $secret, $scheduler, $status);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function report(
+        bool $catalog_installed,
+        bool $catalog_active,
+        bool $enabled,
+        bool $endpoint_configured,
+        bool $key_id_configured,
+        bool $secret_configured,
+        bool $scheduler_available,
+        string $status
+    ): array {
         return [
-            'enabled' => true,
-            'endpoint_configured' => $endpoint,
-            'key_id_configured' => $key_id,
-            'secret_configured' => $secret,
-            'scheduler_available' => $scheduler,
+            'catalog_installed' => $catalog_installed,
+            'catalog_active' => $catalog_active,
+            'enabled' => $enabled,
+            'endpoint_configured' => $endpoint_configured,
+            'key_id_configured' => $key_id_configured,
+            'secret_configured' => $secret_configured,
+            'scheduler_available' => $scheduler_available,
             'status' => $status,
         ];
     }
@@ -309,7 +369,23 @@ final class EventSales_Integration_Health_Order_Index
             );
         }
 
+        if (!self::schema_version_available()) {
+            return self::report(
+                $basename,
+                true,
+                true,
+                EventSales_Integration_Health_States::DEPENDENCY_UNAVAILABLE,
+                $auth,
+                $storage
+            );
+        }
+
         return self::report($basename, true, true, EventSales_Integration_Health_States::READY, $auth, $storage);
+    }
+
+    public static function schema_version_available(): bool
+    {
+        return EventSales_Integration_Health_Plugins::non_empty_defined_constant('EVENTSALES_WOO_ORDER_INDEX_SCHEMA_VERSION');
     }
 
     public static function authentication_configured(): bool
@@ -517,6 +593,11 @@ final class EventSales_Integration_Health_Snapshot
 
 final class EventSales_Integration_Health_Site_Health
 {
+    public const TEST_CATALOG_FEED = 'eventsales_catalog_feed';
+    public const TEST_CATALOG_CHANGE_SENDER = 'eventsales_catalog_change_sender';
+    public const TEST_ORDER_INDEX_FEED = 'eventsales_order_index_feed';
+    public const TEST_ORDER_LINE_IDENTITY = 'eventsales_order_line_identity';
+
     public static function register_hooks(): void
     {
         add_filter('site_status_tests', [self::class, 'register_tests']);
@@ -557,6 +638,7 @@ final class EventSales_Integration_Health_Site_Health
         $report = EventSales_Integration_Health_Catalog::evaluate();
 
         return self::result_from_report(
+            self::TEST_CATALOG_FEED,
             __('EventSales Tickera catalog feed', 'eventsales-integration-health'),
             (string) $report['status'],
             self::catalog_description($report)
@@ -571,6 +653,7 @@ final class EventSales_Integration_Health_Site_Health
         $report = EventSales_Integration_Health_Catalog_Change_Sender::evaluate();
 
         return self::result_from_report(
+            self::TEST_CATALOG_CHANGE_SENDER,
             __('EventSales catalogue-change sender', 'eventsales-integration-health'),
             (string) $report['status'],
             self::sender_description($report)
@@ -585,6 +668,7 @@ final class EventSales_Integration_Health_Site_Health
         $report = EventSales_Integration_Health_Order_Index::evaluate();
 
         return self::result_from_report(
+            self::TEST_ORDER_INDEX_FEED,
             __('EventSales Woo order index feed', 'eventsales-integration-health'),
             (string) $report['status'],
             self::order_index_description($report)
@@ -599,6 +683,7 @@ final class EventSales_Integration_Health_Site_Health
         $report = EventSales_Integration_Health_Order_Line_Identity::evaluate();
 
         return self::result_from_report(
+            self::TEST_ORDER_LINE_IDENTITY,
             __('EventSales Woo order line identity', 'eventsales-integration-health'),
             (string) $report['status'],
             self::order_line_description($report)
@@ -657,8 +742,9 @@ final class EventSales_Integration_Health_Site_Health
     private static function sender_description(array $report): string
     {
         return sprintf(
-            'Status %s. Enabled: %s. Endpoint configured: %s. Key configured: %s. Secret configured: %s. Scheduler: %s.',
+            'Status %s. Catalog active: %s. Enabled: %s. Endpoint configured: %s. Key configured: %s. Secret configured: %s. Scheduler: %s.',
             $report['status'],
+            EventSales_Integration_Health_Snapshot::format_debug_value($report['catalog_active'] ?? false),
             EventSales_Integration_Health_Snapshot::format_debug_value($report['enabled']),
             EventSales_Integration_Health_Snapshot::format_debug_value($report['endpoint_configured']),
             EventSales_Integration_Health_Snapshot::format_debug_value($report['key_id_configured']),
@@ -697,13 +783,18 @@ final class EventSales_Integration_Health_Site_Health
     /**
      * @return array<string, mixed>
      */
-    private static function result_from_report(string $label, string $status, string $description): array
+    private static function result_from_report(string $test_id, string $label, string $status, string $description): array
     {
         return [
             'label' => $label,
             'status' => EventSales_Integration_Health_Snapshot::site_health_status_for_component($status),
+            'badge' => [
+                'label' => __('EventSales', 'eventsales-integration-health'),
+                'color' => 'blue',
+            ],
             'description' => $description,
             'actions' => '',
+            'test' => $test_id,
         ];
     }
 }

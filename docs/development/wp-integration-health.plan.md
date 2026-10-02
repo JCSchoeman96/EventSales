@@ -2,7 +2,7 @@
 
 **Plan ID:** wp-integration-health
 
-**Plan version:** v1
+**Plan version:** v2
 
 **Status:** active
 
@@ -12,11 +12,12 @@
 
 **Last updated:** 2026-10-02
 
-**Change summary (v1):** Initial reconnaissance and locked health semantics.
+**Change summary (v2):** Fail-closed contract identity, sender depends on active catalog producer, full Site Health result shape.
 
 ### Revision log
 
 - `v1` — reconnaissance complete; health states, guards, and implementation paths locked.
+- `v2` — READY requires non-empty contract constants; sender lifecycle tied to catalog producer; Site Health callbacks return `badge` and `test`.
 
 ## Goal
 
@@ -107,16 +108,19 @@ Observational only; no durable writes.
 | ABSENT | not installed |
 | INACTIVE | installed, not active / class not loaded |
 | MISCONFIGURED | active, `authentication_configured` false |
-| READY | active, constants present, auth configured |
+| DEPENDENCY_UNAVAILABLE | active, auth ok, any contract constant missing or empty |
+| READY | active, auth configured, all three contract constants non-empty |
 
 ### Catalogue-change sender
 
 | Status | Guard |
 |--------|-------|
-| DISABLED | `EVENTSALES_CATALOG_CHANGE_SENDER_ENABLED` not defined or false |
-| MISCONFIGURED | enabled, any of endpoint/key/secret booleans false |
-| DEPENDENCY_UNAVAILABLE | enabled, config complete, scheduler booleans false |
-| READY | enabled, config complete, scheduler available |
+| ABSENT | catalog producer not installed |
+| INACTIVE | catalog installed but not active/loaded |
+| DISABLED | catalog active/loaded and sender flag false |
+| MISCONFIGURED | catalog active, sender enabled, endpoint/key/secret incomplete |
+| DEPENDENCY_UNAVAILABLE | catalog active, sender enabled and configured, scheduler unavailable |
+| READY | catalog active, sender enabled and configured, scheduler available |
 
 ### Order index feed
 
@@ -125,8 +129,8 @@ Observational only; no durable writes.
 | ABSENT | not installed |
 | INACTIVE | installed, not active |
 | MISCONFIGURED | active, auth incomplete |
-| DEPENDENCY_UNAVAILABLE | active, auth ok, manifest tables missing |
-| READY | active, auth ok, tables present |
+| DEPENDENCY_UNAVAILABLE | active, auth ok, tables missing or schema constant missing/empty |
+| READY | active, auth ok, tables present, schema constant non-empty |
 
 ### Order line identity
 

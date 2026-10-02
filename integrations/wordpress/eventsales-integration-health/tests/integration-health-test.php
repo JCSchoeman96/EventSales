@@ -141,6 +141,18 @@ final class T
             self::ok($label . ' lacks ' . $needle, strpos($haystack, $needle) === false);
         }
     }
+
+    /** @param array<string, mixed> $result */
+    public static function site_health_result_shape(string $label, array $result, string $expected_test_id): void
+    {
+        self::ok($label . ' has label', isset($result['label']) && is_string($result['label']));
+        self::ok($label . ' has status', isset($result['status']) && is_string($result['status']));
+        self::ok($label . ' has badge.label', isset($result['badge']['label']) && is_string($result['badge']['label']));
+        self::ok($label . ' has badge.color', isset($result['badge']['color']) && is_string($result['badge']['color']));
+        self::ok($label . ' has description', isset($result['description']) && is_string($result['description']));
+        self::ok($label . ' has actions', array_key_exists('actions', $result));
+        self::same($label . ' test id', $expected_test_id, $result['test'] ?? null);
+    }
 }
 
 function eventsales_reset_test_state(): void
@@ -222,6 +234,47 @@ function eventsales_load_order_line_producer(): void
     }
 }
 
+function eventsales_catalog_bootstrap_php(): string
+{
+    $plugin_dir = WP_PLUGIN_DIR;
+
+    return "\$GLOBALS['plugin_registry']['" . EventSales_Integration_Health_Plugins::CATALOG_BASENAME . "'] = ['Version' => '0.1.0'];\n"
+        . "\$GLOBALS['active_plugins'][] = '" . EventSales_Integration_Health_Plugins::CATALOG_BASENAME . "';\n"
+        . "if (!function_exists('add_action')) { function add_action(...\$args) { return true; } }\n"
+        . 'require ' . var_export($plugin_dir . '/eventsales-tickera-catalog-feed/eventsales-tickera-catalog-feed.php', true) . ";\n";
+}
+
+function eventsales_run_isolated_probe(string $body, string $expect_status, string $label): void
+{
+    $probe = "<?php\n"
+        . "define('ABSPATH', __DIR__);\n"
+        . 'define(\'WP_PLUGIN_DIR\', ' . var_export(WP_PLUGIN_DIR, true) . ");\n"
+        . "\$GLOBALS['options'] = [];\n"
+        . "\$GLOBALS['active_plugins'] = [];\n"
+        . "\$GLOBALS['plugin_registry'] = [];\n"
+        . "\$GLOBALS['post_types'] = [];\n"
+        . "function get_option(\$name, \$default = false) {\n"
+        . "    return array_key_exists(\$name, \$GLOBALS['options']) ? \$GLOBALS['options'][\$name] : \$default;\n"
+        . "}\n"
+        . "function get_plugins() { return \$GLOBALS['plugin_registry']; }\n"
+        . "function is_plugin_active(\$basename) { return in_array(\$basename, \$GLOBALS['active_plugins'], true); }\n"
+        . "function post_type_exists(\$type) { return in_array(\$type, \$GLOBALS['post_types'], true); }\n"
+        . "function wp_json_encode(\$value) { return json_encode(\$value); }\n"
+        . "function __(\$text, \$domain = 'default') { return \$text; }\n"
+        . "if (!function_exists('add_action')) { function add_action(...\$args) { return true; } }\n"
+        . $body;
+
+    $path = sys_get_temp_dir() . '/eventsales-probe-' . bin2hex(random_bytes(4)) . '.php';
+    file_put_contents($path, $probe);
+    $output = [];
+    $exit = 0;
+    exec('php ' . escapeshellarg($path), $output, $exit);
+    @unlink($path);
+
+    T::ok($label . ' probe exit zero', $exit === 0);
+    T::same($label, $expect_status, $output[0] ?? '');
+}
+
 // --- State model ---
 
 eventsales_reset_test_state();
@@ -229,9 +282,11 @@ T::same('catalog absent', EventSales_Integration_Health_States::ABSENT, EventSal
 
 eventsales_register_plugin(EventSales_Integration_Health_Plugins::CATALOG_BASENAME, '0.1.0');
 T::same('catalog inactive', EventSales_Integration_Health_States::INACTIVE, EventSales_Integration_Health_Catalog::evaluate()['status']);
+T::same('sender inactive when catalog inactive', EventSales_Integration_Health_States::INACTIVE, EventSales_Integration_Health_Catalog_Change_Sender::evaluate()['status']);
 
 eventsales_activate(EventSales_Integration_Health_Plugins::CATALOG_BASENAME);
 eventsales_load_catalog_producer();
+T::same('sender disabled when catalog active', EventSales_Integration_Health_States::DISABLED, EventSales_Integration_Health_Catalog_Change_Sender::evaluate()['status']);
 T::same('catalog misconfigured without secret', EventSales_Integration_Health_States::MISCONFIGURED, EventSales_Integration_Health_Catalog::evaluate()['status']);
 
 $GLOBALS['options']['eventsales_tickera_catalog_secret'] = 'SUPER_SECRET_DO_NOT_RENDER';
@@ -246,53 +301,89 @@ T::same('catalog producer', '2026-08-07.1', EventSales_Integration_Health_Catalo
 
 // --- Sender (isolated PHP processes because sender constants cannot be undefined) ---
 
-T::same('sender disabled by default', EventSales_Integration_Health_States::DISABLED, EventSales_Integration_Health_Catalog_Change_Sender::evaluate()['status']);
+global $EVENTSALES_HEALTH_INCLUDES;
 
-function eventsales_run_sender_probe(string $expect_status): void
-{
-    global $EVENTSALES_HEALTH_INCLUDES;
+$sender_catalog = eventsales_catalog_bootstrap_php();
+$sender_tail = 'require ' . var_export($EVENTSALES_HEALTH_INCLUDES, true) . ";\n"
+    . "\$report = EventSales_Integration_Health_Catalog_Change_Sender::evaluate();\n"
+    . "fwrite(STDOUT, \$report['status']);\n";
 
-    $prefix = '';
-    if ($expect_status === EventSales_Integration_Health_States::MISCONFIGURED) {
-        $prefix = "define('EVENTSALES_CATALOG_CHANGE_SENDER_ENABLED', true);\n";
-    }
-    if ($expect_status === EventSales_Integration_Health_States::DEPENDENCY_UNAVAILABLE) {
-        $prefix = "define('EVENTSALES_CATALOG_CHANGE_SENDER_ENABLED', true);\n"
-            . "define('EVENTSALES_CATALOG_CHANGE_ENDPOINT', 'https://eventsales.example/webhooks/catalog-change/PATH_TOKEN_DO_NOT_RENDER');\n"
-            . "define('EVENTSALES_CATALOG_CHANGE_KEY_ID', 'key');\n"
-            . "define('EVENTSALES_CATALOG_CHANGE_SECRET', 'SUPER_SECRET_DO_NOT_RENDER');\n";
-    }
+eventsales_run_isolated_probe(
+    "define('EVENTSALES_CATALOG_CHANGE_SENDER_ENABLED', true);\n"
+    . "define('EVENTSALES_CATALOG_CHANGE_ENDPOINT', 'https://eventsales.example/hooks/PATH_TOKEN_DO_NOT_RENDER');\n"
+    . "define('EVENTSALES_CATALOG_CHANGE_KEY_ID', 'key');\n"
+    . "define('EVENTSALES_CATALOG_CHANGE_SECRET', 'SUPER_SECRET_DO_NOT_RENDER');\n"
+    . "function as_enqueue_async_action(...\$args) { return 1; }\n"
+    . "function as_schedule_single_action(...\$args) { return 1; }\n"
+    . $sender_tail,
+    EventSales_Integration_Health_States::ABSENT,
+    'sender enabled without catalog producer'
+);
 
-    $probe = "<?php\n"
-        . "define('ABSPATH', __DIR__);\n"
-        . "\$GLOBALS['options'] = [];\n"
-        . "\$GLOBALS['active_plugins'] = [];\n"
-        . "\$GLOBALS['plugin_registry'] = [];\n"
-        . "\$GLOBALS['post_types'] = [];\n"
-        . "function get_plugins() { return \$GLOBALS['plugin_registry']; }\n"
-        . "function is_plugin_active(\$basename) { return in_array(\$basename, \$GLOBALS['active_plugins'], true); }\n"
-        . "function post_type_exists(\$type) { return in_array(\$type, \$GLOBALS['post_types'], true); }\n"
-        . "function wp_json_encode(\$value) { return json_encode(\$value); }\n"
-        . "function __(\$text, \$domain = 'default') { return \$text; }\n"
-        . $prefix
-        . 'require ' . var_export($EVENTSALES_HEALTH_INCLUDES, true) . ";\n"
-        . "\$report = EventSales_Integration_Health_Catalog_Change_Sender::evaluate();\n"
-        . "fwrite(STDOUT, \$report['status']);\n";
+eventsales_run_isolated_probe(
+    "\$GLOBALS['plugin_registry']['" . EventSales_Integration_Health_Plugins::CATALOG_BASENAME . "'] = ['Version' => '0.1.0'];\n"
+    . "define('EVENTSALES_CATALOG_CHANGE_SENDER_ENABLED', true);\n"
+    . "define('EVENTSALES_CATALOG_CHANGE_ENDPOINT', 'https://eventsales.example/hooks/PATH_TOKEN_DO_NOT_RENDER');\n"
+    . "define('EVENTSALES_CATALOG_CHANGE_KEY_ID', 'key');\n"
+    . "define('EVENTSALES_CATALOG_CHANGE_SECRET', 'SUPER_SECRET_DO_NOT_RENDER');\n"
+    . "function as_enqueue_async_action(...\$args) { return 1; }\n"
+    . "function as_schedule_single_action(...\$args) { return 1; }\n"
+    . $sender_tail,
+    EventSales_Integration_Health_States::INACTIVE,
+    'sender enabled with inactive catalog producer'
+);
 
-    $path = sys_get_temp_dir() . '/eventsales-sender-probe-' . bin2hex(random_bytes(4)) . '.php';
-    file_put_contents($path, $probe);
+eventsales_run_isolated_probe(
+    $sender_catalog
+    . "define('EVENTSALES_CATALOG_CHANGE_SENDER_ENABLED', true);\n"
+    . $sender_tail,
+    EventSales_Integration_Health_States::MISCONFIGURED,
+    'sender misconfigured'
+);
 
-    $output = [];
-    $exit = 0;
-    exec('php ' . escapeshellarg($path), $output, $exit);
-    @unlink($path);
+eventsales_run_isolated_probe(
+    $sender_catalog
+    . "define('EVENTSALES_CATALOG_CHANGE_SENDER_ENABLED', true);\n"
+    . "define('EVENTSALES_CATALOG_CHANGE_ENDPOINT', 'https://eventsales.example/webhooks/catalog-change/PATH_TOKEN_DO_NOT_RENDER');\n"
+    . "define('EVENTSALES_CATALOG_CHANGE_KEY_ID', 'key');\n"
+    . "define('EVENTSALES_CATALOG_CHANGE_SECRET', 'SUPER_SECRET_DO_NOT_RENDER');\n"
+    . $sender_tail,
+    EventSales_Integration_Health_States::DEPENDENCY_UNAVAILABLE,
+    'sender missing scheduler'
+);
 
-    T::ok('sender probe exit zero for ' . $expect_status, $exit === 0);
-    T::same('sender status ' . $expect_status, $expect_status, $output[0] ?? '');
-}
+eventsales_run_isolated_probe(
+    "final class EventSales_Tickera_Catalog_Feed {}\n"
+    . "define('WP_PLUGIN_DIR', " . var_export(WP_PLUGIN_DIR, true) . ");\n"
+    . "\$GLOBALS['plugin_registry']['" . EventSales_Integration_Health_Plugins::CATALOG_BASENAME . "'] = ['Version' => '0.1.0'];\n"
+    . "\$GLOBALS['active_plugins'][] = '" . EventSales_Integration_Health_Plugins::CATALOG_BASENAME . "';\n"
+    . "\$GLOBALS['options']['eventsales_tickera_catalog_secret'] = 'local-secret';\n"
+    . 'require ' . var_export($EVENTSALES_HEALTH_INCLUDES, true) . ";\n"
+    . "fwrite(STDOUT, EventSales_Integration_Health_Catalog::evaluate()['status']);\n",
+    EventSales_Integration_Health_States::DEPENDENCY_UNAVAILABLE,
+    'catalog missing contract identity'
+);
 
-eventsales_run_sender_probe(EventSales_Integration_Health_States::MISCONFIGURED);
-eventsales_run_sender_probe(EventSales_Integration_Health_States::DEPENDENCY_UNAVAILABLE);
+eventsales_run_isolated_probe(
+    "final class EventSales_Woo_Order_Index_Feed {\n"
+    . "  public static function key_id_option_name(): string { return 'eventsales_woo_order_index_key_id'; }\n"
+    . "  public static function secret_option_name(): string { return 'eventsales_woo_order_index_secret'; }\n"
+    . "}\n"
+    . "define('WP_PLUGIN_DIR', " . var_export(WP_PLUGIN_DIR, true) . ");\n"
+    . "\$GLOBALS['plugin_registry']['" . EventSales_Integration_Health_Plugins::ORDER_INDEX_BASENAME . "'] = ['Version' => '0.2.0'];\n"
+    . "\$GLOBALS['active_plugins'][] = '" . EventSales_Integration_Health_Plugins::ORDER_INDEX_BASENAME . "';\n"
+    . "\$GLOBALS['options']['eventsales_woo_order_index_key_id'] = 'kid';\n"
+    . "\$GLOBALS['options']['eventsales_woo_order_index_secret'] = 'secret';\n"
+    . "\$GLOBALS['wpdb'] = new class {\n"
+    . "  public string \$prefix = 'wp_';\n"
+    . "  public function prepare(string \$query, ...\$args): string { return str_replace('%s', \"'\".(string)\$args[0].\"'\", \$query); }\n"
+    . "  public function get_var(string \$query) { preg_match(\"/SHOW TABLES LIKE '([^']+)'/\", \$query, \$m); return in_array(\$m[1], ['wp_eventsales_order_manifests','wp_eventsales_order_manifest_items'], true) ? \$m[1] : null; }\n"
+    . "};\n"
+    . 'require ' . var_export($EVENTSALES_HEALTH_INCLUDES, true) . ";\n"
+    . "fwrite(STDOUT, EventSales_Integration_Health_Order_Index::evaluate()['status']);\n",
+    EventSales_Integration_Health_States::DEPENDENCY_UNAVAILABLE,
+    'order index missing schema version'
+);
 
 // --- Order index ---
 
@@ -429,10 +520,19 @@ T::ok('health source avoids wc_get_order', strpos($health_source, 'wc_get_order'
 // --- Sender ready path (scheduler stubs loaded in subprocess) ---
 
 $sender_ready_script = "<?php\n"
+    . "define('ABSPATH', __DIR__);\n"
+    . 'define(\'WP_PLUGIN_DIR\', ' . var_export(WP_PLUGIN_DIR, true) . ");\n"
+    . "\$GLOBALS['options'] = [];\n"
+    . "\$GLOBALS['active_plugins'] = [];\n"
+    . "\$GLOBALS['plugin_registry'] = [];\n"
+    . "function get_plugins() { return \$GLOBALS['plugin_registry']; }\n"
+    . "function is_plugin_active(\$basename) { return in_array(\$basename, \$GLOBALS['active_plugins'], true); }\n"
+    . "function add_action(...\$args) { return true; }\n"
     . "function as_enqueue_async_action(...\$args) { return 1; }\n"
     . "function as_schedule_single_action(...\$args) { return 1; }\n"
     . "function wp_json_encode(\$value) { return json_encode(\$value); }\n"
     . "function __(\$text, \$domain = 'default') { return \$text; }\n"
+    . eventsales_catalog_bootstrap_php()
     . "define('EVENTSALES_CATALOG_CHANGE_SENDER_ENABLED', true);\n"
     . "define('EVENTSALES_CATALOG_CHANGE_ENDPOINT', 'https://example.test/hooks/token');\n"
     . "define('EVENTSALES_CATALOG_CHANGE_KEY_ID', 'kid');\n"
@@ -456,6 +556,35 @@ T::ok('sender ready with scheduler', $sender_exit === 0);
 eventsales_reset_test_state();
 eventsales_register_plugin(EventSales_Integration_Health_Plugins::ORDER_INDEX_BASENAME, '0.2.0');
 T::same('order index inactive', EventSales_Integration_Health_States::INACTIVE, EventSales_Integration_Health_Order_Index::evaluate()['status']);
+
+T::site_health_result_shape(
+    'catalog feed site health',
+    EventSales_Integration_Health_Site_Health::test_catalog_feed(),
+    EventSales_Integration_Health_Site_Health::TEST_CATALOG_FEED
+);
+T::site_health_result_shape(
+    'catalog sender site health',
+    EventSales_Integration_Health_Site_Health::test_catalog_change_sender(),
+    EventSales_Integration_Health_Site_Health::TEST_CATALOG_CHANGE_SENDER
+);
+T::site_health_result_shape(
+    'order index site health',
+    EventSales_Integration_Health_Site_Health::test_order_index_feed(),
+    EventSales_Integration_Health_Site_Health::TEST_ORDER_INDEX_FEED
+);
+T::site_health_result_shape(
+    'order line site health',
+    EventSales_Integration_Health_Site_Health::test_order_line_identity(),
+    EventSales_Integration_Health_Site_Health::TEST_ORDER_LINE_IDENTITY
+);
+
+$test_ids = [
+    EventSales_Integration_Health_Site_Health::test_catalog_feed()['test'],
+    EventSales_Integration_Health_Site_Health::test_catalog_change_sender()['test'],
+    EventSales_Integration_Health_Site_Health::test_order_index_feed()['test'],
+    EventSales_Integration_Health_Site_Health::test_order_line_identity()['test'],
+];
+T::same('site health test ids are unique', 4, count(array_unique($test_ids)));
 
 if (T::$failures !== []) {
     fwrite(STDERR, "FAILURES:\n- " . implode("\n- ", T::$failures) . "\n");
