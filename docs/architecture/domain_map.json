@@ -333,6 +333,18 @@
       {
         "docs_count": 0,
         "moduledoc?": true,
+        "name": "EventSales.Analytics.Resources.AnalyticsContributionFact",
+        "parse_error": null,
+        "path": "lib/event_sales/analytics/resources/analytics_contribution_fact.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
         "name": "EventSales.Analytics.Resources.DailySalesAggregateSnapshot",
         "parse_error": null,
         "path": "lib/event_sales/analytics/resources/daily_sales_aggregate_snapshot.ex",
@@ -360,6 +372,30 @@
         "name": "EventSales.Analytics.Resources.EventDimensionAggregateSnapshot",
         "parse_error": null,
         "path": "lib/event_sales/analytics/resources/event_dimension_aggregate_snapshot.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Analytics.Resources.EventDimensionPeriodAggregateSnapshot",
+        "parse_error": null,
+        "path": "lib/event_sales/analytics/resources/event_dimension_period_aggregate_snapshot.ex",
+        "public_funs": [],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Analytics.Resources.EventPeriodAggregateSnapshot",
+        "parse_error": null,
+        "path": "lib/event_sales/analytics/resources/event_period_aggregate_snapshot.ex",
         "public_funs": [],
         "specs?": false,
         "uses": [
@@ -1030,6 +1066,48 @@
       {
         "docs_count": 0,
         "moduledoc?": true,
+        "name": "EventSales.Analytics.Validations.ValidateContributionFactIdentity",
+        "parse_error": null,
+        "path": "lib/event_sales/analytics/validations/validate_contribution_fact_identity.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "init"
+          },
+          {
+            "arity": 3,
+            "name": "validate"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource.Validation"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Analytics.Validations.ValidateContributionFactShape",
+        "parse_error": null,
+        "path": "lib/event_sales/analytics/validations/validate_contribution_fact_shape.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "init"
+          },
+          {
+            "arity": 3,
+            "name": "validate"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource.Validation"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
         "name": "EventSales.Analytics.Validations.ValidateDimensionAggregateGrain",
         "parse_error": null,
         "path": "lib/event_sales/analytics/validations/validate_dimension_aggregate_grain.ex",
@@ -1075,6 +1153,27 @@
         "name": "EventSales.Analytics.Validations.ValidateDimensionTicketTypeEvent",
         "parse_error": null,
         "path": "lib/event_sales/analytics/validations/validate_dimension_ticket_type_event.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "init"
+          },
+          {
+            "arity": 3,
+            "name": "validate"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Ash.Resource.Validation"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
+        "name": "EventSales.Analytics.Validations.ValidatePeriodBucketContract",
+        "parse_error": null,
+        "path": "lib/event_sales/analytics/validations/validate_period_bucket_contract.ex",
         "public_funs": [
           {
             "arity": 1,

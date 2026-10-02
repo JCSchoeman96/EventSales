@@ -1,0 +1,242 @@
+defmodule EventSales.Analytics.Resources.EventPeriodAggregateSnapshot do
+  @moduledoc """
+  Durable event and currency aggregate for one fixed reporting bucket.
+
+  A current row, including an all-zero row, is the coverage envelope for that
+  complete bucket. Absence or a non-current projection state is not zero.
+  """
+
+  use Ash.Resource,
+    data_layer: AshPostgres.DataLayer,
+    domain: EventSales.Analytics
+
+  alias EventSales.Analytics.Validations.ValidatePeriodBucketContract
+
+  @bucket_kinds [:utc_hour, :johannesburg_day]
+  @projection_states [:current, :stale, :refresh_pending, :rebuilding, :unavailable]
+
+  @bucket_timezone_check """
+  (
+    (bucket_kind = 'utc_hour' AND bucket_timezone = 'UTC')
+    OR
+    (bucket_kind = 'johannesburg_day' AND bucket_timezone = 'Africa/Johannesburg')
+  )
+  """
+
+  postgres do
+    table "analytics_event_period_aggregate_snapshots"
+    repo EventSales.Repo
+
+    references do
+      reference :event, on_delete: :delete, on_update: :update
+    end
+
+    custom_indexes do
+      index [:event_id, :currency, :bucket_kind, :bucket_start_utc, :bucket_end_utc],
+        unique: true,
+        name: "analytics_event_period_aggregate_snapshots_identity_idx"
+    end
+
+    check_constraints do
+      check_constraint :coverage_identity,
+        name: "analytics_event_period_coverage_identity_check",
+        check: "char_length(coverage_identity) > 0"
+
+      check_constraint :bucket_timezone,
+        name: "analytics_event_period_bucket_timezone_check",
+        check: @bucket_timezone_check
+
+      check_constraint :bucket_end_utc,
+        name: "analytics_event_period_bucket_bounds_check",
+        check: "bucket_start_utc < bucket_end_utc"
+
+      check_constraint :projection_state,
+        name: "analytics_event_period_projection_state_check",
+        check:
+          "projection_state IN ('current', 'stale', 'refresh_pending', 'rebuilding', 'unavailable')"
+
+      check_constraint :semantic_version,
+        name: "analytics_event_period_semantic_version_check",
+        check: "semantic_version >= 1"
+
+      check_constraint :gross_ticket_quantity,
+        name: "analytics_event_period_gross_quantity_check",
+        check: "gross_ticket_quantity >= 0"
+
+      check_constraint :gross_ticket_value,
+        name: "analytics_event_period_gross_value_check",
+        check: "gross_ticket_value >= 0"
+
+      check_constraint :refund_ticket_quantity,
+        name: "analytics_event_period_refund_quantity_check",
+        check: "refund_ticket_quantity >= 0"
+
+      check_constraint :refund_ticket_value,
+        name: "analytics_event_period_refund_value_check",
+        check: "refund_ticket_value >= 0"
+    end
+  end
+
+  actions do
+    defaults [:read]
+
+    create :create_snapshot do
+      accept [
+        :event_id,
+        :currency,
+        :bucket_kind,
+        :bucket_start_utc,
+        :bucket_end_utc,
+        :bucket_timezone,
+        :gross_ticket_quantity,
+        :gross_ticket_value,
+        :refund_ticket_quantity,
+        :refund_ticket_value,
+        :generation_id,
+        :semantic_version,
+        :coverage_identity,
+        :projection_state,
+        :refreshed_at,
+        :source_watermark_at
+      ]
+
+      validate present([
+                 :event_id,
+                 :currency,
+                 :bucket_kind,
+                 :bucket_start_utc,
+                 :bucket_end_utc,
+                 :bucket_timezone,
+                 :generation_id,
+                 :semantic_version,
+                 :coverage_identity,
+                 :projection_state,
+                 :refreshed_at
+               ])
+
+      validate {ValidatePeriodBucketContract, []}
+    end
+
+    update :update_snapshot do
+      accept [
+        :gross_ticket_quantity,
+        :gross_ticket_value,
+        :refund_ticket_quantity,
+        :refund_ticket_value,
+        :generation_id,
+        :semantic_version,
+        :coverage_identity,
+        :projection_state,
+        :refreshed_at,
+        :source_watermark_at
+      ]
+
+      require_atomic? false
+    end
+
+    destroy :destroy_snapshot do
+      primary? true
+      accept []
+    end
+  end
+
+  attributes do
+    uuid_primary_key :id
+
+    attribute :currency, :string do
+      allow_nil? false
+      public? true
+    end
+
+    attribute :bucket_kind, :atom do
+      allow_nil? false
+      constraints one_of: @bucket_kinds
+      public? true
+    end
+
+    attribute :bucket_start_utc, :utc_datetime_usec do
+      allow_nil? false
+      public? true
+    end
+
+    attribute :bucket_end_utc, :utc_datetime_usec do
+      allow_nil? false
+      public? true
+    end
+
+    attribute :bucket_timezone, :string do
+      allow_nil? false
+      public? true
+    end
+
+    attribute :gross_ticket_quantity, :integer do
+      allow_nil? false
+      default 0
+      constraints min: 0
+      public? true
+    end
+
+    attribute :gross_ticket_value, :decimal do
+      allow_nil? false
+      default Decimal.new("0")
+      constraints min: 0
+      public? true
+    end
+
+    attribute :refund_ticket_quantity, :integer do
+      allow_nil? false
+      default 0
+      constraints min: 0
+      public? true
+    end
+
+    attribute :refund_ticket_value, :decimal do
+      allow_nil? false
+      default Decimal.new("0")
+      constraints min: 0
+      public? true
+    end
+
+    attribute :generation_id, :uuid do
+      allow_nil? false
+      public? true
+    end
+
+    attribute :semantic_version, :integer do
+      allow_nil? false
+      constraints min: 1
+      public? true
+    end
+
+    attribute :coverage_identity, :string do
+      allow_nil? false
+      constraints min_length: 1
+      public? true
+    end
+
+    attribute :projection_state, :atom do
+      allow_nil? false
+      constraints one_of: @projection_states
+      public? true
+    end
+
+    attribute :refreshed_at, :utc_datetime_usec do
+      allow_nil? false
+      public? true
+    end
+
+    attribute :source_watermark_at, :utc_datetime_usec do
+      public? true
+    end
+
+    create_timestamp :inserted_at
+    update_timestamp :updated_at
+  end
+
+  relationships do
+    belongs_to :event, EventSales.Catalog.Resources.Event do
+      allow_nil? false
+      public? true
+    end
+  end
+end
