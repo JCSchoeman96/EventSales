@@ -2,7 +2,7 @@
 
 **Plan ID:** wp-order-line-event-identity
 
-**Plan version:** v2
+**Plan version:** v3
 
 **Status:** active
 
@@ -11,12 +11,13 @@
 **Authority:** This file is the active contract for WP-SOURCE-01.
 
 **Last updated:** 2026-10-02
-**Change summary (v2):** Review correction: Woo `WC_Meta_Data` extraction, fail-closed `_event_name` multiplicity, variation parent guard.
+**Change summary (v3):** `_tc_is_ticket` uses all physical rows (at least one exact `yes`), matching catalogue SQL membership.
 
 ### Revision log
 
 - `v1` — initial plan locked to `_event_name` → `tc_events` authority and checkout/new-order-item hooks.
 - `v2` — merge-review fixes for real Woo meta objects, corrupt `_event_name` rows, and variation/product consistency.
+- `v3` — `_tc_is_ticket` reads all physical values; ticket when any row is exact `yes`.
 
 ## Goal
 

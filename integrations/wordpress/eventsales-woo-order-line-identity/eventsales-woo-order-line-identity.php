@@ -68,7 +68,7 @@ final class EventSales_Woo_Order_Line_Identity
         $resolution = EventSales_Tickera_Event_Resolver::resolve_for_product_line(
             $product_id,
             $variation_id,
-            static fn (int $post_id): string => (string) get_post_meta($post_id, EventSales_Tickera_Event_Resolver::META_TICKET_FLAG, true),
+            static fn (int $post_id): array => self::ticket_flag_values($post_id),
             static fn (int $post_id): array => self::event_reference_values($post_id),
             static fn (int $post_id) => get_post($post_id)
         );
@@ -125,6 +125,16 @@ final class EventSales_Woo_Order_Line_Identity
         }
 
         return $entry;
+    }
+
+    /**
+     * @return array<int, mixed>
+     */
+    private static function ticket_flag_values(int $post_id): array
+    {
+        $values = get_post_meta($post_id, EventSales_Tickera_Event_Resolver::META_TICKET_FLAG, false);
+
+        return is_array($values) ? $values : [];
     }
 
     /**

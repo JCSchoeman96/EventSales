@@ -131,10 +131,21 @@ function resolve_line(int $product_id, int $variation_id = 0): array
     return Resolver::resolve_for_product_line(
         $product_id,
         $variation_id,
-        static fn (int $post_id): string => (string) get_post_meta($post_id, Resolver::META_TICKET_FLAG, true),
+        static fn (int $post_id): array => get_post_meta($post_id, Resolver::META_TICKET_FLAG, false),
         static fn (int $post_id): array => get_post_meta($post_id, Resolver::META_EVENT_REFERENCE, false),
         static fn (int $post_id) => get_post($post_id)
     );
+}
+
+function ticket_product_state(array $flags): string
+{
+    seed_event(500001);
+    seed_product(500100, [
+        Resolver::META_TICKET_FLAG => $flags,
+        Resolver::META_EVENT_REFERENCE => '500001',
+    ]);
+
+    return resolve_line(500100, 0)['state'];
 }
 
 final class Mock_Order_Item_Product
@@ -239,6 +250,20 @@ final class Mock_Order_Item_Product
         return $values;
     }
 }
+
+// --- _tc_is_ticket physical multiplicity (catalogue semantic) ---
+T::ok('single yes is ticket product', Resolver::is_ticket_product(['yes']));
+T::ok('duplicate yes is ticket product', Resolver::is_ticket_product(['yes', 'yes']));
+T::ok('no then yes is ticket product', Resolver::is_ticket_product(['no', 'yes']));
+T::ok('yes then no is ticket product', Resolver::is_ticket_product(['yes', 'no']));
+T::ok('no only is not ticket product', !Resolver::is_ticket_product(['no']));
+T::ok('empty is not ticket product', !Resolver::is_ticket_product([]));
+T::same('resolver applies single yes', Resolver::STATE_RESOLVED, ticket_product_state(['yes']));
+T::same('resolver applies duplicate yes', Resolver::STATE_RESOLVED, ticket_product_state(['yes', 'yes']));
+T::same('resolver applies mixed no yes', Resolver::STATE_RESOLVED, ticket_product_state(['no', 'yes']));
+T::same('resolver applies mixed yes no', Resolver::STATE_RESOLVED, ticket_product_state(['yes', 'no']));
+T::same('resolver rejects no only', Resolver::STATE_NOT_APPLICABLE, ticket_product_state(['no']));
+T::same('resolver rejects empty ticket flag', Resolver::STATE_NOT_APPLICABLE, ticket_product_state([]));
 
 // --- resolver basics ---
 seed_event(100342);

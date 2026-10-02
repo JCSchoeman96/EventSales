@@ -33,7 +33,8 @@ final class EventSales_Tickera_Event_Resolver
     public const OUTCOME_CONFLICT_EXISTING = 'CONFLICT_EXISTING';
 
     /**
-     * @param callable(int, string): array<int, string> $event_reference_reader
+     * @param callable(int): array<int, mixed> $ticket_flag_reader
+     * @param callable(int): array<int, string> $event_reference_reader
      * @param callable(int): ?object $post_loader
      */
     public static function resolve_for_product_line(
@@ -53,8 +54,7 @@ final class EventSales_Tickera_Event_Resolver
             return self::resolution(self::STATE_UNRESOLVED, null);
         }
 
-        $ticket_flag = $ticket_flag_reader($authority_product_id);
-        if ($ticket_flag !== 'yes') {
+        if (!self::is_ticket_product($ticket_flag_reader($authority_product_id))) {
             return self::resolution(self::STATE_NOT_APPLICABLE, null);
         }
 
@@ -182,6 +182,23 @@ final class EventSales_Tickera_Event_Resolver
     public static function normalize_existing_event_ids($values): array
     {
         return self::analyze_existing_event_meta($values)['valid_ids'];
+    }
+
+    /**
+     * Catalogue semantic: at least one physical `_tc_is_ticket` row equals exact `yes`.
+     *
+     * @param array<int, mixed> $ticket_flag_values
+     */
+    public static function is_ticket_product(array $ticket_flag_values): bool
+    {
+        foreach ($ticket_flag_values as $value) {
+            $raw = self::preserve_raw_meta_value($value);
+            if ($raw === 'yes') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public static function variation_line_integrity(int $product_id, int $variation_id, callable $post_loader): bool
