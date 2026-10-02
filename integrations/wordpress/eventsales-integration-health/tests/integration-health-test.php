@@ -354,7 +354,6 @@ eventsales_run_isolated_probe(
 
 eventsales_run_isolated_probe(
     "final class EventSales_Tickera_Catalog_Feed {}\n"
-    . "define('WP_PLUGIN_DIR', " . var_export(WP_PLUGIN_DIR, true) . ");\n"
     . "\$GLOBALS['plugin_registry']['" . EventSales_Integration_Health_Plugins::CATALOG_BASENAME . "'] = ['Version' => '0.1.0'];\n"
     . "\$GLOBALS['active_plugins'][] = '" . EventSales_Integration_Health_Plugins::CATALOG_BASENAME . "';\n"
     . "\$GLOBALS['options']['eventsales_tickera_catalog_secret'] = 'local-secret';\n"
@@ -369,7 +368,6 @@ eventsales_run_isolated_probe(
     . "  public static function key_id_option_name(): string { return 'eventsales_woo_order_index_key_id'; }\n"
     . "  public static function secret_option_name(): string { return 'eventsales_woo_order_index_secret'; }\n"
     . "}\n"
-    . "define('WP_PLUGIN_DIR', " . var_export(WP_PLUGIN_DIR, true) . ");\n"
     . "\$GLOBALS['plugin_registry']['" . EventSales_Integration_Health_Plugins::ORDER_INDEX_BASENAME . "'] = ['Version' => '0.2.0'];\n"
     . "\$GLOBALS['active_plugins'][] = '" . EventSales_Integration_Health_Plugins::ORDER_INDEX_BASENAME . "';\n"
     . "\$GLOBALS['options']['eventsales_woo_order_index_key_id'] = 'kid';\n"
