@@ -34,6 +34,39 @@ defmodule EventSales.Analytics.MetricRules do
         }
 
   @zero Decimal.new("0")
+  @one_hundred Decimal.new("100")
+
+  @comparison_scope_keys [
+    :currency,
+    :grain,
+    :period_scope,
+    :semantic_version,
+    :coverage_identity
+  ]
+
+  @type comparison_readiness :: :ready | :not_ready
+
+  @type comparison_state ::
+          :available
+          | :flat_zero
+          | :new_activity
+          | :baseline_zero
+          | :current_missing
+          | :comparison_missing
+          | :not_comparable
+
+  @type comparison_projection_scope :: %{
+          required(:currency) => String.t(),
+          required(:grain) => term(),
+          required(:period_scope) => term(),
+          required(:semantic_version) => term(),
+          required(:coverage_identity) => term()
+        }
+
+  @type comparison_deltas :: %{
+          absolute_delta: Decimal.t() | nil,
+          percentage_delta: Decimal.t() | nil
+        }
 
   @additive_primitive_keys [
     :gross_ticket_quantity,
@@ -191,6 +224,125 @@ defmodule EventSales.Analytics.MetricRules do
          recognised_order_count: recognised_order_count
        })}
     end
+  end
+
+  @doc """
+  Returns true when two ready projection scopes share currency, grain, period scope,
+  semantic version, and compatible coverage contract identity.
+
+  `coverage_identity` is the versioned coverage completeness/readiness contract under which
+  both operands were established. It is not bucket bounds, `captured_now_utc`, `generation_id`,
+  or `refreshed_at`. Current and previous comparison periods intentionally cover different
+  timestamps; comparability requires compatible coverage semantics, not identical time ranges.
+  """
+  @spec projections_comparable?(comparison_projection_scope(), comparison_projection_scope()) ::
+          boolean()
+  def projections_comparable?(current_scope, comparison_scope)
+      when is_map(current_scope) and is_map(comparison_scope) do
+    Enum.all?(@comparison_scope_keys, fn key ->
+      Map.fetch!(current_scope, key) == Map.fetch!(comparison_scope, key)
+    end)
+  end
+
+  @doc """
+  Classifies a metric comparison using the locked M5-04 precedence (JC-310 Section 10.2).
+
+  Expects:
+
+  * `:current_readiness` and `:comparison_readiness` — `:ready` or `:not_ready`
+  * `:comparable` — whether ready projections can be compared (currency/grain/scope/coverage)
+  * `:comparison_grain_zero_activity` — confirmed complete zero activity on the comparison grain
+  * `:current_metric` and `:comparison_metric` — `Decimal` operands for the selected metric
+  """
+  @spec classify_comparison_state(map()) :: comparison_state()
+  def classify_comparison_state(%{} = input) do
+    case readiness_state(input) do
+      nil -> metric_comparison_state(input)
+      state -> state
+    end
+  end
+
+  defp readiness_state(%{current_readiness: :not_ready}), do: :current_missing
+
+  defp readiness_state(%{comparison_readiness: :not_ready}), do: :comparison_missing
+
+  defp readiness_state(%{comparable: false}), do: :not_comparable
+
+  defp readiness_state(_input), do: nil
+
+  defp metric_comparison_state(%{} = input) do
+    current_metric = Map.fetch!(input, :current_metric)
+    comparison_metric = Map.fetch!(input, :comparison_metric)
+    comparison_grain_zero_activity? = Map.fetch!(input, :comparison_grain_zero_activity)
+
+    cond do
+      Decimal.equal?(current_metric, @zero) and Decimal.equal?(comparison_metric, @zero) ->
+        :flat_zero
+
+      comparison_grain_zero_activity? and Decimal.compare(current_metric, @zero) == :gt ->
+        :new_activity
+
+      zero_comparison_denominator?(comparison_metric) ->
+        :baseline_zero
+
+      true ->
+        :available
+    end
+  end
+
+  @doc """
+  Derives absolute and percentage deltas for a classified comparison state.
+
+  Percentage change exists only for `:available` with a non-zero comparison denominator.
+  Never returns infinity, NaN, or a fabricated 100% placeholder.
+  """
+  @spec derive_comparison_deltas(comparison_state(), Decimal.t(), Decimal.t()) ::
+          comparison_deltas()
+  def derive_comparison_deltas(state, %Decimal{} = current_metric, %Decimal{} = comparison_metric) do
+    case state do
+      :current_missing ->
+        %{absolute_delta: nil, percentage_delta: nil}
+
+      :comparison_missing ->
+        %{absolute_delta: nil, percentage_delta: nil}
+
+      :not_comparable ->
+        %{absolute_delta: nil, percentage_delta: nil}
+
+      :flat_zero ->
+        %{absolute_delta: @zero, percentage_delta: nil}
+
+      :new_activity ->
+        %{
+          absolute_delta: Decimal.sub(current_metric, comparison_metric),
+          percentage_delta: nil
+        }
+
+      :baseline_zero ->
+        %{
+          absolute_delta: Decimal.sub(current_metric, comparison_metric),
+          percentage_delta: nil
+        }
+
+      :available ->
+        absolute = Decimal.sub(current_metric, comparison_metric)
+
+        percentage =
+          if zero_comparison_denominator?(comparison_metric) do
+            nil
+          else
+            comparison_metric
+            |> then(&Decimal.sub(current_metric, &1))
+            |> Decimal.div(comparison_metric)
+            |> Decimal.mult(@one_hundred)
+          end
+
+        %{absolute_delta: absolute, percentage_delta: percentage}
+    end
+  end
+
+  defp zero_comparison_denominator?(%Decimal{} = comparison_metric) do
+    Decimal.equal?(comparison_metric, @zero)
   end
 
   defp validate_currency(currency) when is_binary(currency) and byte_size(currency) > 0, do: :ok

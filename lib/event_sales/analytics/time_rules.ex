@@ -20,12 +20,41 @@ defmodule EventSales.Analytics.TimeRules do
     @enforce_keys [:start_utc, :end_utc]
     defstruct [:start_utc, :end_utc, :kind, :timezone]
 
-    @type kind :: :today | :yesterday | :custom | {:rolling_days, pos_integer()}
+    @type kind ::
+            :today
+            | :yesterday
+            | :custom
+            | {:rolling_days, pos_integer()}
+            | {:comparison, :today | :yesterday}
 
     @type t :: %__MODULE__{
             start_utc: DateTime.t(),
             end_utc: DateTime.t(),
             kind: kind() | nil,
+            timezone: String.t() | nil
+          }
+  end
+
+  defmodule ComparisonWindows do
+    @moduledoc """
+    Current and previous-equivalent management comparison windows for one captured `now`.
+
+    Distinct from canonical M1-07 `:today`, which remains a full Johannesburg civil day via
+    `today_bounds/2`.
+    """
+
+    @enforce_keys [:captured_now_utc, :request, :current, :previous]
+    defstruct [:captured_now_utc, :request, :current, :previous, :timezone]
+
+    @type rolling_comparison_days :: 7 | 30
+
+    @type request :: :today | :yesterday | {:rolling_days, rolling_comparison_days()}
+
+    @type t :: %__MODULE__{
+            captured_now_utc: DateTime.t(),
+            request: request(),
+            current: Period.t(),
+            previous: Period.t(),
             timezone: String.t() | nil
           }
   end
@@ -140,6 +169,89 @@ defmodule EventSales.Analytics.TimeRules do
   def last_30_days_bounds(%DateTime{} = now), do: rolling_bounds(30, now)
 
   @doc """
+  Derives current and previous-equivalent management comparison windows from one captured `now`.
+
+  Supported requests: `:today`, `:yesterday`, `{:rolling_days, 7}`, and `{:rolling_days, 30}`.
+  Custom comparison remains unsupported. The supplied anchor is authoritative; this function
+  never reads the system clock.
+  """
+  @spec comparison_windows(String.t(), DateTime.t(), ComparisonWindows.request()) ::
+          {:ok, ComparisonWindows.t()}
+          | {:error, :invalid_timezone | :unsupported_comparison_period}
+  def comparison_windows(timezone, %DateTime{} = now, :today) when is_binary(timezone) do
+    captured_now_utc = to_utc(now)
+
+    with {:ok, %Period{start_utc: start_utc} = _canonical_today} <-
+           today_bounds(timezone, now),
+         {:ok, local} <- shift_zone(now, timezone) do
+      elapsed_us = DateTime.diff(captured_now_utc, start_utc, :microsecond)
+      yesterday_date = Date.add(DateTime.to_date(local), -1)
+
+      with {:ok, previous} <-
+             comparison_civil_day_bounds(yesterday_date, timezone, elapsed_us, :today) do
+        current = %Period{
+          start_utc: start_utc,
+          end_utc: captured_now_utc,
+          kind: {:comparison, :today},
+          timezone: timezone
+        }
+
+        {:ok,
+         %ComparisonWindows{
+           captured_now_utc: captured_now_utc,
+           request: :today,
+           current: current,
+           previous: previous,
+           timezone: timezone
+         }}
+      end
+    end
+  end
+
+  def comparison_windows(timezone, %DateTime{} = now, :yesterday) when is_binary(timezone) do
+    captured_now_utc = to_utc(now)
+
+    with {:ok, local} <- shift_zone(now, timezone) do
+      yesterday_date = Date.add(DateTime.to_date(local), -1)
+      day_before = Date.add(yesterday_date, -1)
+
+      with {:ok, current} <-
+             civil_day_bounds(yesterday_date, timezone, {:comparison, :yesterday}),
+           {:ok, previous} <-
+             civil_day_bounds(day_before, timezone, {:comparison, :yesterday}) do
+        {:ok,
+         %ComparisonWindows{
+           captured_now_utc: captured_now_utc,
+           request: :yesterday,
+           current: current,
+           previous: previous,
+           timezone: timezone
+         }}
+      end
+    end
+  end
+
+  def comparison_windows(_timezone, %DateTime{} = now, {:rolling_days, days})
+      when days in [7, 30] do
+    captured_now_utc = to_utc(now)
+
+    with {:ok, current} <- rolling_bounds(days, now),
+         {:ok, previous} <- rolling_previous_bounds(days, captured_now_utc) do
+      {:ok,
+       %ComparisonWindows{
+         captured_now_utc: captured_now_utc,
+         request: {:rolling_days, days},
+         current: current,
+         previous: previous,
+         timezone: nil
+       }}
+    end
+  end
+
+  def comparison_windows(_timezone, _now, _request),
+    do: {:error, :unsupported_comparison_period}
+
+  @doc """
   Converts inclusive-local start and exclusive-local end civil instants to UTC `[start, end)`.
 
   Both `start_local` and `end_local` are interpreted in `timezone` via `NaiveDateTime`.
@@ -203,6 +315,37 @@ defmodule EventSales.Analytics.TimeRules do
   @spec freshness_classification(DateTime.t(), DateTime.t()) :: Freshness.classification()
   def freshness_classification(anchor, now) do
     classify_source_freshness(anchor, now).classification
+  end
+
+  defp comparison_civil_day_bounds(%Date{} = date, timezone, elapsed_us, comparison_kind) do
+    with {:ok, %Period{start_utc: start_utc}} <-
+           civil_day_bounds(date, timezone, {:comparison, comparison_kind}) do
+      end_utc = DateTime.add(start_utc, elapsed_us, :microsecond)
+
+      {:ok,
+       %Period{
+         start_utc: to_utc(start_utc),
+         end_utc: to_utc(end_utc),
+         kind: {:comparison, comparison_kind},
+         timezone: timezone
+       }}
+    end
+  end
+
+  defp rolling_previous_bounds(days, %DateTime{} = captured_now_utc)
+       when is_integer(days) and days > 0 do
+    with {:ok, %Period{start_utc: current_start}} <- rolling_bounds(days, captured_now_utc) do
+      previous_end = to_utc(current_start)
+      previous_start = DateTime.add(previous_end, -days * @day_seconds, :second)
+
+      {:ok,
+       %Period{
+         start_utc: to_utc(previous_start),
+         end_utc: previous_end,
+         kind: {:rolling_days, days},
+         timezone: nil
+       }}
+    end
   end
 
   defp civil_day_bounds(%Date{} = date, timezone, kind) do

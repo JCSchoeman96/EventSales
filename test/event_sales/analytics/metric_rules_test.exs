@@ -513,6 +513,178 @@ defmodule EventSales.Analytics.MetricRulesTest do
     end
   end
 
+  describe "comparison classification and deltas" do
+    test "both missing resolves to current_missing" do
+      state =
+        MetricRules.classify_comparison_state(%{
+          current_readiness: :not_ready,
+          comparison_readiness: :not_ready,
+          comparable: true,
+          comparison_grain_zero_activity: false,
+          current_metric: Decimal.new("10"),
+          comparison_metric: Decimal.new("5")
+        })
+
+      assert state == :current_missing
+    end
+
+    test "ready current with missing comparison resolves to comparison_missing" do
+      state =
+        MetricRules.classify_comparison_state(%{
+          current_readiness: :ready,
+          comparison_readiness: :not_ready,
+          comparable: true,
+          comparison_grain_zero_activity: false,
+          current_metric: Decimal.new("10"),
+          comparison_metric: Decimal.new("5")
+        })
+
+      assert state == :comparison_missing
+    end
+
+    test "ready incompatible scopes resolve to not_comparable" do
+      current_scope = scope("ZAR", :event)
+      comparison_scope = scope("USD", :event)
+
+      refute MetricRules.projections_comparable?(current_scope, comparison_scope)
+
+      state =
+        MetricRules.classify_comparison_state(%{
+          current_readiness: :ready,
+          comparison_readiness: :ready,
+          comparable: false,
+          comparison_grain_zero_activity: false,
+          current_metric: Decimal.new("10"),
+          comparison_metric: Decimal.new("5")
+        })
+
+      assert state == :not_comparable
+
+      assert MetricRules.derive_comparison_deltas(state, Decimal.new("10"), Decimal.new("5")) ==
+               %{absolute_delta: nil, percentage_delta: nil}
+    end
+
+    test "zero versus zero resolves to flat_zero before baseline_zero" do
+      state =
+        MetricRules.classify_comparison_state(%{
+          current_readiness: :ready,
+          comparison_readiness: :ready,
+          comparable: true,
+          comparison_grain_zero_activity: false,
+          current_metric: Decimal.new("0"),
+          comparison_metric: Decimal.new("0")
+        })
+
+      assert state == :flat_zero
+
+      assert MetricRules.derive_comparison_deltas(state, Decimal.new("0"), Decimal.new("0")) ==
+               %{absolute_delta: Decimal.new("0"), percentage_delta: nil}
+    end
+
+    test "positive current with confirmed zero comparison activity resolves to new_activity" do
+      state =
+        MetricRules.classify_comparison_state(%{
+          current_readiness: :ready,
+          comparison_readiness: :ready,
+          comparable: true,
+          comparison_grain_zero_activity: true,
+          current_metric: Decimal.new("25"),
+          comparison_metric: Decimal.new("0")
+        })
+
+      assert state == :new_activity
+
+      assert MetricRules.derive_comparison_deltas(state, Decimal.new("25"), Decimal.new("0")) ==
+               %{absolute_delta: Decimal.new("25"), percentage_delta: nil}
+    end
+
+    test "zero denominator that is not flat_zero or new_activity resolves to baseline_zero" do
+      state =
+        MetricRules.classify_comparison_state(%{
+          current_readiness: :ready,
+          comparison_readiness: :ready,
+          comparable: true,
+          comparison_grain_zero_activity: false,
+          current_metric: Decimal.new("10"),
+          comparison_metric: Decimal.new("0")
+        })
+
+      assert state == :baseline_zero
+    end
+
+    test "non-zero denominator resolves to available with decimal percentage arithmetic" do
+      current = Decimal.new("125")
+      comparison = Decimal.new("100")
+
+      state =
+        MetricRules.classify_comparison_state(%{
+          current_readiness: :ready,
+          comparison_readiness: :ready,
+          comparable: true,
+          comparison_grain_zero_activity: false,
+          current_metric: current,
+          comparison_metric: comparison
+        })
+
+      assert state == :available
+
+      assert MetricRules.derive_comparison_deltas(state, current, comparison) == %{
+               absolute_delta: Decimal.new("25"),
+               percentage_delta: Decimal.new("25.00")
+             }
+    end
+
+    test "negative net values remain legitimate and are not clamped" do
+      current = Decimal.new("-20")
+      comparison = Decimal.new("-50")
+
+      state =
+        MetricRules.classify_comparison_state(%{
+          current_readiness: :ready,
+          comparison_readiness: :ready,
+          comparable: true,
+          comparison_grain_zero_activity: false,
+          current_metric: current,
+          comparison_metric: comparison
+        })
+
+      assert state == :available
+
+      deltas = MetricRules.derive_comparison_deltas(state, current, comparison)
+      assert deltas.absolute_delta == Decimal.new("30")
+      assert Decimal.equal?(deltas.percentage_delta, Decimal.new("-60"))
+    end
+
+    test "not_comparable suppresses percentage evaluation" do
+      state = :not_comparable
+
+      assert MetricRules.derive_comparison_deltas(state, Decimal.new("10"), Decimal.new("0")) ==
+               %{absolute_delta: nil, percentage_delta: nil}
+    end
+
+    test "projections_comparable? requires compatible coverage contract, not identical time bounds" do
+      current_scope = scope("ZAR", :event, :m5_04_coverage_v1)
+      comparison_scope = scope("ZAR", :event, :m5_04_coverage_v1)
+
+      assert MetricRules.projections_comparable?(current_scope, comparison_scope)
+
+      incompatible_coverage =
+        Map.put(comparison_scope, :coverage_identity, :legacy_coverage_v0)
+
+      refute MetricRules.projections_comparable?(current_scope, incompatible_coverage)
+    end
+  end
+
+  defp scope(currency, grain, coverage_identity \\ :m5_04_coverage_v1) do
+    %{
+      currency: currency,
+      grain: grain,
+      period_scope: :event_currency_preset,
+      semantic_version: 1,
+      coverage_identity: coverage_identity
+    }
+  end
+
   defp order(status, attrs \\ %{}) do
     struct!(
       Order,
