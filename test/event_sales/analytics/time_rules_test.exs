@@ -2,7 +2,7 @@ defmodule EventSales.Analytics.TimeRulesTest do
   use ExUnit.Case, async: true
 
   alias EventSales.Analytics.{MetricRules, TimeRules}
-  alias EventSales.Analytics.TimeRules.{Freshness, Period}
+  alias EventSales.Analytics.TimeRules.{ComparisonWindows, Freshness, Period}
   alias EventSales.Sales.Resources.{Order, Refund}
 
   @johannesburg "Africa/Johannesburg"
@@ -169,6 +169,127 @@ defmodule EventSales.Analytics.TimeRulesTest do
       assert_period_etc_utc(rolling)
       assert DateTime.compare(rolling.end_utc, period.end_utc) == :eq
       assert DateTime.compare(rolling.start_utc, period.start_utc) == :eq
+    end
+  end
+
+  describe "comparison_windows/3" do
+    test "elapsed today current window runs from Johannesburg midnight through captured now" do
+      now = ~U[2026-05-17 10:00:00.000000Z]
+
+      assert {:ok, %ComparisonWindows{} = windows} =
+               TimeRules.comparison_windows(@johannesburg, now, :today)
+
+      assert windows.captured_now_utc == now
+      assert windows.current.start_utc == ~U[2026-05-16 22:00:00.000000Z]
+      assert windows.current.end_utc == now
+      assert windows.current.kind == {:comparison, :today}
+      refute windows.current.end_utc == windows.current.start_utc
+    end
+
+    test "elapsed today previous window uses the same Johannesburg civil-time offset yesterday" do
+      now = ~U[2026-05-17 10:00:00.000000Z]
+
+      assert {:ok, windows} = TimeRules.comparison_windows(@johannesburg, now, :today)
+
+      assert windows.previous.start_utc == ~U[2026-05-15 22:00:00.000000Z]
+      assert windows.previous.end_utc == ~U[2026-05-16 10:00:00.000000Z]
+      assert windows.previous.kind == {:comparison, :today}
+
+      assert DateTime.diff(windows.current.end_utc, windows.current.start_utc, :microsecond) ==
+               DateTime.diff(windows.previous.end_utc, windows.previous.start_utc, :microsecond)
+    end
+
+    test "canonical today_bounds/2 remains the full Johannesburg civil day" do
+      now = ~U[2026-05-17 10:00:00.000000Z]
+
+      assert {:ok, canonical} = TimeRules.today_bounds(@johannesburg, now)
+      assert {:ok, comparison} = TimeRules.comparison_windows(@johannesburg, now, :today)
+
+      assert canonical.end_utc == ~U[2026-05-17 22:00:00.000000Z]
+      assert comparison.current.end_utc == now
+      refute canonical.end_utc == comparison.current.end_utc
+    end
+
+    test "yesterday comparison uses full civil days for current and previous" do
+      now = ~U[2026-05-17 10:00:00.000000Z]
+
+      assert {:ok, windows} = TimeRules.comparison_windows(@johannesburg, now, :yesterday)
+      assert {:ok, canonical_yesterday} = TimeRules.yesterday_bounds(@johannesburg, now)
+
+      assert windows.current.start_utc == canonical_yesterday.start_utc
+      assert windows.current.end_utc == canonical_yesterday.end_utc
+      assert windows.previous.end_utc == windows.current.start_utc
+      assert windows.previous.start_utc == ~U[2026-05-14 22:00:00.000000Z]
+    end
+
+    test "rolling 7-day windows use exact durations and adjacency" do
+      now = ~U[2026-06-01 12:34:56.789012Z]
+
+      assert {:ok, windows} = TimeRules.comparison_windows(@johannesburg, now, {:rolling_days, 7})
+
+      assert windows.current.end_utc == now
+      assert windows.current.start_utc == ~U[2026-05-25 12:34:56.789012Z]
+      assert windows.previous.end_utc == windows.current.start_utc
+      assert windows.previous.start_utc == ~U[2026-05-18 12:34:56.789012Z]
+
+      seven_days_us = 7 * 24 * 60 * 60 * 1_000_000
+
+      assert DateTime.diff(windows.current.end_utc, windows.current.start_utc, :microsecond) ==
+               seven_days_us
+
+      assert DateTime.diff(windows.previous.end_utc, windows.previous.start_utc, :microsecond) ==
+               seven_days_us
+    end
+
+    test "rolling 30-day windows use exact durations and adjacency" do
+      now = ~U[2026-06-01 12:34:56.789012Z]
+
+      assert {:ok, windows} =
+               TimeRules.comparison_windows(@johannesburg, now, {:rolling_days, 30})
+
+      thirty_days_us = 30 * 24 * 60 * 60 * 1_000_000
+
+      assert DateTime.diff(windows.current.end_utc, windows.current.start_utc, :microsecond) ==
+               thirty_days_us
+
+      assert DateTime.diff(windows.previous.end_utc, windows.previous.start_utc, :microsecond) ==
+               thirty_days_us
+
+      assert windows.previous.end_utc == windows.current.start_utc
+    end
+
+    test "windows are half-open and preserve captured microsecond precision" do
+      now = ~U[2026-06-01 12:34:56.789012Z]
+
+      assert {:ok, windows} = TimeRules.comparison_windows(@johannesburg, now, {:rolling_days, 7})
+
+      refute TimeRules.period_contains?(windows.current, windows.current.end_utc)
+      assert TimeRules.period_contains?(windows.current, windows.current.start_utc)
+      assert windows.captured_now_utc.microsecond == {789_012, 6}
+    end
+
+    test "invalid timezone fails closed" do
+      now = ~U[2026-06-01 12:00:00.000000Z]
+
+      assert TimeRules.comparison_windows("Invalid/Timezone", now, :today) ==
+               {:error, :invalid_timezone}
+    end
+
+    test "custom comparison is rejected" do
+      now = ~U[2026-06-01 12:00:00.000000Z]
+
+      assert TimeRules.comparison_windows(@johannesburg, now, :custom) ==
+               {:error, :unsupported_comparison_period}
+
+      assert TimeRules.comparison_windows(@johannesburg, now, {:rolling_days, 14}) ==
+               {:error, :unsupported_comparison_period}
+    end
+
+    test "same captured now is deterministic" do
+      now = ~U[2026-06-01 12:00:00.000000Z]
+
+      assert TimeRules.comparison_windows(@johannesburg, now, :today) ==
+               TimeRules.comparison_windows(@johannesburg, now, :today)
     end
   end
 

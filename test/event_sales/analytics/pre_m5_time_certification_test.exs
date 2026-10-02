@@ -155,6 +155,19 @@ defmodule EventSales.Analytics.PreM5TimeCertificationTest do
              {:error, :unsupported_period_kind}
   end
 
+  test "comparison_windows preserve canonical today bounds and one captured now anchor" do
+    assert {:ok, canonical_today} = TimeRules.today_bounds(@johannesburg, @report_now)
+
+    assert {:ok, windows} =
+             TimeRules.comparison_windows(@johannesburg, @report_now, :today)
+
+    assert windows.captured_now_utc == @report_now
+    assert windows.current.start_utc == canonical_today.start_utc
+    assert windows.current.end_utc == @report_now
+    assert canonical_today.end_utc == ~U[2026-06-02 22:00:00.000000Z]
+    refute windows.current.end_utc == canonical_today.end_utc
+  end
+
   defp create_order!(source, attrs) do
     now = DateTime.utc_now()
 
