@@ -1,10 +1,10 @@
-# M5-04A period comparisons planning and conformance audit
+# M5-04 period comparisons plan (M5-04A audit + JC-310 owner authority)
 
-> For agentic workers: this document is a planning and conformance artifact. It does not authorize production changes. Use the repository's implementation and review workflow for each approved M5-04B+ slice.
+> For agentic workers: this document is a planning and conformance artifact. M5-04A did not authorize production changes. JC-310 records locked owner comparison semantics only. M5-04B+ implementation starts only after this authority revision is reviewed and merged to `main`.
 
 **Goal:** Define a canonical, currency-safe period comparison read model for event and required dimensional grains without promoting the legacy daily-v1 snapshot or inventing comparison semantics.
 
-**Architecture:** Keep `TimeRules` and the certified `EventAggregator.financial_summaries_for_event_period/2` as the current semantic and event-level query authorities. The recommended target is a new additive Postgres time-bucket projection family for event and dimensional rows, with Net, ATV, comparison deltas, and percentages derived by a projection-only reader. The target remains implementation-blocked until the older comparison planning contract is reconciled with current M1-07 and M5-03 authority.
+**Architecture:** Keep `TimeRules` and the certified `EventAggregator.financial_summaries_for_event_period/2` as the current semantic and event-level query authorities. The recommended target is a new additive Postgres time-bucket projection family for event and dimensional rows, with Net, ATV, comparison deltas, and percentages derived by a projection-only reader. Previous-equivalent comparison semantics are locked by owner decision (JC-310). Exact rolling-edge bucket resolution remains an M5-04B design gate.
 
 **Tech stack:** Ash 3.x, AshPostgres, PostgreSQL 18, Ecto query plans, Oban `RefreshSnapshotWorker`, Phoenix PubSub, ETS `DashboardCache`, optional existing Redis snapshot adapter, and the existing `Policies`, `FinancialPrimitives`, `MetricRules`, `TimeRules`, `EventAggregator`, and `DimensionAggregator` modules.
 
@@ -23,7 +23,7 @@ git rev-parse origin/main^{tree}
 git status --short
 ```
 
-Observed values:
+Observed values at M5-04A preflight (historical):
 
 ```text
 BASE_SHA  = 388938a8c443ecfca3fa63476ecbcfc452b456a9
@@ -32,17 +32,31 @@ WORKTREE  = clean at preflight
 BRANCH    = docs/jc-309-m5-04a-period-comparisons
 ```
 
-`origin/main` matched the accepted merge of M5-03F / PR #282. If `origin/main` moves before any implementation slice starts, that slice must stop and re-verify its own accepted base.
+JC-310 authority recording preflight (re-authorized base after unrelated `origin/main` movement):
+
+```text
+REAUTHORIZED_BASE_SHA  = 89c19bacbb48b29b0e372d31fa544f316de029e8
+REAUTHORIZED_BASE_TREE = 388c89c524fb8324120b8e83e932ee054ef42584
+PREVIOUS_BASE_SHA      = 959e1b307bc801a4049a55195c94b8ff892e8b77
+BASE_MOVEMENT_CLASS    = NON-CONFLICTING / UNRELATED TO JC-310 (PR #284)
+WORKTREE               = clean at preflight
+BRANCH                 = docs/jc-310-m5-04-comparison-owner-authority
+```
+
+If `origin/main` moves before any implementation slice starts, that slice must stop and re-verify its own accepted base.
 
 ### 1.2 Linear and scope
 
 ```text
-LINEAR = JC-309
-TITLE  = EventSales M5-04A - Period comparisons planning and conformance audit
-SCOPE  = documentation and repository conformance only
+LINEAR_M5_04A = JC-309
+LINEAR_M5_04_AUTHORITY = JC-310
+TITLE_JC-309  = EventSales M5-04A - Period comparisons planning and conformance audit
+TITLE_JC-310  = EventSales M5-04 owner decision - Previous-equivalent period contract
+SCOPE_JC-309  = documentation and repository conformance only (merged)
+SCOPE_JC-310  = record approved owner comparison authority in this plan only
 ```
 
-Only this file is in scope for M5-04A. There are no production, test, migration, index, dependency, cache, Redis, worker, scheduler, or UI changes.
+JC-310 changes only this file. There are no production, test, migration, index, dependency, cache, Redis, worker, scheduler, or UI changes in JC-310.
 
 ### 1.3 Authority order
 
@@ -82,20 +96,26 @@ The repository also contains older VS-27B.1 and VS-27B.2 planning packs in `slic
 - `SnapshotRefresh` writes event and dimension projections under the existing per-event advisory fence and coherent transaction.
 - Existing readers perform authorization before projection work, use coherent reads, and redact monetary values through `Policies.can_view_revenue?/2`.
 
-### 1.5 Current blocking result
+### 1.5 Prior blocking result (resolved by JC-310)
 
-An older VS-27B.1 `COMPARISON_CONTRACT.md` does define prior comparison rules, including equal-duration rolling/custom windows, a previous business day for a partial `today_to_now` window, and the full business day before yesterday. It is not executable authority. It conflicts with current authority in two material ways:
+M5-04A recorded an older VS-27B.1 `COMPARISON_CONTRACT.md` as non-authoritative planning evidence. It conflicted with current M1-07/M5-03 in two material ways: full civil `:today` versus a partial `today_to_now` comparison window, and refund attribution back to sale windows versus independent `Refund.source_created_at` placement.
 
-1. the current canonical `:today` is a full Johannesburg civil day, while the pack defines `today_to_now` as a partial day;
-2. the pack's `METRIC_DEFINITIONS.md` attributes refunds back to the original sale window, while M1-07, PRE-M5-TIME, and M5-03 lock independent refund placement by `source_created_at`.
-
-The older pack also uses a 366-day planning maximum, while the current owner decision is 90 Johannesburg civil days. Current authority wins these conflicts. The prior comparison mapping needs an explicit owner reconciliation before implementation can start.
+The owner approved the JC-310 recommended contract without modification. That decision is locked in Section 7 and does not rewrite M1-07. Management "today" comparison uses a separate elapsed-day scope; canonical M1-07 `:today` remains a full Johannesburg civil day.
 
 ```text
-OWNER_DECISION_REQUIRED = YES
-IMPLEMENTATION_READY    = NO
-STOP_CONDITION_TRIGGERED = COMPARISON_AUTHORITY_CONFLICTS_CURRENT_M1_07
+OWNER_DECISION_REQUIRED = NO
+OWNER_DECISION = APPROVED
+COMPARISON_AUTHORITY_LOCKED = YES
+M1_07_REWRITE = NO
+CUSTOM_COMPARISON = DEFERRED
+M5_04B_AUTHORIZATION_PENDING_MERGE = YES
+IMPLEMENTATION_READY = NO
+ROLLING_EDGE_STRATEGY = UNRESOLVED
+ROLLING_EDGE_IMPLEMENTATION_DEFERRED_TO = M5-04B
+STOP_CONDITION_TRIGGERED = NONE (comparison-semantics blocker cleared; rolling-edge remains M5-04B gate)
 ```
+
+`M5_04B_AUTHORIZATION_PENDING_MERGE = YES` until this JC-310 authority revision is independently reviewed and merged to `main`. An open branch is not durable repository authority.
 
 ## 2. Ultimate goal
 
@@ -131,8 +151,8 @@ Currency conversion is outside the goal. `ZAR` and `USD` remain independent part
 
 The target is reached in this order:
 
-1. Reconcile the older comparison contract with current M1-07 and M5-03 authority.
-2. Lock a single captured `now`, current bounds, previous bounds, and comparison output states.
+1. ~~Reconcile the older comparison contract with current M1-07 and M5-03 authority.~~ Done (JC-310 owner decision recorded in Section 7).
+2. Lock a single captured `now`, current bounds, previous bounds, and comparison output states. Done for semantics (JC-310); M5-04B implements helpers and tests.
 3. Keep effective-time, recognition, refund qualification, and currency rules unchanged.
 4. Choose an additive bucket identity that can represent each approved period exactly, including rolling boundary behavior.
 5. Persist only additive primitives at event and dimensional grains.
@@ -141,7 +161,7 @@ The target is reached in this order:
 8. Read only the period projection after UUID validation, authorization, readiness checks, and generation validation.
 9. Add hot or warm acceleration only after measured demand proves the cold projection read insufficient.
 
-Steps 2 through 9 are blocked until step 1 is recorded by owner authority. This document does not infer a product rule from a stale planning pack.
+Steps 4 through 9 remain blocked until M5-04B locks exact bucket resolution for rolling windows and subsequent slices certify resources, rebuilds, and readers. Step 1 authority is recorded; do not infer product rules from stale planning packs.
 
 ## 4. Current repository truth
 
@@ -219,7 +239,7 @@ M5-01 B23 and M5-03 reuse `RefreshSnapshotWorker` and existing mutation candidat
 
 | Component | Current contract | Period role |
 | --- | --- | --- |
-| `TimeRules.Period` | Normalized half-open UTC current bounds | Extend only after comparison authority is locked |
+| `TimeRules.Period` | Normalized half-open UTC current bounds | Extend with comparison helpers after JC-310 merge and M5-04B design |
 | `EventAggregator` | Bounded event financial aggregation, including supported presets | Reuse for parity and certification; not an interactive source fallback and not a dimensional store |
 | `DimensionAggregator` | Bounded event/dimensional gross/refund aggregation | Extend only in an approved period projection slice |
 | `EventAggregateSnapshot` | Lifetime/current event/currency v2 projection | Do not add period identity |
@@ -282,41 +302,154 @@ rows to one captured `now_utc`, timezone, scope/version, and semantic version.
 
 | Period kind | Current boundary rule | Authority | Status |
 | --- | --- | --- | --- |
-| `today` | Johannesburg civil day containing `now`, `[start, end)` | `TimeRules.today_bounds/2`, M1-07 T17-T20, TIME-G | `LOCKED` |
+| `today` | Johannesburg civil day containing `now`, `[start, end)` | `TimeRules.today_bounds/2`, M1-07 T17-T20, TIME-G | `LOCKED` (M1-07; unchanged) |
+| `today` management comparison (elapsed) | Johannesburg civil midnight today through captured `now` | JC-310 Section 7 | `LOCKED` (M5-04; distinct from M1-07 `:today`) |
 | `yesterday` | Preceding Johannesburg civil day, `[start, end)` | `TimeRules.yesterday_bounds/2`, M1-07 T20, TIME-G | `LOCKED` |
 | rolling 7 days | Exact UTC `[now - 7*24h, now)` | `TimeRules.last_7_days_bounds/1`, M1-07 T21, TIME-G | `LOCKED` |
 | rolling 30 days | Exact UTC `[now - 30*24h, now)` | `TimeRules.last_30_days_bounds/1`, M1-07 T22, TIME-G | `LOCKED` |
 | `custom` | Johannesburg civil `[start, end)`, max 90 civil days | `TimeRules.custom_civil_bounds/3`, TIME-G owner decision | `DERIVED_FROM_LOCKED_RULE` for normalization; `OUT_OF_SCOPE` for financial aggregation |
 
-The current boundary authority is complete. It does not settle the comparison boundary.
+The current boundary authority for preset **current** windows is complete. JC-310 locks **comparison** boundaries in Section 7. Do not silently redefine `TimeRules.today_bounds/2` to mean elapsed-day comparison.
 
-## 7. Previous-equivalent-period matrix
+## 7. Locked previous-equivalent-period contract (JC-310)
 
-The old VS-27B.1 pack provides a candidate mapping, but its `execution_authority` is false and it conflicts with current M1-07. The mapping is therefore recorded as a candidate, not a lock.
-
-| Period kind | Current boundary rule | Candidate comparison rule from old pack | Current authority disposition | Status |
-| --- | --- | --- | --- | --- |
-| `today` | Full Johannesburg civil day | Old pack defines `today_to_now` as prior business day midnight through the same elapsed local time | No current `today_to_now` kind; must not reinterpret current `today` silently | `OWNER_DECISION_REQUIRED` |
-| `yesterday` | Full preceding Johannesburg civil day | Full business day before yesterday | Candidate only; requires activation against current period names | `OWNER_DECISION_REQUIRED` |
-| rolling 7 days | Exact UTC 7x24h ending at captured `now` | Equal-duration adjacent window ending at current start | Candidate only; current authority has no comparison operation | `OWNER_DECISION_REQUIRED` |
-| rolling 30 days | Exact UTC 30x24h ending at captured `now` | Generic equal-duration adjacent rule from the old pack | Candidate only; current authority has no comparison operation | `OWNER_DECISION_REQUIRED` |
-| `custom` | Current financial API rejects `:custom`; cap is 90 civil days | Equal-duration adjacent window; old pack's 366-day planning bound conflicts with current 90-day cap | Keep disabled; no comparison API until separately authorized | `OWNER_DECISION_REQUIRED` / `OUT_OF_SCOPE` |
-
-The old pack's percentage states (`comparable`, `flat_zero`, `new_activity`, and explicit missing/incomplete/currency states) are useful candidates. They are not public authority until reconciled with current policy and readiness semantics.
-
-### 7.1 Smallest owner decision
-
-The owner must approve one current contract that defines:
+Owner decision recorded without modification. This section is current M5-04 comparison authority layered on locked M1-07. Do not edit `docs/path-1/m1-07-timestamp-johannesburg-period-and-freshness-contract.md` to retroactively embed these rules.
 
 ```text
-comparison period names and mapping for today and yesterday
-one captured now for current and comparison bounds
-adjacent equal-duration rule for rolling windows, or a named alternative
-custom comparison disposition while :custom aggregation is disabled
-whether the old pack's comparison states become the public vocabulary
+OWNER_DECISION = APPROVED
+COMPARISON_AUTHORITY_LOCKED = YES
+M1_07_REWRITE = NO
+CUSTOM_COMPARISON = DEFERRED
+ONE_CAPTURED_NOW = REQUIRED
 ```
 
-The current `today` versus old `today_to_now` conflict is not a naming detail. It changes which sale and refund facts are included.
+### 7.1 One captured clock anchor
+
+Exactly one `now_utc` is captured once per comparison operation. Current and previous windows must derive from the same captured `now_utc`, timezone, comparison scope/version, and semantic version. Independent clock reads for current versus previous windows are forbidden. This is required for deterministic boundaries.
+
+### 7.2 Today comparison (management elapsed-day scope)
+
+Canonical M1-07 `:today` remains a **full** Johannesburg civil day. For management period **comparison**, use a separate elapsed-day scope (conceptually `today_to_now`). Do not conflate the two in implementation or API naming.
+
+```text
+TODAY_COMPARISON_CURRENT =
+  Johannesburg civil midnight today -> captured now
+
+TODAY_COMPARISON_PREVIOUS =
+  Johannesburg civil midnight yesterday -> the same elapsed Johannesburg civil-time offset yesterday
+```
+
+```text
+M1_07 :today = full Johannesburg civil day
+M5_04 live comparison scope = elapsed Johannesburg day to captured now
+```
+
+### 7.3 Yesterday comparison
+
+Half-open Johannesburg civil boundaries.
+
+```text
+YESTERDAY_COMPARISON_CURRENT =
+  full Johannesburg civil yesterday
+
+YESTERDAY_COMPARISON_PREVIOUS =
+  full Johannesburg civil day immediately before yesterday
+```
+
+### 7.4 Rolling 7-day comparison
+
+Using the single captured `now`:
+
+```text
+ROLLING_7D_COMPARISON_CURRENT  = [now - 7*24h, now)
+ROLLING_7D_COMPARISON_PREVIOUS = [now - 14*24h, now - 7*24h)
+```
+
+Exact UTC-duration windows.
+
+### 7.5 Rolling 30-day comparison
+
+Using the same captured `now`:
+
+```text
+ROLLING_30D_COMPARISON_CURRENT  = [now - 30*24h, now)
+ROLLING_30D_COMPARISON_PREVIOUS = [now - 60*24h, now - 30*24h)
+```
+
+Exact UTC-duration windows.
+
+### 7.6 Custom comparison
+
+```text
+CUSTOM_COMPARISON = DEFERRED
+```
+
+`:custom` financial aggregation remains disabled. The approved 90 Johannesburg civil-day maximum is a future bound only. It does not authorize custom period financial aggregation or custom comparison support. No custom comparison algorithm is specified in JC-310.
+
+### 7.7 Locked comparison matrix
+
+| Period kind | Current window (comparison scope) | Previous-equivalent window | Status |
+| --- | --- | --- | --- |
+| Today (elapsed) | JHB midnight today -> captured `now` | JHB midnight yesterday -> same elapsed offset | `LOCKED` |
+| Yesterday | Full preceding JHB civil day | Full JHB civil day before that | `LOCKED` |
+| Rolling 7 days | `[now - 7*24h, now)` | `[now - 14*24h, now - 7*24h)` | `LOCKED` |
+| Rolling 30 days | `[now - 30*24h, now)` | `[now - 60*24h, now - 30*24h)` | `LOCKED` |
+| Custom | Financial API rejects `:custom` | Not offered | `DEFERRED` |
+
+### 7.8 Zero and missing semantics
+
+```text
+ZERO_BASELINE_RULE =
+  percentage unavailable when comparison denominator is zero
+```
+
+Forbidden outputs: `Infinity`, `-Infinity`, `NaN`, fabricated `100%`.
+
+```text
+MISSING_PROJECTION_RULE =
+  only explicitly complete empty coverage means zero
+```
+
+The following do **not** mean zero and must fail closed into the appropriate comparison state:
+
+```text
+absent
+stale
+rebuilding
+unavailable
+currency mismatch
+semantic mismatch
+incomplete coverage
+generation mismatch
+```
+
+Do not substitute zero for missing projection data.
+
+### 7.9 Financial invariants unchanged by M5-04
+
+M5-04 comparison authority does **not** alter certified M1-07/M5-03 financial semantics.
+
+**Historical recognition:** `status == "completed" OR completed_at is present`. A later `refunded` / `cancelled` status does not erase historical Gross while completion evidence remains.
+
+**Sale effective time:** `COALESCE(paid_at, completed_at)`.
+
+**Refund effective time:** `Refund.source_created_at`. Refunds remain in their refund-effective period. Do not attribute refunds back into the original sale period.
+
+**Gross:** remains in its original sale-effective period.
+
+**Net:** `Net = Gross - Refund` with no clamp.
+
+**ATV:** derived from rolled additive Net primitives `net_ticket_value / net_ticket_quantity` when mathematically valid. Never sum or average stored ATV values.
+
+**Currency:** each currency is an independent partition. No implicit FX. No cross-currency comparison.
+
+**Dimensions:** `ticket_type`, `source_product`, and `source_variation` remain independent parallel families. Never sum those families together. Historical dimensional identity remains parent `OrderItem` / `Order` source identity, not mutable `ProductMapping`.
+
+```text
+HISTORICAL_RECOGNITION_UNCHANGED = YES
+REFUND_EFFECTIVE_TIME_UNCHANGED = YES
+CURRENCY_PARTITION_UNCHANGED = YES
+```
 
 ## 8. MVP period-kind decision
 
@@ -360,22 +493,30 @@ Distinct order count is additive across disjoint event time buckets because one 
 
 ATV is never persisted as additive truth, never summed, and never averaged across rows. Percentage values are also never persisted.
 
-### 10.1 Comparison output states
+### 10.1 Comparison output states (locked public vocabulary)
 
-The following are candidate states, not yet the locked public vocabulary. The
-implementation contract must choose their precedence before code starts:
+```text
+COMPARISON_STATE_VOCABULARY =
+  available
+  flat_zero
+  new_activity
+  baseline_zero
+  current_missing
+  comparison_missing
+  not_comparable
+```
 
 | State | Meaning |
 | --- | --- |
-| `available` | Both operands exist and the percentage denominator is non-zero |
-| `flat_zero` | Current and comparison values are both zero |
-| `new_activity` | Candidate period-level state when the comparison grain has no activity at all and current activity is positive; absolute delta is available, percentage is not |
-| `baseline_zero` | Candidate metric-level state when this metric's comparison denominator is zero but the comparison grain has other activity; no percentage is defined |
-| `current_missing` | Current projection is unavailable or not ready |
-| `comparison_missing` | Comparison grain or currency has no coherent projection; do not fabricate zero |
-| `not_comparable` | Period, grain, currency, or semantic versions do not match |
+| `available` | Both operands are available and the comparison denominator is non-zero. Absolute and percentage deltas may be produced. |
+| `flat_zero` | Current and comparison metric are both exactly zero within complete comparable projections. Percentage is not required to fabricate a mathematical ratio. |
+| `new_activity` | The comparison grain has confirmed complete zero activity while the current grain has positive activity. Absolute delta is available. Percentage is unavailable. Do not fabricate `100%` or infinity. |
+| `baseline_zero` | The comparison projection/grain exists and is complete, but the specific comparison metric denominator is zero. Percentage is unavailable. Distinct from missing projection data. |
+| `current_missing` | Current projection is absent, stale, rebuilding, unavailable, or otherwise not ready. Do not substitute zero. |
+| `comparison_missing` | Previous projection is absent, stale, rebuilding, unavailable, or otherwise not ready. Do not substitute zero. |
+| `not_comparable` | Comparable identity cannot be established, including currency mismatch, period-scope mismatch, grain mismatch, semantic-version mismatch, or completeness mismatch. No cross-currency comparison. |
 
-The old pack uses a similar vocabulary but names `comparable`, `flat_zero`, `new_activity`, `not_comparable_incomplete`, `not_comparable_currency`, and `not_comparable_missing`. M5-04B must choose one public vocabulary and the precedence between `new_activity` and `baseline_zero` after owner review. No infinity, NaN, or fabricated 100% result is permitted.
+Precedence between `new_activity` and `baseline_zero` must be implemented consistently in M5-04B/F. No infinity, NaN, or fabricated 100% result is permitted. See Section 7.8 for zero-baseline and missing-projection rules.
 
 ## 11. Resource alternatives
 
@@ -623,30 +764,30 @@ The proposed projection is the only architecture in this plan that can satisfy t
 
 | Gap | Evidence | Impact | Smallest resolution |
 | --- | --- | --- | --- |
-| Previous-equivalent mapping is not locked in current authority | `TimeRules` has no comparison helper; old VS-27B.1 pack is non-authoritative and conflicts with current `today`/refund semantics | Blocks comparison period kernel and all implementation phases that depend on it | Owner approves a current comparison contract |
-| Exact bucket strategy for rolling windows is not locked | Current rolling windows end at arbitrary UTC instants; old B.2 hour/day proposal is non-authoritative | Blocks canonical bucket identity and exact rebuild/read behavior | M5-04B chooses atomic, edge-fragment, or bounded-edge strategy and proves no overcount |
-| Custom financial aggregation is disabled | EventAggregator rejects `:custom`; only civil-bound normalization is certified | Blocks custom MVP and custom comparisons | Keep deferred or separately authorize implementation and tests |
-| Public comparison-state vocabulary is not locked | Old pack and current readiness conventions use different names | Blocks stable reader contract | Owner selects states and missing/currency semantics |
+| ~~Previous-equivalent mapping is not locked in current authority~~ | JC-310 Section 7 | ~~Blocks comparison period kernel~~ | **Resolved (JC-310)** |
+| Exact bucket strategy for rolling windows is not locked | Current rolling windows end at arbitrary UTC instants; old B.2 hour/day proposal is non-authoritative | Blocks canonical bucket identity and exact rebuild/read behavior | M5-04B chooses atomic fine-grained buckets, exact boundary fragments + fixed buckets, or durable contribution projection + bounded edge composition; certify one approach |
+| Custom financial aggregation is disabled | EventAggregator rejects `:custom`; only civil-bound normalization is certified | Blocks custom MVP and custom comparisons | `CUSTOM_COMPARISON = DEFERRED` until separately authorized |
+| ~~Public comparison-state vocabulary is not locked~~ | JC-310 Section 10.1 | ~~Blocks stable reader contract~~ | **Resolved (JC-310)**; M5-04B/F implements precedence |
 | Distinct-order dimensional semantics are not additive | One order can span multiple dimensions | Blocks dimensional recognized-order count | Omit dimensional count or define a separate non-additive contract |
 | Period write-query plans do not exist | No period projection resource or rebuild SQL is implemented | Blocks index decision and write certification | Implement selective proof in M5-04D/E |
 | Period readiness metadata is not yet represented | Existing readers have generation checks but no period resource | Blocks coherent period read implementation | Reuse generation pattern in the approved resource slice |
 
-## 22. Owner decisions required
+## 22. Owner decisions (JC-310 recorded)
 
 ```text
-OWNER_DECISION_REQUIRED = YES
+OWNER_DECISION_REQUIRED = NO
+OWNER_DECISION = APPROVED
+COMPARISON_AUTHORITY_LOCKED = YES
+M5_04B_AUTHORIZATION_PENDING_MERGE = YES
 ```
 
-The one blocking owner decision is not whether to revive Daily v1. It is which previous-equivalent period contract is current. The decision must explicitly reconcile:
+The blocking owner decision on previous-equivalent period semantics is recorded in Section 7. Remaining gates before implementation:
 
-1. whether `today` compares as a full prior Johannesburg day or as a partial `today_to_now` window;
-2. the exact previous mapping for `yesterday`, rolling 7 days, and rolling 30 days;
-3. whether custom remains out of scope and, if not, its comparison rule under the 90-day cap;
-4. one captured `now` and timezone/scope/version identity for both periods;
-5. the public missing, zero-baseline, incomplete, and currency-state vocabulary;
-6. confirmation that current M1-07/M5-03 refund placement by `Refund.source_created_at` remains unchanged.
+1. Merge this JC-310 authority revision to `main` and independent review.
+2. M5-04B locks exact rolling-edge bucket resolution (`ROLLING_EDGE_STRATEGY = UNRESOLVED` until then).
+3. Subsequent M5-04C+ resource, rebuild, reader, and certification slices as listed in Section 23.
 
-The implementation-ready verdict stays negative until this decision is recorded in current authority. No code, migration, test, index, cache, worker, scheduler, or UI work should begin as a way to bypass it.
+Do not start production code, migration, test, index, cache, worker, scheduler, or UI work to bypass the rolling-edge design gate. M5-04B begins only after JC-310 authority is merged unless a later slice explicitly records a new accepted base.
 
 ## 23. M5-04B+ implementation sequence
 
@@ -654,7 +795,13 @@ The following sequence is conditional. Each phase starts only after the precedin
 
 ### M5-04B - comparison kernel and boundary contract
 
-Scope: record the owner-approved previous mapping, captured-now behavior, comparison states, currency behavior, and exact bucket-resolution strategy.
+Scope: implement owner-approved previous mapping (Section 7), captured-now behavior, comparison states (Section 10.1), currency behavior, and **choose and certify** exact bucket-resolution strategy for rolling windows. JC-310 does not select the rolling-edge persistence architecture.
+
+```text
+ROLLING_EDGE_STRATEGY = UNRESOLVED (until M5-04B)
+ROLLING_EDGE_IMPLEMENTATION_DEFERRED_TO = M5-04B
+M5_04B_AUTHORIZATION_PENDING_MERGE = YES (until JC-310 merged to main)
+```
 
 Likely files:
 
@@ -666,10 +813,11 @@ test/event_sales/analytics/pre_m5_time_certification_test.exs
 docs/development/m5-04-period-comparisons.plan.md
 ```
 
-No resource or migration should be introduced in B until the time/comparison contract is locked. Record the owner decision in later M5-04 authority, such as this plan's approved revision or a dedicated M5-04 comparison contract. Do not rewrite the locked M1-07 history. Custom remains disabled unless explicitly included in that authority.
+No resource or migration should be introduced in B until the time/comparison contract is locked in merged plan authority and rolling-edge strategy is chosen in B. JC-310 records owner decision in this plan; do not rewrite locked M1-07 history. Custom remains disabled unless explicitly included in later authority.
 
 ```text
 M1_07_REWRITE = NO
+CUSTOM_COMPARISON = DEFERRED
 ```
 
 ### M5-04C - additive period resources and migration
@@ -756,7 +904,15 @@ docs/evidence/m5-04-period-comparisons-certification.md
 
 This phase is the first point at which a scale statement or optional Redis representation can be considered.
 
-## 24. File-level scope for M5-04A
+## 24. File-level scope
+
+### M5-04A (JC-309, merged)
+
+```text
+CHANGED_FILES = docs/development/m5-04-period-comparisons.plan.md (initial audit)
+```
+
+### JC-310 (this slice)
 
 ```text
 CHANGED_FILES = docs/development/m5-04-period-comparisons.plan.md
@@ -782,13 +938,21 @@ docs/architecture/module_manifest.json
 
 ## 25. Test and certification strategy
 
-M5-04A is documentation-only. The focused validation for this slice is repository conformance and diff hygiene:
+M5-04A focused validation:
 
 ```text
 git diff --check
 git status --short
 git diff --name-only <BASE_SHA>...HEAD
 ```
+
+JC-310 validation base:
+
+```text
+git diff --name-only 89c19bacbb48b29b0e372d31fa544f316de029e8...HEAD
+```
+
+Expected: exactly `docs/development/m5-04-period-comparisons.plan.md`.
 
 No production test or migration is required for the plan itself. Conditional implementation certification must cover, at minimum:
 
@@ -825,8 +989,8 @@ No production test or migration is required for the plan itself. Conditional imp
 
 Stop the slice if any of the following occurs:
 
-1. `origin/main` moves from the accepted SHA/tree.
-2. Previous-equivalent semantics remain unapproved or current authority still conflicts with the candidate contract.
+1. `origin/main` moves from the slice's accepted SHA/tree.
+2. ~~Previous-equivalent semantics remain unapproved or current authority still conflicts with the candidate contract.~~ Cleared by JC-310 when merged; do not regress Section 7 semantics.
 3. Custom must be enabled but its period, authorization, and bounded-read semantics are not locked.
 4. Event, currency, period, or dimension identity cannot be represented without double-counting.
 5. Correctness would require persisted Net, ATV, or percentage values.
@@ -841,25 +1005,32 @@ Stop the slice if any of the following occurs:
 14. Production code, tests, migrations, or generated architecture files become necessary in M5-04A.
 15. A secret, production endpoint, remote database, or non-local WordPress target is encountered.
 
-For this slice, stop condition 2 is active:
+For M5-04A, stop condition 2 was active until JC-310. After JC-310 merge, the comparison-semantics blocker is cleared. Rolling-edge bucket resolution remains unresolved until M5-04B.
 
 ```text
-STOP_CONDITION_TRIGGERED = COMPARISON_AUTHORITY_CONFLICTS_CURRENT_M1_07
-IMPLEMENTATION_READY = NO
+STOP_CONDITION_TRIGGERED = NONE (JC-310 authority slice; awaiting merge)
+IMPLEMENTATION_READY = NO (M5-04B rolling-edge + downstream slices remain)
+M5_04B_AUTHORIZATION_PENDING_MERGE = YES
 ```
 
 ## 27. Verdict
 
-M5-04A has audited the current repository, identified the unresolved comparison-authority conflict, and rejected both Daily v1 rehabilitation and an unbounded request-time comparison reader. The recommended target is a new additive event/dimensional time-bucket projection with projection-only comparison derivation, but exact previous-equivalent semantics and exact rolling-edge bucket resolution remain owner/implementation gates.
+M5-04A audited the repository, identified the comparison-authority conflict, and rejected Daily v1 rehabilitation and an unbounded request-time comparison reader. JC-310 records the approved previous-equivalent contract without modifying M1-07. The recommended target remains a new additive event/dimensional time-bucket projection with projection-only comparison derivation. Exact rolling-edge bucket resolution is deferred to M5-04B; JC-310 does not choose that strategy.
 
 ```text
 DAILY_V1_DECISION = LEGACY / NON-CANONICAL FOR M5 PERIOD REPORTING
 CANONICAL_PERIOD_SOURCE = TimeRules + EventAggregator for current preset semantics; future approved additive period projection for management comparisons
 PERIOD_MVP = today, yesterday, rolling 7 days, rolling 30 days
 CUSTOM_RANGE_DECISION = DEFERRED; keep EventAggregator :custom rejection in force
+CUSTOM_COMPARISON = DEFERRED
 M1_07_REWRITE = NO
-OWNER_DECISION_REQUIRED = YES
+OWNER_DECISION_REQUIRED = NO
+OWNER_DECISION = APPROVED
+COMPARISON_AUTHORITY_LOCKED = YES
+M5_04B_AUTHORIZATION_PENDING_MERGE = YES
+ROLLING_EDGE_STRATEGY = UNRESOLVED
+ROLLING_EDGE_IMPLEMENTATION_DEFERRED_TO = M5-04B
 IMPLEMENTATION_READY = NO
 ```
 
-No implementation should be started from the old roadmap phrase alone. The smallest next action is an owner decision that records the current previous-equivalent contract and confirms that M1-07/M5-03 refund placement remains authoritative.
+The smallest next action after JC-310 merge is M5-04B: implement the locked comparison kernel, choose and certify rolling-edge bucket strategy, and add focused tests. Do not start from the old roadmap phrase alone.
