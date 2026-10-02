@@ -38,12 +38,21 @@ set `attribution_status_reason` to `invalid_source_tickera_event_id`.
 EventSales does not infer event identity from event names, product names,
 variation names, ticket labels, or display text.
 
+## WordPress producer (WP-SOURCE-01)
+
+The `EventSales Woo Order Line Identity` WordPress integration may persist
+`tickera_event_id` on qualifying ticket order lines at order-item creation time.
+Authority matches the Tickera catalog producer: parent product `_tc_is_ticket`
+and `_event_name` resolving to a `tc_events` post ID. The plugin does not call
+EventSales over HTTP and does not replace WooCommerce webhooks.
+
 ## Rollout Caveat
 
-VS-26J does not modify WordPress webhook enrichment. Event-first attribution
-protects future orders only when Woo line item metadata includes
-`tickera_event_id`. Until then, reviewed ProductMapping cutover is the immediate
-control that stops stale ProductMapping fallback for future webhook attribution.
+Until the WordPress producer is installed and active on a store, Event-first
+attribution depends on Woo line item metadata already including
+`tickera_event_id`. Where that metadata is absent, reviewed ProductMapping
+cutover remains the control that stops stale ProductMapping fallback for future
+webhook attribution.
 
 Do not include customer names, emails, phone numbers, IP addresses, payment
 references, provider payloads, delivery tokens, ticket URLs, QR hashes, signed
