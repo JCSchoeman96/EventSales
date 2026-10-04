@@ -272,7 +272,7 @@ function run_dist_tests(string $distDir): void
     DistributionTest::ok('manifest source_commit is 40-char hex', is_string($manifest['source_commit'] ?? null) && preg_match('/^[0-9a-f]{40}$/', $manifest['source_commit']) === 1);
     DistributionTest::ok('manifest source_tree is 40-char hex', is_string($manifest['source_tree'] ?? null) && preg_match('/^[0-9a-f]{40}$/', $manifest['source_tree']) === 1);
     DistributionTest::ok('manifest deterministic_source_content', ($manifest['deterministic_source_content'] ?? false) === true);
-    DistributionTest::ok('manifest deterministic_archive_bytes is false', ($manifest['deterministic_archive_bytes'] ?? true) === false);
+    DistributionTest::ok('manifest deterministic_archive_bytes', ($manifest['deterministic_archive_bytes'] ?? false) === true);
 
     $shaPath = $distDir . '/SHA256SUMS';
     DistributionTest::ok('SHA256SUMS exists', is_file($shaPath));

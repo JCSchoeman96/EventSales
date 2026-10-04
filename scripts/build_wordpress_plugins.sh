@@ -75,7 +75,7 @@ if [[ "$SOURCE_COMMIT" == "$HEAD_COMMIT" ]]; then
   done
 fi
 
-OUT_DIR="$ROOT/tmp/wordpress-plugin-dist/$SOURCE_COMMIT"
+OUT_DIR="${WP_BUILD_OUT_DIR:-$ROOT/tmp/wordpress-plugin-dist/$SOURCE_COMMIT}"
 rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
 
@@ -108,6 +108,8 @@ exit(1);
   mkdir -p "$plugin_stage"
 
   packaged_files=()
+  zip_members_list="$(mktemp)"
+  : >"$zip_members_list"
   while read -r mode objtype _object git_path; do
     [[ -z "$git_path" ]] && continue
     if ! validate_wordpress_packaging_git_object "$mode" "$objtype" "$git_path"; then
@@ -143,6 +145,7 @@ exit(1);
     mkdir -p "$(dirname "$dest")"
     git show "$SOURCE_COMMIT:$git_path" >"$dest"
     packaged_files+=("$rel")
+    printf '%s|%s|%s\n' "${slug}/${rel}" "$mode" "$dest" >>"$zip_members_list"
   done < <(git ls-tree -r "$SOURCE_TREE" "$PLUGIN_PREFIX/$slug")
 
   main_file="$(php -r 'echo json_decode($argv[1], true)["main_file"];' "$plugin_meta")"
@@ -162,10 +165,25 @@ exit(1);
   done < <(printf '%s\n' "${packaged_files[@]}")
 
   zip_path="$OUT_DIR/$archive_name"
-  (
-    cd "$STAGING"
-    zip -qr "$zip_path" "$slug"
-  )
+  zip_members_json="$(mktemp)"
+  php -r '
+$listPath = $argv[1];
+$outPath = $argv[2];
+$members = [];
+foreach (file($listPath, FILE_IGNORE_NEW_LINES) as $line) {
+    if ($line === "") {
+        continue;
+    }
+    [$path, $mode, $file] = explode("|", $line, 3);
+    $members[] = ["path" => $path, "mode" => $mode, "file" => $file];
+}
+file_put_contents($outPath, json_encode($members, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES));
+' "$zip_members_list" "$zip_members_json"
+  rm -f "$zip_members_list"
+  python3 "$ROOT/scripts/lib/build_deterministic_wordpress_zip.py" \
+    --output "$zip_path" \
+    --members-json "$zip_members_json"
+  rm -f "$zip_members_json"
 
   archive_sha256="$(sha256sum "$zip_path" | awk '{print $1}')"
   MANIFEST_PLUGINS+=("$slug|$archive_name|$archive_sha256|$plugin_meta")
@@ -204,7 +222,7 @@ $manifest = [
     "source_tree" => $tree,
     "suite_manifest_git_path" => $suitePath,
     "deterministic_source_content" => true,
-    "deterministic_archive_bytes" => false,
+    "deterministic_archive_bytes" => true,
     "plugins" => $plugins,
 ];
 file_put_contents($out, json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL);

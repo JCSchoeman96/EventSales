@@ -106,9 +106,9 @@ ZIP interior: exactly one root folder `<slug>/` with main file `<slug>/<slug>.ph
 | Claim | Value |
 |-------|-------|
 | `DETERMINISTIC_SOURCE_CONTENT` | **YES** — same commit yields same included relative paths and file bytes |
-| `DETERMINISTIC_ARCHIVE_BYTES` | **NO** — ZIP stores platform-dependent metadata/timestamps; provenance uses per-archive SHA-256 |
+| `DETERMINISTIC_ARCHIVE_BYTES` | **YES** — same commit, tree, and suite manifest yield byte-identical ZIP archives (WP-SOURCE-05 deterministic ZIP writer) |
 
-Second builds into a separate output directory must match file sets and per-file digests when comparing extracted contents.
+Second independent builds into separate output directories must produce identical per-archive SHA-256 values and matching ZIP member metadata.
 
 ## Local installation guard
 
