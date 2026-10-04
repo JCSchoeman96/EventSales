@@ -30,6 +30,8 @@ final class EventSales_WP_Update_Discovery
     private const USER_AGENT = 'EventSales-WordPress-Update-Discovery/1.0';
 
     private static bool $skip_remote_for_site_health_request = false;
+    private static bool $request_cache_loaded = false;
+    private static ?array $request_metadata = null;
 
     /** @var array<string, array{main_file: string}> */
     private const PLUGINS = [
@@ -64,7 +66,7 @@ final class EventSales_WP_Update_Discovery
             return;
         }
 
-        self::$skip_remote_for_site_health_request = false;
+        self::reset_request_state();
         add_filter('debug_information', [self::class, 'register_debug'], 10, 1);
 
         if (function_exists('add_action')) {
@@ -77,6 +79,14 @@ final class EventSales_WP_Update_Discovery
         }
 
         add_filter(self::UPDATE_HOOK, [self::class, 'filter_update'], 10, 4);
+    }
+
+    /** Reset in-request memoization when WordPress starts a new request. */
+    public static function reset_request_state(): void
+    {
+        self::$skip_remote_for_site_health_request = false;
+        self::$request_cache_loaded = false;
+        self::$request_metadata = null;
     }
 
     public static function disable_remote_for_site_health_request(): void
@@ -224,7 +234,9 @@ final class EventSales_WP_Update_Discovery
             $metadata = $cached['metadata'];
             $result['suite_release_id'] = $metadata['suite_release_id'];
             $result['remote_versions'] = self::format_remote_versions($metadata['plugins']);
-            $result['category'] = $supported ? self::calculate_update_category($metadata, $cached['category']) : 'wp_version_unsupported';
+            $result['category'] = $supported
+                ? self::calculate_update_category($metadata, $cached['category'], $wordpressVersion)
+                : 'wp_version_unsupported';
 
             return $result;
         }
@@ -253,8 +265,15 @@ final class EventSales_WP_Update_Discovery
     /** @return array<string, mixed>|null */
     private static function discover(): ?array
     {
+        if (self::$request_cache_loaded) {
+            return self::$request_metadata;
+        }
+
         $cached = self::read_valid_cache();
         if ($cached !== null) {
+            self::$request_cache_loaded = true;
+            self::$request_metadata = $cached['metadata'] ?? null;
+
             return $cached['metadata'] ?? null;
         }
 
@@ -263,9 +282,12 @@ final class EventSales_WP_Update_Discovery
             $cache = [
                 'category' => 'current',
                 'checked_at_gmt' => gmdate('Y-m-d H:i:s'),
+                'expires_at' => time() + self::POSITIVE_CACHE_TTL,
                 'metadata' => $result['metadata'],
             ];
             set_site_transient(self::CACHE_KEY, $cache, self::POSITIVE_CACHE_TTL);
+            self::$request_cache_loaded = true;
+            self::$request_metadata = $result['metadata'];
 
             return $result['metadata'];
         }
@@ -278,6 +300,8 @@ final class EventSales_WP_Update_Discovery
             $cache['http_status'] = $result['http_status'];
         }
         set_site_transient(self::CACHE_KEY, $cache, self::NEGATIVE_CACHE_TTL);
+        self::$request_cache_loaded = true;
+        self::$request_metadata = null;
 
         return null;
     }
@@ -622,6 +646,8 @@ final class EventSales_WP_Update_Discovery
 
         if (isset($cached['metadata'])) {
             if (!in_array($cached['category'], ['current', 'update_available', 'wp_version_unsupported'], true)
+                || !is_int($cached['expires_at'] ?? null)
+                || $cached['expires_at'] <= time()
                 || !self::valid_cached_metadata($cached['metadata'])) {
                 return null;
             }
@@ -664,7 +690,7 @@ final class EventSales_WP_Update_Discovery
     }
 
     /** @param array<string, mixed> $metadata */
-    private static function calculate_update_category(array $metadata, string $fallback): string
+    private static function calculate_update_category(array $metadata, string $fallback, string $wordpressVersion): string
     {
         if (!function_exists('get_plugins')) {
             return $fallback;
@@ -675,16 +701,27 @@ final class EventSales_WP_Update_Discovery
             return $fallback;
         }
 
+        $updateAvailable = false;
         foreach (self::PLUGINS as $slug => $plugin) {
             $basename = $slug . '/' . $plugin['main_file'];
             $installedVersion = $installed[$basename]['Version'] ?? null;
             if (self::valid_marketing_version($installedVersion)
                 && version_compare($metadata['plugins'][$slug]['version'], (string) $installedVersion, '>')) {
-                return 'update_available';
+                $updateAvailable = true;
+                break;
             }
         }
 
-        return 'current';
+        if (!$updateAvailable) {
+            return 'current';
+        }
+
+        if (version_compare($wordpressVersion, $metadata['requires_wordpress'], '<')
+            || version_compare(PHP_VERSION, $metadata['requires_php'], '<')) {
+            return 'wp_version_unsupported';
+        }
+
+        return 'update_available';
     }
 
     private static function record_cached_category(string $category): void
@@ -697,7 +734,8 @@ final class EventSales_WP_Update_Discovery
         $cached['category'] = in_array($category, ['current', 'update_available', 'wp_version_unsupported'], true)
             ? $category
             : 'current';
-        set_site_transient(self::CACHE_KEY, $cached, self::POSITIVE_CACHE_TTL);
+        $remainingTtl = max(1, $cached['expires_at'] - time());
+        set_site_transient(self::CACHE_KEY, $cached, $remainingTtl);
     }
 
     private static function format_installed_versions(): string

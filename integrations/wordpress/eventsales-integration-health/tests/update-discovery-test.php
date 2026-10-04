@@ -11,6 +11,7 @@ $GLOBALS['http_responses'] = [];
 $GLOBALS['http_requests'] = [];
 $GLOBALS['site_transients'] = [];
 $GLOBALS['transient_ttls'] = [];
+$GLOBALS['transient_write_fail'] = false;
 $GLOBALS['plugin_registry'] = [];
 
 final class WP_Error
@@ -58,6 +59,10 @@ function get_site_transient($name)
 
 function set_site_transient($name, $value, $expiration = 0)
 {
+    if ($GLOBALS['transient_write_fail']) {
+        return false;
+    }
+
     $GLOBALS['site_transients'][$name] = $value;
     $GLOBALS['transient_ttls'][$name] = $expiration;
 
@@ -135,7 +140,12 @@ function reset_update_discovery_state(): void
     $GLOBALS['http_requests'] = [];
     $GLOBALS['site_transients'] = [];
     $GLOBALS['transient_ttls'] = [];
+    $GLOBALS['transient_write_fail'] = false;
     $GLOBALS['plugin_registry'] = [];
+
+    if (method_exists(EventSales_WP_Update_Discovery::class, 'reset_request_state')) {
+        EventSales_WP_Update_Discovery::reset_request_state();
+    }
 }
 
 function http_response(int $status, string $body = '', array $headers = []): array
@@ -391,6 +401,61 @@ Update_Discovery_Test::same('older remote version returns no update', false, eva
 Update_Discovery_Test::same('malformed installed version returns no update', false, evaluate_plugin('eventsales-tickera-catalog-feed', 'latest'));
 Update_Discovery_Test::same('comparison reused one cache', 2, count($GLOBALS['http_requests']));
 
+foreach ([
+    'newer WordPress floor' => ['requires_wordpress' => '99.0'],
+    'newer PHP floor' => ['requires_php' => '99.0'],
+] as $label => $manifestChanges) {
+    reset_update_discovery_state();
+    $manifest = valid_release_manifest($manifestChanges);
+    queue_valid_release(json_encode($manifest, JSON_UNESCAPED_SLASHES));
+    $GLOBALS['plugin_registry']['eventsales-tickera-catalog-feed/eventsales-tickera-catalog-feed.php'] = [
+        'Version' => '0.1.1',
+    ];
+    Update_Discovery_Test::same(
+        $label . ' produces no update response',
+        false,
+        evaluate_plugin('eventsales-tickera-catalog-feed')
+    );
+    Update_Discovery_Test::same(
+        $label . ' is reported accurately in Site Health',
+        'wp_version_unsupported',
+        EventSales_WP_Update_Discovery::read_diagnostics('7.1.2')['category'] ?? null
+    );
+}
+
+reset_update_discovery_state();
+queue_valid_release();
+evaluate_plugin('eventsales-tickera-catalog-feed');
+$cachedPositive = $GLOBALS['site_transients']['eventsales_wp_update_discovery_v1'] ?? [];
+$cachedPositive['expires_at'] = time() + 3600;
+$GLOBALS['site_transients']['eventsales_wp_update_discovery_v1'] = $cachedPositive;
+evaluate_plugin('eventsales-woo-order-index-feed', '0.2.1');
+Update_Discovery_Test::ok(
+    'positive cache check does not extend the original TTL',
+    ($GLOBALS['transient_ttls']['eventsales_wp_update_discovery_v1'] ?? 43200) > 0
+        && $GLOBALS['transient_ttls']['eventsales_wp_update_discovery_v1'] < 43200
+);
+
+reset_update_discovery_state();
+$GLOBALS['transient_write_fail'] = true;
+queue_valid_release();
+foreach ([
+    ['eventsales-tickera-catalog-feed', '0.1.1'],
+    ['eventsales-woo-order-index-feed', '0.2.1'],
+    ['eventsales-woo-order-line-identity', '0.1.1'],
+    ['eventsales-integration-health', '0.1.1'],
+] as [$slug, $installedVersion]) {
+    Update_Discovery_Test::ok(
+        'request-local metadata still reports update for ' . $slug,
+        is_array(evaluate_plugin($slug, $installedVersion))
+    );
+}
+Update_Discovery_Test::same('failed transient writes still make two remote requests total', 2, count($GLOBALS['http_requests']));
+Update_Discovery_Test::ok(
+    'failed transient writes leave no stored cache',
+    !isset($GLOBALS['site_transients']['eventsales_wp_update_discovery_v1'])
+);
+
 reset_update_discovery_state();
 queue_valid_release();
 $unrelated = evaluate_plugin(
@@ -563,6 +628,23 @@ foreach ([
     );
 }
 Update_Discovery_Test::same('four plugin rows share one cached timeout', 1, count($GLOBALS['http_requests']));
+
+reset_update_discovery_state();
+$GLOBALS['transient_write_fail'] = true;
+$GLOBALS['http_responses'] = [new WP_Error('connect_timeout')];
+foreach ([
+    'eventsales-tickera-catalog-feed',
+    'eventsales-woo-order-index-feed',
+    'eventsales-woo-order-line-identity',
+    'eventsales-integration-health',
+] as $slug) {
+    Update_Discovery_Test::same(
+        'request-local negative result suppresses retry for ' . $slug,
+        false,
+        evaluate_plugin($slug)
+    );
+}
+Update_Discovery_Test::same('failed negative-cache write still makes one request', 1, count($GLOBALS['http_requests']));
 
 assert_failure_category(
     'metadata redirect rejected',

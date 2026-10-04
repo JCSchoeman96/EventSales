@@ -66,7 +66,7 @@ maximum redirect count:    3
 HTTP timeout:              5 seconds per request
 ```
 
-The cache stores only the validation category, checked time, suite release ID, release tag, WordPress/PHP floors, and validated plugin versions. A cache miss may make one release API request and one manifest request, plus at most three explicitly validated redirect requests. Later plugin-row evaluations reuse the same result. Failures receive the negative TTL and do not retry on each row.
+The cache stores only the validation category, checked time, positive-cache expiry, suite release ID, release tag, WordPress/PHP floors, and validated plugin versions. The positive expiry is fixed at the first successful check; later row evaluations do not extend it. A request-local memo keeps the first positive or negative result available if a transient write fails, so one update-check cycle still does not refetch for each plugin. A cache miss may make one release API request and one manifest request, plus at most three explicitly validated redirect requests. Failures receive the negative TTL and do not retry on each row.
 
 Internal categories are bounded to `never_checked`, `current`, `update_available`, `wp_version_unsupported`, `remote_timeout`, `remote_http_error`, `release_missing`, `manifest_missing`, `manifest_invalid`, `tag_mismatch`, and `redirect_rejected`. A remote 404 for the latest-release endpoint maps to `release_missing`; other non-2xx responses map to `remote_http_error`.
 

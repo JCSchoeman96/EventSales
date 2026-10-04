@@ -23,7 +23,7 @@ https://api.github.com/repos/JCSchoeman96/EventSales/releases/latest
 
 It rejects drafts, prereleases, missing or duplicate `release-manifest.json` assets, unexpected tags, and malformed release manifests. It retrieves only the manifest asset using its fixed GitHub API asset ID. It does not request any ZIP file or use a remote URL from the manifest.
 
-All four plugin rows share the site transient `eventsales_wp_update_discovery_v1`. Valid metadata is cached for 12 hours. Errors are cached for 15 minutes. Each request has a five-second timeout. Automatic redirects are off. The updater follows no more than three redirects, and it accepts only HTTPS redirects to the exact host `release-assets.githubusercontent.com`. A different host or redirect scheme fails closed.
+All four plugin rows share the site transient `eventsales_wp_update_discovery_v1`. Valid metadata is cached for a fixed 12 hours; checking another plugin row does not extend that expiry. Errors are cached for 15 minutes. An in-request memo preserves the first result if a transient write fails, so the remaining plugin rows do not trigger duplicate requests. Each request has a five-second timeout. Automatic redirects are off. The updater follows no more than three redirects, and it accepts only HTTPS redirects to the exact host `release-assets.githubusercontent.com`. A different host or redirect scheme fails closed.
 
 The updater sends no cookies, authorization, site URL, order data, ticket-holder data, catalog secrets, HMAC secrets, WordPress credentials, or EventSales API credentials. It stores no raw response body, HTTP headers, redirect URL, or signed query string.
 
