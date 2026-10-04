@@ -15,15 +15,17 @@
 - `v9` — record merged JC-314 authority and JC-317 event bucket invalidation, rebuild, and query-plan evidence
 - `v10` — correct current C/D authority, record source lock ordering and contribution identity validation, and separate event from dimensional write-query evidence
 
-**Plan version:** `v10`
+- `v11` records the verified JC-317 merge and JC-319 dimensional period population and reconciliation.
+
+**Plan version:** `v11`
 
 ```text
-PLAN_VERSION = v10
+PLAN_VERSION = v11
 ```
 
-**Status:** JC-314 merged; M5-04D implementation JC-317 in progress
+**Status:** JC-317 merged; JC-319 M5-04E implementation in progress
 **Last updated:** 2026-10-04
-**Change summary (v10):** Records current JC-314 authority and JC-317 branch status, the source mutation lock order, the fail-closed contribution identity guard, and separate event and dimensional write-query status.
+**Change summary (v11):** Records merged JC-317 authority and JC-319 dimensional grouping, reconciliation, and atomic bulk replacement from the same validated contribution facts.
 
 **Goal:** Define a canonical, currency-safe period comparison read model for event and required dimensional grains without promoting the legacy daily-v1 snapshot or inventing comparison semantics.
 
@@ -212,8 +214,14 @@ JC_314_MERGE_SHA = eebb9a83563e2ce0e40dd9a4e069567d89acd28f
 JC_314_MERGE_TREE = 489dc3843679d7477f706a5ab24de1b0310f8674
 M5_04C_DURABLE_AUTHORITY = YES
 M5_04D_AUTHORIZED = YES
-M5_04D_STATUS = IN_PROGRESS
-M5_04E_AUTHORIZED = NO
+M5_04D_STATUS = MERGED
+JC_317_STATUS = MERGED
+JC_317_MERGE_SHA = 5f2acf53b97b974f6abf4c3bb271e2e843fc282c
+JC_317_MERGE_TREE = c6d58c43499233c22be34cdc0551d0fbae255224
+M5_04D_DURABLE_AUTHORITY = YES
+M5_04E_AUTHORIZED = YES
+M5_04E_STATUS = IN_PROGRESS
+M5_04F_AUTHORIZED = NO
 ```
 
 M5-04D adds these modules:
@@ -257,6 +265,35 @@ event.source_system_id == contribution.source_system_id
 Inconsistent qualifying source rows remain in the query result and return a typed error before contribution or bucket writes.
 
 Selective `EXPLAIN (FORMAT JSON)` tests certify indexed sale and refund population plans and fixed query counts while target contribution cardinality grows. The observed plans did not justify a new index: `NEW_INDEX = NONE`. M5-04D does not populate dimension-period rows, add a reader, alter worker arguments/queues, backfill history, or add cache/Redis/PubSub/UI behavior.
+
+### 1.8 JC-319 M5-04E dimensional period projection
+
+The owner authorized continuation after unrelated WordPress PR #292 moved main. The original preflight matched the required JC-317 merge, with a clean worktree. JC-319 recovered its tracked edits into an isolated worktree and preserved the original checkout and stashes.
+
+```text
+LINEAR_M5_04E = JC-319
+ORIGINAL_BASE_SHA = 5f2acf53b97b974f6abf4c3bb271e2e843fc282c
+ORIGINAL_BASE_TREE = c6d58c43499233c22be34cdc0551d0fbae255224
+REAUTHORIZED_BASE_SHA = a8510f1093ca07c16108b70c556c0dbbaff1c024
+REAUTHORIZED_BASE_TREE = 7dbf3882aaa2cc477d1aa48eb0807594c17d1499
+PERIOD_DIMENSION_AGGREGATOR = EventSales.Analytics.PeriodDimensionAggregator.rows_for_pending_buckets/2
+AGGREGATOR_SOURCE = normalized identity-validated M5-04D current_facts
+DIMENSION_FAMILIES = ticket_type / source_product / source_variation
+VARIATION_RECONCILIATION_RULE = exact variation-bearing contribution subset
+DIMENSION_DELETE_QUERY_COUNT = 3
+DIMENSION_INSERT_QUERY_COUNT = 1 when rows exist; 0 when dimension-empty
+EVENT_DIMENSION_GENERATION_RULE = same transaction, generation_id, semantic_version, coverage_identity, refreshed_at, source_watermark_at
+ZERO_BUCKET_DIMENSION_RULE = delete old dimensions; insert none; CURRENT zero event row proves completeness
+INDEX_DECISION = no new index; all three actual DELETE plans use existing family partial unique indexes
+```
+
+Every contribution participates in ticket type and source product. Only contributions with an exact non-nil variation participate in source variation. Each contribution uses `PeriodBucketRules.for_instant/1` and contributes only to bucket identities present in the pending event set. An unaffected hour stays untouched when its day is pending. Malformed identities or facts outside every pending bucket return a typed error.
+
+Before persistence, ticket type and product each reconcile all four additive quantities and values against D's event totals. Variation reconciles against only variation-bearing contributions. The refresh transaction writes contribution changes, replaces dimensions with three family-specific set deletes and one bulk insert, then marks event buckets CURRENT. Any failure rolls back the entire replacement. Source invalidation still marks only event envelopes; no dimensional pending placeholders are added.
+
+`PeriodDimensionProjectionQueryPlanTest` certifies `Repo.to_sql(:delete_all, query)` with JSON EXPLAIN against 1,200 dimensional noise buckets. The ticket type, source product, and source variation deletes each use their existing partial unique index and avoid sequential scans. Adding 20 distinct target sale grains increases dimensional row count while retaining three deletes, one insert, one sale read, one refund read, and one existing-fact read. Empty replacement performs three deletes and no insert. Exact replay performs no writes. These fixtures certify query shape and count, not final 100k scale.
+
+JC-319 adds no raw financial or ProductMapping reads, invalidation change, worker, Oban arguments, reader, historical backfill, cache, Redis, PubSub, or UI behavior. The lifetime DimensionAggregator contract remains unchanged. M5-04G owns scale certification.
 
 ## 2. Ultimate goal
 
@@ -313,7 +350,7 @@ LINEAR    = JC-314
 SCOPE     = M5-04C schema/resources only
 ```
 
-JC-314 is merged and supplies the durable schema. JC-317 implements event-period population, invalidation, and bounded source queries on PR #291; that implementation is pending merge. M5-04E owns dimensional period population, M5-04F owns projection and edge reads, and M5-04G owns certification. Step 1 authority is recorded; do not infer product rules from stale planning packs.
+JC-314 is merged and supplies the durable schema. JC-317 merged event-period population, invalidation, and bounded source queries in PR #291. M5-04E owns dimensional period population, M5-04F owns projection and edge reads, and M5-04G owns certification. Step 1 authority is recorded; do not infer product rules from stale planning packs.
 
 ## 4. Current repository truth
 
@@ -877,7 +914,7 @@ DECISION = RECOMMEND / NEW
 
 The proposed `EventPeriodAggregateSnapshot` and `EventDimensionPeriodAggregateSnapshot` store only additive primitives keyed by event, currency, fixed bucket identity, and required dimension identity. Net, ATV, deltas, and percentages remain reader-derived. Rows replaced in the same atomic transaction for one affected bucket identity share one `generation_id`; unrelated buckets may carry different `generation_id` values and remain jointly readable when all are CURRENT.
 
-Performance is bounded by requested event, currency, bucket count, and dimension cardinality. Reads avoid raw `Order`, `OrderItem`, `Refund`, and `RefundLine` queries. Rebuilds may run bounded SQL in Oban. Migration is additive and does not change lifetime v2 rows or Daily v1. Exact rolling-boundary resolution is locked by JC-312: fully covered rolling interiors use fixed UTC-hour buckets, while partial boundary fragments use bounded reads from `AnalyticsContributionFact`. JC-314 defines the physical resources. JC-317 implements event-period population and bounded source queries on the current branch, pending merge. M5-04E owns dimensional period population, and M5-04F owns projection and edge reads.
+Performance is bounded by requested event, currency, bucket count, and dimension cardinality. Reads avoid raw `Order`, `OrderItem`, `Refund`, and `RefundLine` queries. Rebuilds may run bounded SQL in Oban. Migration is additive and does not change lifetime v2 rows or Daily v1. Exact rolling-boundary resolution is locked by JC-312: fully covered rolling interiors use fixed UTC-hour buckets, while partial boundary fragments use bounded reads from `AnalyticsContributionFact`. JC-314 defines the physical resources. JC-317 merged event-period population and bounded source queries in PR #291. M5-04E owns dimensional period population, and M5-04F owns projection and edge reads.
 
 ### D. Request-time composition from `EventAggregator` only
 
@@ -955,7 +992,7 @@ fixed aggregate buckets   exact partial-edge reads
 | Raw `Order` / `OrderItem` / `Refund` / `RefundLine` edge reads on interactive path | Violates M5 management read contract; financial logic must be resolved at write time |
 | Full-window contribution scans | Query cost scales with window width and cardinality; interior fixed buckets must absorb bulk span |
 
-JC-314 implements the fixed-bucket and contribution schema foundations for exact edge composition. JC-317 implements event-period population and bounded rebuild queries on the current branch, pending merge. M5-04E owns dimensional population, M5-04F owns edge reads, and M5-04G must certify edge-query cost, rebuild cost, latency, connection use, and fan-out before any scale claim.
+JC-314 implements the fixed-bucket and contribution schema foundations for exact edge composition. JC-317 merged event-period population and bounded rebuild queries in PR #291. M5-04E owns dimensional population, M5-04F owns edge reads, and M5-04G must certify edge-query cost, rebuild cost, latency, connection use, and fan-out before any scale claim.
 
 **Bounded edge scope (locked)**
 
@@ -1151,9 +1188,9 @@ Current repository evidence is sufficient for the existing event-level period so
 - `DimensionAggregatorQueryPlanTest` proves the six current dimensional gross/refund paths are bounded for the selective fixture.
 - M5-03 reconciliation tests prove exact refund binders, identity predicates, and currency predicates are present in the current query paths.
 
-JC-317 implements event-period population and bounded source queries on the current branch, pending merge. Dimensional population and projection/read paths remain unimplemented, so their query plans have no EXPLAIN evidence.
+JC-317 merged event-period population and bounded source queries in PR #291. JC-319 implements dimensional population from the same normalized contribution facts. Projection and edge readers remain deferred to M5-04F.
 
-JC-317 selectively certifies event-period population and rebuild query shapes on the current branch, pending merge. M5-04E must prove dimensional population and rebuild query shapes. M5-04F must prove projection and bounded edge-read query shapes. Any non-constraint index requires selective fixtures and EXPLAIN evidence against the actual implemented path.
+Merged JC-317 certifies event-period population and rebuild query shapes. M5-04E must prove dimensional population and rebuild query shapes. M5-04F must prove projection and bounded edge-read query shapes. Any non-constraint index requires selective fixtures and EXPLAIN evidence against the actual implemented path.
 
 ```text
 M5_04C_PERFORMANCE_INDEX_DECISION = NONE
@@ -1197,9 +1234,9 @@ The proposed projection is the only architecture in this plan that can satisfy t
 | Custom financial aggregation is disabled | EventAggregator rejects `:custom`; only civil-bound normalization is certified | Blocks custom MVP and custom comparisons | `CUSTOM_COMPARISON = DEFERRED` until separately authorized |
 | ~~Public comparison-state vocabulary is not locked~~ | JC-310 Sections 10.1–10.2 | ~~Blocks stable reader contract~~ | **Resolved (JC-310)**; precedence locked in Section 10.2 |
 | Distinct-order dimensional semantics are not additive | One order can span multiple dimensions | Blocks dimensional recognized-order count | Omit dimensional count or define a separate non-additive contract |
-| Event-period write-query plan | JC-317 implements and selectively certifies event-period source queries on the current branch; merge is pending | Durable event-period write authority is pending JC-317 merge | Merge JC-317 after the correction and exact-head gates pass |
-| Dimensional-period write-query plan | Dimensional rebuild SQL is not implemented | Blocks dimensional write certification | Implement and selectively certify in M5-04E |
-| Period readiness metadata population and reader enforcement | JC-317 implements event-period lifecycle on the current branch; dimensional lifecycle remains M5-04E; projection reads remain M5-04F | Blocks durable coherent period reads | Merge JC-317, populate dimensions in M5-04E, and enforce Section 12.2 coherence rules in M5-04F |
+| Event-period write-query plan | JC-317 merged and selectively certifies bounded source reads | Durable authority recorded | Complete in merged PR #291 |
+| Dimensional-period write-query plan | JC-319 certifies actual family DELETE plans and fixed bulk write counts | Local dimensional write evidence exists | Review JC-319 and require exact-head CI |
+| Period readiness metadata population and reader enforcement | Merged JC-317 event lifecycle and JC-319 atomic dimensional lifecycle; readers remain M5-04F | Reader enforcement remains deferred | Enforce Section 12.2 coherence rules in M5-04F when authorized |
 | ~~Durable generation coherence conflict (single generation_id vs incremental bucket refresh)~~ | Plan Sections 13.2 and 12.2 previously conflicted | ~~Blocks M5-04C reader/rebuild design~~ | **Resolved (JC-312 review correction)** — per-identity readiness + coherent snapshot; mixed `generation_id` allowed |
 
 ## 22. Owner decisions (JC-310 recorded)
@@ -1222,7 +1259,7 @@ M5_04C_DURABLE_AUTHORITY = YES
 
 Remaining gates after JC-314:
 
-1. Merge JC-317 after its targeted corrections and exact-head gates pass; it implements event-period invalidation and rebuild.
+1. JC-317 event-period invalidation and rebuild is merged and durable.
 2. M5-04E dimensional period population and query-plan certification.
 3. M5-04F projection and bounded edge reads, followed by M5-04G certification for latency, edge-query cost, rebuild cost, connection use, and fan-out.
 
@@ -1477,7 +1514,7 @@ ROLLING_EDGE_STRATEGY = FIXED_INTERIOR_BUCKETS_PLUS_DURABLE_EXACT_CONTRIBUTION_E
 
 ## 27. Verdict
 
-M5-04A audited the repository, identified the comparison-authority conflict, and rejected Daily v1 rehabilitation and an unbounded request-time comparison reader. JC-310 records the approved previous-equivalent contract without modifying M1-07. JC-312 implements pure comparison kernels and locks hybrid rolling-edge plus contribution contracts; PR #287 is merged and is durable authority. JC-314 implemented the authorized M5-04C schema slice and merged at `eebb9a83563e2ce0e40dd9a4e069567d89acd28f`. JC-317 implements the authorized M5-04D event-period rebuild and invalidation slice on the current branch; PR #291 is pending merge.
+M5-04A audited the repository, identified the comparison-authority conflict, and rejected Daily v1 rehabilitation and an unbounded request-time comparison reader. JC-310 records the approved previous-equivalent contract without modifying M1-07. JC-312 implements pure comparison kernels and locks hybrid rolling-edge plus contribution contracts; PR #287 is merged and is durable authority. JC-314 implemented the authorized M5-04C schema slice and merged at `eebb9a83563e2ce0e40dd9a4e069567d89acd28f`. JC-317 merged the authorized M5-04D event-period rebuild and invalidation slice in PR #291 at `5f2acf53b97b974f6abf4c3bb271e2e843fc282c`. JC-319 implements the authorized M5-04E dimensional projection slice.
 
 ```text
 DAILY_V1_DECISION = LEGACY / NON-CANONICAL FOR M5 PERIOD REPORTING
@@ -1499,12 +1536,18 @@ JC_314_STATUS = MERGED
 JC_314_MERGE_SHA = eebb9a83563e2ce0e40dd9a4e069567d89acd28f
 M5_04C_DURABLE_AUTHORITY = YES
 M5_04D_AUTHORIZED = YES
-M5_04D_STATUS = IN_PROGRESS
-M5_04E_AUTHORIZED = NO
+M5_04D_STATUS = MERGED
+JC_317_STATUS = MERGED
+JC_317_MERGE_SHA = 5f2acf53b97b974f6abf4c3bb271e2e843fc282c
+JC_317_MERGE_TREE = c6d58c43499233c22be34cdc0551d0fbae255224
+M5_04D_DURABLE_AUTHORITY = YES
+M5_04E_AUTHORIZED = YES
+M5_04E_STATUS = IN_PROGRESS
+M5_04F_AUTHORIZED = NO
 ROLLING_EDGE_STRATEGY = FIXED_INTERIOR_BUCKETS_PLUS_DURABLE_EXACT_CONTRIBUTION_EDGE
 ROLLING_EDGE_SCHEMA_FOUNDATION = M5-04C
 ROLLING_EDGE_POPULATION = JC-317 event period / M5-04E dimensional period
 ROLLING_EDGE_READ = M5-04F
 ```
 
-JC-314 is complete. JC-317 owns event-period population, invalidation, and bounded replacement without reopening comparison semantics or the accepted storage model. M5-04E dimensional population remains unauthorized.
+JC-314 is complete. JC-317 owns event-period population, invalidation, and bounded replacement without reopening comparison semantics or the accepted storage model. M5-04E dimensional population is authorized through JC-319. M5-04F remains unauthorized.

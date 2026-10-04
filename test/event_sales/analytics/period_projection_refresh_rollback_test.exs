@@ -7,7 +7,13 @@ defmodule EventSales.Analytics.PeriodProjectionRefreshRollbackTest do
 
   alias EventSales.Analytics.PeriodProjectionInvalidator
   alias EventSales.Analytics.PeriodProjectionRefresh
-  alias EventSales.Analytics.Resources.{AnalyticsContributionFact, EventPeriodAggregateSnapshot}
+
+  alias EventSales.Analytics.Resources.{
+    AnalyticsContributionFact,
+    EventDimensionPeriodAggregateSnapshot,
+    EventPeriodAggregateSnapshot
+  }
+
   alias EventSales.Analytics.SnapshotRefresh
   alias EventSales.Catalog.Resources.{Event, SourceSystem, TicketType}
   alias EventSales.Ingestion.HistoricalOrderMutationDetector
@@ -94,6 +100,68 @@ defmodule EventSales.Analytics.PeriodProjectionRefreshRollbackTest do
         Repo.delete_all(from(ticket in TicketType, where: ticket.event_id == ^event.id))
         Repo.delete_all(from(event_row in Event, where: event_row.id == ^event.id))
         Repo.delete_all(from(source_row in SourceSystem, where: source_row.id == ^source.id))
+      end
+    end)
+  end
+
+  test "dimension delete and insert failures preserve the prior multi-family generation and facts" do
+    UnboxedPostgres.with_connection(fn ->
+      fixture = refresh_identity_fixture!()
+
+      try do
+        assert {:ok, :ok} = refresh_pending(fixture.event.id)
+
+        dimension_query =
+          EventDimensionPeriodAggregateSnapshot
+          |> Ash.Query.filter(event_id == ^fixture.event.id)
+          |> Ash.Query.sort(id: :asc)
+
+        fact_query = AnalyticsContributionFact |> Ash.Query.filter(event_id == ^fixture.event.id)
+        old_dimensions = Ash.read!(dimension_query, domain: EventSales.Analytics)
+        old_facts = Ash.read!(fact_query, domain: EventSales.Analytics)
+        assert length(old_dimensions) == 6
+        assert length(old_facts) == 1
+
+        assert Enum.map(old_dimensions, & &1.dimension_kind) |> Enum.uniq() |> Enum.sort() == [
+                 :source_product,
+                 :source_variation,
+                 :ticket_type
+               ]
+
+        assert {:ok, before_snapshot} = HistoricalOrderMutationDetector.capture(fixture.order)
+
+        Repo.query!(
+          "UPDATE sales_order_items SET quantity = quantity + 1 WHERE id = $1::text::uuid",
+          [fixture.item.id]
+        )
+
+        assert {:ok, after_snapshot} = HistoricalOrderMutationDetector.capture(fixture.order)
+
+        assert {:ok, :ok} =
+                 Repo.transaction(fn ->
+                   PeriodProjectionInvalidator.invalidate_order_change(
+                     before_snapshot,
+                     after_snapshot
+                   )
+                 end)
+
+        for {injection, expected_error} <- [
+              {:source_product, {:dimension_persist_injected_failure, :delete, :source_product}},
+              {:insert, {:dimension_persist_injected_failure, :insert}}
+            ] do
+          assert {:error, ^expected_error} =
+                   refresh_pending(fixture.event.id, dimension_persist_failure: injection)
+
+          assert Ash.read!(dimension_query, domain: EventSales.Analytics) == old_dimensions
+          assert Ash.read!(fact_query, domain: EventSales.Analytics) == old_facts
+
+          assert Enum.all?(
+                   period_rows!(fixture.event.id),
+                   &(&1.projection_state == :refresh_pending)
+                 )
+        end
+      after
+        cleanup_identity_fixture!(fixture, [], [], [])
       end
     end)
   end
@@ -191,8 +259,8 @@ defmodule EventSales.Analytics.PeriodProjectionRefreshRollbackTest do
     assert Enum.all?(rows, &(&1.projection_state == :refresh_pending))
   end
 
-  defp refresh_pending(event_id) do
-    Repo.transaction(fn -> PeriodProjectionRefresh.refresh_pending_event(event_id) end)
+  defp refresh_pending(event_id, opts \\ []) do
+    Repo.transaction(fn -> PeriodProjectionRefresh.refresh_pending_event(event_id, opts) end)
   end
 
   defp assert_refresh_failed_closed!(event_id, expected_pending_count) do
@@ -218,6 +286,12 @@ defmodule EventSales.Analytics.PeriodProjectionRefreshRollbackTest do
          other_event_ids,
          other_ticket_ids
        ) do
+    Repo.delete_all(
+      from(dimension in EventDimensionPeriodAggregateSnapshot,
+        where: dimension.event_id == ^fixture.event.id
+      )
+    )
+
     Repo.delete_all(
       from(fact in AnalyticsContributionFact, where: fact.event_id == ^fixture.event.id)
     )

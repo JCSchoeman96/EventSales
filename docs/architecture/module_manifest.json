@@ -33,6 +33,7 @@
     "lib/event_sales/analytics/metric_rules.ex",
     "lib/event_sales/analytics/order_processed_notifier.ex",
     "lib/event_sales/analytics/period_bucket_rules.ex",
+    "lib/event_sales/analytics/period_dimension_aggregator.ex",
     "lib/event_sales/analytics/period_projection_invalidator.ex",
     "lib/event_sales/analytics/period_projection_refresh.ex",
     "lib/event_sales/analytics/refund_processed_notifier.ex",
@@ -1083,6 +1084,29 @@
       "uses": []
     },
     {
+      "docs_count": 3,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.PeriodDimensionAggregator",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/period_dimension_aggregator.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "rows_for_pending_buckets"
+        },
+        {
+          "arity": 2,
+          "name": "variation_subset_totals_for_pending_buckets"
+        },
+        {
+          "arity": 4,
+          "name": "reconcile_rows"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
       "docs_count": 2,
       "moduledoc?": true,
       "name": "EventSales.Analytics.PeriodProjectionInvalidator",
@@ -1102,7 +1126,7 @@
       "uses": []
     },
     {
-      "docs_count": 3,
+      "docs_count": 4,
       "moduledoc?": true,
       "name": "EventSales.Analytics.PeriodProjectionRefresh",
       "parse_error": null,
@@ -1119,6 +1143,10 @@
         {
           "arity": 2,
           "name": "refund_population_query"
+        },
+        {
+          "arity": 2,
+          "name": "dimension_delete_query"
         }
       ],
       "specs?": true,

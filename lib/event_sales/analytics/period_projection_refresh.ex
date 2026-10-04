@@ -8,11 +8,13 @@ defmodule EventSales.Analytics.PeriodProjectionRefresh do
   alias EventSales.Analytics
   alias EventSales.Analytics.Aggregators.EventAggregator
   alias EventSales.Analytics.PeriodBucketRules
+  alias EventSales.Analytics.PeriodDimensionAggregator
   alias EventSales.Analytics.Resources.EventPeriodAggregateSnapshot
   alias EventSales.Repo
   alias EventSales.Sales.FinancialPrimitives
 
   @period_table "analytics_event_period_aggregate_snapshots"
+  @dimension_table "analytics_event_dimension_period_aggregate_snapshots"
   @contribution_table "analytics_contribution_facts"
   @coverage_identity "m5_04d:event_period_bucket_v1"
   @semantic_version 1
@@ -138,6 +140,24 @@ defmodule EventSales.Analytics.PeriodProjectionRefresh do
       }
   end
 
+  @doc false
+  @spec dimension_delete_query(atom(), [map()]) :: Ecto.Query.t()
+  def dimension_delete_query(dimension_kind, pending_rows)
+      when dimension_kind in [:ticket_type, :source_product, :source_variation] and
+             is_list(pending_rows) do
+    case pending_rows do
+      [] ->
+        from dimension in @dimension_table, where: false
+
+      [_first | _rest] ->
+        dimension_kind = Atom.to_string(dimension_kind)
+        bucket_filter = pending_dimension_bucket_filter(pending_rows, dimension_kind)
+
+        from dimension in @dimension_table,
+          where: ^bucket_filter
+    end
+  end
+
   defp refresh_pending_rows(_event_id, [], _opts), do: :ok
 
   defp refresh_pending_rows(event_id, pending_rows, opts) do
@@ -150,6 +170,20 @@ defmodule EventSales.Analytics.PeriodProjectionRefresh do
          {:ok, refund_rows} <- fetch_refunds(event_id, windows),
          {:ok, current_facts} <- normalize_contributions(sales_rows, refund_rows),
          {:ok, totals_by_bucket} <- aggregate_bucket_totals(current_facts),
+         {:ok, dimensional_rows} <-
+           PeriodDimensionAggregator.rows_for_pending_buckets(current_facts, pending_rows),
+         {:ok, variation_totals_by_bucket} <-
+           PeriodDimensionAggregator.variation_subset_totals_for_pending_buckets(
+             current_facts,
+             pending_rows
+           ),
+         :ok <-
+           PeriodDimensionAggregator.reconcile_rows(
+             dimensional_rows,
+             pending_rows,
+             totals_by_bucket,
+             variation_totals_by_bucket
+           ),
          {:ok, existing_facts} <- existing_contributions(event_id, windows),
          {:ok, changed_facts, removed_facts} <- exact_diff(existing_facts, current_facts),
          generation_id = Ecto.UUID.generate(),
@@ -163,13 +197,23 @@ defmodule EventSales.Analytics.PeriodProjectionRefresh do
              refreshed_at,
              source_watermark_at
            ) do
-      replace_pending_buckets(
-        pending_rows,
-        totals_by_bucket,
-        generation_id,
-        refreshed_at,
-        source_watermark_at
-      )
+      with :ok <-
+             replace_pending_dimensions(
+               pending_rows,
+               dimensional_rows,
+               generation_id,
+               refreshed_at,
+               source_watermark_at,
+               opts
+             ) do
+        replace_pending_buckets(
+          pending_rows,
+          totals_by_bucket,
+          generation_id,
+          refreshed_at,
+          source_watermark_at
+        )
+      end
     end
   end
 
@@ -595,6 +639,148 @@ defmodule EventSales.Analytics.PeriodProjectionRefresh do
   rescue
     _error -> {:error, :period_bucket_persist_failed}
   end
+
+  defp replace_pending_dimensions(
+         pending_rows,
+         dimensional_rows,
+         generation_id,
+         refreshed_at,
+         watermark,
+         opts
+       ) do
+    failure = Keyword.get(opts, :dimension_persist_failure)
+
+    with :ok <-
+           delete_dimension_family_rows(
+             :ticket_type,
+             pending_rows,
+             failure
+           ),
+         :ok <-
+           delete_dimension_family_rows(
+             :source_product,
+             pending_rows,
+             failure
+           ),
+         :ok <-
+           delete_dimension_family_rows(
+             :source_variation,
+             pending_rows,
+             failure
+           ) do
+      bulk_insert_dimension_rows(
+        dimensional_rows,
+        generation_id,
+        refreshed_at,
+        watermark,
+        failure
+      )
+    end
+  rescue
+    _error -> {:error, :dimension_snapshot_persist_failed}
+  end
+
+  defp delete_dimension_family_rows(dimension_kind, pending_rows, failure) do
+    if dimension_persist_failure?(failure, :delete, dimension_kind) do
+      {:error, {:dimension_persist_injected_failure, :delete, dimension_kind}}
+    else
+      query = dimension_delete_query(dimension_kind, pending_rows)
+
+      try do
+        Repo.delete_all(query)
+        :ok
+      rescue
+        _error -> {:error, :dimension_snapshot_persist_failed}
+      end
+    end
+  end
+
+  defp bulk_insert_dimension_rows([], _generation_id, _refreshed_at, _watermark, _failure),
+    do: :ok
+
+  defp bulk_insert_dimension_rows(
+         dimensional_rows,
+         generation_id,
+         refreshed_at,
+         watermark,
+         failure
+       ) do
+    if dimension_persist_failure?(failure, :insert, nil) do
+      {:error, {:dimension_persist_injected_failure, :insert}}
+    else
+      persisted_at = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+      rows =
+        Enum.map(dimensional_rows, fn row ->
+          %{
+            id: Ecto.UUID.generate() |> Ecto.UUID.dump!(),
+            event_id: Ecto.UUID.dump!(row.event_id),
+            currency: row.currency,
+            bucket_kind: Atom.to_string(row.bucket_kind),
+            bucket_start_utc: row.bucket_start_utc,
+            bucket_end_utc: row.bucket_end_utc,
+            bucket_timezone: row.bucket_timezone,
+            dimension_kind: Atom.to_string(row.dimension_kind),
+            ticket_type_id: dump_optional_uuid(row.ticket_type_id),
+            source_system_id: dump_optional_uuid(row.source_system_id),
+            woo_product_id: row.woo_product_id,
+            woo_variation_id: row.woo_variation_id,
+            gross_ticket_quantity: row.gross_ticket_quantity,
+            gross_ticket_value: row.gross_ticket_value,
+            refund_ticket_quantity: row.refund_ticket_quantity,
+            refund_ticket_value: row.refund_ticket_value,
+            generation_id: Ecto.UUID.dump!(generation_id),
+            semantic_version: @semantic_version,
+            coverage_identity: @coverage_identity,
+            projection_state: "current",
+            refreshed_at: refreshed_at,
+            source_watermark_at: watermark,
+            inserted_at: persisted_at,
+            updated_at: persisted_at
+          }
+        end)
+
+      try do
+        {count, _rows} = Repo.insert_all(@dimension_table, rows)
+
+        if count == length(rows),
+          do: :ok,
+          else: {:error, :dimension_snapshot_insert_count_mismatch}
+      rescue
+        _error -> {:error, :dimension_snapshot_persist_failed}
+      end
+    end
+  end
+
+  defp dimension_persist_failure?(failure, :insert, _dimension_kind), do: failure == :insert
+
+  defp dimension_persist_failure?(failure, :delete, dimension_kind) do
+    failure in [dimension_kind, {"delete", dimension_kind}, {:delete, dimension_kind}]
+  end
+
+  defp pending_dimension_bucket_filter(pending_rows, dimension_kind) do
+    Enum.reduce(pending_rows, dynamic(false), fn bucket, acc ->
+      event_id = bucket |> Map.fetch!(:event_id) |> Ecto.UUID.dump!()
+      currency = Map.fetch!(bucket, :currency)
+      bucket_kind = bucket |> Map.fetch!(:bucket_kind) |> Atom.to_string()
+      bucket_start_utc = Map.fetch!(bucket, :bucket_start_utc)
+      bucket_end_utc = Map.fetch!(bucket, :bucket_end_utc)
+
+      dynamic(
+        [dimension],
+        ^acc or
+          (dimension.event_id == ^event_id and
+             dimension.dimension_kind == ^dimension_kind and
+             dimension.currency == ^currency and
+             dimension.bucket_kind == ^bucket_kind and
+             dimension.bucket_start_utc == ^bucket_start_utc and
+             dimension.bucket_end_utc == ^bucket_end_utc)
+      )
+    end)
+  end
+
+  defp dump_optional_uuid(nil), do: nil
+  defp dump_optional_uuid(id), do: Ecto.UUID.dump!(id)
 
   defp aggregate_bucket_totals(facts) do
     Enum.reduce_while(facts, {:ok, %{}}, fn fact, {:ok, totals_by_bucket} ->

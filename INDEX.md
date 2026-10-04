@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-417
+418
 
 ## Files
 
@@ -45,6 +45,7 @@ Project root: `.`
 - `lib/event_sales/analytics/metric_rules.ex`
 - `lib/event_sales/analytics/order_processed_notifier.ex`
 - `lib/event_sales/analytics/period_bucket_rules.ex`
+- `lib/event_sales/analytics/period_dimension_aggregator.ex`
 - `lib/event_sales/analytics/period_projection_invalidator.ex`
 - `lib/event_sales/analytics/period_projection_refresh.ex`
 - `lib/event_sales/analytics/refund_processed_notifier.ex`
@@ -600,6 +601,12 @@ Project root: `.`
   - docs_count: 1
   - public_funs: `for_instant/1`
   - uses: _none_
+- `EventSales.Analytics.PeriodDimensionAggregator` - `lib/event_sales/analytics/period_dimension_aggregator.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 3
+  - public_funs: `rows_for_pending_buckets/2`, `variation_subset_totals_for_pending_buckets/2`, `reconcile_rows/4`
+  - uses: _none_
 - `EventSales.Analytics.PeriodProjectionInvalidator` - `lib/event_sales/analytics/period_projection_invalidator.ex`
   - moduledoc?: true
   - specs?: true
@@ -609,8 +616,8 @@ Project root: `.`
 - `EventSales.Analytics.PeriodProjectionRefresh` - `lib/event_sales/analytics/period_projection_refresh.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 3
-  - public_funs: `refresh_pending_event/2`, `sale_population_query/2`, `refund_population_query/2`
+  - docs_count: 4
+  - public_funs: `refresh_pending_event/2`, `sale_population_query/2`, `refund_population_query/2`, `dimension_delete_query/2`
   - uses: _none_
 - `EventSales.Analytics.RefundProcessedNotifier` - `lib/event_sales/analytics/refund_processed_notifier.ex`
   - moduledoc?: true

@@ -6,7 +6,13 @@ defmodule EventSales.Analytics.PeriodProjectionRefreshTest do
   alias EventSales.Analytics
   alias EventSales.Analytics.PeriodProjectionInvalidator
   alias EventSales.Analytics.PeriodProjectionRefresh
-  alias EventSales.Analytics.Resources.{AnalyticsContributionFact, EventPeriodAggregateSnapshot}
+
+  alias EventSales.Analytics.Resources.{
+    AnalyticsContributionFact,
+    EventDimensionPeriodAggregateSnapshot,
+    EventPeriodAggregateSnapshot
+  }
+
   alias EventSales.Analytics.SnapshotRefresh
   alias EventSales.Ingestion.HistoricalOrderMutationDetector
   alias EventSales.Repo
@@ -25,6 +31,31 @@ defmodule EventSales.Analytics.PeriodProjectionRefreshTest do
 
     invalidate_order!(nil, snapshot)
     unaffected_seed = seed_unaffected_current_bucket!(event.id)
+
+    unaffected_dimension =
+      Ash.create!(
+        EventDimensionPeriodAggregateSnapshot,
+        Map.merge(
+          Map.take(unaffected_seed, [
+            :event_id,
+            :currency,
+            :bucket_kind,
+            :bucket_timezone,
+            :bucket_start_utc,
+            :bucket_end_utc,
+            :gross_ticket_quantity,
+            :gross_ticket_value,
+            :generation_id,
+            :semantic_version,
+            :coverage_identity,
+            :projection_state,
+            :refreshed_at
+          ]),
+          %{dimension_kind: :ticket_type, ticket_type_id: item.ticket_type_id}
+        ),
+        action: :create_snapshot,
+        domain: Analytics
+      )
 
     assert {:ok, _snapshots} =
              SnapshotRefresh.refresh_event(event.id, refreshed_at: @refreshed_at)
@@ -61,6 +92,62 @@ defmodule EventSales.Analytics.PeriodProjectionRefreshTest do
     assert Enum.find(facts, &(&1.contribution_kind == :refund)).source_contribution_id ==
              refund_line.id
 
+    dimension_rows = dimension_rows!(event.id)
+    assert length(dimension_rows) == 13
+
+    persisted_attributes =
+      EventDimensionPeriodAggregateSnapshot
+      |> Ash.Resource.Info.attributes()
+      |> Enum.map(& &1.name)
+
+    assert Map.take(
+             Enum.find(dimension_rows, &(&1.id == unaffected_dimension.id)),
+             persisted_attributes
+           ) ==
+             Map.take(unaffected_dimension, persisted_attributes)
+
+    assert Enum.all?(dimension_rows, &(&1.projection_state == :current))
+
+    for bucket <- [sale_hour, sale_day] do
+      rows = dimension_rows_for_bucket(dimension_rows, bucket)
+
+      assert Enum.map(rows, & &1.dimension_kind) |> Enum.sort() == [
+               :source_product,
+               :source_variation,
+               :ticket_type
+             ]
+
+      assert Enum.all?(rows, &(&1.gross_ticket_quantity == 2))
+      assert Enum.all?(rows, &Decimal.equal?(&1.gross_ticket_value, Decimal.new("115.00")))
+      assert Enum.all?(rows, &(&1.refund_ticket_quantity == 0))
+      assert Enum.all?(rows, &Decimal.equal?(&1.refund_ticket_value, Decimal.new("0")))
+      assert Enum.all?(rows, &(&1.generation_id == bucket.generation_id))
+      assert Enum.all?(rows, &(&1.semantic_version == bucket.semantic_version))
+      assert Enum.all?(rows, &(&1.coverage_identity == bucket.coverage_identity))
+      assert Enum.all?(rows, &(&1.refreshed_at == bucket.refreshed_at))
+      assert Enum.all?(rows, &(&1.source_watermark_at == bucket.source_watermark_at))
+    end
+
+    for bucket <- [refund_hour, refund_day] do
+      rows = dimension_rows_for_bucket(dimension_rows, bucket)
+
+      assert Enum.map(rows, & &1.dimension_kind) |> Enum.sort() == [
+               :source_product,
+               :source_variation,
+               :ticket_type
+             ]
+
+      assert Enum.all?(rows, &(&1.gross_ticket_quantity == 0))
+      assert Enum.all?(rows, &Decimal.equal?(&1.gross_ticket_value, Decimal.new("0")))
+      assert Enum.all?(rows, &(&1.refund_ticket_quantity == 1))
+      assert Enum.all?(rows, &Decimal.equal?(&1.refund_ticket_value, Decimal.new("12.00")))
+      assert Enum.all?(rows, &(&1.generation_id == bucket.generation_id))
+      assert Enum.all?(rows, &(&1.semantic_version == bucket.semantic_version))
+      assert Enum.all?(rows, &(&1.coverage_identity == bucket.coverage_identity))
+      assert Enum.all?(rows, &(&1.refreshed_at == bucket.refreshed_at))
+      assert Enum.all?(rows, &(&1.source_watermark_at == bucket.source_watermark_at))
+    end
+
     assert [replacement_generation] =
              [sale_hour, sale_day, refund_hour, refund_day]
              |> Enum.map(& &1.generation_id)
@@ -91,6 +178,41 @@ defmodule EventSales.Analytics.PeriodProjectionRefreshTest do
     refund_hour = bucket!(rows, :utc_hour, @refund_at)
     assert refund_hour.refund_ticket_quantity == 0
     assert Decimal.equal?(refund_hour.refund_ticket_value, Decimal.new("12.00"))
+    refund_dimensions = dimension_rows_for_bucket(dimension_rows!(event.id), refund_hour)
+    assert length(refund_dimensions) == 3
+    assert Enum.all?(refund_dimensions, &(&1.refund_ticket_quantity == 0))
+
+    assert Enum.all?(
+             refund_dimensions,
+             &Decimal.equal?(&1.refund_ticket_value, Decimal.new("12.00"))
+           )
+  end
+
+  test "a no-variation sale populates ticket type and product families only" do
+    {_source, event, order, item} = source_fixture!()
+    before_snapshot = capture!(order)
+
+    Repo.query!(
+      "UPDATE sales_order_items SET woo_variation_id = NULL WHERE id = $1::text::uuid",
+      [item.id]
+    )
+
+    after_snapshot = capture!(order)
+    invalidate_order!(before_snapshot, after_snapshot)
+
+    assert {:ok, :ok} = refresh_transaction(event.id, @refreshed_at)
+
+    rows = dimension_rows!(event.id)
+    assert length(rows) == 4
+
+    assert Enum.map(rows, & &1.dimension_kind) |> Enum.sort() == [
+             :source_product,
+             :source_product,
+             :ticket_type,
+             :ticket_type
+           ]
+
+    refute Enum.any?(rows, &(&1.dimension_kind == :source_variation))
   end
 
   test "exact-equal facts stay untouched while another contribution in the day changes" do
@@ -162,6 +284,171 @@ defmodule EventSales.Analytics.PeriodProjectionRefreshTest do
              bucket.gross_ticket_quantity == 0 and
                Decimal.equal?(bucket.gross_ticket_value, Decimal.new("0"))
            end)
+
+    assert dimension_rows!(event.id) == []
+  end
+
+  test "a pending day includes existing sales without replacing their unaffected hour dimensions" do
+    {_source, event, order, item} = source_fixture!()
+    invalidate_order!(nil, capture!(order))
+    assert {:ok, :ok} = refresh_transaction(event.id, @refreshed_at)
+    original_hour = bucket!(period_rows!(event.id), :utc_hour, @sale_at)
+    original_dimensions = dimension_rows_for_bucket(dimension_rows!(event.id), original_hour)
+
+    second_order =
+      Ash.create!(
+        Order,
+        order
+        |> Map.take([
+          :source_system_id,
+          :status,
+          :currency,
+          :created_at_source,
+          :updated_at_source,
+          :raw_total,
+          :raw_discount_total,
+          :raw_tax_total
+        ])
+        |> Map.merge(%{
+          woo_order_id: System.unique_integer([:positive]),
+          order_number: "unaffected-hour",
+          paid_at: DateTime.add(@sale_at, 1, :hour)
+        }),
+        action: :create_normalized,
+        domain: Sales
+      )
+
+    create_second_item!(second_order, item)
+    invalidate_order!(nil, capture!(second_order))
+    assert {:ok, :ok} = refresh_transaction(event.id, DateTime.add(@refreshed_at, 1, :hour))
+    dimensions = dimension_rows!(event.id)
+    assert dimension_rows_for_bucket(dimensions, original_hour) == original_dimensions
+    day = bucket!(period_rows!(event.id), :johannesburg_day, @sale_at)
+    assert day.gross_ticket_quantity == 3
+    assert Enum.all?(dimension_rows_for_bucket(dimensions, day), &(&1.gross_ticket_quantity == 3))
+    second_hour = bucket!(period_rows!(event.id), :utc_hour, DateTime.add(@sale_at, 1, :hour))
+
+    assert Enum.all?(
+             dimension_rows_for_bucket(dimensions, second_hour),
+             &(&1.gross_ticket_quantity == 1)
+           )
+  end
+
+  test "ticket type, product, and variation corrections replace the old dimensional grains" do
+    {_source, event, order, item} = source_fixture!()
+    before = capture!(order)
+    invalidate_order!(nil, before)
+    assert {:ok, :ok} = refresh_transaction(event.id, @refreshed_at)
+
+    replacement_ticket = SalesHelpers.create_ticket_type!(event, %{name: "Corrected ticket"})
+
+    for {field, value} <- [
+          {:ticket_type_id, replacement_ticket.id},
+          {:woo_product_id, 6001},
+          {:woo_variation_id, 6002}
+        ] do
+      before = capture!(order)
+      old_rows = dimension_rows!(event.id)
+      cast = if field == :ticket_type_id, do: "::text::uuid", else: "::bigint"
+
+      Repo.query!("UPDATE sales_order_items SET #{field} = $1#{cast} WHERE id = $2::text::uuid", [
+        value,
+        item.id
+      ])
+
+      after_snapshot = capture!(order)
+      invalidate_order!(before, after_snapshot)
+      assert {:ok, :ok} = refresh_transaction(event.id, @refreshed_at)
+      rows = dimension_rows!(event.id)
+      assert length(rows) == 6
+
+      affected =
+        case field do
+          :ticket_type_id -> [:ticket_type]
+          :woo_product_id -> [:source_product, :source_variation]
+          :woo_variation_id -> [:source_variation]
+        end
+
+      for row <- Enum.filter(rows, &(&1.dimension_kind in affected)) do
+        assert Map.fetch!(row, field) == value
+      end
+
+      refute Enum.any?(rows, fn row -> Enum.any?(old_rows, &(&1.id == row.id)) end)
+    end
+  end
+
+  test "event, currency, and effective-time corrections remove old partitions" do
+    {source, event, order, item} = source_fixture!()
+    before = capture!(order)
+    invalidate_order!(nil, before)
+    assert {:ok, :ok} = refresh_transaction(event.id, @refreshed_at)
+    other_event = SalesHelpers.create_event!(source, %{name: "Corrected event"})
+
+    other_ticket =
+      SalesHelpers.create_ticket_type!(other_event, %{name: "Corrected event ticket"})
+
+    Repo.query!(
+      "UPDATE sales_order_items SET event_id = $1::text::uuid, ticket_type_id = $2::text::uuid WHERE id = $3::text::uuid",
+      [other_event.id, other_ticket.id, item.id]
+    )
+
+    after_event = capture!(order)
+    invalidate_order!(before, after_event)
+    assert {:ok, :ok} = refresh_transaction(event.id, @refreshed_at)
+    assert {:ok, :ok} = refresh_transaction(other_event.id, @refreshed_at)
+    assert dimension_rows!(event.id) == []
+    assert length(dimension_rows!(other_event.id)) == 6
+
+    assert Enum.all?(
+             period_rows!(event.id),
+             &(&1.gross_ticket_quantity == 0 and &1.projection_state == :current)
+           )
+
+    Repo.query!("UPDATE sales_orders SET currency = 'EUR' WHERE id = $1::text::uuid", [order.id])
+    euro_order = Ash.get!(Order, order.id, domain: Sales)
+    after_currency = capture!(euro_order)
+    invalidate_order!(after_event, after_currency)
+    assert {:ok, :ok} = refresh_transaction(other_event.id, @refreshed_at)
+    assert Enum.all?(dimension_rows!(other_event.id), &(&1.currency == "EUR"))
+
+    assert Enum.all?(
+             Enum.filter(period_rows!(other_event.id), &(&1.currency == "ZAR")),
+             &(&1.gross_ticket_quantity == 0)
+           )
+
+    corrected_at = ~U[2026-07-04 17:15:00.000000Z]
+
+    Repo.query!("UPDATE sales_orders SET paid_at = $1 WHERE id = $2::text::uuid", [
+      corrected_at,
+      order.id
+    ])
+
+    corrected_order = Ash.get!(Order, order.id, domain: Sales)
+    invalidate_order!(after_currency, capture!(corrected_order))
+    assert {:ok, :ok} = refresh_transaction(other_event.id, @refreshed_at)
+    rows = dimension_rows!(other_event.id)
+    assert length(rows) == 6
+    assert Enum.all?(rows, &(DateTime.compare(&1.bucket_start_utc, @sale_at) == :gt))
+    assert Enum.all?(rows, &(&1.currency == "EUR" and &1.projection_state == :current))
+  end
+
+  test "voiding an active refund removes its dimensions while preserving sale dimensions" do
+    {source, event, order, item} = source_fixture!()
+    line = create_refund!(source, order, item)
+    before = capture!(order)
+    invalidate_order!(nil, before)
+    assert {:ok, :ok} = refresh_transaction(event.id, @refreshed_at)
+    sale_rows = Enum.filter(dimension_rows!(event.id), &(&1.gross_ticket_quantity > 0))
+    assert length(dimension_rows!(event.id)) == 12
+
+    Repo.query!("UPDATE sales_refunds SET source_state = 'voided' WHERE id = $1::text::uuid", [
+      line.refund_id
+    ])
+
+    invalidate_order!(before, capture!(order))
+    assert {:ok, :ok} = refresh_transaction(event.id, @refreshed_at)
+    assert dimension_rows!(event.id) == sale_rows
+    assert Enum.all?(period_rows!(event.id), &(&1.refund_ticket_quantity == 0))
   end
 
   defp source_fixture! do
@@ -350,6 +637,22 @@ defmodule EventSales.Analytics.PeriodProjectionRefreshTest do
     AnalyticsContributionFact
     |> Ash.Query.filter(event_id == ^event_id)
     |> Ash.read!(domain: Analytics)
+  end
+
+  defp dimension_rows!(event_id) do
+    EventDimensionPeriodAggregateSnapshot
+    |> Ash.Query.filter(event_id == ^event_id)
+    |> Ash.Query.sort([:currency, :bucket_kind, :bucket_start_utc, :dimension_kind])
+    |> Ash.read!(domain: Analytics)
+  end
+
+  defp dimension_rows_for_bucket(rows, bucket) do
+    Enum.filter(rows, fn row ->
+      row.currency == bucket.currency and
+        row.bucket_kind == bucket.bucket_kind and
+        row.bucket_start_utc == bucket.bucket_start_utc and
+        row.bucket_end_utc == bucket.bucket_end_utc
+    end)
   end
 
   defp bucket!(rows, kind, %DateTime{} = instant) do
