@@ -32,6 +32,9 @@
     "lib/event_sales/analytics/hot_state_aggregator.ex",
     "lib/event_sales/analytics/metric_rules.ex",
     "lib/event_sales/analytics/order_processed_notifier.ex",
+    "lib/event_sales/analytics/period_bucket_rules.ex",
+    "lib/event_sales/analytics/period_projection_invalidator.ex",
+    "lib/event_sales/analytics/period_projection_refresh.ex",
     "lib/event_sales/analytics/refund_processed_notifier.ex",
     "lib/event_sales/analytics/resources/analytics_contribution_fact.ex",
     "lib/event_sales/analytics/resources/daily_sales_aggregate_snapshot.ex",
@@ -860,7 +863,7 @@
       "uses": []
     },
     {
-      "docs_count": 5,
+      "docs_count": 6,
       "moduledoc?": true,
       "name": "EventSales.Analytics.EventSnapshotRefreshFence",
       "parse_error": null,
@@ -873,6 +876,10 @@
         {
           "arity": 0,
           "name": "coherent_transaction_opts"
+        },
+        {
+          "arity": 1,
+          "name": "lock_events_in_transaction"
         },
         {
           "arity": 0,
@@ -1055,6 +1062,63 @@
         {
           "arity": 4,
           "name": "finalize_csv_import_hot_state"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.PeriodBucketRules",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/period_bucket_rules.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "for_instant"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 2,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.PeriodProjectionInvalidator",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/period_projection_invalidator.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "invalidate_order_change"
+        },
+        {
+          "arity": 2,
+          "name": "invalidate_refund_change"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 3,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.PeriodProjectionRefresh",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/period_projection_refresh.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "refresh_pending_event"
+        },
+        {
+          "arity": 2,
+          "name": "sale_population_query"
+        },
+        {
+          "arity": 2,
+          "name": "refund_population_query"
         }
       ],
       "specs?": true,

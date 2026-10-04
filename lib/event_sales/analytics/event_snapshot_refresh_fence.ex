@@ -33,6 +33,27 @@ defmodule EventSales.Analytics.EventSnapshotRefreshFence do
   end
 
   @doc false
+  @spec lock_events_in_transaction([Ecto.UUID.t() | String.t()]) ::
+          :ok | {:error, :invalid_event_id | :event_snapshot_refresh_fence_failed}
+  def lock_events_in_transaction(event_ids) when is_list(event_ids) do
+    with true <- Repo.in_transaction?(),
+         {:ok, canonical_ids} <- canonical_event_ids(event_ids),
+         :ok <- acquire_transaction_locks(canonical_ids) do
+      :ok
+    else
+      false -> {:error, :event_snapshot_refresh_fence_failed}
+      {:error, reason} -> {:error, reason}
+    end
+  rescue
+    _error -> {:error, :event_snapshot_refresh_fence_failed}
+  catch
+    :exit, _reason -> {:error, :event_snapshot_refresh_fence_failed}
+    :throw, _value -> {:error, :event_snapshot_refresh_fence_failed}
+  end
+
+  def lock_events_in_transaction(_event_ids), do: {:error, :invalid_event_id}
+
+  @doc false
   @spec use_repeatable_read_isolation?() :: boolean()
   def use_repeatable_read_isolation? do
     Process.get(:ecto_sandbox_unboxed) == true or
@@ -58,6 +79,34 @@ defmodule EventSales.Analytics.EventSnapshotRefreshFence do
 
       :error ->
         {:error, :invalid_event_id}
+    end
+  end
+
+  defp canonical_event_ids(event_ids) do
+    Enum.reduce_while(event_ids, {:ok, []}, fn event_id, {:ok, acc} ->
+      case Ecto.UUID.cast(event_id) do
+        {:ok, canonical_id} -> {:cont, {:ok, [canonical_id | acc]}}
+        :error -> {:halt, {:error, :invalid_event_id}}
+      end
+    end)
+    |> case do
+      {:ok, ids} -> {:ok, ids |> Enum.uniq() |> Enum.sort()}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp acquire_transaction_locks(event_ids) do
+    Enum.reduce_while(event_ids, :ok, fn event_id, :ok ->
+      with {:ok, key} <- lock_key(event_id),
+           {:ok, _result} <- Repo.query("SELECT pg_advisory_xact_lock($1::bigint)", [key]) do
+        {:cont, :ok}
+      else
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      :ok -> :ok
+      {:error, _reason} -> {:error, :event_snapshot_refresh_fence_failed}
     end
   end
 

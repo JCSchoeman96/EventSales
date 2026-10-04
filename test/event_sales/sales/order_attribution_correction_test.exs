@@ -5,7 +5,9 @@ defmodule EventSales.Sales.OrderAttributionCorrectionTest do
 
   alias EventSales.Accounts
   alias EventSales.Accounts.Resources.{Role, User, UserRole}
+  alias EventSales.Analytics
   alias EventSales.Analytics.DashboardCache
+  alias EventSales.Analytics.Resources.EventPeriodAggregateSnapshot
   alias EventSales.Analytics.Workers.RefreshSnapshotWorker
   alias EventSales.Audit
   alias EventSales.Audit.Resources.AuditLog
@@ -132,6 +134,31 @@ defmodule EventSales.Sales.OrderAttributionCorrectionTest do
     assert audit.metadata["from_event_external_id"] == 108_658
     assert audit.metadata["to_event_external_id"] == 109_120
     refute Map.has_key?(audit.metadata, "confirmation")
+  end
+
+  test "successful correction invalidates period projections for both event identities", %{
+    admin: admin,
+    source: source,
+    mp_event: mp_event,
+    wr_event: wr_event
+  } do
+    assert {:ok, _result} =
+             OrderAttributionCorrection.correct_confirmed_order_113834(
+               source.id,
+               "CORRECT ORDER 113834 109132/109167 FROM 108658 TO 109120",
+               actor: admin,
+               snapshot_refresh_scheduler: fn _event_ids -> :ok end
+             )
+
+    period_rows = period_rows_for_events([mp_event.id, wr_event.id])
+
+    assert Enum.map(period_rows, & &1.event_id) ==
+             Enum.sort([mp_event.id, mp_event.id, wr_event.id, wr_event.id])
+
+    assert Enum.map(period_rows, & &1.bucket_kind) ==
+             [:johannesburg_day, :utc_hour, :johannesburg_day, :utc_hour]
+
+    assert Enum.all?(period_rows, &(&1.projection_state == :refresh_pending))
   end
 
   test "successful correction invalidates both exact current Event certificates", %{
@@ -413,7 +440,8 @@ defmodule EventSales.Sales.OrderAttributionCorrectionTest do
       event_id: event.id,
       ticket_type_id: ticket.id,
       mapping_status: :mapped,
-      item_kind: :ticket
+      item_kind: :ticket,
+      line_total_tax: Decimal.new("0")
     })
   end
 
@@ -465,6 +493,13 @@ defmodule EventSales.Sales.OrderAttributionCorrectionTest do
     |> Ash.Query.filter(event_type == :order_attribution_corrected)
     |> Ash.read!(domain: Audit)
     |> length()
+  end
+
+  defp period_rows_for_events(event_ids) do
+    EventPeriodAggregateSnapshot
+    |> Ash.Query.filter(event_id in ^event_ids)
+    |> Ash.Query.sort(event_id: :asc, bucket_kind: :asc)
+    |> Ash.read!(domain: Analytics)
   end
 
   defp refresh_job_count(event_id) do

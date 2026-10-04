@@ -3,6 +3,8 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
 
   require Ash.Query
 
+  alias EventSales.Analytics
+  alias EventSales.Analytics.Resources.EventPeriodAggregateSnapshot
   alias EventSales.Analytics.Workers.RefreshSnapshotWorker
   alias EventSales.Catalog
   alias EventSales.Catalog.MissingCatalogResolver
@@ -62,6 +64,42 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
     assert invalidated.order_coverage_status == :incomplete
     assert invalidated.refund_coverage_status == :incomplete
     assert %DateTime{} = invalidated.coverage_invalidated_at
+  end
+
+  test "maps a completed pending item and invalidates its period projections", %{
+    source: source
+  } do
+    order = create_coverage_order!(source)
+
+    order =
+      Ash.update!(
+        order,
+        %{
+          completed_at: @within_sales_scope,
+          updated_at_source: DateTime.add(order.updated_at_source, 1, :second)
+        },
+        action: :sync_status_from_source,
+        domain: Sales
+      )
+
+    event = SalesHelpers.create_event!(source, %{name: "Period Recovery Event"})
+    ticket = SalesHelpers.create_variation_ticket_type!(event, 501, 601)
+    create_mapping!(source, event, ticket, %{woo_product_id: 501, woo_variation_id: 601})
+
+    create_item!(order, %{
+      woo_product_id: 501,
+      woo_variation_id: 601,
+      line_total_tax: Decimal.new("0")
+    })
+
+    assert {:ok, %{mapped: 1, marked_unmapped: 0, unchanged: 0}} =
+             MissingCatalogResolver.recover_product(source.id, 501, 601,
+               snapshot_refresh_scheduler: fn _event_ids -> :ok end
+             )
+
+    rows = period_rows_for_event(event.id)
+    assert Enum.map(rows, & &1.bucket_kind) == [:johannesburg_day, :utc_hour]
+    assert Enum.all?(rows, &(&1.projection_state == :refresh_pending))
   end
 
   test "refresh scheduling failure rolls back the recovered mapping and coverage", %{
@@ -763,6 +801,13 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
       )
 
     count
+  end
+
+  defp period_rows_for_event(event_id) do
+    EventPeriodAggregateSnapshot
+    |> Ash.Query.filter(event_id == ^event_id)
+    |> Ash.Query.sort(bucket_kind: :asc)
+    |> Ash.read!(domain: Analytics)
   end
 
   defp create_coverage_order!(source, created_at_source \\ @within_sales_scope) do

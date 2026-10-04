@@ -11,6 +11,7 @@ defmodule EventSales.Catalog.MissingCatalogResolver do
 
   require Ash.Query
 
+  alias EventSales.Analytics.PeriodProjectionInvalidator
   alias EventSales.Analytics.Workers.RefreshSnapshotWorker
   alias EventSales.Ingestion.HistoricalCoverageInvalidator
   alias EventSales.Ingestion.HistoricalOrderCoverageCandidateResolver
@@ -91,6 +92,8 @@ defmodule EventSales.Catalog.MissingCatalogResolver do
            {:ok, before_snapshot} <- capture_order(order, opts),
            {:ok, result} <- recover_items(items),
            {:ok, after_snapshot} <- capture_order(order, opts),
+           :ok <-
+             PeriodProjectionInvalidator.invalidate_order_change(before_snapshot, after_snapshot),
            {:ok, candidate_event_ids} <-
              invalidate_changed_order(order, before_snapshot, after_snapshot, opts),
            :ok <- enqueue_mapped_recovery_refreshes(result, candidate_event_ids, opts) do

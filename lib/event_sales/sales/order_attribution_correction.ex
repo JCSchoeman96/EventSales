@@ -10,6 +10,7 @@ defmodule EventSales.Sales.OrderAttributionCorrection do
 
   alias EventSales.Accounts.Policies
   alias EventSales.Analytics.DashboardCache
+  alias EventSales.Analytics.PeriodProjectionInvalidator
   alias EventSales.Analytics.Workers.RefreshSnapshotWorker
   alias EventSales.Audit.Logger, as: AuditLogger
   alias EventSales.Catalog
@@ -81,6 +82,8 @@ defmodule EventSales.Sales.OrderAttributionCorrection do
          {:ok, _audit_log} <- audit_correction(context, corrected, actor),
          {:ok, after_snapshot} <- capture_after(context.order),
          {:ok, comparison} <- compare_correction_truth(before_snapshot, after_snapshot),
+         :ok <-
+           PeriodProjectionInvalidator.invalidate_order_change(before_snapshot, after_snapshot),
          :ok <- invalidate_correction_coverage(context.order, comparison, opts) do
       {corrected, public_preview(%{context | order_item: corrected}), notifications, context}
     else

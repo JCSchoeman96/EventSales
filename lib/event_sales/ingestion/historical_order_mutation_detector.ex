@@ -15,6 +15,8 @@ defmodule EventSales.Ingestion.HistoricalOrderMutationDetector do
 
   @type snapshot :: %{
           header: %{
+            id: String.t(),
+            source_system_id: String.t(),
             status: atom(),
             currency: String.t(),
             created_at_source: DateTime.t(),
@@ -25,6 +27,7 @@ defmodule EventSales.Ingestion.HistoricalOrderMutationDetector do
             raw_tax_total: Decimal.t()
           },
           order_items: [map()],
+          refunds: [map()],
           coupon_snapshots: [map()]
         }
 
@@ -45,6 +48,7 @@ defmodule EventSales.Ingestion.HistoricalOrderMutationDetector do
        %{
          header: header_snapshot(order),
          order_items: order_item_snapshots(order.id),
+         refunds: refund_snapshots(order.id),
          coupon_snapshots: coupon_snapshots(order.id)
        }}
     end
@@ -68,6 +72,8 @@ defmodule EventSales.Ingestion.HistoricalOrderMutationDetector do
 
   defp header_snapshot(%Order{} = order) do
     %{
+      id: order.id,
+      source_system_id: order.source_system_id,
       status: order.status,
       currency: order.currency,
       created_at_source: order.created_at_source,
@@ -113,6 +119,7 @@ defmodule EventSales.Ingestion.HistoricalOrderMutationDetector do
     |> Ash.read!(domain: Sales)
     |> Enum.map(fn %OrderItem{} = item ->
       %{
+        id: item.id,
         woo_line_item_id: item.woo_line_item_id,
         event_id: item.event_id,
         ticket_type_id: item.ticket_type_id,
@@ -143,6 +150,56 @@ defmodule EventSales.Ingestion.HistoricalOrderMutationDetector do
         discount_tax: coupon.discount_tax
       }
     end)
+  end
+
+  defp refund_snapshots(order_id) do
+    refunds =
+      EventSales.Sales.Resources.Refund
+      |> Ash.Query.filter(order_id == ^order_id)
+      |> Ash.Query.sort([:id])
+      |> Ash.read!(domain: Sales)
+
+    refund_ids = Enum.map(refunds, & &1.id)
+
+    lines_by_refund_id =
+      if refund_ids == [] do
+        %{}
+      else
+        EventSales.Sales.Resources.RefundLine
+        |> Ash.Query.filter(refund_id in ^refund_ids)
+        |> Ash.Query.sort([:refund_id, :id])
+        |> Ash.read!(domain: Sales)
+        |> Enum.map(&refund_line_snapshot/1)
+        |> Enum.group_by(& &1.refund_id)
+      end
+
+    Enum.map(refunds, fn refund ->
+      %{
+        header: %{
+          id: refund.id,
+          order_id: refund.order_id,
+          currency: refund.currency,
+          source_state: refund.source_state,
+          detail_status: refund.detail_status,
+          source_created_at: refund.source_created_at
+        },
+        lines: Map.get(lines_by_refund_id, refund.id, [])
+      }
+    end)
+  end
+
+  defp refund_line_snapshot(line) do
+    %{
+      id: line.id,
+      refund_id: line.refund_id,
+      order_item_id: line.order_item_id,
+      woo_refunded_item_id: line.woo_refunded_item_id,
+      refunded_quantity: line.refunded_quantity,
+      refund_total_amount: line.refund_total_amount,
+      refund_total_tax: line.refund_total_tax,
+      binding_reason: line.binding_reason,
+      validation_reason: line.validation_reason
+    }
   end
 
   defp candidate_event_ids(before, after_snapshot) do
