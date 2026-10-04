@@ -451,17 +451,6 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
   defp invalid_dimension_edge_row?(:ticket_type, row), do: is_nil(row.ticket_type_id)
   defp invalid_dimension_edge_row?(:source_product, row), do: is_nil(row.source_system_id)
   defp invalid_dimension_edge_row?(:source_variation, row), do: is_nil(row.woo_variation_id)
-  defp invalid_dimension_edge_row?(_kind, _row), do: false
-
-  defp query_edge_aggregates(
-         _event_id,
-         _currency,
-         [],
-         _coverage_by_hour,
-         _semantic_by_hour,
-         _kind
-       ),
-       do: {:ok, []}
 
   defp query_edge_aggregates(
          event_id,
