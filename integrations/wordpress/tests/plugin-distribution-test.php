@@ -122,6 +122,7 @@ function parse_plugin_header(string $mainFilePath): array
         'version' => '/^\s*\*\s*Version:\s*(.+)$/mi',
         'requires_php' => '/^\s*\*\s*Requires PHP:\s*(.+)$/mi',
         'requires_at_least' => '/^\s*\*\s*Requires at least:\s*(.+)$/mi',
+        'update_uri' => '/^\s*\*\s*Update URI:\s*(.+)$/mi',
     ];
 
     foreach ($patterns as $key => $pattern) {
@@ -186,6 +187,11 @@ function run_source_tests(): void
         DistributionTest::same("{$slug} header version", (string) $plugin['marketing_version'], $headers['version'] ?? '');
         DistributionTest::same("{$slug} Requires PHP", (string) $manifest['requires_php'], $headers['requires_php'] ?? '');
         DistributionTest::same("{$slug} Requires at least", (string) $manifest['requires_at_least_wordpress'], $headers['requires_at_least'] ?? '');
+        DistributionTest::same(
+            "{$slug} Update URI",
+            'https://github.com/JCSchoeman96/EventSales',
+            $headers['update_uri'] ?? ''
+        );
         DistributionTest::ok("{$slug} main filename matches slug", $mainFile === $slug . '.php');
 
         $constants = read_defined_constants_from_main($mainPath);

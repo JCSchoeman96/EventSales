@@ -7,7 +7,7 @@
     {
       "slug": "eventsales-tickera-catalog-feed",
       "main_file": "eventsales-tickera-catalog-feed.php",
-      "marketing_version": "0.1.1",
+      "marketing_version": "0.1.2",
       "catalog_schema_version": "2026-08-07.v3",
       "canonical_contract_version": "source_risk.v3",
       "producer_version": "2026-08-07.1",
@@ -16,18 +16,18 @@
     {
       "slug": "eventsales-woo-order-index-feed",
       "main_file": "eventsales-woo-order-index-feed.php",
-      "marketing_version": "0.2.1",
+      "marketing_version": "0.2.2",
       "order_index_schema_version": "2026-08-12.v1"
     },
     {
       "slug": "eventsales-woo-order-line-identity",
       "main_file": "eventsales-woo-order-line-identity.php",
-      "marketing_version": "0.1.1"
+      "marketing_version": "0.1.2"
     },
     {
       "slug": "eventsales-integration-health",
       "main_file": "eventsales-integration-health.php",
-      "marketing_version": "0.1.1"
+      "marketing_version": "0.1.2"
     }
   ]
 }
