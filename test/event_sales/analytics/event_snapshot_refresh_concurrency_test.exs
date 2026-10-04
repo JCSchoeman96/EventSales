@@ -5,14 +5,23 @@ defmodule EventSales.Analytics.EventSnapshotRefreshConcurrencyTest do
 
   require Ash.Query
 
-  alias EventSales.Analytics.{EventSnapshotRefreshFence, SnapshotRefresh}
+  alias EventSales.Analytics.{
+    EventSnapshotRefreshFence,
+    PeriodBucketRules,
+    PeriodProjectionInvalidator,
+    PeriodProjectionRefresh,
+    SnapshotRefresh
+  }
 
   alias EventSales.Analytics.Resources.{
+    AnalyticsContributionFact,
     EventAggregateSnapshot,
-    EventDimensionAggregateSnapshot
+    EventDimensionAggregateSnapshot,
+    EventPeriodAggregateSnapshot
   }
 
   alias EventSales.Catalog.Resources.{Event, SourceSystem, TicketType}
+  alias EventSales.Ingestion.HistoricalOrderMutationDetector
   alias EventSales.Repo
   alias EventSales.Sales
   alias EventSales.Sales.RefundUpserter
@@ -411,6 +420,139 @@ defmodule EventSales.Analytics.EventSnapshotRefreshConcurrencyTest do
     assert Enum.uniq(Enum.map(final_rows, & &1.refreshed_at)) |> length() == 1
   end
 
+  test "worker-first race leaves old period output pending after the source commits" do
+    fixture = create_committed_fixture!()
+    on_exit(fn -> cleanup_committed_fixture!(fixture) end)
+
+    parent = self()
+
+    worker =
+      Task.async(fn ->
+        UnboxedPostgres.with_connection(fn ->
+          EventSnapshotRefreshFence.with_serial_event_refresh(fixture.event_id, fn ->
+            Repo.transaction(
+              fn ->
+                assert :ok = PeriodProjectionRefresh.refresh_pending_event(fixture.event_id)
+                send(parent, :period_worker_rebuilt_old_truth)
+
+                receive do
+                  :commit_period_worker -> :ok
+                after
+                  15_000 -> Repo.rollback(:period_worker_timeout)
+                end
+              end,
+              [timeout: 30_000] ++ EventSnapshotRefreshFence.coherent_transaction_opts()
+            )
+          end)
+        end)
+      end)
+
+    assert_receive :period_worker_rebuilt_old_truth, 10_000
+
+    source =
+      Task.async(fn ->
+        UnboxedPostgres.with_connection(fn ->
+          Repo.transaction(fn ->
+            {_order, before_snapshot} = capture_order_snapshot!(fixture.zar_order_id)
+            bump_sale_quantity!(fixture.zar_order_id, fixture.event_id)
+            {_order, after_snapshot} = capture_order_snapshot!(fixture.zar_order_id)
+            backend = EventSnapshotRefreshFence.connection_backend_pid()
+            send(parent, {:source_waiting_for_worker, backend})
+
+            assert :ok =
+                     PeriodProjectionInvalidator.invalidate_order_change(
+                       before_snapshot,
+                       after_snapshot
+                     )
+
+            :ok
+          end)
+        end)
+      end)
+
+    assert_receive {:source_waiting_for_worker, source_backend}, 5_000
+    EventSnapshotRefreshTestSupport.wait_for_advisory_lock_wait!(source_backend)
+
+    send(worker.pid, :commit_period_worker)
+
+    assert {:ok, :ok} = Task.await(worker, 10_000)
+    assert {:ok, :ok} = Task.await(source, 10_000)
+
+    stale_sale_bucket = sale_hour_bucket!(fixture)
+    assert stale_sale_bucket.projection_state == :refresh_pending
+    assert stale_sale_bucket.gross_ticket_quantity == 0
+
+    [sale_fact] = sale_facts!(fixture.event_id)
+    assert sale_fact.gross_ticket_quantity == 1
+
+    assert {:ok, _snapshots} =
+             UnboxedPostgres.with_connection(fn ->
+               SnapshotRefresh.refresh_event(fixture.event_id)
+             end)
+
+    current_sale_bucket = sale_hour_bucket!(fixture)
+    assert current_sale_bucket.projection_state == :current
+    assert current_sale_bucket.gross_ticket_quantity == 2
+  end
+
+  test "source-first race makes the worker rebuild from committed source truth" do
+    fixture = create_committed_fixture!()
+    on_exit(fn -> cleanup_committed_fixture!(fixture) end)
+    parent = self()
+
+    source =
+      Task.async(fn ->
+        UnboxedPostgres.with_connection(fn ->
+          Repo.transaction(fn ->
+            {_order, before_snapshot} = capture_order_snapshot!(fixture.zar_order_id)
+            bump_sale_quantity!(fixture.zar_order_id, fixture.event_id)
+            {_order, after_snapshot} = capture_order_snapshot!(fixture.zar_order_id)
+
+            assert :ok =
+                     PeriodProjectionInvalidator.invalidate_order_change(
+                       before_snapshot,
+                       after_snapshot
+                     )
+
+            send(parent, :source_pending_intent_locked)
+
+            receive do
+              :commit_source -> :ok
+            after
+              15_000 -> Repo.rollback(:source_lock_timeout)
+            end
+          end)
+        end)
+      end)
+
+    assert_receive :source_pending_intent_locked, 5_000
+
+    worker =
+      Task.async(fn ->
+        UnboxedPostgres.with_connection(fn ->
+          backend = EventSnapshotRefreshFence.connection_backend_pid()
+          send(parent, {:worker_waiting_for_source, backend})
+          SnapshotRefresh.refresh_event(fixture.event_id)
+        end)
+      end)
+
+    assert_receive {:worker_waiting_for_source, worker_backend}, 5_000
+    EventSnapshotRefreshTestSupport.wait_for_advisory_lock_wait!(worker_backend)
+    refute Task.yield(worker, 200)
+
+    send(source.pid, :commit_source)
+
+    assert {:ok, :ok} = Task.await(source, 10_000)
+    assert {:ok, _snapshots} = Task.await(worker, 20_000)
+
+    current_sale_bucket = sale_hour_bucket!(fixture)
+    assert current_sale_bucket.projection_state == :current
+    assert current_sale_bucket.gross_ticket_quantity == 2
+
+    [sale_fact] = sale_facts!(fixture.event_id)
+    assert sale_fact.gross_ticket_quantity == 2
+  end
+
   defp create_committed_fixture! do
     suffix = System.unique_integer([:positive])
 
@@ -547,6 +689,12 @@ defmodule EventSales.Analytics.EventSnapshotRefreshConcurrencyTest do
         from(snapshot in EventDimensionAggregateSnapshot, where: snapshot.event_id == ^event_id)
       )
 
+      Repo.delete_all(
+        from(snapshot in EventPeriodAggregateSnapshot, where: snapshot.event_id == ^event_id)
+      )
+
+      Repo.delete_all(from(fact in AnalyticsContributionFact, where: fact.event_id == ^event_id))
+
       Repo.delete_all(from(item in OrderItem, where: item.event_id == ^event_id))
       Repo.delete_all(from(order in Order, where: order.source_system_id == ^source_id))
       Repo.delete_all(from(tt in TicketType, where: tt.event_id == ^event_id))
@@ -560,6 +708,54 @@ defmodule EventSales.Analytics.EventSnapshotRefreshConcurrencyTest do
       "DELETE FROM sales_order_items WHERE order_id = $1",
       [Ecto.UUID.dump!(order_id)]
     )
+  end
+
+  defp capture_order_snapshot!(order_id) do
+    UnboxedPostgres.with_connection(fn ->
+      order =
+        Order
+        |> Ash.Query.filter(id == ^order_id)
+        |> Ash.read_one!(domain: Sales)
+
+      {:ok, snapshot} = HistoricalOrderMutationDetector.capture(order)
+      {order, snapshot}
+    end)
+  end
+
+  defp bump_sale_quantity!(order_id, event_id) do
+    %{num_rows: 1} =
+      Repo.query!(
+        """
+        UPDATE sales_order_items
+        SET quantity = quantity + 1
+        WHERE order_id = $1 AND event_id = $2
+        """,
+        [Ecto.UUID.dump!(order_id), Ecto.UUID.dump!(event_id)]
+      )
+  end
+
+  defp sale_hour_bucket!(fixture) do
+    UnboxedPostgres.with_connection(fn ->
+      {order, _snapshot} = capture_order_snapshot!(fixture.zar_order_id)
+      effective_at = order.paid_at || order.completed_at
+      {:ok, buckets} = PeriodBucketRules.for_instant(effective_at)
+      bucket = Enum.find(buckets, &(&1.bucket_kind == :utc_hour))
+
+      EventPeriodAggregateSnapshot
+      |> Ash.Query.filter(
+        event_id == ^fixture.event_id and currency == "ZAR" and
+          bucket_kind == :utc_hour and bucket_start_utc == ^bucket.bucket_start_utc
+      )
+      |> Ash.read_one!(domain: EventSales.Analytics)
+    end)
+  end
+
+  defp sale_facts!(event_id) do
+    UnboxedPostgres.with_connection(fn ->
+      AnalyticsContributionFact
+      |> Ash.Query.filter(event_id == ^event_id and contribution_kind == :sale)
+      |> Ash.read!(domain: EventSales.Analytics)
+    end)
   end
 
   defp normalized_refund(refund_id, line_items) do

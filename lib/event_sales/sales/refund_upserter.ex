@@ -10,6 +10,7 @@ defmodule EventSales.Sales.RefundUpserter do
   require Ash.Query
   import Ecto.Query
 
+  alias EventSales.Analytics.PeriodProjectionInvalidator
   alias EventSales.Analytics.Workers.RefreshSnapshotWorker
   alias EventSales.Ingestion.HistoricalRefundCoverageInvalidator
   alias EventSales.Ingestion.HistoricalRefundMutationDetector
@@ -23,6 +24,7 @@ defmodule EventSales.Sales.RefundUpserter do
   @source_detail_conflict "source_detail_conflict"
   @refund_identity_constraint "sales_refunds_unique_source_order_refund_index"
   @invalid_refund_coverage_invalidator_result :invalid_refund_coverage_invalidator_result
+  @invalid_period_projection_invalidator_result :invalid_period_projection_invalidator_result
   @validation_tokens [
     "product_id_mismatch",
     "variation_id_mismatch",
@@ -1039,15 +1041,16 @@ defmodule EventSales.Sales.RefundUpserter do
 
     case result do
       {:ok, _result} ->
-        case enqueue_refund_snapshot_refresh(
-               before_snapshot,
-               after_snapshot,
-               candidate_event_ids,
-               opts,
-               refresh_snapshot?
-             ) do
-          :ok -> {:ok, refund}
-          {:error, reason} -> {:error, reason}
+        with :ok <- invalidate_period_projection(before_snapshot, after_snapshot, opts),
+             :ok <-
+               enqueue_refund_snapshot_refresh(
+                 before_snapshot,
+                 after_snapshot,
+                 candidate_event_ids,
+                 opts,
+                 refresh_snapshot?
+               ) do
+          {:ok, refund}
         end
 
       {:error, reason} ->
@@ -1055,6 +1058,22 @@ defmodule EventSales.Sales.RefundUpserter do
 
       _other ->
         {:error, @invalid_refund_coverage_invalidator_result}
+    end
+  end
+
+  defp invalidate_period_projection(before_snapshot, after_snapshot, opts) do
+    invalidator =
+      Keyword.get(
+        opts,
+        :period_projection_invalidator,
+        &PeriodProjectionInvalidator.invalidate_refund_change/2
+      )
+
+    case invalidator.(before_snapshot, after_snapshot) do
+      :ok -> :ok
+      {:ok, _result} -> :ok
+      {:error, reason} -> {:error, reason}
+      _other -> {:error, @invalid_period_projection_invalidator_result}
     end
   end
 

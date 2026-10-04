@@ -17,6 +17,7 @@ defmodule EventSales.Analytics.SnapshotRefresh do
   alias EventSales.Analytics.DashboardCache
   alias EventSales.Analytics.EventSnapshotRefreshFence
   alias EventSales.Analytics.MetricRules
+  alias EventSales.Analytics.PeriodProjectionRefresh
   alias EventSales.Analytics.Resources.{DailySalesAggregateSnapshot, EventAggregateSnapshot}
   alias EventSales.Catalog
   alias EventSales.Catalog.Resources.Event
@@ -183,7 +184,11 @@ defmodule EventSales.Analytics.SnapshotRefresh do
     with :ok <- persist_canonical_currencies!(persist_context),
          :ok <-
            purge_obsolete_event_projections!(context.event_id, MapSet.new(canonical_currencies)),
-         :ok <- replace_event_dimension_projection_set!(dimension_context) do
+         :ok <- replace_event_dimension_projection_set!(dimension_context),
+         :ok <-
+           PeriodProjectionRefresh.refresh_pending_event(context.event_id,
+             refreshed_at: context.projection_refreshed_at
+           ) do
       {:ok, read_event_snapshots(context.event_id, @event_snapshot_version)}
     end
   end

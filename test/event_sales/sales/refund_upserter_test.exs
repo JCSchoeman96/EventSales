@@ -4,6 +4,8 @@ defmodule EventSales.Sales.RefundUpserterTest do
   require Ash.Query
 
   alias Ecto.Adapters.SQL.Sandbox
+  alias EventSales.Analytics
+  alias EventSales.Analytics.Resources.EventPeriodAggregateSnapshot
   alias EventSales.Analytics.Workers.RefreshSnapshotWorker
   alias EventSales.Repo
   alias EventSales.Sales
@@ -80,6 +82,62 @@ defmodule EventSales.Sales.RefundUpserterTest do
     assert persisted_line.order_item_id == order_item.id
     assert persisted_line.binding_reason == nil
     assert persisted_line.validation_reason == nil
+  end
+
+  test "invalidates period projections before scheduling event snapshot refresh", %{
+    source: source
+  } do
+    %{order: order, item: item} = create_ticket_order_fixture!(source, 2)
+    test_pid = self()
+
+    scheduler = fn event_ids ->
+      rows =
+        EventPeriodAggregateSnapshot
+        |> Ash.Query.filter(event_id in ^event_ids)
+        |> Ash.read!(domain: Analytics)
+
+      send(test_pid, {:period_projection_ready, event_ids, rows})
+      :ok
+    end
+
+    assert {:ok, _refund} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               order.woo_order_id,
+               normalized_refund(92_007, [refund_line(88_107, item.woo_line_item_id)]),
+               snapshot_refresh_scheduler: scheduler
+             )
+
+    assert_receive {:period_projection_ready, [event_id], rows}
+    assert event_id == item.event_id
+    assert length(rows) == 2
+    assert Enum.all?(rows, &(&1.projection_state == :refresh_pending))
+  end
+
+  test "period projection invalidation errors roll back the refund transaction", %{
+    source: source
+  } do
+    %{order: order, item: item} = create_ticket_order_fixture!(source, 2)
+
+    assert {:error, :period_projection_failed} =
+             RefundUpserter.upsert_normalized_refund(
+               source.id,
+               order.woo_order_id,
+               normalized_refund(92_008, [refund_line(88_108, item.woo_line_item_id)]),
+               period_projection_invalidator: fn _before, _after ->
+                 {:error, :period_projection_failed}
+               end,
+               snapshot_refresh_scheduler: fn _event_ids ->
+                 flunk("snapshot refresh should not be scheduled after invalidation failure")
+               end
+             )
+
+    assert Ash.read!(Refund, domain: Sales) == []
+    assert Ash.read!(RefundLine, domain: Sales) == []
+
+    assert EventPeriodAggregateSnapshot
+           |> Ash.Query.filter(event_id == ^item.event_id)
+           |> Ash.read!(domain: Analytics) == []
   end
 
   test "keeps valid detail complete when the parent order is missing", %{source: source} do

@@ -78,6 +78,9 @@ defmodule EventSales.Ingestion.HistoricalRefundMutationDetector do
 
   defp certificate_truth(snapshot) do
     Map.take(snapshot, [:refund_truth, :refund_line_truth])
+    |> Map.update(:refund_line_truth, [], fn lines ->
+      Enum.map(lines, &Map.drop(&1, [:woo_product_id, :woo_variation_id]))
+    end)
   end
 
   defp validate_refund(%Refund{
@@ -177,9 +180,12 @@ defmodule EventSales.Ingestion.HistoricalRefundMutationDetector do
 
   defp refund_line_snapshot(%RefundLine{} = line) do
     Map.take(line, [
+      :id,
       :order_item_id,
       :woo_refund_line_item_id,
       :woo_refunded_item_id,
+      :woo_product_id,
+      :woo_variation_id,
       :refunded_quantity,
       :refund_subtotal_amount,
       :refund_total_amount,
@@ -192,7 +198,15 @@ defmodule EventSales.Ingestion.HistoricalRefundMutationDetector do
   defp parent_order_snapshot(nil), do: nil
 
   defp parent_order_snapshot(%Order{} = order) do
-    Map.take(order, [:id, :source_system_id, :woo_order_id, :currency, :created_at_source])
+    Map.take(order, [
+      :id,
+      :source_system_id,
+      :woo_order_id,
+      :status,
+      :completed_at,
+      :currency,
+      :created_at_source
+    ])
   end
 
   defp parent_order_item_snapshots(nil), do: []
@@ -206,7 +220,16 @@ defmodule EventSales.Ingestion.HistoricalRefundMutationDetector do
   end
 
   defp parent_order_item_snapshot(%OrderItem{} = item) do
-    Map.take(item, [:id, :woo_line_item_id, :event_id, :item_kind, :mapping_status])
+    Map.take(item, [
+      :id,
+      :woo_line_item_id,
+      :event_id,
+      :ticket_type_id,
+      :woo_product_id,
+      :woo_variation_id,
+      :item_kind,
+      :mapping_status
+    ])
   end
 
   defp candidate_event_ids(before, after_snapshot) do
