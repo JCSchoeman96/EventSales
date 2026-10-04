@@ -2,9 +2,10 @@
 /**
  * Plugin Name: EventSales Tickera Catalog Feed
  * Description: Exposes a sanitized, authenticated Tickera/WooCommerce catalog feed for EventSales catalog discovery.
- * Version: 0.1.1
+ * Version: 0.1.2
  * Requires at least: 5.6
  * Requires PHP: 8.0
+ * Update URI: https://github.com/JCSchoeman96/EventSales
  * Author: EventSales
  * License: GPL-2.0-or-later
  */
