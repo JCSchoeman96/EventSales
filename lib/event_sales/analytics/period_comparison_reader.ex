@@ -81,14 +81,22 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
       envelope =
         base_envelope(event_id, currency, period_request, windows, revenue_visible?)
 
-      if readiness.analytics_ready? do
-        case read_coherent_comparison(event_id, currency, plan, envelope, revenue_visible?) do
-          {:ok, result} -> {:ok, result}
-          {:error, reason} -> {:error, reason}
-        end
-      else
-        {:ok, fail_closed_envelope(envelope, readiness.blocking_reason)}
-      end
+      finalize_comparison(
+        readiness,
+        event_id,
+        currency,
+        plan,
+        envelope,
+        revenue_visible?
+      )
+    end
+  end
+
+  defp finalize_comparison(readiness, event_id, currency, plan, envelope, revenue_visible?) do
+    if readiness.analytics_ready? do
+      read_coherent_comparison(event_id, currency, plan, envelope, revenue_visible?)
+    else
+      {:ok, fail_closed_envelope(envelope, readiness.blocking_reason)}
     end
   end
 
@@ -167,13 +175,7 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
   defp read_coherent_comparison(event_id, currency, plan, envelope, revenue_visible?) do
     transaction_opts = EventSnapshotRefreshFence.coherent_transaction_opts()
 
-    case Repo.transaction(
-           fn ->
-             case load_projection_operands(event_id, currency, plan) do
-               {:ok, payload} -> payload
-               {:error, reason} -> Repo.rollback(reason)
-             end
-           end,
+    case Repo.transaction(fn -> load_projection_operands_in_transaction(event_id, currency, plan) end,
            transaction_opts
          ) do
       {:ok, payload} ->
@@ -181,6 +183,13 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  defp load_projection_operands_in_transaction(event_id, currency, plan) do
+    case load_projection_operands(event_id, currency, plan) do
+      {:ok, payload} -> payload
+      {:error, reason} -> Repo.rollback(reason)
     end
   end
 
@@ -260,13 +269,8 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
       key = {bucket.bucket_kind, bucket.bucket_start_utc, bucket.bucket_end_utc}
 
       case Map.fetch(indexed, key) do
-        {:ok, row} ->
-          if current_compatible_row?(row),
-            do: {:cont, :ok},
-            else: {:halt, {:error, :projection_not_ready}}
-
-        :error ->
-          {:halt, {:error, :projection_not_ready}}
+        {:ok, row} -> validate_bucket_row_step(row)
+        :error -> {:halt, {:error, :projection_not_ready}}
       end
     end)
   end
@@ -278,15 +282,14 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
 
     Enum.reduce_while(edge_fragments, :ok, fn fragment, :ok ->
       case Map.fetch(indexed, fragment.envelope_hour_start_utc) do
-        {:ok, row} ->
-          if current_compatible_row?(row),
-            do: {:cont, :ok},
-            else: {:halt, {:error, :projection_not_ready}}
-
-        :error ->
-          {:halt, {:error, :projection_not_ready}}
+        {:ok, row} -> validate_bucket_row_step(row)
+        :error -> {:halt, {:error, :projection_not_ready}}
       end
     end)
+  end
+
+  defp validate_bucket_row_step(row) do
+    if current_compatible_row?(row), do: {:cont, :ok}, else: {:halt, {:error, :projection_not_ready}}
   end
 
   defp current_compatible_row?(row) do
@@ -646,11 +649,20 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
         {:error, :projection_not_ready}
 
       true ->
-        with :ok <- validate_required_families!(dims, event_row),
-             :ok <- validate_atomic_generation!(dims, event_row),
-             :ok <- reconcile_family_totals!(dims, event_row) do
-          :ok
+        validate_nonzero_bucket_dimension_coverage!(dims, event_row)
+    end
+  end
+
+  defp validate_nonzero_bucket_dimension_coverage!(dims, event_row) do
+    case validate_required_families!(dims, event_row) do
+      :ok ->
+        case validate_atomic_generation!(dims, event_row) do
+          :ok -> reconcile_family_totals!(dims, event_row)
+          {:error, reason} -> {:error, reason}
         end
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -695,9 +707,9 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
     if event_bucket_zero?(event_row) do
       :ok
     else
-      with :ok <- reconcile_family!(:ticket_type, dims, event_row),
-           :ok <- reconcile_family!(:source_product, dims, event_row) do
-        :ok
+      case reconcile_family!(:ticket_type, dims, event_row) do
+        :ok -> reconcile_family!(:source_product, dims, event_row)
+        {:error, reason} -> {:error, reason}
       end
     end
   end

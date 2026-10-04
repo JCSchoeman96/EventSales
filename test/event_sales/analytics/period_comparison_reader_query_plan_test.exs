@@ -125,7 +125,7 @@ defmodule EventSales.Analytics.PeriodComparisonReaderQueryPlanTest do
     )
   end
 
-  defp classify_queries(queries) do
+  defp _classify_queries(queries) do
     selects = select_queries(queries)
 
     dimension_selects =

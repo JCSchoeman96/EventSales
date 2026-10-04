@@ -1558,3 +1558,34 @@ STOP_CONDITION_TRIGGERED = NONE
 ```
 
 JC-314 is complete. JC-317 and JC-319 merged event and dimensional period population. JC-321 delivers the authorized M5-04F reader; M5-04G certification remains next for latency, edge-query cost, and load evidence.
+
+### M5-04F (JC-321) implementation record
+
+```text
+JC_319_STATUS = MERGED
+JC_319_MERGE_SHA = 11f5bc36f351784696aaebb9ce74656e0210d59d
+JC_319_MERGE_TREE = d11d980315fe55ea9a70ac7e3a5c29daea0d46e0
+M5_04E_DURABLE_AUTHORITY = YES
+M5_04F_AUTHORIZED = YES
+M5_04F_STATUS = IN_REVIEW
+M5_04G_AUTHORIZED = NO
+
+PERIOD_COMPARISON_READER = EventSales.Analytics.PeriodComparisonReader
+PUBLIC_API = compare_event(event_id, currency, period_request, opts \\ [])
+
+READ_PLAN = EventSales.Analytics.PeriodReadPlan.build/1 from TimeRules.comparison_windows/3
+EDGE_ENVELOPE_RULE = containing UTC-hour EventPeriodAggregateSnapshot CURRENT + compatible semantic/coverage
+
+FIXED_EVENT_QUERY_COUNT = 1
+DIMENSION_COVERAGE_QUERY_COUNT = 1
+DIMENSION_INTERIOR_QUERY_COUNT = 3
+EDGE_EVENT_QUERY_COUNT = 0 (yesterday) | 1 (when edge fragments exist)
+EDGE_DIMENSION_QUERY_COUNT = 0 (yesterday) | 3 (when edge fragments exist)
+
+DIMENSION_ZERO_FILL_RULE = ready operand + absent grain => explicit zero primitives for comparisons
+ATV_UNDEFINED_RULE = nil operands keep nil values and nil deltas; no synthetic zero Decimal
+REVENUE_REDACTION_RULE = Policies.can_view_revenue?/2 hides all monetary metrics, deltas, and monetary comparison states
+
+EDGE_INDEX_DECISION = NONE
+EDGE_INDEX_EVIDENCE = selective unnest edge fixture EXPLAIN captured in period_comparison_reader_query_plan_test; no migration
+```

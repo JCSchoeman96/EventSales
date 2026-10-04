@@ -4,9 +4,9 @@ defmodule EventSales.Analytics.PeriodComparisonReaderPolicyTest do
   require Ash.Query
 
   alias EventSales.Accounts
-  alias EventSales.Catalog
   alias EventSales.Accounts.Resources.{EventAccessGrant, Role, User, UserRole}
   alias EventSales.Analytics.PeriodComparisonReader
+  alias EventSales.Catalog
   alias EventSales.Catalog.Resources.EventDashboardSetting
   alias EventSales.TestSupport.EventDetailCertificationHelpers
   alias EventSales.TestSupport.PeriodComparisonHelpers
