@@ -258,6 +258,21 @@ jobs:
       - name: Run Dialyzer
         run: mix dialyzer
 
+  wordpress_plugin_distribution:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          tools: unzip
+
+      - name: WordPress plugin distribution gate
+        run: bash scripts/ci_wordpress_plugin_distribution.sh
+
   playwright_unit:
     runs-on: ubuntu-latest
 

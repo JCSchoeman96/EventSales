@@ -2,7 +2,7 @@
 
 **Plan ID:** wp-plugin-distribution
 
-**Plan version:** v1
+**Plan version:** v2
 
 **Status:** active
 
@@ -12,11 +12,12 @@
 
 **Last updated:** 2026-10-02
 
-**Change summary (v1):** Initial distribution, provenance, and install certification contract.
+**Change summary (v2):** Ref-pinned suite manifest, git mode guards, WordPress 5.2 support floor with marketing version bumps, CI distribution gate.
 
 ### Revision log
 
 - `v1` — plugin list, packaging rules, compatibility floor, reproducibility, and certification workflow locked.
+- `v2` — suite manifest read from `source_commit`; reject symlinks/gitlinks; `Requires at least: 5.2` with bumped marketing versions; CI runs build/verify.
 
 ## Goal
 
@@ -34,10 +35,10 @@ Turn the four EventSales WordPress integrations into git-ref–pinned installabl
 
 | Slug | Main file | Marketing version |
 |------|-----------|-------------------|
-| `eventsales-tickera-catalog-feed` | `eventsales-tickera-catalog-feed/eventsales-tickera-catalog-feed.php` | `0.1.0` |
-| `eventsales-woo-order-index-feed` | `eventsales-woo-order-index-feed/eventsales-woo-order-index-feed.php` | `0.2.0` |
-| `eventsales-woo-order-line-identity` | `eventsales-woo-order-line-identity/eventsales-woo-order-line-identity.php` | `0.1.0` |
-| `eventsales-integration-health` | `eventsales-integration-health/eventsales-integration-health.php` | `0.1.0` |
+| `eventsales-tickera-catalog-feed` | `eventsales-tickera-catalog-feed/eventsales-tickera-catalog-feed.php` | `0.1.1` |
+| `eventsales-woo-order-index-feed` | `eventsales-woo-order-index-feed/eventsales-woo-order-index-feed.php` | `0.2.1` |
+| `eventsales-woo-order-line-identity` | `eventsales-woo-order-line-identity/eventsales-woo-order-line-identity.php` | `0.1.1` |
+| `eventsales-integration-health` | `eventsales-integration-health/eventsales-integration-health.php` | `0.1.1` |
 
 Canonical expected-source contract: `integrations/wordpress/eventsales-plugin-suite.json`.
 
@@ -53,7 +54,7 @@ Canonical expected-source contract: `integrations/wordpress/eventsales-plugin-su
 
 ## Marketing version policy
 
-Do not bump marketing versions for packaging-only changes. Header additions for `Requires PHP` / `Requires at least` document support floor without changing runtime behaviour; versions stay at the table above.
+Marketing versions were bumped (`0.1.0`→`0.1.1`, `0.2.0`→`0.2.1`) when `Requires PHP` / `Requires at least` headers were added because WordPress validates those fields at activation time.
 
 ## PHP and WordPress requirement decision
 
@@ -62,7 +63,7 @@ Do not bump marketing versions for packaging-only changes. Header additions for 
 | Requirement | Value | Evidence |
 |-------------|-------|----------|
 | **Requires PHP** | `8.0` | Production `eventsales-woo-order-index-manifest-store.php` uses `str_contains()`. Order-line identity and integration health use `declare(strict_types=1)` (compatible below 8.0 but suite aligns to the highest real floor). |
-| **Requires at least** | `6.4` | REST routes under `eventsales/v1`, Site Health `site_status_tests` / `debug_information` filters, and WooCommerce integration patterns used by the suite match WordPress 6.4+ APIs exercised on local `http://localhost:10059`. |
+| **Requires at least** | `5.2` | Integration Health uses Site Health filters introduced in WordPress 5.2 (`site_status_tests`, `debug_information`). REST routes use `register_rest_route()` (available since 4.4). Suite declares the highest defensible common floor without claiming unsupported newer core versions. |
 
 **Not in this slice:** `Requires Plugins`, `Update URI`, WooCommerce/Tickera dependency headers.
 
@@ -86,8 +87,9 @@ Do not bump marketing versions for packaging-only changes. Header additions for 
 Builder: `scripts/build_wordpress_plugins.sh --ref <git-ref>`.
 
 1. Resolve `source_commit` and `source_tree` via `git rev-parse`.
-2. If `source_commit` equals current `HEAD`, fail when any suite plugin path has staged/unstaged diffs vs `HEAD` or untracked files under those directories.
-3. Materialise each plugin with `git archive` (bytes from the tree, not the working tree).
+2. Load `integrations/wordpress/eventsales-plugin-suite.json` from `source_commit` via `git show` (not the working tree).
+3. If `source_commit` equals current `HEAD`, fail when any suite manifest or plugin path has staged/unstaged diffs vs `HEAD` or untracked files under those directories.
+4. Enumerate `git ls-tree` entries; reject symlinks (`120000`), gitlinks/submodules (`commit`), and non-blob objects before materialising file bytes with `git show`.
 4. Emit four ZIPs and `manifest.json` + `SHA256SUMS` under `tmp/wordpress-plugin-dist/<commit>/`.
 
 **Distribution format version:** `1`

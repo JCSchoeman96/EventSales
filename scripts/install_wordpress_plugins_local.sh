@@ -62,8 +62,14 @@ for slug in "${ACTIVATION_ORDER[@]}"; do
     exit 1
   fi
   wp plugin install "$zip_file" --force --path="$EVENTSALES_WP_ROOT"
-  wp plugin activate "$slug" --path="$EVENTSALES_WP_ROOT" || true
+  wp plugin activate "$slug" --path="$EVENTSALES_WP_ROOT"
+  status="$(wp plugin get "$slug" --field=status --path="$EVENTSALES_WP_ROOT")"
+  if [[ "$status" != "active" ]]; then
+    echo "Plugin $slug is not active after install (status=$status)" >&2
+    exit 1
+  fi
 done
 
 echo "Local ZIP install completed from $DIST_DIR"
+echo "All four EventSales plugins are active."
 echo "Run Site Health checks via WP-CLI or wp-admin Tools -> Site Health"

@@ -22,15 +22,21 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-SUITE_JSON="$ROOT/integrations/wordpress/eventsales-plugin-suite.json"
-if [[ ! -f "$SUITE_JSON" ]]; then
-  echo "Missing suite manifest: $SUITE_JSON" >&2
-  exit 1
-fi
-
+SUITE_GIT_PATH="integrations/wordpress/eventsales-plugin-suite.json"
 SOURCE_COMMIT="$(git rev-parse "${REF}^{commit}")"
 SOURCE_TREE="$(git rev-parse "${SOURCE_COMMIT}^{tree}")"
 HEAD_COMMIT="$(git rev-parse HEAD)"
+
+SUITE_JSON="$(mktemp)"
+cleanup_suite() {
+  rm -f "$SUITE_JSON"
+}
+trap cleanup_suite EXIT
+
+if ! git show "$SOURCE_COMMIT:$SUITE_GIT_PATH" >"$SUITE_JSON" 2>/dev/null; then
+  echo "Missing suite manifest at $SOURCE_COMMIT:$SUITE_GIT_PATH" >&2
+  exit 1
+fi
 
 mapfile -t PLUGIN_SLUGS < <(php -r '
 $data = json_decode(file_get_contents($argv[1]), true, 512, JSON_THROW_ON_ERROR);
@@ -40,7 +46,7 @@ foreach ($data["plugins"] as $plugin) {
 ' "$SUITE_JSON")
 
 PLUGIN_PREFIX="integrations/wordpress"
-PLUGIN_PATHS=()
+PLUGIN_PATHS=("$SUITE_GIT_PATH")
 for slug in "${PLUGIN_SLUGS[@]}"; do
   PLUGIN_PATHS+=("$PLUGIN_PREFIX/$slug")
 done
@@ -71,7 +77,10 @@ rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
 
 STAGING="$(mktemp -d)"
-trap 'rm -rf "$STAGING"' EXIT
+cleanup_staging() {
+  rm -rf "$STAGING"
+}
+trap 'cleanup_suite; cleanup_staging' EXIT
 
 DISTRIBUTION_FORMAT_VERSION="1"
 MANIFEST_PLUGINS=()
@@ -96,8 +105,20 @@ exit(1);
   mkdir -p "$plugin_stage"
 
   packaged_files=()
-  while IFS= read -r git_path; do
+  while read -r mode objtype _object git_path; do
     [[ -z "$git_path" ]] && continue
+    if [[ "$objtype" != "blob" ]]; then
+      echo "Rejected git object type ${objtype} at ${git_path}" >&2
+      exit 1
+    fi
+    if [[ "$mode" == "120000" ]]; then
+      echo "Rejected symlink at ${git_path}" >&2
+      exit 1
+    fi
+    if [[ "$mode" != "100644" && "$mode" != "100755" ]]; then
+      echo "Rejected unexpected git mode ${mode} at ${git_path}" >&2
+      exit 1
+    fi
     rel="${git_path#"$PLUGIN_PREFIX/$slug/"}"
     case "$rel" in
       tests/* | */tests/*)
@@ -128,7 +149,7 @@ exit(1);
     mkdir -p "$(dirname "$dest")"
     git show "$SOURCE_COMMIT:$git_path" >"$dest"
     packaged_files+=("$rel")
-  done < <(git ls-tree -r --name-only "$SOURCE_TREE" "$PLUGIN_PREFIX/$slug")
+  done < <(git ls-tree -r "$SOURCE_TREE" "$PLUGIN_PREFIX/$slug")
 
   main_file="$(php -r 'echo json_decode($argv[1], true)["main_file"];' "$plugin_meta")"
   if [[ ! -f "$plugin_stage/$main_file" ]]; then
@@ -168,7 +189,8 @@ $out = $argv[1];
 $format = $argv[2];
 $commit = $argv[3];
 $tree = $argv[4];
-$entries = array_slice($argv, 5);
+$suitePath = $argv[5];
+$entries = array_slice($argv, 6);
 $plugins = [];
 foreach ($entries as $entry) {
     [$slug, $archive, $sha, $metaJson] = explode("|", $entry, 4);
@@ -186,12 +208,13 @@ $manifest = [
     "distribution_format_version" => $format,
     "source_commit" => $commit,
     "source_tree" => $tree,
+    "suite_manifest_git_path" => $suitePath,
     "deterministic_source_content" => true,
     "deterministic_archive_bytes" => false,
     "plugins" => $plugins,
 ];
 file_put_contents($out, json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL);
-' "$OUT_DIR/manifest.json" "$DISTRIBUTION_FORMAT_VERSION" "$SOURCE_COMMIT" "$SOURCE_TREE" "${MANIFEST_PLUGINS[@]}"
+' "$OUT_DIR/manifest.json" "$DISTRIBUTION_FORMAT_VERSION" "$SOURCE_COMMIT" "$SOURCE_TREE" "$SUITE_GIT_PATH" "${MANIFEST_PLUGINS[@]}"
 
 echo "Built WordPress plugin distribution:"
 echo "  commit: $SOURCE_COMMIT"

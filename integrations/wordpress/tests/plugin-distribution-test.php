@@ -54,6 +54,11 @@ function repo_root(): string
     return dirname(__DIR__, 3);
 }
 
+function suite_manifest_git_path(): string
+{
+    return 'integrations/wordpress/eventsales-plugin-suite.json';
+}
+
 function suite_manifest_path(): string
 {
     return dirname(__DIR__) . '/eventsales-plugin-suite.json';
@@ -68,6 +73,39 @@ function load_suite_manifest(): array
     }
 
     return json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+}
+
+/** @return array<string, mixed> */
+function load_suite_manifest_from_git(string $commit): array
+{
+    $gitPath = suite_manifest_git_path();
+    $command = ['git', '-C', repo_root(), 'show', "{$commit}:{$gitPath}"];
+    $process = proc_open(
+        $command,
+        [
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ],
+        $pipes
+    );
+    if (!is_resource($process)) {
+        throw new RuntimeException('Unable to run git show for suite manifest');
+    }
+
+    $stdout = stream_get_contents($pipes[1]);
+    fclose($pipes[1]);
+    $stderr = stream_get_contents($pipes[2]);
+    fclose($pipes[2]);
+    $exitCode = proc_close($process);
+    if ($exitCode !== 0) {
+        throw new RuntimeException('git show failed for suite manifest at ' . $commit);
+    }
+
+    if ($stdout === false || $stdout === '') {
+        throw new RuntimeException('Empty suite manifest from git at ' . $commit);
+    }
+
+    return json_decode($stdout, true, 512, JSON_THROW_ON_ERROR);
 }
 
 /** @return array<string, string> */
@@ -121,7 +159,7 @@ function run_source_tests(): void
 
     DistributionTest::same('suite format_version', '1', (string) ($manifest['format_version'] ?? ''));
     DistributionTest::same('suite requires_php', '8.0', (string) ($manifest['requires_php'] ?? ''));
-    DistributionTest::same('suite requires_at_least_wordpress', '6.4', (string) ($manifest['requires_at_least_wordpress'] ?? ''));
+    DistributionTest::same('suite requires_at_least_wordpress', '5.2', (string) ($manifest['requires_at_least_wordpress'] ?? ''));
     DistributionTest::ok('suite lists four plugins', is_array($manifest['plugins'] ?? null) && count($manifest['plugins']) === 4);
 
     $readmePath = $wpBase . '/eventsales-tickera-catalog-feed/README.md';
@@ -226,8 +264,10 @@ function run_dist_tests(string $distDir): void
     }
 
     $manifest = json_decode($manifestRaw, true, 512, JSON_THROW_ON_ERROR);
-    $suite = load_suite_manifest();
+    $sourceCommit = (string) ($manifest['source_commit'] ?? '');
+    $suite = load_suite_manifest_from_git($sourceCommit);
 
+    DistributionTest::same('manifest suite_manifest_git_path', suite_manifest_git_path(), (string) ($manifest['suite_manifest_git_path'] ?? ''));
     DistributionTest::same('manifest distribution_format_version', '1', (string) ($manifest['distribution_format_version'] ?? ''));
     DistributionTest::ok('manifest source_commit is 40-char hex', is_string($manifest['source_commit'] ?? null) && preg_match('/^[0-9a-f]{40}$/', $manifest['source_commit']) === 1);
     DistributionTest::ok('manifest source_tree is 40-char hex', is_string($manifest['source_tree'] ?? null) && preg_match('/^[0-9a-f]{40}$/', $manifest['source_tree']) === 1);
@@ -333,6 +373,29 @@ function run_dist_tests(string $distDir): void
 
     $zipCount = count(glob($distDir . '/*.zip') ?: []);
     DistributionTest::same('four zip archives only', 4, $zipCount);
+
+    $expectedPlugins = $suite['plugins'];
+    $actualPlugins = $manifest['plugins'];
+    DistributionTest::ok('dist manifest plugin count matches commit suite', count($expectedPlugins) === count($actualPlugins));
+    foreach ($expectedPlugins as $index => $expectedPlugin) {
+        $actualPlugin = $actualPlugins[$index] ?? null;
+        DistributionTest::ok("dist manifest plugin index {$index} present", is_array($actualPlugin));
+        if (!is_array($actualPlugin)) {
+            continue;
+        }
+        DistributionTest::same("dist manifest slug {$index}", (string) $expectedPlugin['slug'], (string) $actualPlugin['slug']);
+        DistributionTest::same(
+            "dist manifest marketing_version {$index}",
+            (string) $expectedPlugin['marketing_version'],
+            (string) $actualPlugin['marketing_version']
+        );
+        $expectedArchive = sprintf(
+            '%s-%s.zip',
+            (string) $expectedPlugin['slug'],
+            (string) $expectedPlugin['marketing_version']
+        );
+        DistributionTest::same("dist archive filename {$index}", $expectedArchive, (string) $actualPlugin['archive_filename']);
+    }
 }
 
 $mode = 'source';

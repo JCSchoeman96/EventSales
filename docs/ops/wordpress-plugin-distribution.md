@@ -6,10 +6,10 @@ Operational runbook for building, verifying, installing, and rolling back the fo
 
 | Plugin | Slug | Marketing version |
 |--------|------|-------------------|
-| EventSales Tickera Catalog Feed | `eventsales-tickera-catalog-feed` | `0.1.0` |
-| EventSales Woo Order Index Feed | `eventsales-woo-order-index-feed` | `0.2.0` |
-| EventSales Woo Order Line Identity | `eventsales-woo-order-line-identity` | `0.1.0` |
-| EventSales Integration Health | `eventsales-integration-health` | `0.1.0` |
+| EventSales Tickera Catalog Feed | `eventsales-tickera-catalog-feed` | `0.1.1` |
+| EventSales Woo Order Index Feed | `eventsales-woo-order-index-feed` | `0.2.1` |
+| EventSales Woo Order Line Identity | `eventsales-woo-order-line-identity` | `0.1.1` |
+| EventSales Integration Health | `eventsales-integration-health` | `0.1.1` |
 
 Expected-source contract: `integrations/wordpress/eventsales-plugin-suite.json`.
 
@@ -48,7 +48,7 @@ This runs `integrations/wordpress/tests/plugin-distribution-test.php` and `php -
 ```bash
 cat tmp/wordpress-plugin-dist/<source_commit>/manifest.json
 sha256sum -c tmp/wordpress-plugin-dist/<source_commit>/SHA256SUMS
-unzip -l tmp/wordpress-plugin-dist/<source_commit>/eventsales-tickera-catalog-feed-0.1.0.zip
+unzip -l tmp/wordpress-plugin-dist/<source_commit>/eventsales-tickera-catalog-feed-0.1.1.zip
 ```
 
 ## Local install (certification only)
