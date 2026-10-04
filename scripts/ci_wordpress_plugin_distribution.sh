@@ -13,8 +13,10 @@ bash "$ROOT/scripts/check_wordpress_plugin_distribution_reproducibility.sh" --re
 python3 "$ROOT/integrations/wordpress/tests/plugin-deterministic-zip-order-test.py"
 bash "$ROOT/integrations/wordpress/tests/plugin-release-candidate-negative-test.sh"
 php "$ROOT/integrations/wordpress/tests/plugin-release-transition-test.php"
-bash "$ROOT/scripts/build_wordpress_plugin_release_candidate.sh" --ref "$COMMIT" --release-id "2026.10.04.1"
-CANDIDATE="$ROOT/tmp/wordpress-plugin-release/$COMMIT/2026.10.04.1"
+git fetch origin main --depth=1 2>/dev/null || git fetch origin main
+MAIN_SHA="$(git rev-parse origin/main)"
+bash "$ROOT/scripts/build_wordpress_plugin_release_candidate.sh" --ref "$MAIN_SHA" --release-id "2026.10.04.1"
+CANDIDATE="$ROOT/tmp/wordpress-plugin-release/$MAIN_SHA/2026.10.04.1"
 php "$ROOT/integrations/wordpress/tests/plugin-release-candidate-test.php" --candidate "$CANDIDATE"
 bash "$ROOT/scripts/verify_wordpress_plugin_release_candidate.sh" "$CANDIDATE"
 
