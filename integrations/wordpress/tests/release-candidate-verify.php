@@ -6,6 +6,8 @@ declare(strict_types=1);
  * Tight release-candidate verification (distribution + release manifest binding).
  */
 
+require_once __DIR__ . '/release-manifest-contract.php';
+
 /** @return list<string> */
 function release_candidate_verify(string $candidateDir, ?string $repoRoot = null): array
 {
@@ -38,28 +40,12 @@ function release_candidate_verify(string $candidateDir, ?string $repoRoot = null
         $errors[] = 'release_manifest_format_version must be 1';
     }
 
-    $releaseId = (string) ($release['suite_release_id'] ?? '');
-    $suggestedTag = (string) ($release['suggested_tag'] ?? '');
-    if ($releaseId === '') {
-        $errors[] = 'suite_release_id missing';
-    }
-    if ($suggestedTag !== 'eventsales-wp-' . $releaseId) {
-        $errors[] = 'suggested_tag must equal eventsales-wp-<suite_release_id>';
+    foreach (release_manifest_contract_errors($release, 'release manifest') as $contractError) {
+        $errors[] = $contractError;
     }
 
     $sourceCommit = strtolower((string) ($release['source_commit'] ?? ''));
     $sourceTree = strtolower((string) ($release['source_tree'] ?? ''));
-    if (!preg_match('/^[0-9a-f]{40}$/', $sourceCommit)) {
-        $errors[] = 'source_commit must be 40-char lowercase hex';
-    }
-    if (!preg_match('/^[0-9a-f]{40}$/', $sourceTree)) {
-        $errors[] = 'source_tree must be 40-char lowercase hex';
-    }
-
-    $canonicalMain = strtolower((string) ($release['canonical_main_at_build'] ?? ''));
-    if (!preg_match('/^[0-9a-f]{40}$/', $canonicalMain)) {
-        $errors[] = 'canonical_main_at_build must be 40-char lowercase hex';
-    }
 
     if ($sourceCommit !== strtolower((string) ($dist['source_commit'] ?? ''))) {
         $errors[] = 'source_commit mismatch between release and distribution manifests';

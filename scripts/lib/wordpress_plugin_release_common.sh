@@ -9,6 +9,13 @@ ensure_canonical_main_ref() {
     return 1
   fi
 
+  if [[ "$(git rev-parse --is-shallow-repository 2>/dev/null || echo false)" == "true" ]]; then
+    if ! git fetch --unshallow origin; then
+      echo "Failed to unshallow repository before canonical main ancestry checks" >&2
+      return 1
+    fi
+  fi
+
   if ! git fetch origin "+refs/heads/main:${CANONICAL_MAIN_REF}"; then
     echo "Failed to fetch canonical main from origin (full ref update required)" >&2
     return 1

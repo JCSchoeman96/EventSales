@@ -111,6 +111,7 @@ write_manifest($baseline, $baselinePath);
 
 $upgraded = $baseline;
 $upgraded['suite_release_id'] = '2026.10.05.1';
+$upgraded['suggested_tag'] = 'eventsales-wp-2026.10.05.1';
 $upgraded['plugins'] = [
     plugin_row('eventsales-tickera-catalog-feed', '0.1.2', 'ee' . str_repeat('0', 62)),
     plugin_row('eventsales-woo-order-index-feed', '0.2.1', 'bb' . str_repeat('0', 62)),
@@ -177,5 +178,12 @@ $floorRollback['requires_php'] = '7.4';
 $floorRollbackPath = $tmp . '/floor-rollback.json';
 write_manifest($floorRollback, $floorRollbackPath);
 expect_transition('rollback', $baselinePath, $floorRollbackPath, false, 'rollback with requires_php floor change fails');
+
+$malformedReleaseId = $baseline;
+$malformedReleaseId['suite_release_id'] = '2026.02.31.1';
+$malformedReleaseId['suggested_tag'] = 'eventsales-wp-2026.02.31.1';
+$malformedReleaseIdPath = $tmp . '/malformed-release-id.json';
+write_manifest($malformedReleaseId, $malformedReleaseIdPath);
+expect_transition('upgrade', $baselinePath, $malformedReleaseIdPath, false, 'upgrade rejects malformed release id calendar');
 
 ReleaseTransitionTest::finish();

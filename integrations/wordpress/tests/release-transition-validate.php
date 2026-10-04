@@ -6,6 +6,8 @@ declare(strict_types=1);
  * Pure release manifest transition validation (WP-SOURCE-05).
  */
 
+require_once __DIR__ . '/release-manifest-contract.php';
+
 final class TransitionReport
 {
     /** @var list<string> */
@@ -59,47 +61,8 @@ function canonical_slugs(): array
 /** @param array<string, mixed> $manifest */
 function validate_release_manifest_structure(array $manifest, string $label): void
 {
-    $required = [
-        'release_manifest_format_version',
-        'suite_release_id',
-        'suggested_tag',
-        'source_commit',
-        'source_tree',
-        'requires_wordpress',
-        'requires_php',
-        'plugins',
-    ];
-    foreach ($required as $key) {
-        if (!array_key_exists($key, $manifest)) {
-            TransitionReport::fail("{$label} missing field {$key}");
-        }
-    }
-    if (!is_array($manifest['plugins'] ?? null)) {
-        TransitionReport::fail("{$label} plugins must be an array");
-
-        return;
-    }
-    if (count($manifest['plugins']) !== 4) {
-        TransitionReport::fail("{$label} must list exactly four plugins");
-    }
-    foreach ($manifest['plugins'] as $plugin) {
-        if (!is_array($plugin)) {
-            TransitionReport::fail("{$label} plugin entry must be object");
-            continue;
-        }
-        foreach (['slug', 'marketing_version', 'archive_sha256'] as $field) {
-            if (!isset($plugin[$field])) {
-                TransitionReport::fail("{$label} plugin missing {$field}");
-            }
-        }
-        if (!valid_sha256(isset($plugin['archive_sha256']) ? (string) $plugin['archive_sha256'] : null)) {
-            TransitionReport::fail("{$label} invalid archive_sha256 for " . ($plugin['slug'] ?? '?'));
-        }
-    }
-    $wp = (string) ($manifest['requires_wordpress'] ?? '');
-    $php = (string) ($manifest['requires_php'] ?? '');
-    if ($wp === '' || $php === '') {
-        TransitionReport::fail("{$label} runtime floor fields must be non-empty");
+    foreach (release_manifest_contract_errors($manifest, $label) as $error) {
+        TransitionReport::fail($error);
     }
 }
 

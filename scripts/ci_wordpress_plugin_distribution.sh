@@ -16,6 +16,7 @@ bash "$ROOT/scripts/check_wordpress_plugin_distribution_reproducibility.sh" --re
 python3 "$ROOT/integrations/wordpress/tests/plugin-deterministic-zip-order-test.py"
 python3 "$ROOT/integrations/wordpress/tests/plugin-deterministic-zip-metadata-test.py"
 bash "$ROOT/integrations/wordpress/tests/plugin-release-candidate-negative-test.sh"
+bash "$ROOT/integrations/wordpress/tests/plugin-release-main-ancestry-test.sh"
 php "$ROOT/integrations/wordpress/tests/plugin-release-transition-test.php"
 ensure_canonical_main_ref
 MAIN_SHA="$(resolve_canonical_main_sha)"

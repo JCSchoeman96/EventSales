@@ -109,6 +109,18 @@ function run_candidate_verify(string $candidateDir): void
     $tamperErrors = release_candidate_verify($tamperRoot, repo_root());
     ReleaseCandidateTest::ok('tampered release manifest rejected', $tamperErrors !== []);
     exec('rm -rf ' . escapeshellarg($tamperRoot));
+
+    $calendarRoot = sys_get_temp_dir() . '/es-wp-candidate-calendar-' . getmypid();
+    mkdir($calendarRoot);
+    exec('cp -a ' . escapeshellarg($candidateDir) . '/. ' . escapeshellarg($calendarRoot));
+    $calendarReleasePath = $calendarRoot . '/release-manifest.json';
+    $calendarRelease = json_decode((string) file_get_contents($calendarReleasePath), true, 512, JSON_THROW_ON_ERROR);
+    $calendarRelease['suite_release_id'] = '2026.02.31.1';
+    $calendarRelease['suggested_tag'] = 'eventsales-wp-2026.02.31.1';
+    file_put_contents($calendarReleasePath, json_encode($calendarRelease, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL);
+    $calendarErrors = release_candidate_verify($calendarRoot, repo_root());
+    ReleaseCandidateTest::ok('invalid calendar suite_release_id rejected', $calendarErrors !== []);
+    exec('rm -rf ' . escapeshellarg($calendarRoot));
 }
 
 $candidateDir = null;
