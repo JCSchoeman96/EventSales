@@ -17,6 +17,7 @@ defmodule EventSales.Analytics.EventSnapshotRefreshConcurrencyTest do
     AnalyticsContributionFact,
     EventAggregateSnapshot,
     EventDimensionAggregateSnapshot,
+    EventDimensionPeriodAggregateSnapshot,
     EventPeriodAggregateSnapshot
   }
 
@@ -691,6 +692,12 @@ defmodule EventSales.Analytics.EventSnapshotRefreshConcurrencyTest do
 
       Repo.delete_all(
         from(snapshot in EventPeriodAggregateSnapshot, where: snapshot.event_id == ^event_id)
+      )
+
+      Repo.delete_all(
+        from(snapshot in EventDimensionPeriodAggregateSnapshot,
+          where: snapshot.event_id == ^event_id
+        )
       )
 
       Repo.delete_all(from(fact in AnalyticsContributionFact, where: fact.event_id == ^event_id))
