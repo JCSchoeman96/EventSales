@@ -21,9 +21,11 @@ CONFIG_DIR="$(mktemp -d /tmp/eventsales-curlrc-test.XXXXXX)"
 trap 'rm -rf -- "$CONFIG_DIR"' EXIT
 printf '%s\n' '--help' >"$CONFIG_DIR/.curlrc"
 
-configured_output="$(env CURL_HOME="$CONFIG_DIR" curl --version 2>&1)"
-hermetic_output="$(env CURL_HOME="$CONFIG_DIR" curl -q --version 2>&1)"
+configured_output="$(env CURL_HOME="$CONFIG_DIR" XDG_CONFIG_HOME="$CONFIG_DIR" \
+  curl --noproxy '*' --connect-timeout 1 --max-time 1 http://127.0.0.1:1/ 2>&1 || true)"
+hermetic_output="$(env CURL_HOME="$CONFIG_DIR" XDG_CONFIG_HOME="$CONFIG_DIR" \
+  curl -q --noproxy '*' --connect-timeout 1 --max-time 1 http://127.0.0.1:1/ 2>&1 || true)"
 [[ "$configured_output" == *'Usage: curl'* ]] || fail "synthetic curlrc did not affect the control invocation"
-[[ "$hermetic_output" == curl\ * ]] || fail "curl -q did not ignore the synthetic curlrc"
+[[ "$hermetic_output" != *'Usage: curl'* ]] || fail "curl -q did not ignore the synthetic curlrc"
 
 printf 'plugin-published-release-script-test: passed\n'
