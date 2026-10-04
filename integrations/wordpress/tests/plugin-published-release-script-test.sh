@@ -11,10 +11,10 @@ fail() {
 
 [[ -f "$SCRIPT" ]] || fail "published-release verifier is unavailable"
 
-curl_call_count="$(rg -F -c 'command curl -q' "$SCRIPT" || true)"
+curl_call_count="$(grep -F -c 'command curl -q' "$SCRIPT" || true)"
 [[ "$curl_call_count" == "2" ]] || fail "each verifier curl call must disable curlrc before other options"
-rg -Fq -- '--max-filesize "$MAX_METADATA_BYTES"' "$SCRIPT" || fail "GitHub API downloads must have a byte limit"
-rg -Fq -- '--max-filesize "$MAX_ASSET_BYTES"' "$SCRIPT" || fail "release asset downloads must have a byte limit"
+grep -Fq -- '--max-filesize "$MAX_METADATA_BYTES"' "$SCRIPT" || fail "GitHub API downloads must have a byte limit"
+grep -Fq -- '--max-filesize "$MAX_ASSET_BYTES"' "$SCRIPT" || fail "release asset downloads must have a byte limit"
 
 command -v curl >/dev/null 2>&1 || fail "curl is required for the curlrc isolation check"
 CONFIG_DIR="$(mktemp -d /tmp/eventsales-curlrc-test.XXXXXX)"
