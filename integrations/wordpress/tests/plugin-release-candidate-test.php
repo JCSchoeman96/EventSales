@@ -121,6 +121,36 @@ function run_candidate_verify(string $candidateDir): void
     $calendarErrors = release_candidate_verify($calendarRoot, repo_root());
     ReleaseCandidateTest::ok('invalid calendar suite_release_id rejected', $calendarErrors !== []);
     exec('rm -rf ' . escapeshellarg($calendarRoot));
+
+    $phpFloorRoot = sys_get_temp_dir() . '/es-wp-candidate-php-' . getmypid();
+    mkdir($phpFloorRoot);
+    exec('cp -a ' . escapeshellarg($candidateDir) . '/. ' . escapeshellarg($phpFloorRoot));
+    $phpRelease = json_decode((string) file_get_contents($phpFloorRoot . '/release-manifest.json'), true, 512, JSON_THROW_ON_ERROR);
+    $phpRelease['requires_php'] = '7.4';
+    file_put_contents(
+        $phpFloorRoot . '/release-manifest.json',
+        json_encode($phpRelease, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL
+    );
+    ReleaseCandidateTest::ok(
+        'tampered requires_php rejected',
+        release_candidate_verify($phpFloorRoot, repo_root()) !== []
+    );
+    exec('rm -rf ' . escapeshellarg($phpFloorRoot));
+
+    $suitePathRoot = sys_get_temp_dir() . '/es-wp-candidate-suite-path-' . getmypid();
+    mkdir($suitePathRoot);
+    exec('cp -a ' . escapeshellarg($candidateDir) . '/. ' . escapeshellarg($suitePathRoot));
+    $suitePathRelease = json_decode((string) file_get_contents($suitePathRoot . '/release-manifest.json'), true, 512, JSON_THROW_ON_ERROR);
+    $suitePathRelease['suite_manifest_git_path'] = 'integrations/wordpress/other-suite.json';
+    file_put_contents(
+        $suitePathRoot . '/release-manifest.json',
+        json_encode($suitePathRelease, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL
+    );
+    ReleaseCandidateTest::ok(
+        'tampered suite_manifest_git_path rejected',
+        release_candidate_verify($suitePathRoot, repo_root()) !== []
+    );
+    exec('rm -rf ' . escapeshellarg($suitePathRoot));
 }
 
 $candidateDir = null;

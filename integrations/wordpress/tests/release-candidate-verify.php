@@ -8,6 +8,30 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/release-manifest-contract.php';
 
+/** @return array<string, mixed>|null */
+function load_suite_manifest_from_git(string $repoRoot, string $commit, string $gitPath): ?array
+{
+    $command = ['git', '-C', $repoRoot, 'show', "{$commit}:{$gitPath}"];
+    $process = proc_open($command, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+    if (!is_resource($process)) {
+        return null;
+    }
+
+    $stdout = stream_get_contents($pipes[1]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    $exitCode = proc_close($process);
+    if ($exitCode !== 0 || $stdout === false || $stdout === '') {
+        return null;
+    }
+
+    try {
+        return json_decode($stdout, true, 512, JSON_THROW_ON_ERROR);
+    } catch (Throwable) {
+        return null;
+    }
+}
+
 /** @return list<string> */
 function release_candidate_verify(string $candidateDir, ?string $repoRoot = null): array
 {
@@ -86,6 +110,30 @@ function release_candidate_verify(string $candidateDir, ?string $repoRoot = null
 
     if (($release['distribution_format_version'] ?? '') !== (string) ($dist['distribution_format_version'] ?? '')) {
         $errors[] = 'distribution_format_version mismatch between release and distribution manifests';
+    }
+
+    $distSuitePath = (string) ($dist['suite_manifest_git_path'] ?? '');
+    $releaseSuitePath = (string) ($release['suite_manifest_git_path'] ?? '');
+    if ($distSuitePath === '' || $releaseSuitePath === '') {
+        $errors[] = 'suite_manifest_git_path missing from release or distribution manifest';
+    } elseif ($releaseSuitePath !== $distSuitePath) {
+        $errors[] = 'suite_manifest_git_path mismatch between release and distribution manifests';
+    }
+
+    if ($sourceCommit !== '' && preg_match('/^[0-9a-f]{40}$/', $sourceCommit) && $releaseSuitePath !== '') {
+        $suiteAtSource = load_suite_manifest_from_git($repoRoot, $sourceCommit, $releaseSuitePath);
+        if ($suiteAtSource === null) {
+            $errors[] = 'unable to load suite manifest from source_commit at suite_manifest_git_path';
+        } else {
+            $expectedPhp = (string) ($suiteAtSource['requires_php'] ?? '');
+            $expectedWp = (string) ($suiteAtSource['requires_at_least_wordpress'] ?? '');
+            if ((string) ($release['requires_php'] ?? '') !== $expectedPhp) {
+                $errors[] = 'requires_php must match suite manifest at source_commit';
+            }
+            if ((string) ($release['requires_wordpress'] ?? '') !== $expectedWp) {
+                $errors[] = 'requires_wordpress must match suite manifest at source_commit';
+            }
+        }
     }
 
     $distPlugins = [];

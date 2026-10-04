@@ -37,11 +37,16 @@ git -C "$BUILD" branch -M main
 COMMIT2="$(git -C "$BUILD" rev-parse HEAD~1)"
 git -C "$BUILD" push -u origin main >/dev/null
 
-git clone --depth 1 --branch main "$BARE" "$CLONE" >/dev/null
-git -C "$CLONE" remote set-url origin "$BARE"
+BARE_URL="file://${BARE}"
+rm -rf "$CLONE"
+git clone --no-local --depth 1 --branch main "$BARE_URL" "$CLONE" >/dev/null
 
 (
   cd "$CLONE"
+  git remote set-url origin "$BARE_URL"
+  if [[ "$(git rev-parse --is-shallow-repository)" != "true" ]]; then
+    fail "clone must be shallow before canonical main helper runs"
+  fi
   if ! assert_commit_on_canonical_main "$COMMIT2"; then
     fail "older main ancestor must pass after shallow unshallow/deepen"
   fi
@@ -50,8 +55,15 @@ git -C "$CLONE" remote set-url origin "$BARE"
   fi
 )
 
+CLONE2="$WORK/shallow-clone-fetch-fail"
+rm -rf "$CLONE2"
+git clone --no-local --depth 1 --branch main "$BARE_URL" "$CLONE2" >/dev/null
+
 (
-  cd "$CLONE"
+  cd "$CLONE2"
+  if [[ "$(git rev-parse --is-shallow-repository)" != "true" ]]; then
+    fail "second clone must remain shallow before fetch-failure test"
+  fi
   git remote set-url origin "http://127.0.0.1:9/invalid-remote"
   if ensure_canonical_main_ref >/dev/null 2>&1; then
     fail "failed fetch must not succeed with stale canonical main ref"
@@ -59,8 +71,8 @@ git -C "$CLONE" remote set-url origin "$BARE"
 )
 
 (
-  cd "$CLONE"
-  git remote set-url origin "$BARE"
+  cd "$CLONE2"
+  git remote set-url origin "$BARE_URL"
   if ! ensure_canonical_main_ref; then
     fail "ensure should succeed again after restoring origin"
   fi
