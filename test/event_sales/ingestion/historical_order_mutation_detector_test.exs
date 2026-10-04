@@ -5,7 +5,7 @@ defmodule EventSales.Ingestion.HistoricalOrderMutationDetectorTest do
 
   alias EventSales.Ingestion.HistoricalOrderMutationDetector
   alias EventSales.Sales
-  alias EventSales.Sales.Resources.{CouponSnapshot, Order, OrderItem}
+  alias EventSales.Sales.Resources.{CouponSnapshot, Order, OrderItem, Refund, RefundLine}
   alias EventSales.TestSupport.SalesHelpers
 
   @created_at_source ~U[2026-08-05 12:00:00.000000Z]
@@ -117,33 +117,35 @@ defmodule EventSales.Ingestion.HistoricalOrderMutationDetectorTest do
     ticket_a = SalesHelpers.create_ticket_type!(event_a, %{name: "Ticket A"})
     ticket_b = SalesHelpers.create_ticket_type!(event_b, %{name: "Ticket B"})
 
-    create_item!(order, event_b, ticket_b, %{
-      woo_line_item_id: 20,
-      woo_product_id: 202,
-      woo_variation_id: 2,
-      name: "Cosmetic B",
-      quantity: 2,
-      line_subtotal: Decimal.new("220.00"),
-      line_total: Decimal.new("200.00"),
-      line_total_tax: Decimal.new("20.00"),
-      discount_total: Decimal.new("20.00"),
-      source_tickera_event_id: 20_002,
-      attribution_status_reason: :missing_product_mapping
-    })
+    _item_b =
+      create_item!(order, event_b, ticket_b, %{
+        woo_line_item_id: 20,
+        woo_product_id: 202,
+        woo_variation_id: 2,
+        name: "Cosmetic B",
+        quantity: 2,
+        line_subtotal: Decimal.new("220.00"),
+        line_total: Decimal.new("200.00"),
+        line_total_tax: Decimal.new("20.00"),
+        discount_total: Decimal.new("20.00"),
+        source_tickera_event_id: 20_002,
+        attribution_status_reason: :missing_product_mapping
+      })
 
-    create_item!(order, event_a, ticket_a, %{
-      woo_line_item_id: 10,
-      woo_product_id: 101,
-      woo_variation_id: 1,
-      name: "Cosmetic A",
-      quantity: 1,
-      line_subtotal: Decimal.new("110.00"),
-      line_total: Decimal.new("100.00"),
-      line_total_tax: Decimal.new("10.00"),
-      discount_total: Decimal.new("10.00"),
-      source_tickera_event_id: 10_001,
-      attribution_status_reason: :order_event_mapping_conflict
-    })
+    item_a =
+      create_item!(order, event_a, ticket_a, %{
+        woo_line_item_id: 10,
+        woo_product_id: 101,
+        woo_variation_id: 1,
+        name: "Cosmetic A",
+        quantity: 1,
+        line_subtotal: Decimal.new("110.00"),
+        line_total: Decimal.new("100.00"),
+        line_total_tax: Decimal.new("10.00"),
+        discount_total: Decimal.new("10.00"),
+        source_tickera_event_id: 10_001,
+        attribution_status_reason: :order_event_mapping_conflict
+      })
 
     create_coupon!(order, "ZETA", "7.00", "0.70")
     create_coupon!(order, "ALPHA", "5.00", "0.50")
@@ -151,6 +153,8 @@ defmodule EventSales.Ingestion.HistoricalOrderMutationDetectorTest do
     snapshot = capture!(order)
 
     assert snapshot.header == %{
+             id: order.id,
+             source_system_id: source.id,
              status: :completed,
              currency: "ZAR",
              created_at_source: @created_at_source,
@@ -165,6 +169,7 @@ defmodule EventSales.Ingestion.HistoricalOrderMutationDetectorTest do
     assert Enum.map(snapshot.coupon_snapshots, & &1.code) == ["ALPHA", "ZETA"]
 
     assert Enum.at(snapshot.order_items, 0) == %{
+             id: item_a.id,
              woo_line_item_id: 10,
              event_id: event_a.id,
              ticket_type_id: ticket_a.id,
@@ -196,6 +201,85 @@ defmodule EventSales.Ingestion.HistoricalOrderMutationDetectorTest do
     refute Map.has_key?(Enum.at(snapshot.order_items, 0), :name)
     refute Map.has_key?(Enum.at(snapshot.order_items, 0), :inserted_at)
     refute Map.has_key?(Enum.at(snapshot.coupon_snapshots, 0), :updated_at)
+  end
+
+  test "captures refund evidence attached to this Order for period invalidation", %{
+    source: source
+  } do
+    order = create_order!(source)
+    event = SalesHelpers.create_event!(source, %{name: "Refund Evidence Event"})
+    ticket = SalesHelpers.create_ticket_type!(event, %{name: "Refund Evidence Ticket"})
+    item = create_item!(order, event, ticket, %{woo_line_item_id: 31})
+
+    refund =
+      Ash.create!(
+        Refund,
+        %{
+          source_system_id: source.id,
+          order_id: order.id,
+          woo_order_id: order.woo_order_id,
+          woo_refund_id: 41,
+          currency: order.currency,
+          source_state: :active,
+          detail_status: :complete,
+          summary_total_amount: Decimal.new("6.00"),
+          header_amount: Decimal.new("0.00"),
+          shipping_refund_amount: Decimal.new("0.00"),
+          shipping_refund_tax: Decimal.new("0.00"),
+          fee_refund_amount: Decimal.new("0.00"),
+          fee_refund_tax: Decimal.new("0.00"),
+          unallocated_header_amount: Decimal.new("0.00"),
+          source_created_at: ~U[2026-08-06 08:45:00.000000Z]
+        },
+        action: :create_normalized,
+        domain: Sales
+      )
+
+    line =
+      Ash.create!(
+        RefundLine,
+        %{
+          refund_id: refund.id,
+          order_item_id: item.id,
+          woo_refund_line_item_id: 51,
+          woo_refunded_item_id: item.woo_line_item_id,
+          refunded_quantity: 0,
+          refund_total_amount: Decimal.new("5.00"),
+          refund_total_tax: Decimal.new("1.00"),
+          binding_reason: nil,
+          validation_reason: nil
+        },
+        action: :create_normalized,
+        domain: Sales
+      )
+
+    snapshot = capture!(order)
+
+    assert snapshot.refunds == [
+             %{
+               header: %{
+                 id: refund.id,
+                 order_id: order.id,
+                 currency: "ZAR",
+                 source_state: :active,
+                 detail_status: :complete,
+                 source_created_at: ~U[2026-08-06 08:45:00.000000Z]
+               },
+               lines: [
+                 %{
+                   id: line.id,
+                   refund_id: refund.id,
+                   order_item_id: item.id,
+                   woo_refunded_item_id: 31,
+                   refunded_quantity: 0,
+                   refund_total_amount: Decimal.new("5.00"),
+                   refund_total_tax: Decimal.new("1.00"),
+                   binding_reason: nil,
+                   validation_reason: nil
+                 }
+               ]
+             }
+           ]
   end
 
   test "identical replay and source-version-only change do not mutate historical truth", %{

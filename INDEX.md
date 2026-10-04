@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-414
+417
 
 ## Files
 
@@ -44,6 +44,9 @@ Project root: `.`
 - `lib/event_sales/analytics/hot_state_aggregator.ex`
 - `lib/event_sales/analytics/metric_rules.ex`
 - `lib/event_sales/analytics/order_processed_notifier.ex`
+- `lib/event_sales/analytics/period_bucket_rules.ex`
+- `lib/event_sales/analytics/period_projection_invalidator.ex`
+- `lib/event_sales/analytics/period_projection_refresh.ex`
 - `lib/event_sales/analytics/refund_processed_notifier.ex`
 - `lib/event_sales/analytics/resources/analytics_contribution_fact.ex`
 - `lib/event_sales/analytics/resources/daily_sales_aggregate_snapshot.ex`
@@ -564,8 +567,8 @@ Project root: `.`
 - `EventSales.Analytics.EventSnapshotRefreshFence` - `lib/event_sales/analytics/event_snapshot_refresh_fence.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 5
-  - public_funs: `with_serial_event_refresh/2`, `coherent_transaction_opts/0`, `use_repeatable_read_isolation?/0`, `connection_backend_pid/0`, `lock_key/1`
+  - docs_count: 6
+  - public_funs: `with_serial_event_refresh/2`, `coherent_transaction_opts/0`, `lock_events_in_transaction/1`, `use_repeatable_read_isolation?/0`, `connection_backend_pid/0`, `lock_key/1`
   - uses: _none_
 - `EventSales.Analytics.HistoricalCatchupFreshnessNotifier` - `lib/event_sales/analytics/historical_catchup_freshness_notifier.ex`
   - moduledoc?: true
@@ -590,6 +593,24 @@ Project root: `.`
   - specs?: true
   - docs_count: 4
   - public_funs: `notify_order_processed/3`, `notify_order_source_applied/2`, `notify_order_reconciled/4`, `finalize_csv_import_hot_state/4`
+  - uses: _none_
+- `EventSales.Analytics.PeriodBucketRules` - `lib/event_sales/analytics/period_bucket_rules.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `for_instant/1`
+  - uses: _none_
+- `EventSales.Analytics.PeriodProjectionInvalidator` - `lib/event_sales/analytics/period_projection_invalidator.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 2
+  - public_funs: `invalidate_order_change/2`, `invalidate_refund_change/2`
+  - uses: _none_
+- `EventSales.Analytics.PeriodProjectionRefresh` - `lib/event_sales/analytics/period_projection_refresh.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 3
+  - public_funs: `refresh_pending_event/2`, `sale_population_query/2`, `refund_population_query/2`
   - uses: _none_
 - `EventSales.Analytics.RefundProcessedNotifier` - `lib/event_sales/analytics/refund_processed_notifier.ex`
   - moduledoc?: true

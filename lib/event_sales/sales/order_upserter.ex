@@ -5,6 +5,7 @@ defmodule EventSales.Sales.OrderUpserter do
 
   require Ash.Query
 
+  alias EventSales.Analytics.PeriodProjectionInvalidator
   alias EventSales.Analytics.Workers.RefreshSnapshotWorker
   alias EventSales.Ingestion.HistoricalCoverageInvalidator
   alias EventSales.Ingestion.HistoricalOrderCoverageCandidateResolver
@@ -205,6 +206,7 @@ defmodule EventSales.Sales.OrderUpserter do
     with {:ok, candidates} <-
            resolve_coverage_candidates(order, nil, after_snapshot, reconciliation_event_id, opts),
          :ok <- invalidate_new_order(order, candidates, opts),
+         :ok <- invalidate_period_projection(nil, after_snapshot, opts),
          :ok <- enqueue_snapshot_refreshes(candidates, opts) do
       {:ok, order}
     end
@@ -240,6 +242,7 @@ defmodule EventSales.Sales.OrderUpserter do
                  candidates,
                  opts
                ),
+             :ok <- invalidate_period_projection(before_snapshot, after_snapshot, opts),
              :ok <- enqueue_snapshot_refreshes(candidates, opts) do
           {:ok, order}
         end
@@ -336,6 +339,22 @@ defmodule EventSales.Sales.OrderUpserter do
       {:ok, _result} -> :ok
       {:error, reason} -> {:error, reason}
       other -> {:error, {:invalid_historical_coverage_invalidator_result, other}}
+    end
+  end
+
+  defp invalidate_period_projection(before_snapshot, after_snapshot, opts) do
+    invalidator =
+      Keyword.get(
+        opts,
+        :period_projection_invalidator,
+        &PeriodProjectionInvalidator.invalidate_order_change/2
+      )
+
+    case invalidator.(before_snapshot, after_snapshot) do
+      :ok -> :ok
+      {:ok, _result} -> :ok
+      {:error, reason} -> {:error, reason}
+      other -> {:error, {:invalid_period_projection_invalidator_result, other}}
     end
   end
 

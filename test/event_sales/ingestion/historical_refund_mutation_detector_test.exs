@@ -118,7 +118,7 @@ defmodule EventSales.Ingestion.HistoricalRefundMutationDetectorTest do
       )
 
     refund = create_refund!(source, order, %{woo_refund_id: 91_001})
-    _refund_line = create_refund_line!(refund, line, %{woo_refund_line_item_id: 88_001})
+    refund_line = create_refund_line!(refund, line, %{woo_refund_line_item_id: 88_001})
 
     refund_ids_before = ids(Refund, nil)
     refund_line_ids_before = refund_line_ids(refund.id)
@@ -129,11 +129,24 @@ defmodule EventSales.Ingestion.HistoricalRefundMutationDetectorTest do
     assert snapshot.parent_order_evidence.source_system_id == source.id
     assert snapshot.parent_order_evidence.woo_order_id == order.woo_order_id
     assert snapshot.parent_order_evidence.created_at_source == order.created_at_source
+    assert snapshot.parent_order_evidence.status == order.status
+    assert snapshot.parent_order_evidence.completed_at == order.completed_at
+    assert snapshot.parent_order_evidence.currency == order.currency
 
-    assert snapshot.parent_order_item_evidence |> Enum.map(& &1.woo_line_item_id) == [
-             line.woo_line_item_id
-           ]
+    assert snapshot.parent_order_item_evidence |> Enum.map(& &1.id) == [line.id]
 
+    assert Enum.at(snapshot.parent_order_item_evidence, 0) == %{
+             id: line.id,
+             woo_line_item_id: line.woo_line_item_id,
+             event_id: event.id,
+             ticket_type_id: ticket.id,
+             woo_product_id: line.woo_product_id,
+             woo_variation_id: line.woo_variation_id,
+             item_kind: :ticket,
+             mapping_status: :mapped
+           }
+
+    assert snapshot.refund_line_truth |> Enum.map(& &1.id) == [refund_line.id]
     assert snapshot.refund_line_truth |> Enum.map(& &1.woo_refund_line_item_id) == [88_001]
     assert snapshot.refund_truth.source_state == :active
     assert snapshot.refund_truth.detail_status == :complete

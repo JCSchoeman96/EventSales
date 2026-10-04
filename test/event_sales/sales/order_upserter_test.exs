@@ -3,6 +3,8 @@ defmodule EventSales.Sales.OrderUpserterTest do
 
   require Ash.Query
 
+  alias EventSales.Analytics
+  alias EventSales.Analytics.Resources.EventPeriodAggregateSnapshot
   alias EventSales.Catalog
   alias EventSales.Catalog.Resources.ProductMapping
   alias EventSales.Ingestion.Parsers.WoocommerceOrderParser
@@ -430,6 +432,7 @@ defmodule EventSales.Sales.OrderUpserterTest do
           quantity: 1,
           line_subtotal: Decimal.new("500.00"),
           line_total: Decimal.new("500.00"),
+          line_total_tax: Decimal.new("0"),
           discount_total: Decimal.new("0"),
           event_id: event.id,
           ticket_type_id: ticket.id,
@@ -464,6 +467,132 @@ defmodule EventSales.Sales.OrderUpserterTest do
     assert updated_line.item_kind == :ticket
     assert updated_line.mapping_status == :mapped
     assert Ash.count!(OrderItem, domain: Sales) == 1
+  end
+
+  test "invalidates period projections before scheduling event snapshot refresh", %{
+    source: source
+  } do
+    event = SalesHelpers.create_event!(source, %{name: "Period Event"})
+    ticket = SalesHelpers.create_ticket_type!(event, %{name: "Period Ticket"})
+    test_pid = self()
+
+    normalized = %{
+      woo_order_id: 90_002,
+      order_number: "PERIOD-90002",
+      status: :completed,
+      currency: "ZAR",
+      completed_at: ~U[2026-05-21 10:00:00.000000Z],
+      created_at_source: ~U[2026-05-21 09:55:00.000000Z],
+      updated_at_source: ~U[2026-05-21 10:00:00.000000Z],
+      customer_name: "Period Import",
+      customer_email: "period.import@example.test",
+      raw_total: Decimal.new("500.00"),
+      raw_discount_total: Decimal.new("0"),
+      raw_tax_total: Decimal.new("0"),
+      payment_method: "payfast",
+      payment_method_title: "Synthetic PayFast",
+      payment_gateway_transaction_id: "period-upsert-1",
+      coupons: [],
+      line_items: [
+        %{
+          woo_line_item_id: 80_002,
+          woo_product_id: 501,
+          woo_variation_id: 601,
+          name: "Period Ticket",
+          quantity: 1,
+          line_subtotal: Decimal.new("500.00"),
+          line_total: Decimal.new("500.00"),
+          line_total_tax: Decimal.new("0"),
+          discount_total: Decimal.new("0"),
+          event_id: event.id,
+          ticket_type_id: ticket.id,
+          item_kind: :ticket,
+          mapping_status: :mapped
+        }
+      ]
+    }
+
+    scheduler = fn event_ids ->
+      rows =
+        EventPeriodAggregateSnapshot
+        |> Ash.Query.filter(event_id in ^event_ids)
+        |> Ash.read!(domain: Analytics)
+
+      send(test_pid, {:period_projection_ready, event_ids, rows})
+      :ok
+    end
+
+    assert {:ok, order} =
+             OrderUpserter.upsert_normalized_order(
+               source.id,
+               normalized,
+               snapshot_refresh_scheduler: scheduler
+             )
+
+    assert order.status == :completed
+    assert_receive {:period_projection_ready, [event_id], rows}
+    assert event_id == event.id
+    assert length(rows) == 2
+    assert Enum.all?(rows, &(&1.projection_state == :refresh_pending))
+  end
+
+  test "period projection invalidation errors roll back the order transaction", %{source: source} do
+    event = SalesHelpers.create_event!(source, %{name: "Period Rollback Event"})
+    ticket = SalesHelpers.create_ticket_type!(event, %{name: "Period Rollback Ticket"})
+
+    normalized = %{
+      woo_order_id: 90_003,
+      order_number: "PERIOD-90003",
+      status: :completed,
+      currency: "ZAR",
+      completed_at: ~U[2026-05-21 10:00:00.000000Z],
+      created_at_source: ~U[2026-05-21 09:55:00.000000Z],
+      updated_at_source: ~U[2026-05-21 10:00:00.000000Z],
+      customer_name: "Period Rollback",
+      customer_email: "period.rollback@example.test",
+      raw_total: Decimal.new("500.00"),
+      raw_discount_total: Decimal.new("0"),
+      raw_tax_total: Decimal.new("0"),
+      payment_method: "payfast",
+      payment_method_title: "Synthetic PayFast",
+      payment_gateway_transaction_id: "period-upsert-2",
+      coupons: [],
+      line_items: [
+        %{
+          woo_line_item_id: 80_003,
+          woo_product_id: 501,
+          woo_variation_id: 601,
+          name: "Period Rollback Ticket",
+          quantity: 1,
+          line_subtotal: Decimal.new("500.00"),
+          line_total: Decimal.new("500.00"),
+          discount_total: Decimal.new("0"),
+          event_id: event.id,
+          ticket_type_id: ticket.id,
+          item_kind: :ticket,
+          mapping_status: :mapped
+        }
+      ]
+    }
+
+    assert {:error, :period_projection_failed} =
+             OrderUpserter.upsert_normalized_order(
+               source.id,
+               normalized,
+               period_projection_invalidator: fn _before, _after ->
+                 {:error, :period_projection_failed}
+               end,
+               snapshot_refresh_scheduler: fn _event_ids ->
+                 flunk("snapshot refresh should not be scheduled after invalidation failure")
+               end
+             )
+
+    assert Ash.count!(Order, domain: Sales) == 0
+    assert Ash.count!(OrderItem, domain: Sales) == 0
+
+    assert EventPeriodAggregateSnapshot
+           |> Ash.Query.filter(event_id == ^event.id)
+           |> Ash.read!(domain: Analytics) == []
   end
 
   defp fixture(name), do: FixtureHelpers.decode_json_fixture!(:woocommerce, name)
