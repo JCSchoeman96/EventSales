@@ -175,7 +175,8 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
   defp read_coherent_comparison(event_id, currency, plan, envelope, revenue_visible?) do
     transaction_opts = EventSnapshotRefreshFence.coherent_transaction_opts()
 
-    case Repo.transaction(fn -> load_projection_operands_in_transaction(event_id, currency, plan) end,
+    case Repo.transaction(
+           fn -> load_projection_operands_in_transaction(event_id, currency, plan) end,
            transaction_opts
          ) do
       {:ok, payload} ->
@@ -289,7 +290,9 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
   end
 
   defp validate_bucket_row_step(row) do
-    if current_compatible_row?(row), do: {:cont, :ok}, else: {:halt, {:error, :projection_not_ready}}
+    if current_compatible_row?(row),
+      do: {:cont, :ok},
+      else: {:halt, {:error, :projection_not_ready}}
   end
 
   defp current_compatible_row?(row) do
