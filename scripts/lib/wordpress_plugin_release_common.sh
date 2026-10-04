@@ -4,7 +4,7 @@
 CANONICAL_MAIN_REF="refs/remotes/origin/main"
 
 ensure_canonical_main_ref() {
-  if ! git rev-parse --verify origin >/dev/null 2>&1; then
+  if ! git remote get-url origin >/dev/null 2>&1; then
     echo "Git remote origin is not configured" >&2
     return 1
   fi
