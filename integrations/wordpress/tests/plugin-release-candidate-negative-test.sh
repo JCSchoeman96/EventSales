@@ -30,7 +30,13 @@ if bash "$BUILD" --ref "$HEAD_SHA" --release-id 'bad-id' >/dev/null 2>&1; then
 fi
 
 EMPTY_TREE="$(git mktree </dev/null)"
-ORPHAN_SHA="$(git commit-tree "$EMPTY_TREE" -m "wp-release-candidate negative test")"
+ORPHAN_SHA="$(
+  GIT_AUTHOR_NAME="EventSales Test" \
+  GIT_AUTHOR_EMAIL="eventsales-test@example.invalid" \
+  GIT_COMMITTER_NAME="EventSales Test" \
+  GIT_COMMITTER_EMAIL="eventsales-test@example.invalid" \
+  git commit-tree "$EMPTY_TREE" -m "wp-release-candidate negative test"
+)"
 if git merge-base --is-ancestor "$ORPHAN_SHA" origin/main 2>/dev/null; then
   echo "orphan commit unexpectedly on main history" >&2
   exit 1
