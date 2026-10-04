@@ -261,6 +261,31 @@ function remove_published_fixture(array $fixture): void
     rmdir($fixture['root']);
 }
 
+/** @param array<string, mixed> $fixture */
+function refresh_fixture_release_authorities(array &$fixture): void
+{
+    $sumFiles = [
+        'eventsales-tickera-catalog-feed-0.1.2.zip',
+        'eventsales-woo-order-index-feed-0.2.2.zip',
+        'eventsales-woo-order-line-identity-0.1.2.zip',
+        'eventsales-integration-health-0.1.2.zip',
+        'manifest.json',
+        'release-manifest.json',
+    ];
+    sort($sumFiles);
+
+    $sumLines = [];
+    foreach ($sumFiles as $name) {
+        $sumLines[] = hash_file('sha256', $fixture['assets_dir'] . '/' . $name) . '  ' . $name;
+    }
+    file_put_contents($fixture['assets_dir'] . '/RELEASE_SHA256SUMS', implode(PHP_EOL, $sumLines) . PHP_EOL);
+
+    foreach ($fixture['release']['assets'] as &$asset) {
+        $asset['digest'] = 'sha256:' . hash_file('sha256', $fixture['assets_dir'] . '/' . $asset['name']);
+    }
+    unset($asset);
+}
+
 $fixture = published_release_fixture();
 PublishedReleaseTest::ok(
     'public immutable release fixture validates without a token',
@@ -302,6 +327,46 @@ PublishedReleaseTest::ok(
         'build_to_main' => 'identical',
     ]) !== []
 );
+
+foreach (['source_to_build', 'build_to_main'] as $ancestryKey) {
+    $badAncestry = $fixture['ancestry'];
+    $badAncestry[$ancestryKey] = 'diverged';
+    PublishedReleaseTest::ok(
+        "GitHub ancestry failure for {$ancestryKey} is rejected",
+        verify_published_fixture($fixture, ancestry: $badAncestry) !== []
+    );
+}
+
+$typeMismatchFixture = published_release_fixture();
+$typeMismatchReleaseManifest = json_decode(
+    (string) file_get_contents($typeMismatchFixture['assets_dir'] . '/release-manifest.json'),
+    true,
+    512,
+    JSON_THROW_ON_ERROR
+);
+$typeMismatchDistributionManifest = json_decode(
+    (string) file_get_contents($typeMismatchFixture['assets_dir'] . '/manifest.json'),
+    true,
+    512,
+    JSON_THROW_ON_ERROR
+);
+$typeMismatchReleaseManifest['plugins'][0]['review_fixture'] = '7';
+$typeMismatchDistributionManifest['plugins'][0]['review_fixture'] = 7;
+file_put_contents(
+    $typeMismatchFixture['assets_dir'] . '/release-manifest.json',
+    json_encode($typeMismatchReleaseManifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL
+);
+file_put_contents(
+    $typeMismatchFixture['assets_dir'] . '/manifest.json',
+    json_encode($typeMismatchDistributionManifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL
+);
+refresh_fixture_release_authorities($typeMismatchFixture);
+$typeMismatchErrors = verify_published_fixture($typeMismatchFixture);
+PublishedReleaseTest::ok(
+    'plugin manifest row type mismatch is rejected',
+    in_array('Release and distribution plugin rows differ for eventsales-tickera-catalog-feed', $typeMismatchErrors, true)
+);
+remove_published_fixture($typeMismatchFixture);
 
 PublishedReleaseTest::ok(
     'source tree mismatch is rejected',

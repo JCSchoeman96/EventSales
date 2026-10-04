@@ -5,6 +5,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VALIDATOR="$ROOT/integrations/wordpress/tests/published-release-validate.php"
 REPOSITORY="JCSchoeman96/EventSales"
 API_ROOT="https://api.github.com/repos/$REPOSITORY"
+MAX_METADATA_BYTES=$((2 * 1024 * 1024))
+MAX_ASSET_BYTES=$((16 * 1024 * 1024))
 TAG=""
 CANDIDATE_DIR=""
 
@@ -67,14 +69,18 @@ api_get_json() {
   local url="$1"
   local destination="$2"
   local status
+  local size
 
-  if ! status="$(curl --silent --show-error --connect-timeout 10 --max-time 45 \
+  if ! status="$(command curl -q --silent --show-error --connect-timeout 10 --max-time 45 \
+    --max-filesize "$MAX_METADATA_BYTES" \
     -H 'Accept: application/vnd.github+json' \
     -H 'User-Agent: EventSales-WordPress-Release-Certification/1.0' \
     --output "$destination" --write-out '%{http_code}' "$url" 2>/dev/null)"; then
-    fail "GitHub API request failed"
+    fail "GitHub API request failed or exceeded the metadata size limit"
   fi
   [[ "$status" == "200" ]] || fail "GitHub API returned HTTP $status"
+  size="$(wc -c <"$destination")"
+  [[ "$size" =~ ^[0-9]+$ && "$size" -le "$MAX_METADATA_BYTES" ]] || fail "GitHub API metadata exceeded the size limit"
 }
 
 json_value() {
@@ -111,20 +117,24 @@ download_release_asset() {
   local body="$TEMP_DIR/asset-body"
   local status
   local location
+  local body_size
   local redirects=0
 
   while :; do
     : >"$headers"
     : >"$body"
     if ! status="$(printf 'url = "%s"\nheader = "Accept: application/octet-stream"\nheader = "User-Agent: EventSales-WordPress-Release-Certification/1.0"\n' "$url" \
-      | curl --silent --connect-timeout 10 --max-time 60 --dump-header "$headers" \
+      | command curl -q --silent --connect-timeout 10 --max-time 60 \
+        --max-filesize "$MAX_ASSET_BYTES" --dump-header "$headers" \
         --output "$body" --write-out '%{http_code}' --config - 2>/dev/null)"; then
-      fail "GitHub release asset download failed"
+      fail "GitHub release asset download failed or exceeded the asset size limit"
     fi
 
     case "$status" in
       200)
         [[ -s "$body" ]] || fail "GitHub returned an empty release asset"
+        body_size="$(wc -c <"$body")"
+        [[ "$body_size" =~ ^[0-9]+$ && "$body_size" -le "$MAX_ASSET_BYTES" ]] || fail "GitHub release asset exceeded the size limit"
         mv -- "$body" "$destination"
         return
         ;;

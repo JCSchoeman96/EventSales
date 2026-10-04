@@ -24,5 +24,7 @@ bash "$ROOT/scripts/build_wordpress_plugin_release_candidate.sh" --ref "$MAIN_SH
 CANDIDATE="$ROOT/tmp/wordpress-plugin-release/$MAIN_SHA/2026.10.04.1"
 php "$ROOT/integrations/wordpress/tests/plugin-release-candidate-test.php" --candidate "$CANDIDATE"
 bash "$ROOT/scripts/verify_wordpress_plugin_release_candidate.sh" "$CANDIDATE"
+php "$ROOT/integrations/wordpress/tests/plugin-published-release-test.php"
+bash "$ROOT/integrations/wordpress/tests/plugin-published-release-script-test.sh"
 
 echo "WordPress plugin distribution CI gate passed."

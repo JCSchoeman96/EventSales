@@ -80,6 +80,8 @@ bash scripts/verify_wordpress_plugin_published_release.sh \
 
 It uses unauthenticated public GitHub API requests, constructs asset API paths from validated numeric IDs, follows no more than three redirects, and accepts only HTTPS redirects to the exact host `release-assets.githubusercontent.com`. It does not read or print `browser_download_url` values, credentials, or signed query strings. It creates no GitHub objects and does not change repository settings.
 
+The verifier caps GitHub API JSON responses at 2 MiB and each release asset at 16 MiB. Curl's default config is disabled on both network paths so local configuration cannot enable automatic redirects or replace the byte limits.
+
 The release asset set is:
 
 ```text
@@ -161,9 +163,10 @@ The repository currently reports immutable releases disabled and not owner-enfor
 
 No runtime plugin PHP files or plugin marketing versions change in WP-SOURCE-07. The certified suite remains catalog `0.1.2`, order index `0.2.2`, order-line identity `0.1.2`, and Integration Health `0.1.2`.
 
-## GitHub references
+## Reference docs
 
 - [Immutable releases](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)
 - [REST API release metadata](https://docs.github.com/en/rest/releases/releases?apiVersion=latest)
 - [REST API release assets](https://docs.github.com/en/rest/releases/assets)
 - [`gh attestation verify`](https://cli.github.com/manual/gh_attestation_verify)
+- [curl command-line options](https://curl.se/docs/manpage.html)

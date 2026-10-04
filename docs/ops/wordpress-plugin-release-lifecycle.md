@@ -71,7 +71,7 @@ bash scripts/verify_wordpress_plugin_published_release.sh \
   --candidate tmp/wordpress-plugin-first-release-certification/<suite_release_id>
 ```
 
-The verifier uses public GitHub API requests without a token. It downloads assets by validated release asset IDs and checks each redirect before following it. It allows only HTTPS redirects to `release-assets.githubusercontent.com`, with at most three redirects. It does not use release-provided download URLs, print signed query strings, or create or change GitHub resources.
+The verifier uses public GitHub API requests without a token. It caps API JSON at 2 MiB and each release asset at 16 MiB. It disables curl's default config so a local `.curlrc` cannot enable automatic redirects. It downloads assets by validated release asset IDs and checks each redirect before following it. It allows only HTTPS redirects to `release-assets.githubusercontent.com`, with at most three redirects. It does not use release-provided download URLs, print signed query strings, or create or change GitHub resources.
 
 The release must include exactly these assets, with each GitHub `sha256:` digest matching the downloaded bytes:
 

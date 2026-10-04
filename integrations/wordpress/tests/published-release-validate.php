@@ -410,7 +410,7 @@ function published_release_validation_errors(
         if (!isset($releasePlugins[$slug], $distributionPlugins[$slug])) {
             continue;
         }
-        if ($releasePlugins[$slug] != $distributionPlugins[$slug]) {
+        if ($releasePlugins[$slug] !== $distributionPlugins[$slug]) {
             $errors[] = "Release and distribution plugin rows differ for {$slug}";
         }
     }
