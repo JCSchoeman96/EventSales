@@ -12,9 +12,11 @@ WordPress plugin artifact for VS-26C. It exposes a sanitized Tickera/WooCommerce
 
 This plugin does not send order, customer, payment, webhook, ticket delivery, QR, token, or raw provider payload data.
 
-The plugin emits schema version `2026-07-08.v1`. EventSales temporarily accepts
-the previous `2026-07-05.v1` schema during rollout and treats missing event
-metadata as empty until the upgraded plugin is active.
+The plugin emits schema version `2026-08-07.v3` with canonical contract
+`source_risk.v3` and producer version `2026-08-07.1`. EventSales still parses
+legacy feed schemas such as `2026-07-22.v2`, `2026-07-08.v1`, and
+`2026-07-05.v1` for historical snapshots; those older schemas are not the
+current WordPress producer authority.
 
 ## Endpoint
 
@@ -161,7 +163,9 @@ Unauthorized response:
 
 ```json
 {
-  "schema_version": "2026-07-08.v1",
+  "schema_version": "2026-08-07.v3",
+  "canonical_contract_version": "source_risk.v3",
+  "producer_version": "2026-08-07.1",
   "source": "wordpress_tickera",
   "source_snapshot_at": "2026-07-05T10:00:00Z",
   "generated_at": "2026-07-05T10:00:00Z",

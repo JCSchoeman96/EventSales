@@ -2,7 +2,9 @@
 /**
  * Plugin Name: EventSales Woo Order Index Feed
  * Description: Provides authenticated Woo order identity manifest capture and a bounded READY reader.
- * Version: 0.2.0
+ * Version: 0.2.1
+ * Requires at least: 5.6
+ * Requires PHP: 8.0
  * Author: EventSales
  * License: GPL-2.0-or-later
  */
