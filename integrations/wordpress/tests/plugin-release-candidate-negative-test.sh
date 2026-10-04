@@ -29,6 +29,10 @@ if bash "$BUILD" --ref "$HEAD_SHA" --release-id 'bad-id' >/dev/null 2>&1; then
   fail "invalid release ID"
 fi
 
+if bash "$BUILD" --ref "$HEAD_SHA" --release-id '2026.02.31.1' >/dev/null 2>&1; then
+  fail "invalid calendar release ID"
+fi
+
 EMPTY_TREE="$(git mktree </dev/null)"
 ORPHAN_SHA="$(
   GIT_AUTHOR_NAME="EventSales Test" \

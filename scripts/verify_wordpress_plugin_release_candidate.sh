@@ -18,29 +18,23 @@ php "$ROOT/integrations/wordpress/tests/plugin-release-candidate-test.php" --can
 
 bash "$ROOT/scripts/verify_wordpress_plugin_packages.sh" "$CANDIDATE_DIR"
 
+php "$ROOT/integrations/wordpress/tests/release-candidate-verify.php" --candidate "$CANDIDATE_DIR"
+
 RELEASE_MANIFEST="$CANDIDATE_DIR/release-manifest.json"
-if [[ ! -f "$RELEASE_MANIFEST" ]]; then
-  echo "Missing release-manifest.json" >&2
-  exit 1
-fi
+SOURCE_SHA="$(php -r 'echo strtolower(json_decode(file_get_contents($argv[1]), true)["source_commit"]);' "$RELEASE_MANIFEST")"
+CANONICAL_MAIN_AT_BUILD="$(php -r 'echo strtolower(json_decode(file_get_contents($argv[1]), true)["canonical_main_at_build"]);' "$RELEASE_MANIFEST")"
 
-SOURCE_SHA="$(php -r 'echo json_decode(file_get_contents($argv[1]), true)["source_commit"];' "$RELEASE_MANIFEST")"
 validate_source_commit_sha "$SOURCE_SHA"
+validate_source_commit_sha "$CANONICAL_MAIN_AT_BUILD"
 assert_source_on_canonical_main "$SOURCE_SHA"
+assert_commit_on_canonical_main "$CANONICAL_MAIN_AT_BUILD"
 
-DIST_MANIFEST="$CANDIDATE_DIR/manifest.json"
-DIST_COMMIT="$(php -r 'echo json_decode(file_get_contents($argv[1]), true)["source_commit"];' "$DIST_MANIFEST")"
-if [[ "$DIST_COMMIT" != "$SOURCE_SHA" ]]; then
-  echo "release manifest source_commit does not match distribution manifest" >&2
+if ! git merge-base --is-ancestor "$SOURCE_SHA" "$CANONICAL_MAIN_AT_BUILD"; then
+  echo "source_commit must be an ancestor of canonical_main_at_build recorded in release manifest" >&2
   exit 1
 fi
 
 RELEASE_SUMS="$CANDIDATE_DIR/RELEASE_SHA256SUMS"
-if [[ ! -f "$RELEASE_SUMS" ]]; then
-  echo "Missing RELEASE_SHA256SUMS" >&2
-  exit 1
-fi
-
 (
   cd "$CANDIDATE_DIR"
   while read -r hash file; do

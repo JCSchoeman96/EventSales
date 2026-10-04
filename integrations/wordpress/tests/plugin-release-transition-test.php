@@ -172,4 +172,10 @@ $schemaRollbackPath = $tmp . '/schema-rollback.json';
 write_manifest($schemaRollback, $schemaRollbackPath);
 expect_transition('rollback', $baselinePath, $schemaRollbackPath, false, 'rollback across order-index schema fails');
 
+$floorRollback = $downgraded;
+$floorRollback['requires_php'] = '7.4';
+$floorRollbackPath = $tmp . '/floor-rollback.json';
+write_manifest($floorRollback, $floorRollbackPath);
+expect_transition('rollback', $baselinePath, $floorRollbackPath, false, 'rollback with requires_php floor change fails');
+
 ReleaseTransitionTest::finish();

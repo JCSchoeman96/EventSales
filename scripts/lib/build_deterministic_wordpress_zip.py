@@ -19,9 +19,10 @@ from pathlib import Path
 # Fixed metadata (1980-01-01 00:00:00 MS-DOS) — common reproducible-build convention.
 FIXED_DOS_TIME = 0
 FIXED_DOS_DATE = 33  # 1980-01-01
-CREATE_VERSION = 20  # 2.0
+CREATE_VERSION = 20  # Unix zip format 2.0
 EXTRACT_VERSION = 20
 CREATE_SYSTEM_UNIX = 3
+VERSION_MADE_BY = (CREATE_SYSTEM_UNIX << 8) | CREATE_VERSION
 GENERAL_PURPOSE_FLAG = 0
 COMPRESSION_STORED = 0
 
@@ -90,7 +91,7 @@ def write_deterministic_zip(members: list[dict], output_path: Path) -> None:
         central_header = struct.pack(
             "<IHHHHHHIIIHHHHHII",
             0x02014B50,
-            CREATE_VERSION,
+            VERSION_MADE_BY,
             EXTRACT_VERSION,
             GENERAL_PURPOSE_FLAG,
             COMPRESSION_STORED,

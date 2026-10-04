@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/release-candidate-verify.php';
+
 final class ReleaseCandidateTest
 {
     public static int $passes = 0;
@@ -61,26 +63,52 @@ function run_cmd_expect_fail(array $command, string $label): void
     ReleaseCandidateTest::ok($label, $code !== 0);
 }
 
-function run_candidate_verify(string $candidateDir): void
+function expect_release_id_validation(string $releaseId, bool $shouldPass, string $label): void
 {
-    $manifestPath = $candidateDir . '/release-manifest.json';
-    ReleaseCandidateTest::ok('release-manifest.json exists', is_file($manifestPath));
-    if (!is_file($manifestPath)) {
+    $root = repo_root();
+    $command = [
+        'bash',
+        '-c',
+        'source "$1" && validate_suite_release_id "$2"',
+        'bash',
+        $root . '/scripts/lib/wordpress_plugin_release_common.sh',
+        $releaseId,
+    ];
+    $process = proc_open($command, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $root);
+    if (!is_resource($process)) {
+        ReleaseCandidateTest::ok($label, false);
+
         return;
     }
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    $code = proc_close($process);
+    ReleaseCandidateTest::ok($label, ($code === 0) === $shouldPass);
+}
 
-    $manifest = json_decode((string) file_get_contents($manifestPath), true, 512, JSON_THROW_ON_ERROR);
-    ReleaseCandidateTest::ok('release_manifest_format_version', ($manifest['release_manifest_format_version'] ?? '') === '1');
-    ReleaseCandidateTest::ok('suite_release_id present', isset($manifest['suite_release_id']));
-    ReleaseCandidateTest::ok('suggested_tag prefix', str_starts_with((string) ($manifest['suggested_tag'] ?? ''), 'eventsales-wp-'));
-    ReleaseCandidateTest::ok('deterministic_archive_bytes true', ($manifest['deterministic_archive_bytes'] ?? false) === true);
-    ReleaseCandidateTest::ok('RELEASE_SHA256SUMS exists', is_file($candidateDir . '/RELEASE_SHA256SUMS'));
+function run_candidate_verify(string $candidateDir): void
+{
+    $errors = release_candidate_verify($candidateDir, repo_root());
+    ReleaseCandidateTest::ok('release-candidate-verify binding', $errors === []);
+    if ($errors !== []) {
+        foreach ($errors as $error) {
+            ReleaseCandidateTest::ok('binding detail: ' . $error, false);
+        }
+    }
 
-    $distManifest = json_decode((string) file_get_contents($candidateDir . '/manifest.json'), true, 512, JSON_THROW_ON_ERROR);
-    ReleaseCandidateTest::ok(
-        'distribution source_commit matches release manifest',
-        ($distManifest['source_commit'] ?? '') === ($manifest['source_commit'] ?? '')
-    );
+    $tamperRoot = sys_get_temp_dir() . '/es-wp-candidate-tamper-' . getmypid();
+    if (is_dir($tamperRoot)) {
+        exec('rm -rf ' . escapeshellarg($tamperRoot));
+    }
+    mkdir($tamperRoot);
+    exec('cp -a ' . escapeshellarg($candidateDir) . '/. ' . escapeshellarg($tamperRoot));
+    $releasePath = $tamperRoot . '/release-manifest.json';
+    $release = json_decode((string) file_get_contents($releasePath), true, 512, JSON_THROW_ON_ERROR);
+    $release['plugins'][0]['marketing_version'] = '9.9.9';
+    file_put_contents($releasePath, json_encode($release, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL);
+    $tamperErrors = release_candidate_verify($tamperRoot, repo_root());
+    ReleaseCandidateTest::ok('tampered release manifest rejected', $tamperErrors !== []);
+    exec('rm -rf ' . escapeshellarg($tamperRoot));
 }
 
 $candidateDir = null;
@@ -104,6 +132,11 @@ $root = repo_root();
 $head = trim((string) shell_exec('git -C ' . escapeshellarg($root) . ' rev-parse HEAD'));
 ReleaseCandidateTest::ok('HEAD is 40-char sha', preg_match('/^[0-9a-f]{40}$/', $head) === 1);
 
+expect_release_id_validation('2026.10.04.1', true, 'accept valid calendar release id');
+expect_release_id_validation('2026.02.31.1', false, 'reject impossible February date');
+expect_release_id_validation('2023.02.29.1', false, 'reject non-leap Feb 29');
+expect_release_id_validation('2024.02.29.1', true, 'accept leap-year Feb 29');
+
 $buildScript = $root . '/scripts/build_wordpress_plugin_release_candidate.sh';
 
 run_cmd_expect_fail(
@@ -117,6 +150,10 @@ run_cmd_expect_fail(
 run_cmd_expect_fail(
     ['bash', $buildScript, '--ref', $head, '--release-id', 'not-valid'],
     'reject invalid release ID'
+);
+run_cmd_expect_fail(
+    ['bash', $buildScript, '--ref', $head, '--release-id', '2026.02.31.1'],
+    'reject invalid calendar release ID in builder'
 );
 
 $tree = trim((string) shell_exec('git -C ' . escapeshellarg($root) . ' rev-parse HEAD^{tree}'));

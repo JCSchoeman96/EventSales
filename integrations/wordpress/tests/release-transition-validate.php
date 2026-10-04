@@ -156,6 +156,15 @@ function run_transition(string $mode, string $fromPath, string $toPath): int
     $strictIncrease = 0;
     $strictDecrease = 0;
 
+    if ($mode === 'rollback') {
+        if ($from['requires_wordpress'] !== $to['requires_wordpress']) {
+            TransitionReport::fail('rollback blocked: requires_wordpress change requires explicit review');
+        }
+        if ($from['requires_php'] !== $to['requires_php']) {
+            TransitionReport::fail('rollback blocked: requires_php change requires explicit review');
+        }
+    }
+
     foreach (canonical_slugs() as $slug) {
         $fp = $fromPlugins[$slug];
         $tp = $toPlugins[$slug];

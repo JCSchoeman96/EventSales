@@ -80,7 +80,8 @@ No secrets, endpoints, credentials, or operator filesystem paths.
 
 - `source_commit`: 40-char lowercase hex commit
 - Commit must exist; must **not** accept tree/blob objects
-- `git merge-base --is-ancestor "$source_commit" origin/main` after fetching canonical `main`
+- Fetch canonical main with a full ref update (`git fetch origin +refs/heads/main:refs/remotes/origin/main`) — never `--depth=1` on the authority ref; fetch failure must abort (no stale fallback)
+- `git merge-base --is-ancestor "$source_commit" refs/remotes/origin/main` after fetch
 - `SOURCE_SHA == origin/main HEAD` is **not** required; ancestor of current `main` is sufficient
 - Record `canonical_main_at_build` separately from `source_commit`
 
