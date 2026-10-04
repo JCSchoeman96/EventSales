@@ -1,0 +1,103 @@
+name: WordPress plugin release candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: 40-character commit SHA on origin/main history
+        required: true
+        type: string
+      suite_release_id:
+        description: Suite release id YYYY.MM.DD.N
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  release_candidate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve canonical main
+        run: git fetch origin main
+
+      - name: Validate source on main
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          SOURCE_SHA="$(printf '%s' "$SOURCE_SHA" | tr 'A-Z' 'a-z')"
+          if [[ ! "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Invalid source_sha" >&2
+            exit 1
+          fi
+          git cat-file -e "${SOURCE_SHA}^{commit}"
+          git merge-base --is-ancestor "$SOURCE_SHA" origin/main
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.0"
+          tools: unzip
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: WP-SOURCE-04 source and packaging tests
+        run: |
+          bash integrations/wordpress/tests/plugin-packaging-git-object-negative-test.sh
+          php integrations/wordpress/tests/plugin-distribution-test.php --source
+          bash integrations/wordpress/tests/plugin-release-candidate-negative-test.sh
+          php integrations/wordpress/tests/plugin-release-transition-test.php
+
+      - name: Build release candidate
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RELEASE_ID: ${{ inputs.suite_release_id }}
+        run: |
+          set -euo pipefail
+          SOURCE_SHA="$(printf '%s' "$SOURCE_SHA" | tr 'A-Z' 'a-z')"
+          bash scripts/build_wordpress_plugin_release_candidate.sh \
+            --ref "$SOURCE_SHA" \
+            --release-id "$RELEASE_ID"
+
+      - name: Reproducibility proof on candidate source
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RELEASE_ID: ${{ inputs.suite_release_id }}
+        run: |
+          set -euo pipefail
+          SOURCE_SHA="$(printf '%s' "$SOURCE_SHA" | tr 'A-Z' 'a-z')"
+          bash scripts/check_wordpress_plugin_distribution_reproducibility.sh --ref "$SOURCE_SHA"
+          bash scripts/verify_wordpress_plugin_release_candidate.sh \
+            "tmp/wordpress-plugin-release/${SOURCE_SHA}/${RELEASE_ID}"
+
+      - name: Stage attestation artifacts
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RELEASE_ID: ${{ inputs.suite_release_id }}
+        run: |
+          set -euo pipefail
+          CANDIDATE="tmp/wordpress-plugin-release/${SOURCE_SHA}/${RELEASE_ID}"
+          mkdir -p candidate-upload
+          cp -a "$CANDIDATE"/* candidate-upload/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wordpress-plugin-release-candidate
+          path: candidate-upload/
+          if-no-files-found: error
+
+      - name: Generate artifact attestations
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: candidate-upload/*

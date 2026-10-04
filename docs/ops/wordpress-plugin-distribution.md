@@ -83,8 +83,8 @@ After install, confirm Site Health registers EventSales direct tests and the **E
 
 ## Reproducibility
 
-Same git commit yields the same included source files and bytes (`DETERMINISTIC_SOURCE_CONTENT=YES`). ZIP file digests may differ between builds (`DETERMINISTIC_ARCHIVE_BYTES=NO`); compare `manifest.json` archive SHA-256 for a specific build output.
+Same git commit yields the same included source files and bytes (`DETERMINISTIC_SOURCE_CONTENT=YES`). ZIP file digests are stable across builds (`DETERMINISTIC_ARCHIVE_BYTES=YES`); see [wordpress-plugin-release-lifecycle.md](./wordpress-plugin-release-lifecycle.md) for release candidates.
 
 ## Not in this slice
 
-Automatic updates, `Update URI`, custom release feeds, and production rollout belong to WP-SOURCE-05 and WP-SOURCE-06.
+Automatic updates, `Update URI`, custom release feeds, and production rollout belong to WP-SOURCE-05 release promotion and WP-SOURCE-06 self-update decisions.
