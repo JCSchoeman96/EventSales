@@ -16,16 +16,17 @@
 - `v10` — correct current C/D authority, record source lock ordering and contribution identity validation, and separate event from dimensional write-query evidence
 
 - `v11` records the verified JC-317 merge and JC-319 dimensional period population and reconciliation.
+- `v12` — JC-321 M5-04F `PeriodComparisonReader` and `PeriodReadPlan`, bounded unnest edge reads, policy/redaction tests, and query-plan evidence.
 
-**Plan version:** `v11`
+**Plan version:** `v12`
 
 ```text
-PLAN_VERSION = v11
+PLAN_VERSION = v12
 ```
 
-**Status:** JC-317 merged; JC-319 M5-04E implementation in progress
+**Status:** JC-319 M5-04E merged; JC-321 M5-04F reader implementation in review
 **Last updated:** 2026-10-04
-**Change summary (v11):** Records merged JC-317 authority and JC-319 dimensional grouping, reconciliation, and atomic bulk replacement from the same validated contribution facts.
+**Change summary (v12):** Records JC-321 projection-only period comparison reader, read plan decomposition, fixed query architecture, revenue redaction, and focused test/certification coverage for M5-04F.
 
 **Goal:** Define a canonical, currency-safe period comparison read model for event and required dimensional grains without promoting the legacy daily-v1 snapshot or inventing comparison semantics.
 
@@ -1514,7 +1515,7 @@ ROLLING_EDGE_STRATEGY = FIXED_INTERIOR_BUCKETS_PLUS_DURABLE_EXACT_CONTRIBUTION_E
 
 ## 27. Verdict
 
-M5-04A audited the repository, identified the comparison-authority conflict, and rejected Daily v1 rehabilitation and an unbounded request-time comparison reader. JC-310 records the approved previous-equivalent contract without modifying M1-07. JC-312 implements pure comparison kernels and locks hybrid rolling-edge plus contribution contracts; PR #287 is merged and is durable authority. JC-314 implemented the authorized M5-04C schema slice and merged at `eebb9a83563e2ce0e40dd9a4e069567d89acd28f`. JC-317 merged the authorized M5-04D event-period rebuild and invalidation slice in PR #291 at `5f2acf53b97b974f6abf4c3bb271e2e843fc282c`. JC-319 implements the authorized M5-04E dimensional projection slice.
+M5-04A audited the repository, identified the comparison-authority conflict, and rejected Daily v1 rehabilitation and an unbounded request-time comparison reader. JC-310 records the approved previous-equivalent contract without modifying M1-07. JC-312 implements pure comparison kernels and locks hybrid rolling-edge plus contribution contracts; PR #287 is merged and is durable authority. JC-314 implemented the authorized M5-04C schema slice and merged at `eebb9a83563e2ce0e40dd9a4e069567d89acd28f`. JC-317 merged the authorized M5-04D event-period rebuild and invalidation slice in PR #291 at `5f2acf53b97b974f6abf4c3bb271e2e843fc282c`. JC-319 merged the authorized M5-04E dimensional projection slice in PR #293. JC-321 implements the authorized M5-04F projection-only comparison reader (`PeriodComparisonReader`, `PeriodReadPlan`) on branch `feature/jc-321-m5-04f-period-comparison-reader`.
 
 ```text
 DAILY_V1_DECISION = LEGACY / NON-CANONICAL FOR M5 PERIOD REPORTING
@@ -1542,12 +1543,18 @@ JC_317_MERGE_SHA = 5f2acf53b97b974f6abf4c3bb271e2e843fc282c
 JC_317_MERGE_TREE = c6d58c43499233c22be34cdc0551d0fbae255224
 M5_04D_DURABLE_AUTHORITY = YES
 M5_04E_AUTHORIZED = YES
-M5_04E_STATUS = IN_PROGRESS
-M5_04F_AUTHORIZED = NO
+M5_04E_STATUS = MERGED
+JC_319_STATUS = MERGED
+JC_319_MERGE_SHA = 11f5bc3 (PR #293 merge commit on main)
+M5_04E_DURABLE_AUTHORITY = YES
+M5_04F_AUTHORIZED = YES
+M5_04F_STATUS = IN_REVIEW
+JC_321_STATUS = IN_REVIEW
 ROLLING_EDGE_STRATEGY = FIXED_INTERIOR_BUCKETS_PLUS_DURABLE_EXACT_CONTRIBUTION_EDGE
 ROLLING_EDGE_SCHEMA_FOUNDATION = M5-04C
-ROLLING_EDGE_POPULATION = JC-317 event period / M5-04E dimensional period
-ROLLING_EDGE_READ = M5-04F
+ROLLING_EDGE_POPULATION = JC-317 event period / JC-319 dimensional period
+ROLLING_EDGE_READ = M5-04F (PeriodComparisonReader)
+STOP_CONDITION_TRIGGERED = NONE
 ```
 
-JC-314 is complete. JC-317 owns event-period population, invalidation, and bounded replacement without reopening comparison semantics or the accepted storage model. M5-04E dimensional population is authorized through JC-319. M5-04F remains unauthorized.
+JC-314 is complete. JC-317 and JC-319 merged event and dimensional period population. JC-321 delivers the authorized M5-04F reader; M5-04G certification remains next for latency, edge-query cost, and load evidence.
