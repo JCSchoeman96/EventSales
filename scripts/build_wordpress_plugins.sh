@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# shellcheck source=lib/wordpress_plugin_packaging_git_object.sh
+source "$ROOT/scripts/lib/wordpress_plugin_packaging_git_object.sh"
+
 REF="HEAD"
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -107,16 +110,7 @@ exit(1);
   packaged_files=()
   while read -r mode objtype _object git_path; do
     [[ -z "$git_path" ]] && continue
-    if [[ "$objtype" != "blob" ]]; then
-      echo "Rejected git object type ${objtype} at ${git_path}" >&2
-      exit 1
-    fi
-    if [[ "$mode" == "120000" ]]; then
-      echo "Rejected symlink at ${git_path}" >&2
-      exit 1
-    fi
-    if [[ "$mode" != "100644" && "$mode" != "100755" ]]; then
-      echo "Rejected unexpected git mode ${mode} at ${git_path}" >&2
+    if ! validate_wordpress_packaging_git_object "$mode" "$objtype" "$git_path"; then
       exit 1
     fi
     rel="${git_path#"$PLUGIN_PREFIX/$slug/"}"

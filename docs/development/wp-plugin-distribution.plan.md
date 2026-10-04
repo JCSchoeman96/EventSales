@@ -2,7 +2,7 @@
 
 **Plan ID:** wp-plugin-distribution
 
-**Plan version:** v2
+**Plan version:** v3
 
 **Status:** active
 
@@ -12,12 +12,13 @@
 
 **Last updated:** 2026-10-02
 
-**Change summary (v2):** Ref-pinned suite manifest, git mode guards, WordPress 5.2 support floor with marketing version bumps, CI distribution gate.
+**Change summary (v3):** WordPress 5.6 floor aligned with PHP 8.0 core compatibility; negative symlink packaging test; ops runbook matches `git ls-tree`/`git show` builder.
 
 ### Revision log
 
 - `v1` — plugin list, packaging rules, compatibility floor, reproducibility, and certification workflow locked.
-- `v2` — suite manifest read from `source_commit`; reject symlinks/gitlinks; `Requires at least: 5.2` with bumped marketing versions; CI runs build/verify.
+- `v2` — suite manifest read from `source_commit`; reject symlinks/gitlinks; marketing version bumps; CI runs build/verify.
+- `v3` — `Requires at least: 5.6` (PHP 8.0 + WordPress compatibility table); packaging negative test; CI on PHP 8.0.
 
 ## Goal
 
@@ -63,7 +64,7 @@ Marketing versions were bumped (`0.1.0`→`0.1.1`, `0.2.0`→`0.2.1`) when `Requ
 | Requirement | Value | Evidence |
 |-------------|-------|----------|
 | **Requires PHP** | `8.0` | Production `eventsales-woo-order-index-manifest-store.php` uses `str_contains()`. Order-line identity and integration health use `declare(strict_types=1)` (compatible below 8.0 but suite aligns to the highest real floor). |
-| **Requires at least** | `5.2` | Integration Health uses Site Health filters introduced in WordPress 5.2 (`site_status_tests`, `debug_information`). REST routes use `register_rest_route()` (available since 4.4). Suite declares the highest defensible common floor without claiming unsupported newer core versions. |
+| **Requires at least** | `5.6` | Site Health filters require WordPress 5.2+, but the suite declares **PHP 8.0**. WordPress’s PHP compatibility table supports PHP 8.0 only from WordPress 5.6 onward, so `Requires at least` must not be lower than 5.6 while `Requires PHP` is 8.0. |
 
 **Not in this slice:** `Requires Plugins`, `Update URI`, WooCommerce/Tickera dependency headers.
 

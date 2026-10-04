@@ -159,7 +159,7 @@ function run_source_tests(): void
 
     DistributionTest::same('suite format_version', '1', (string) ($manifest['format_version'] ?? ''));
     DistributionTest::same('suite requires_php', '8.0', (string) ($manifest['requires_php'] ?? ''));
-    DistributionTest::same('suite requires_at_least_wordpress', '5.2', (string) ($manifest['requires_at_least_wordpress'] ?? ''));
+    DistributionTest::same('suite requires_at_least_wordpress', '5.6', (string) ($manifest['requires_at_least_wordpress'] ?? ''));
     DistributionTest::ok('suite lists four plugins', is_array($manifest['plugins'] ?? null) && count($manifest['plugins']) === 4);
 
     $readmePath = $wpBase . '/eventsales-tickera-catalog-feed/README.md';

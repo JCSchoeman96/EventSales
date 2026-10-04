@@ -3,7 +3,7 @@
  * Plugin Name: EventSales Woo Order Line Identity
  * Description: Persists authoritative Tickera event identity on qualifying WooCommerce ticket order lines.
  * Version: 0.1.1
- * Requires at least: 5.2
+ * Requires at least: 5.6
  * Requires PHP: 8.0
  * Author: EventSales
  * License: GPL-2.0-or-later

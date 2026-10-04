@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+bash "$ROOT/integrations/wordpress/tests/plugin-packaging-git-object-negative-test.sh"
 php "$ROOT/integrations/wordpress/tests/plugin-distribution-test.php" --source
 bash "$ROOT/scripts/build_wordpress_plugins.sh" --ref HEAD
 COMMIT="$(git rev-parse HEAD)"

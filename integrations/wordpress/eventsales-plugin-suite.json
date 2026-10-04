@@ -2,7 +2,7 @@
   "format_version": "1",
   "suite_name": "eventsales-wordpress-plugin-suite",
   "requires_php": "8.0",
-  "requires_at_least_wordpress": "5.2",
+  "requires_at_least_wordpress": "5.6",
   "plugins": [
     {
       "slug": "eventsales-tickera-catalog-feed",

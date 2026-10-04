@@ -33,7 +33,7 @@ Artifacts:
 - `manifest.json` (commit, tree, per-plugin SHA-256)
 - `SHA256SUMS`
 
-The builder refuses `--ref HEAD` when suite plugin paths have staged, unstaged, or untracked changes. Archives are produced with `git archive` from the resolved commit.
+The builder refuses `--ref HEAD` when the suite manifest or plugin paths have staged, unstaged, or untracked changes. Archives materialise allowed paths from the resolved commit using `git ls-tree` (mode/type validation), rejecting symlinks and gitlinks, then `git show` for file bytes.
 
 ## Verify
 
