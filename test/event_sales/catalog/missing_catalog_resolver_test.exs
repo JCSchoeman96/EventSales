@@ -8,17 +8,19 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
   alias EventSales.Analytics.Workers.RefreshSnapshotWorker
   alias EventSales.Catalog
   alias EventSales.Catalog.MissingCatalogResolver
-  alias EventSales.Catalog.Resources.{Event, ProductMapping}
+  alias EventSales.Catalog.Resources.{Event, ProductMapping, SourceSystem, TicketType}
   alias EventSales.Ingestion
   alias EventSales.Ingestion.HistoricalCoverageInvalidator
   alias EventSales.Ingestion.HistoricalCoverageResolver
   alias EventSales.Ingestion.Resources.SyncRun
   alias EventSales.Repo
   alias EventSales.Sales
+  alias EventSales.Sales.OrderUpserter
   alias EventSales.Sales.Resources.{Order, OrderItem}
   alias EventSales.TestSupport.FixtureHelpers
   alias EventSales.TestSupport.HistoricalCoverageHelpers
   alias EventSales.TestSupport.SalesHelpers
+  alias EventSales.TestSupport.UnboxedPostgres
 
   @coverage_start ~U[2026-08-01 08:00:00.000000Z]
   @sales_covered_through ~U[2026-08-09 23:59:59.999999Z]
@@ -64,6 +66,89 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
     assert invalidated.order_coverage_status == :incomplete
     assert invalidated.refund_coverage_status == :incomplete
     assert %DateTime{} = invalidated.coverage_invalidated_at
+  end
+
+  test "order upsert and catalog recovery acquire historical then period fences" do
+    UnboxedPostgres.with_connection(fn ->
+      source = SalesHelpers.create_source_system!()
+      event = SalesHelpers.create_event!(source, %{name: "Cross-namespace lock event"})
+      ticket = SalesHelpers.create_variation_ticket_type!(event, 501, 601)
+      create_mapping!(source, event, ticket, %{woo_product_id: 501, woo_variation_id: 601})
+      run = certified_run!(event)
+
+      resolver_order = create_lock_order!(source)
+      resolver_item = create_item!(resolver_order, %{woo_product_id: 501, woo_variation_id: 601})
+
+      upsert_payload =
+        FixtureHelpers.decode_json_fixture!(:woocommerce, :order_completed)
+        |> Map.put("id", System.unique_integer([:positive]))
+        |> Map.put("number", "cross-lock-#{unique_id()}")
+
+      test_pid = self()
+
+      upsert_task =
+        Task.async(fn ->
+          UnboxedPostgres.with_connection(fn ->
+            OrderUpserter.upsert_order(source.id, upsert_payload,
+              historical_coverage_invalidator: fn order, event_ids ->
+                backend_pid = backend_pid!()
+                result = HistoricalCoverageInvalidator.invalidate_order_change(order, event_ids)
+                send(test_pid, {:upsert_historical_lock_acquired, backend_pid})
+
+                receive do
+                  :continue_upsert -> result
+                after
+                  10_000 -> {:error, :upsert_lock_test_timeout}
+                end
+              end,
+              snapshot_refresh_scheduler: fn _event_ids -> :ok end
+            )
+          end)
+        end)
+
+      try do
+        assert_receive {:upsert_historical_lock_acquired, _upsert_backend_pid}, 5_000
+
+        recovery_task =
+          Task.async(fn ->
+            UnboxedPostgres.with_connection(fn ->
+              MissingCatalogResolver.recover_product(source.id, 501, 601,
+                historical_coverage_invalidator: fn order, event_ids ->
+                  backend_pid = backend_pid!()
+                  send(test_pid, {:recovery_historical_lock_attempted, backend_pid})
+
+                  HistoricalCoverageInvalidator.invalidate_order_change(order, event_ids)
+                end,
+                snapshot_refresh_scheduler: fn _event_ids -> :ok end
+              )
+            end)
+          end)
+
+        assert_receive {:recovery_historical_lock_attempted, recovery_backend_pid}, 5_000
+        wait_for_advisory_wait!(recovery_backend_pid)
+        send(upsert_task.pid, :continue_upsert)
+
+        assert {:ok, %Order{}} = Task.await(upsert_task, 10_000)
+
+        assert {:ok, %{mapped: 1, marked_unmapped: 0, unchanged: 0}} =
+                 Task.await(recovery_task, 10_000)
+
+        assert {:error, :historical_coverage_not_current} =
+                 HistoricalCoverageResolver.resolve_current(event.id)
+
+        invalidated = Ash.get!(SyncRun, run.id, domain: Ingestion)
+        assert invalidated.coverage_invalidation_reason == :historical_order_changed
+
+        pending = period_rows_for_event(event.id)
+        assert length(pending) == 4
+        assert Enum.all?(pending, &(&1.projection_state == :refresh_pending))
+        assert Ash.get!(OrderItem, resolver_item.id, domain: Sales).mapping_status == :mapped
+      after
+        send(upsert_task.pid, :continue_upsert)
+      end
+
+      cleanup_lock_fixture!(source, event, run)
+    end)
   end
 
   test "maps a completed pending item and invalidates its period projections", %{
@@ -787,6 +872,80 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
       domain: Ingestion
     )
     |> Ash.update!(%{}, action: :complete, domain: Ingestion)
+  end
+
+  defp create_lock_order!(source) do
+    Ash.create!(
+      Order,
+      %{
+        source_system_id: source.id,
+        woo_order_id: System.unique_integer([:positive]),
+        status: :completed,
+        currency: "ZAR",
+        created_at_source: @within_sales_scope,
+        updated_at_source: @within_sales_scope,
+        completed_at: @within_sales_scope,
+        paid_at: @within_sales_scope,
+        raw_total: Decimal.new("100.00")
+      },
+      action: :create_normalized,
+      domain: Sales
+    )
+  end
+
+  defp backend_pid! do
+    %{rows: [[pid]]} = Repo.query!("SELECT pg_backend_pid()")
+    pid
+  end
+
+  defp wait_for_advisory_wait!(
+         backend_pid,
+         deadline \\ System.monotonic_time(:millisecond) + 5_000
+       ) do
+    %{rows: rows} =
+      Repo.query!(
+        "SELECT wait_event_type, wait_event FROM pg_stat_activity WHERE pid = $1",
+        [backend_pid]
+      )
+
+    case rows do
+      [["Lock", "advisory"]] ->
+        :ok
+
+      other ->
+        if System.monotonic_time(:millisecond) < deadline do
+          Process.sleep(20)
+          wait_for_advisory_wait!(backend_pid, deadline)
+        else
+          flunk(
+            "expected backend #{backend_pid} to wait on an advisory lock, got #{inspect(other)}"
+          )
+        end
+    end
+  end
+
+  defp cleanup_lock_fixture!(source, event, run) do
+    Repo.query!("DELETE FROM oban_jobs WHERE args ->> 'event_id' = $1", [event.id])
+
+    Repo.delete_all(
+      from(snapshot in EventPeriodAggregateSnapshot, where: snapshot.event_id == ^event.id)
+    )
+
+    Repo.delete_all(
+      from(item in OrderItem,
+        where:
+          item.order_id in subquery(
+            from(order in Order, where: order.source_system_id == ^source.id, select: order.id)
+          )
+      )
+    )
+
+    Repo.delete_all(from(order in Order, where: order.source_system_id == ^source.id))
+    Repo.delete_all(from(sync_run in SyncRun, where: sync_run.id == ^run.id))
+    Repo.delete_all(from(mapping in ProductMapping, where: mapping.event_id == ^event.id))
+    Repo.delete_all(from(ticket in TicketType, where: ticket.event_id == ^event.id))
+    Repo.delete_all(from(event_row in Event, where: event_row.id == ^event.id))
+    Repo.delete_all(from(source_row in SourceSystem, where: source_row.id == ^source.id))
   end
 
   defp refresh_job_count(event_id) do

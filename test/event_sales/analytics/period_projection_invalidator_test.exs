@@ -218,6 +218,38 @@ defmodule EventSales.Analytics.PeriodProjectionInvalidatorTest do
     assert Enum.all?(rows_a ++ rows_b, &(&1.projection_state == :refresh_pending))
   end
 
+  test "order invalidation handles a mapped refund parent becoming pending" do
+    {_source, event, refund_snapshot, before_snapshot} =
+      refund_snapshot_fixture!(include_order_snapshot: true)
+
+    after_snapshot =
+      update_in(before_snapshot, [:order_items, Access.at(0)], fn item ->
+        Map.put(item, :mapping_status, :pending_mapping_resolution)
+      end)
+
+    invalidate_order!(before_snapshot, after_snapshot)
+
+    expected_buckets =
+      [
+        before_snapshot.header.paid_at || before_snapshot.header.completed_at,
+        refund_snapshot.refund_truth.source_created_at
+      ]
+      |> Enum.flat_map(fn instant ->
+        {:ok, buckets} = PeriodBucketRules.for_instant(instant)
+        buckets
+      end)
+      |> Enum.uniq_by(&{&1.bucket_kind, &1.bucket_start_utc, &1.bucket_end_utc})
+
+    rows = snapshots_for_event(event.id)
+
+    assert Enum.all?(rows, &(&1.projection_state == :refresh_pending))
+
+    assert Enum.map(rows, &{&1.bucket_kind, &1.bucket_start_utc, &1.bucket_end_utc})
+           |> Enum.sort() ==
+             Enum.map(expected_buckets, &{&1.bucket_kind, &1.bucket_start_utc, &1.bucket_end_utc})
+             |> Enum.sort()
+  end
+
   test "voiding and unresolved detail invalidate only the formerly qualifying refund buckets" do
     {source, event, refund_snapshot} = refund_snapshot_fixture!()
 
@@ -405,7 +437,13 @@ defmodule EventSales.Analytics.PeriodProjectionInvalidatorTest do
     )
 
     assert {:ok, snapshot} = HistoricalRefundMutationDetector.capture(refund)
-    {source, event, snapshot}
+
+    if Keyword.get(opts, :include_order_snapshot, false) do
+      assert {:ok, order_snapshot} = HistoricalOrderMutationDetector.capture(order)
+      {source, event, snapshot, order_snapshot}
+    else
+      {source, event, snapshot}
+    end
   end
 
   defp bucket_identities!(order, snapshot) do

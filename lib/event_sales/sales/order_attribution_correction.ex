@@ -83,8 +83,10 @@ defmodule EventSales.Sales.OrderAttributionCorrection do
          {:ok, after_snapshot} <- capture_after(context.order),
          {:ok, comparison} <- compare_correction_truth(before_snapshot, after_snapshot),
          :ok <-
+           invalidate_correction_coverage(context.order, comparison),
+         :ok <-
            PeriodProjectionInvalidator.invalidate_order_change(before_snapshot, after_snapshot),
-         :ok <- invalidate_correction_coverage(context.order, comparison, opts) do
+         :ok <- enqueue_snapshot_refreshes(comparison.candidate_event_ids, opts) do
       {corrected, public_preview(%{context | order_item: corrected}), notifications, context}
     else
       {:error, :audit_failed} -> Repo.rollback(:audit_failed)
@@ -255,12 +257,11 @@ defmodule EventSales.Sales.OrderAttributionCorrection do
 
   defp invalidate_correction_coverage(
          %Order{} = order,
-         %{changed?: true, candidate_event_ids: candidate_event_ids},
-         opts
+         %{changed?: true, candidate_event_ids: candidate_event_ids}
        ) do
     case HistoricalCoverageInvalidator.invalidate_order_change(order, candidate_event_ids) do
       {:ok, _result} ->
-        enqueue_snapshot_refreshes(candidate_event_ids, opts)
+        :ok
 
       {:error, reason}
       when reason in [

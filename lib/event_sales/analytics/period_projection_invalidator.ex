@@ -173,6 +173,7 @@ defmodule EventSales.Analytics.PeriodProjectionInvalidator do
         :not_qualifying
       end
     else
+      :not_qualifying -> :not_qualifying
       {:error, reason} -> {:error, reason}
     end
   end

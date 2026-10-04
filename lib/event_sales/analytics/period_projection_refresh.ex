@@ -68,6 +68,10 @@ defmodule EventSales.Analytics.PeriodProjectionRefresh do
     from oi in "sales_order_items",
       join: o in "sales_orders",
       on: oi.order_id == o.id,
+      left_join: e in "catalog_events",
+      on: e.id == oi.event_id,
+      left_join: tt in "catalog_ticket_types",
+      on: tt.id == oi.ticket_type_id,
       where: ^dynamic([oi, o], ^sale_filter and ^window_filter),
       order_by: oi.id,
       select: %{
@@ -78,6 +82,8 @@ defmodule EventSales.Analytics.PeriodProjectionRefresh do
           type(fragment("COALESCE(?, ?)", o.paid_at, o.completed_at), :utc_datetime_usec),
         ticket_type_id: oi.ticket_type_id,
         source_system_id: o.source_system_id,
+        event_source_system_id: e.source_system_id,
+        ticket_type_event_id: tt.event_id,
         woo_product_id: oi.woo_product_id,
         woo_variation_id: oi.woo_variation_id,
         quantity: oi.quantity,
@@ -102,6 +108,10 @@ defmodule EventSales.Analytics.PeriodProjectionRefresh do
       on:
         parent.id == rl.order_item_id and parent.order_id == o.id and
           parent.woo_line_item_id == rl.woo_refunded_item_id,
+      left_join: e in "catalog_events",
+      on: e.id == parent.event_id,
+      left_join: tt in "catalog_ticket_types",
+      on: tt.id == parent.ticket_type_id,
       where:
         ^dynamic(
           [rl, r, o, parent],
@@ -117,6 +127,8 @@ defmodule EventSales.Analytics.PeriodProjectionRefresh do
         effective_at: r.source_created_at,
         ticket_type_id: parent.ticket_type_id,
         source_system_id: o.source_system_id,
+        event_source_system_id: e.source_system_id,
+        ticket_type_event_id: tt.event_id,
         woo_product_id: parent.woo_product_id,
         woo_variation_id: parent.woo_variation_id,
         refunded_quantity: rl.refunded_quantity,
@@ -301,6 +313,13 @@ defmodule EventSales.Analytics.PeriodProjectionRefresh do
          {:ok, event_id} <- uuid_from_repo(row.event_id),
          {:ok, ticket_type_id} <- uuid_from_repo(row.ticket_type_id),
          {:ok, source_system_id} <- uuid_from_repo(row.source_system_id),
+         :ok <- identity_matches(row.ticket_type_event_id, event_id, :ticket_type_event_mismatch),
+         :ok <-
+           identity_matches(
+             row.event_source_system_id,
+             source_system_id,
+             :event_source_system_mismatch
+           ),
          :ok <- valid_currency(row.currency),
          {:ok, effective_at} <- utc_datetime(row.effective_at),
          :ok <- valid_product_identity(row.woo_product_id, row.woo_variation_id) do
@@ -718,6 +737,13 @@ defmodule EventSales.Analytics.PeriodProjectionRefresh do
   end
 
   defp uuid_from_repo(_id), do: {:error, :invalid_contribution_identity}
+
+  defp identity_matches(repo_id, expected_id, mismatch_reason) do
+    case uuid_from_repo(repo_id) do
+      {:ok, ^expected_id} -> :ok
+      _other -> {:error, mismatch_reason}
+    end
+  end
 
   defp contribution_kind("sale"), do: {:ok, :sale}
   defp contribution_kind("refund"), do: {:ok, :refund}
