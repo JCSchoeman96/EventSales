@@ -62,6 +62,49 @@ defmodule EventSales.Analytics.PeriodComparisonReaderPolicyTest do
     assert %Decimal{} = result.event.metric_comparisons.gross_ticket_value.current
   end
 
+  @monetary_metrics [
+    :gross_ticket_value,
+    :refund_ticket_value,
+    :net_ticket_value,
+    :average_ticket_value
+  ]
+
+  @quantity_metrics [:gross_ticket_quantity, :refund_ticket_quantity, :net_ticket_quantity]
+
+  test "hidden revenue redacts every monetary comparison surface", %{event: event, owner: owner} do
+    assert {:ok, result} =
+             PeriodComparisonReader.compare_event(event.id, "ZAR", :yesterday,
+               actor: owner,
+               now: @now
+             )
+
+    refute result.revenue_visible?
+
+    for metric <- @monetary_metrics do
+      assert result.current.metrics[metric] == nil
+      assert result.comparison.metrics[metric] == nil
+      assert_monetary_comparison_redacted!(result.event.metric_comparisons[metric])
+    end
+
+    for metric <- @quantity_metrics do
+      assert result.current.metrics[metric] != nil
+      assert result.comparison.metrics[metric] != nil
+      assert result.event.metric_comparisons[metric].state != nil
+    end
+
+    for kind <- [:ticket_type, :source_product, :source_variation] do
+      row = hd(Map.fetch!(result.dimensions, kind))
+
+      for metric <- @monetary_metrics do
+        assert_monetary_comparison_redacted!(row.metric_comparisons[metric])
+      end
+
+      for metric <- @quantity_metrics do
+        assert row.metric_comparisons[metric].state != nil
+      end
+    end
+  end
+
   test "owner hides monetary metrics by default", %{event: event, owner: owner} do
     assert {:ok, result} =
              PeriodComparisonReader.compare_event(event.id, "ZAR", :yesterday,
@@ -178,6 +221,14 @@ defmodule EventSales.Analytics.PeriodComparisonReaderPolicyTest do
       action: :create,
       domain: Catalog
     )
+  end
+
+  defp assert_monetary_comparison_redacted!(comparison) do
+    assert comparison.current == nil
+    assert comparison.comparison == nil
+    assert comparison.state == nil
+    assert comparison.absolute_delta == nil
+    assert comparison.percentage_delta == nil
   end
 
   defp capture_select_queries(fun) do

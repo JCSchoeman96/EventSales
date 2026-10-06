@@ -17,16 +17,17 @@
 
 - `v11` records the verified JC-317 merge and JC-319 dimensional period population and reconciliation.
 - `v12` — JC-321 M5-04F `PeriodComparisonReader` and `PeriodReadPlan`, bounded unnest edge reads, policy/redaction tests, and query-plan evidence.
+- `v13` — JC-321 review correction: fixed projection scope AND, readiness envelope states, operand metadata coherence, edge envelope coverage, edge metadata fail-closed, decode fix, interior-hour plan fix, ATV nil semantics, EXPLAIN evidence, isolation/RR tests, explicit PostgreSQL `SET TRANSACTION` coherent-read preparation (`prepare_coherent_transaction!/0`), project index regeneration.
 
-**Plan version:** `v12`
+**Plan version:** `v13`
 
 ```text
-PLAN_VERSION = v12
+PLAN_VERSION = v13
 ```
 
-**Status:** JC-319 M5-04E merged; JC-321 M5-04F reader implementation in review
+**Status:** JC-319 M5-04E merged; JC-321 M5-04F reader correction pass in review (do not merge until CI green)
 **Last updated:** 2026-10-04
-**Change summary (v12):** Records JC-321 projection-only period comparison reader, read plan decomposition, fixed query architecture, revenue redaction, and focused test/certification coverage for M5-04F.
+**Change summary (v13):** Records PR #295 review fixes (S1 isolation, F correctness gates, truthful edge EXPLAIN, PostgreSQL repeatable-read preparation before projection statements, plan v13 metadata); M5-04F durable authority remains pending merge.
 
 **Goal:** Define a canonical, currency-safe period comparison read model for event and required dimensional grains without promoting the legacy daily-v1 snapshot or inventing comparison semantics.
 
@@ -1568,24 +1569,40 @@ JC_319_MERGE_TREE = d11d980315fe55ea9a70ac7e3a5c29daea0d46e0
 M5_04E_DURABLE_AUTHORITY = YES
 M5_04F_AUTHORIZED = YES
 M5_04F_STATUS = IN_REVIEW
+M5_04F_DURABLE_AUTHORITY = PENDING_MERGE
 M5_04G_AUTHORIZED = NO
+
+REAUTHORIZED_BASE_SHA = f55ea2632ca9480412be4b086af1bd26b9b9889c
+REAUTHORIZED_BASE_TREE = 52bbe026bf6d7d975ac6bf0dc03109b7ca3ecc9b
 
 PERIOD_COMPARISON_READER = EventSales.Analytics.PeriodComparisonReader
 PUBLIC_API = compare_event(event_id, currency, period_request, opts \\ [])
 
 READ_PLAN = EventSales.Analytics.PeriodReadPlan.build/1 from TimeRules.comparison_windows/3
-EDGE_ENVELOPE_RULE = containing UTC-hour EventPeriodAggregateSnapshot CURRENT + compatible semantic/coverage
+
+FIXED_QUERY_SCOPE_RULE = event_id AND currency AND (bucket OR …) — never OR bucket predicates outside tenant scope
+READINESS_RESULT_RULE = missing/stale operands surface current_missing / comparison_missing in envelope; not {:error, :projection_not_ready}
+OPERAND_METADATA_COHERENCE_RULE = mixed semantic_version or coverage_identity within one operand => operand not_ready
+EDGE_DIMENSION_ENVELOPE_RULE = dimension coverage validates fixed buckets UNION edge-envelope UTC hours; interior composition uses fixed buckets only
+EDGE_METADATA_MISMATCH_RULE = contribution facts with incompatible semantic/coverage in edge window => operand not_ready (no silent JOIN drop)
+READY_GRAIN_ZERO_FILL_RULE = ready parent + absent grain in operand => zero primitives and grain ready (new_activity / flat_zero / etc.)
+ATV_UNDEFINED_RULE = nil ATV operands => nil state and nil deltas (not :available)
 
 FIXED_EVENT_QUERY_COUNT = 1
 DIMENSION_COVERAGE_QUERY_COUNT = 1
 DIMENSION_INTERIOR_QUERY_COUNT = 3
-EDGE_EVENT_QUERY_COUNT = 0 (yesterday) | 1 (when edge fragments exist)
+EDGE_EVENT_QUERY_COUNT = 0 (yesterday) | 2 (aggregate + metadata mismatch when edge fragments exist)
 EDGE_DIMENSION_QUERY_COUNT = 0 (yesterday) | 3 (when edge fragments exist)
 
-DIMENSION_ZERO_FILL_RULE = ready operand + absent grain => explicit zero primitives for comparisons
-ATV_UNDEFINED_RULE = nil operands keep nil values and nil deltas; no synthetic zero Decimal
 REVENUE_REDACTION_RULE = Policies.can_view_revenue?/2 hides all monetary metrics, deltas, and monetary comparison states
 
-EDGE_INDEX_DECISION = NONE
-EDGE_INDEX_EVIDENCE = selective unnest edge fixture EXPLAIN captured in period_comparison_reader_query_plan_test; no migration
+COHERENT_READ_ISOLATION = PostgreSQL REPEATABLE READ established explicitly via EventSnapshotRefreshFence.prepare_coherent_transaction!/0 inside the projection transaction before the first projection statement
+COHERENT_TRANSACTION_OPTS_ALONE = NOT sufficient PostgreSQL isolation authority (Postgrex 0.22.4 BEGIN does not apply isolation_level option)
+COHERENT_TRANSACTION_POSTGRES_ISOLATION = explicit SET TRANSACTION ISOLATION LEVEL REPEATABLE READ before first projection statement when use_repeatable_read_isolation?/0
+READER_WRITER_FENCE = NONE (reader does not acquire writer advisory lock; MVCC snapshot isolation is the coherence mechanism)
+
+EDGE_INDEX_DECISION = NONE (fixture EXPLAIN on event_id + currency + effective_at range showed selective plan without new index)
+EDGE_INDEX_BEFORE_EXPLAIN = captured in test/event_sales/analytics/period_comparison_reader_query_plan_test.exs (EXPLAIN FORMAT JSON on captured edge SQL)
+EDGE_INDEX_AFTER_EXPLAIN = not applicable (no index added)
+EDGE_INDEX_EVIDENCE = period_comparison_reader_query_plan_test.exs EXPLAIN asserts analytics_contribution_facts + event_id in plan JSON
 ```

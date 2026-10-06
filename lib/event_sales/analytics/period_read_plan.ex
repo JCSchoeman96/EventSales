@@ -189,7 +189,7 @@ defmodule EventSales.Analytics.PeriodReadPlan do
           end
 
         interiors =
-          if DateTime.compare(first_interior, last_interior) in [:gt, :eq] do
+          if DateTime.compare(first_interior, last_interior) == :gt do
             []
           else
             enumerate_interior_hours(first_interior, last_interior)
