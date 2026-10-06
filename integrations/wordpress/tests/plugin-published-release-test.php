@@ -47,6 +47,8 @@ if (!function_exists('published_release_validation_errors')) {
 
 $redirectValidatorAvailable = function_exists('published_release_redirect_url_allowed');
 PublishedReleaseTest::ok('asset redirect URL validator is available', $redirectValidatorAvailable);
+$redirectOriginAvailable = function_exists('published_release_url_origin');
+PublishedReleaseTest::ok('safe release redirect origin formatter is available', $redirectOriginAvailable);
 if ($redirectValidatorAvailable) {
     PublishedReleaseTest::ok(
         'signed HTTPS URL from the exact GitHub asset host is allowed',
@@ -70,6 +72,21 @@ if ($redirectValidatorAvailable) {
             !published_release_redirect_url_allowed($unsafeRedirectUrl)
         );
     }
+}
+if ($redirectOriginAvailable) {
+    PublishedReleaseTest::ok(
+        'release redirect origin omits paths and signed query strings',
+        published_release_url_origin('https://release-assets.githubusercontent.com/signed/path?X-Amz-Signature=fixture')
+            === 'https://release-assets.githubusercontent.com'
+    );
+    PublishedReleaseTest::ok(
+        'release redirect origin rejects non-HTTPS URLs',
+        published_release_url_origin('http://release-assets.githubusercontent.com/signed/path') === null
+    );
+    PublishedReleaseTest::ok(
+        'release redirect origin rejects user information',
+        published_release_url_origin('https://user@release-assets.githubusercontent.com/signed/path') === null
+    );
 }
 
 /** @return array<string, mixed> */
@@ -127,6 +144,23 @@ function published_release_fixture(): array
     }
     unset($plugin);
 
+    $releasePlugins = [];
+    foreach ($plugins as $plugin) {
+        $releasePlugin = [
+            'slug' => $plugin['slug'],
+            'archive_filename' => $plugin['archive_filename'],
+            'archive_sha256' => $plugin['archive_sha256'],
+            'main_file' => $plugin['main_file'],
+            'marketing_version' => $plugin['marketing_version'],
+        ];
+        foreach ($plugin as $key => $value) {
+            if (!array_key_exists($key, $releasePlugin)) {
+                $releasePlugin[$key] = $value;
+            }
+        }
+        $releasePlugins[] = $releasePlugin;
+    }
+
     $releaseManifest = [
         'release_manifest_format_version' => '1',
         'suite_release_id' => $releaseId,
@@ -138,7 +172,7 @@ function published_release_fixture(): array
         'distribution_format_version' => '1',
         'requires_wordpress' => '5.6',
         'requires_php' => '8.0',
-        'plugins' => $plugins,
+        'plugins' => $releasePlugins,
         'deterministic_source_content' => true,
         'deterministic_archive_bytes' => true,
     ];

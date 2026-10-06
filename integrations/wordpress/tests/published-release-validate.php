@@ -54,6 +54,26 @@ function published_release_redirect_url_allowed(string $url): bool
         && $parts['path'] !== '';
 }
 
+function published_release_url_origin(string $url): ?string
+{
+    if (preg_match('/[\x00-\x20\x7f"\\\\]/', $url) === 1) {
+        return null;
+    }
+
+    $parts = parse_url($url);
+    if (!is_array($parts)
+        || strtolower((string) ($parts['scheme'] ?? '')) !== 'https'
+        || !isset($parts['host'])
+        || $parts['host'] === ''
+        || isset($parts['user'])
+        || isset($parts['pass'])
+        || isset($parts['fragment'])) {
+        return null;
+    }
+
+    return 'https://' . strtolower($parts['host']) . (isset($parts['port']) ? ':' . $parts['port'] : '');
+}
+
 function published_release_repository_matches(array $release, string $requestedTag): bool
 {
     $apiUrl = $release['url'] ?? null;
@@ -410,7 +430,11 @@ function published_release_validation_errors(
         if (!isset($releasePlugins[$slug], $distributionPlugins[$slug])) {
             continue;
         }
-        if ($releasePlugins[$slug] !== $distributionPlugins[$slug]) {
+        $releasePlugin = $releasePlugins[$slug];
+        $distributionPlugin = $distributionPlugins[$slug];
+        ksort($releasePlugin, SORT_STRING);
+        ksort($distributionPlugin, SORT_STRING);
+        if ($releasePlugin !== $distributionPlugin) {
             $errors[] = "Release and distribution plugin rows differ for {$slug}";
         }
     }

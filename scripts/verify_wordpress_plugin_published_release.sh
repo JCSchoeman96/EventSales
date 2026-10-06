@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VALIDATOR="$ROOT/integrations/wordpress/tests/published-release-validate.php"
+CURL_HELPER="$ROOT/scripts/wordpress_plugin_release_http.sh"
 REPOSITORY="JCSchoeman96/EventSales"
 API_ROOT="https://api.github.com/repos/$REPOSITORY"
 MAX_METADATA_BYTES=$((2 * 1024 * 1024))
@@ -48,8 +49,11 @@ done
 
 [[ -n "$TAG" ]] || { usage; exit 2; }
 command -v curl >/dev/null 2>&1 || fail "curl is required"
+command -v head >/dev/null 2>&1 || fail "head is required"
 command -v php >/dev/null 2>&1 || fail "PHP is required"
 [[ -f "$VALIDATOR" ]] || fail "published release validator is unavailable"
+[[ -f "$CURL_HELPER" ]] || fail "bounded HTTP helper is unavailable"
+source "$CURL_HELPER"
 
 if ! php -r 'require $argv[1]; exit(published_release_valid_tag($argv[2]) ? 0 : 1);' "$VALIDATOR" "$TAG"; then
   fail "tag is not a valid EventSales suite tag"
@@ -68,19 +72,25 @@ mkdir -p "$ASSET_DIR"
 api_get_json() {
   local url="$1"
   local destination="$2"
+  local headers="$TEMP_DIR/api-headers"
   local status
-  local size
+  local curl_result=0
 
-  if ! status="$(command curl -q --silent --show-error --connect-timeout 10 --max-time 45 \
-    --max-filesize "$MAX_METADATA_BYTES" \
+  if wordpress_plugin_curl_get_limited "$MAX_METADATA_BYTES" "$headers" "$destination" \
     -H 'Accept: application/vnd.github+json' \
     -H 'User-Agent: EventSales-WordPress-Release-Certification/1.0' \
-    --output "$destination" --write-out '%{http_code}' "$url" 2>/dev/null)"; then
-    fail "GitHub API request failed or exceeded the metadata size limit"
+    "$url"; then
+    :
+  else
+    curl_result=$?
+    if ((curl_result == 2)); then
+      fail "GitHub API response exceeded the metadata size limit"
+    fi
+    fail "GitHub API request failed"
   fi
+
+  status="$(wordpress_plugin_http_status "$headers")" || fail "GitHub API response has no HTTP status"
   [[ "$status" == "200" ]] || fail "GitHub API returned HTTP $status"
-  size="$(wc -c <"$destination")"
-  [[ "$size" =~ ^[0-9]+$ && "$size" -le "$MAX_METADATA_BYTES" ]] || fail "GitHub API metadata exceeded the size limit"
 }
 
 json_value() {
@@ -109,9 +119,21 @@ asset_redirect_allowed() {
   ' "$VALIDATOR" >/dev/null 2>&1
 }
 
+safe_url_origin() {
+  printf '%s' "$1" | php -r '
+    require $argv[1];
+    $origin = published_release_url_origin(stream_get_contents(STDIN));
+    if (!is_string($origin)) {
+        exit(1);
+    }
+    echo $origin;
+  ' "$VALIDATOR"
+}
+
 download_release_asset() {
   local asset_id="$1"
-  local destination="$2"
+  local asset_name="$2"
+  local asset_destination="$3"
   local url="$API_ROOT/releases/assets/$asset_id"
   local headers="$TEMP_DIR/asset-headers"
   local body="$TEMP_DIR/asset-body"
@@ -119,23 +141,34 @@ download_release_asset() {
   local location
   local body_size
   local redirects=0
+  local curl_result=0
+  local request_origin
+  local target_origin
 
   while :; do
-    : >"$headers"
-    : >"$body"
-    if ! status="$(printf 'url = "%s"\nheader = "Accept: application/octet-stream"\nheader = "User-Agent: EventSales-WordPress-Release-Certification/1.0"\n' "$url" \
-      | command curl -q --silent --connect-timeout 10 --max-time 60 \
-        --max-filesize "$MAX_ASSET_BYTES" --dump-header "$headers" \
-        --output "$body" --write-out '%{http_code}' --config - 2>/dev/null)"; then
-      fail "GitHub release asset download failed or exceeded the asset size limit"
+    if wordpress_plugin_curl_get_limited "$MAX_ASSET_BYTES" "$headers" "$body" \
+      -H 'Accept: application/octet-stream' \
+      -H 'User-Agent: EventSales-WordPress-Release-Certification/1.0' \
+      "$url"; then
+      :
+    else
+      curl_result=$?
+      if ((curl_result == 2)); then
+        fail "GitHub release asset exceeded the size limit"
+      fi
+      fail "GitHub release asset download failed"
     fi
+
+    status="$(wordpress_plugin_http_status "$headers")" || fail "GitHub release asset response has no HTTP status"
 
     case "$status" in
       200)
         [[ -s "$body" ]] || fail "GitHub returned an empty release asset"
         body_size="$(wc -c <"$body")"
         [[ "$body_size" =~ ^[0-9]+$ && "$body_size" -le "$MAX_ASSET_BYTES" ]] || fail "GitHub release asset exceeded the size limit"
-        mv -- "$body" "$destination"
+        request_origin="$(safe_url_origin "$url")" || fail "GitHub release asset response origin is invalid"
+        printf 'release asset %s final: HTTP 200 %s\n' "$asset_name" "$request_origin"
+        mv -- "$body" "$asset_destination"
         return
         ;;
       301|302|303|307|308)
@@ -143,6 +176,10 @@ download_release_asset() {
         location="$(awk 'tolower($1) == "location:" { sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); value=$0 } END { print value }' "$headers")"
         [[ -n "$location" ]] || fail "GitHub release asset redirect has no location"
         asset_redirect_allowed "$location" || fail "GitHub release asset redirect host is not allowed"
+        request_origin="$(safe_url_origin "$url")" || fail "GitHub release asset redirect source origin is invalid"
+        target_origin="$(safe_url_origin "$location")" || fail "GitHub release asset redirect target origin is invalid"
+        printf 'release asset %s redirect %s: HTTP %s %s -> %s\n' \
+          "$asset_name" "$((redirects + 1))" "$status" "$request_origin" "$target_origin"
         url="$location"
         redirects=$((redirects + 1))
         ;;
@@ -166,7 +203,7 @@ php -r '
 
 while IFS=$'\t' read -r asset_name asset_id; do
   [[ "$asset_id" =~ ^[1-9][0-9]*$ ]] || fail "GitHub release asset ID is invalid"
-  download_release_asset "$asset_id" "$ASSET_DIR/$asset_name"
+  download_release_asset "$asset_id" "$asset_name" "$ASSET_DIR/$asset_name"
 done <"$TEMP_DIR/assets.tsv"
 
 SOURCE_SHA="$(json_value "$ASSET_DIR/release-manifest.json" source_commit)"
