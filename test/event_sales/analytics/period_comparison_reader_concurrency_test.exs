@@ -260,6 +260,7 @@ defmodule EventSales.Analytics.PeriodComparisonReaderConcurrencyTest do
     }
 
     alias EventSales.Catalog.Resources.{Event, SourceSystem, TicketType}
+
     UnboxedPostgres.with_connection(fn ->
       Repo.delete_all(from(f in AnalyticsContributionFact, where: f.event_id == ^event_id))
 
