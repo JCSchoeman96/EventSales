@@ -76,8 +76,8 @@ defmodule EventSales.Analytics.PeriodComparisonReaderConcurrencyTest do
     UnboxedPostgres.with_exclusive_setup(fn ->
       source = SalesHelpers.create_source_system!()
       event = SalesHelpers.create_event!(source, %{name: "RR isolation probe"})
+      on_exit(fn -> cleanup_unboxed_period_fixture!(event.id, source.id) end)
       ticket = SalesHelpers.create_ticket_type!(event, %{name: "GA"})
-      EventDetailCertificationHelpers.certify_analytics_ready!(event)
 
       PeriodComparisonHelpers.seed_comparison_projection!(
         event,
@@ -146,8 +146,8 @@ defmodule EventSales.Analytics.PeriodComparisonReaderConcurrencyTest do
     UnboxedPostgres.with_exclusive_setup(fn ->
       source = SalesHelpers.create_source_system!()
       event = SalesHelpers.create_event!(source, %{name: "RR period comparison"})
+      on_exit(fn -> cleanup_unboxed_period_fixture!(event.id, source.id) end)
       ticket = SalesHelpers.create_ticket_type!(event, %{name: "GA"})
-      EventDetailCertificationHelpers.certify_analytics_ready!(event)
 
       PeriodComparisonHelpers.seed_comparison_projection!(
         event,
@@ -248,6 +248,30 @@ defmodule EventSales.Analytics.PeriodComparisonReaderConcurrencyTest do
     payload.event_rows
     |> Enum.map(& &1.gross_ticket_quantity)
     |> Enum.sum()
+  end
+
+  defp cleanup_unboxed_period_fixture!(event_id, source_id) do
+    import Ecto.Query
+
+    alias EventSales.Analytics.Resources.{
+      AnalyticsContributionFact,
+      EventDimensionPeriodAggregateSnapshot,
+      EventPeriodAggregateSnapshot
+    }
+
+    alias EventSales.Catalog.Resources.{Event, SourceSystem, TicketType}
+    UnboxedPostgres.with_connection(fn ->
+      Repo.delete_all(from(f in AnalyticsContributionFact, where: f.event_id == ^event_id))
+
+      Repo.delete_all(
+        from(s in EventDimensionPeriodAggregateSnapshot, where: s.event_id == ^event_id)
+      )
+
+      Repo.delete_all(from(s in EventPeriodAggregateSnapshot, where: s.event_id == ^event_id))
+      Repo.delete_all(from(t in TicketType, where: t.event_id == ^event_id))
+      Repo.delete_all(from(e in Event, where: e.id == ^event_id))
+      Repo.delete_all(from(s in SourceSystem, where: s.id == ^source_id))
+    end)
   end
 
   defp create_user!(email) do

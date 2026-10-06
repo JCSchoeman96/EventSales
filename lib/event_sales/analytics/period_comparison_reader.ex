@@ -478,8 +478,6 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
      }}
   end
 
-  defp fetch_dimension_family_rows(_kind, _event_id, _currency, []), do: []
-
   defp fetch_dimension_family_rows(kind, event_id, currency, fixed_buckets) do
     bucket_filter = bucket_specs_dynamic(fixed_buckets)
 
@@ -500,9 +498,7 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
   defp aggregate_dimension_edges(event_id, currency, edge_fragments, event_rows) do
     {coverage_by_hour, semantic_by_hour} = envelope_hour_metadata_maps(event_rows)
 
-    unless envelope_metadata_complete?(edge_fragments, coverage_by_hour, semantic_by_hour) do
-      {:ok, %{ticket_type: %{}, source_product: %{}, source_variation: %{}}}
-    else
+    if envelope_metadata_complete?(edge_fragments, coverage_by_hour, semantic_by_hour) do
       aggregate_dimension_edges_with_metadata(
         event_id,
         currency,
@@ -510,6 +506,8 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
         coverage_by_hour,
         semantic_by_hour
       )
+    else
+      {:ok, %{ticket_type: %{}, source_product: %{}, source_variation: %{}}}
     end
   end
 
