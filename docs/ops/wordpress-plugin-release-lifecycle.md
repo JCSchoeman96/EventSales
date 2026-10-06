@@ -117,17 +117,53 @@ bash scripts/check_wordpress_plugin_release_transition.sh \
 
 Upgrade mode reports public contract field changes for human review. Rollback mode fails closed on order-index schema mismatch.
 
-## Prepare a GitHub Release (operator action only)
+## Prepare and promote a GitHub Release (operator actions only)
 
-The candidate workflow does not publish releases. For a future promotion:
+The candidate workflow does not publish releases. A published-release verifier cannot be a pre-publication gate: it correctly rejects drafts and requires `immutable: true`, which GitHub sets for an immutable release after publication.
 
-1. A repository administrator confirms immutable releases are enabled.
-2. An operator obtains explicit authorization before creating a draft or tag.
-3. Attach the **exact** candidate bytes. Do not rebuild or substitute assets.
-4. Verify every attached asset digest against the candidate and checksum authority.
-5. Publish only after the published-release verifier and independent review pass.
+### Before publication
 
-Promotion policy: use the attested candidate artifact bytes, or rebuild and require a byte-identical SHA-256 match before publication. Never publish assets that disagree with the reviewed candidate manifest.
+1. A repository administrator enables immutable releases after separate explicit authorization for that repository-setting change. Record whether the setting is owner-enforced.
+2. Obtain explicit operator authorization to create and stage the release draft. This authorization does not authorize publication.
+3. Create the draft for the exact `release-manifest.suggested_tag` and `release-manifest.source_commit`. Do not move or retarget an existing tag.
+4. Upload the **exact eight files** from the attested candidate artifact. Do not rebuild, edit, or substitute any bytes.
+5. Read the draft through the authenticated GitHub Release API. Require the expected repository and tag, `draft: true`, `prerelease: false`, and exactly the eight approved asset names with no duplicates. Compare each GitHub asset `sha256:` digest to the SHA-256 of the same candidate file and to the manifest/checksum authority. For example, inspect only names and digests with:
+
+   ```bash
+   gh api "repos/JCSchoeman96/EventSales/releases/tags/$TAG" \
+     --jq '.assets[] | [.name, .digest] | @tsv'
+   sha256sum "$CANDIDATE"/*
+   ```
+
+   If any digest is absent or differs, or the asset set is not exact, stop before publication and correct the draft under the authorized draft workflow.
+6. Complete independent promotion review against the candidate and verified draft asset list. Do not run the published-release verifier against the draft.
+
+### Publication
+
+Publication is a separate, explicit, irreversible operator action. Perform it only after the draft checks and independent promotion review pass. Do not add publish-on-merge automation.
+
+### Immediately after publication
+
+1. Read the release metadata. Require `draft: false`, `prerelease: false`, and `immutable: true`.
+2. Run GitHub CLI release verification and match every local candidate subject to a published asset:
+
+   ```bash
+   gh release verify "$TAG" --repo JCSchoeman96/EventSales
+   for asset in \
+     eventsales-tickera-catalog-feed-0.1.2.zip \
+     eventsales-woo-order-index-feed-0.2.2.zip \
+     eventsales-woo-order-line-identity-0.1.2.zip \
+     eventsales-integration-health-0.1.2.zip \
+     manifest.json SHA256SUMS release-manifest.json RELEASE_SHA256SUMS; do
+     gh release verify-asset "$TAG" "$CANDIDATE/$asset" \
+       --repo JCSchoeman96/EventSales
+   done
+   ```
+
+3. Run `scripts/verify_wordpress_plugin_published_release.sh --tag "$TAG" --candidate "$CANDIDATE"` and retain its safe output, including the validated redirect chain.
+4. If any post-publication check fails, stop and treat the result as a release incident. Preserve the metadata and verification output for investigation. Do not try to replace the tag or immutable assets.
+
+Promotion policy: use the attested candidate artifact bytes. Never publish assets that disagree with the reviewed candidate manifest.
 
 For the first release, prepare concise notes that identify the suite as the first EventSales WordPress release and describe the catalogue feed, historical order index, order-line identity, Integration Health, delivery telemetry, and read-only update discovery. State WordPress 5.6 and PHP 8.0 minimums, and that native update discovery requires WordPress 5.8. Discovery is notification-only. It provides no package URL and does not enable automatic updates.
 
