@@ -19,19 +19,23 @@
 - `v12` — JC-321 M5-04F `PeriodComparisonReader` and `PeriodReadPlan`, bounded unnest edge reads, policy/redaction tests, and query-plan evidence.
 - `v13` — JC-321 review correction: fixed projection scope AND, readiness envelope states, operand metadata coherence, edge envelope coverage, edge metadata fail-closed, decode fix, interior-hour plan fix, ATV nil semantics, EXPLAIN evidence, isolation/RR tests, explicit PostgreSQL `SET TRANSACTION` coherent-read preparation (`prepare_coherent_transaction!/0`), project index regeneration.
 - `v14` — JC-321 S2 review correction: dimensional zero-activity operand maps, single event-edge unnest query, truthful JSON EXPLAIN scan detection, `(event_id, currency, effective_at)` contribution index, global not-ready monetary redaction.
+- `v15` — JC-321 final integration cleanup: align M5-04F implementation-record base with v14 header (`eb0991a` / `835b423a`); restore `mix.lock` to current `main` (no unrelated `ex_ast` / `finch` / `req` drift).
 
-**Plan version:** `v14`
+**Plan version:** `v15`
 
 ```text
-PLAN_VERSION = v14
+PLAN_VERSION = v15
 REAUTHORIZED_BASE_SHA = eb0991a6198a7ef9484b3de46b7ac2545f828542
 REAUTHORIZED_BASE_TREE = 835b423a6798fff22caf82890680c126d10ef238
 BASE_MOVEMENT = PR #297 Ash CVE + PR #296 WordPress release certification merge
+M5_04F_STATUS = IN_REVIEW
+M5_04F_DURABLE_AUTHORITY = PENDING_MERGE
+M5_04G_AUTHORIZED = NO
 ```
 
-**Status:** JC-319 M5-04E merged; JC-321 M5-04F reader S2 correction pass in review (do not merge until exact-head CI green)
+**Status:** JC-319 M5-04E merged; JC-321 M5-04F reader final integration cleanup in review (do not merge until exact-head CI green)
 **Last updated:** 2026-10-07
-**Change summary (v14):** Records PR #295 S2 fixes (dimensional `new_activity`, duplicate edge metadata query removal, EXPLAIN/index evidence, global not-ready revenue redaction); M5-04F durable authority remains pending merge.
+**Change summary (v15):** Canonical plan authority alignment and dependency-lock hygiene for PR #295; M5-04F durable authority remains pending merge.
 
 **Goal:** Define a canonical, currency-safe period comparison read model for event and required dimensional grains without promoting the legacy daily-v1 snapshot or inventing comparison semantics.
 
@@ -1576,8 +1580,8 @@ M5_04F_STATUS = IN_REVIEW
 M5_04F_DURABLE_AUTHORITY = PENDING_MERGE
 M5_04G_AUTHORIZED = NO
 
-REAUTHORIZED_BASE_SHA = f55ea2632ca9480412be4b086af1bd26b9b9889c
-REAUTHORIZED_BASE_TREE = 52bbe026bf6d7d975ac6bf0dc03109b7ca3ecc9b
+REAUTHORIZED_BASE_SHA = eb0991a6198a7ef9484b3de46b7ac2545f828542
+REAUTHORIZED_BASE_TREE = 835b423a6798fff22caf82890680c126d10ef238
 
 PERIOD_COMPARISON_READER = EventSales.Analytics.PeriodComparisonReader
 PUBLIC_API = compare_event(event_id, currency, period_request, opts \\ [])
