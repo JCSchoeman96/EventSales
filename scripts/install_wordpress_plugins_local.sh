@@ -29,11 +29,20 @@ fi
 normalize_url() {
   local url="$1"
   url="${url%/}"
-  echo "$url"
+  printf '%s\n' "$url"
 }
 
-WP_HOME="$(normalize_url "$(wp option get home --path="$EVENTSALES_WP_ROOT")")"
-WP_SITEURL="$(normalize_url "$(wp option get siteurl --path="$EVENTSALES_WP_ROOT")")"
+if ! RAW_WP_HOME="$(wp option get home --path="$EVENTSALES_WP_ROOT")"; then
+  echo "Refusing install: could not read WordPress home URL" >&2
+  exit 1
+fi
+if ! RAW_WP_SITEURL="$(wp option get siteurl --path="$EVENTSALES_WP_ROOT")"; then
+  echo "Refusing install: could not read WordPress siteurl" >&2
+  exit 1
+fi
+
+WP_HOME="$(normalize_url "$RAW_WP_HOME")"
+WP_SITEURL="$(normalize_url "$RAW_WP_SITEURL")"
 
 if [[ "$WP_HOME" != "$LOCKED_HOME" || "$WP_SITEURL" != "$LOCKED_HOME" ]]; then
   echo "Refusing install: WordPress URLs must be $LOCKED_HOME (got home=$WP_HOME siteurl=$WP_SITEURL)" >&2

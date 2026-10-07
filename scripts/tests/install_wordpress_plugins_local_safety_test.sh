@@ -52,10 +52,14 @@ case "${1:-}" in
   option)
     [[ "${2:-}" == "get" ]] || exit 2
     case "${3:-}" in
-      home) printf '%s\n' "$FAKE_HOME_URL" ;;
-      siteurl) printf '%s\n' "$FAKE_SITEURL_URL" ;;
+      home) option_value="$FAKE_HOME_URL" ;;
+      siteurl) option_value="$FAKE_SITEURL_URL" ;;
       *) exit 2 ;;
     esac
+    printf '%s\n' "$option_value"
+    if [[ "${FAKE_FAIL_OPTION:-}" == "${3:-}" ]]; then
+      exit 23
+    fi
     ;;
   eval)
     [[ "${2:-}" == "echo WP_PLUGIN_DIR;" ]] || exit 2
@@ -97,6 +101,7 @@ FAKE_WP
   export FAKE_SITEURL_URL="http://localhost:10059"
   export FAKE_PLUGIN_DIR="$CASE/wp/wp-content/plugins"
   export FAKE_VERIFY_FAIL=0
+  export FAKE_FAIL_OPTION=""
   export FAKE_FAIL_INSTALL_ARCHIVE=""
   export FAKE_REALPATH_ESCAPE_INPUT=""
   export FAKE_REALPATH_ESCAPE_TARGET=""
@@ -264,6 +269,26 @@ test_wrong_home_and_siteurl_fail_before_mutation() {
   assert_eq "$(install_count)" "0" "wrong-siteurl install count"
 }
 
+test_failed_url_reads_fail_even_when_stdout_looks_local() {
+  setup_case failed-home-read
+  export FAKE_FAIL_OPTION="home"
+  local output="$CASE/output.log"
+  if run_installer > "$output" 2>&1; then
+    fail "failed home option read was accepted based on stdout"
+  fi
+  grep -F 'could not read WordPress home URL' "$output" >/dev/null || fail "failed home option read was not reported"
+  assert_eq "$(install_count)" "0" "failed-home-read install count"
+
+  setup_case failed-siteurl-read
+  export FAKE_FAIL_OPTION="siteurl"
+  output="$CASE/output.log"
+  if run_installer > "$output" 2>&1; then
+    fail "failed siteurl option read was accepted based on stdout"
+  fi
+  grep -F 'could not read WordPress siteurl' "$output" >/dev/null || fail "failed siteurl option read was not reported"
+  assert_eq "$(install_count)" "0" "failed-siteurl-read install count"
+}
+
 test_package_verification_failure_precedes_plugin_root_resolution() {
   setup_case invalid-distribution
   export FAKE_VERIFY_FAIL=1
@@ -311,6 +336,7 @@ test_nested_symlink_fails_closed
 test_canonical_path_escape_fails_closed
 test_plugin_root_symlink_fails_closed
 test_wrong_home_and_siteurl_fail_before_mutation
+test_failed_url_reads_fail_even_when_stdout_looks_local
 test_package_verification_failure_precedes_plugin_root_resolution
 test_preflight_order_is_before_first_install
 test_failed_replacement_reports_partial_install_risk

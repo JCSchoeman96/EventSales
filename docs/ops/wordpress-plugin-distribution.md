@@ -81,7 +81,7 @@ After install, confirm Site Health registers EventSales direct tests and the **E
 ## Rollback
 
 1. Build or locate a prior distribution directory with known `manifest.json`.
-2. Re-run `install_wordpress_plugins_local.sh` against that directory (or `wp plugin install <zip> --force` per plugin).
+2. Re-run `install_wordpress_plugins_local.sh` against that directory. The local certification installer performs the same destination safety checks for rollback; do not bypass them with direct `wp plugin install <zip> --force` commands.
 
 **Order index warning:** rolling back plugin PHP does **not** roll back database schema or READY manifests. Do not drop manifest tables, truncate them, or destructively downgrade schema. Plugin code rollback and data rollback are separate operations.
 
