@@ -43,6 +43,7 @@ defmodule EventSales.TestSupport.M5_04PeriodLoadHarness do
 
     try do
       telemetry = start_telemetry!()
+
       reader_results =
         for request <- @requests,
             concurrency <- cohorts do
