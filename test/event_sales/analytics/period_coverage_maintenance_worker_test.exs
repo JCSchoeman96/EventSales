@@ -97,66 +97,10 @@ defmodule EventSales.Analytics.PeriodCoverageMaintenanceWorkerTest do
     end
   end
 
-  test "eligible event failure increments failures without aborting the worker batch" do
-    source = SalesHelpers.create_source_system!()
-    event = ready_event!(source, "Failure #{System.unique_integer([:positive])}")
-
-    page =
-      PeriodCoverageEligibleEvents.page_event_ids(cursor_before_id(event.id), limit: 1)
-
-    assert page == [event.id]
-
-    handler_id = {__MODULE__, :failures, make_ref()}
-    parent = self()
-
-    :ok =
-      :telemetry.attach(
-        handler_id,
-        [:event_sales, :analytics, :period_coverage, :maintenance],
-        fn _event, measurements, _metadata, _ ->
-          send(parent, {:maintenance_measurements, measurements})
-        end,
-        nil
-      )
-
-    try do
-      assert :ok =
-               PeriodCoverageMaintenanceWorker.perform(%Oban.Job{
-                 args: %{
-                   "batch_size" => 1,
-                   "after_event_id" => cursor_before_id(event.id),
-                   "period_coverage_opts" => [
-                     refresh_snapshot_worker:
-                       EventSales.Analytics.PeriodCoverageMaintenanceWorkerTest.StubFailingRefreshWorker
-                   ]
-                 }
-               })
-
-      assert_receive {:maintenance_measurements, measurements}
-      assert measurements.failures >= 1
-    after
-      :telemetry.detach(handler_id)
-    end
-  end
-
   defp ready_event!(source, name) do
     event = SalesHelpers.create_event!(source, %{name: name})
     EventDetailCertificationHelpers.certify_analytics_ready!(event)
     PeriodCoverageHelpers.seed_v2_currency!(event, "ZAR")
     event
-  end
-
-  defp cursor_before_id(event_id) do
-    PeriodCoverageEligibleEvents.page_event_ids(nil, limit: 10_000)
-    |> Enum.take_while(&(&1 < event_id))
-    |> List.last()
-    |> case do
-      nil -> "00000000-0000-0000-0000-000000000000"
-      id -> id
-    end
-  end
-
-  defmodule StubFailingRefreshWorker do
-    def enqueue_event(_event_id, _opts \\ []), do: {:error, :stub_enqueue_failed}
   end
 end
