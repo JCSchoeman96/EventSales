@@ -2,112 +2,8 @@
 
 declare(strict_types=1);
 
-define('ABSPATH', __DIR__);
-define('WP_PLUGIN_DIR', dirname(__DIR__, 2));
-
 $GLOBALS['wp_version'] = '5.6';
-$GLOBALS['filters'] = [];
-$GLOBALS['http_responses'] = [];
-$GLOBALS['http_requests'] = [];
-$GLOBALS['site_transients'] = [];
-$GLOBALS['transient_ttls'] = [];
-$GLOBALS['transient_write_fail'] = false;
-$GLOBALS['plugin_registry'] = [];
-
-final class WP_Error
-{
-    public function __construct(public string $code)
-    {
-    }
-
-    public function get_error_code(): string
-    {
-        return $this->code;
-    }
-
-    public function get_error_message(): string
-    {
-        return $this->code;
-    }
-}
-
-function add_filter($hook, $callback, $priority = 10, $accepted_args = 1)
-{
-    $GLOBALS['filters'][$hook][] = [
-        'callback' => $callback,
-        'priority' => $priority,
-        'accepted_args' => $accepted_args,
-    ];
-
-    return true;
-}
-
-function add_action($hook, $callback, $priority = 10, $accepted_args = 1)
-{
-    return add_filter($hook, $callback, $priority, $accepted_args);
-}
-
-function get_plugins()
-{
-    return $GLOBALS['plugin_registry'];
-}
-
-function get_site_transient($name)
-{
-    return $GLOBALS['site_transients'][$name] ?? false;
-}
-
-function set_site_transient($name, $value, $expiration = 0)
-{
-    if ($GLOBALS['transient_write_fail']) {
-        return false;
-    }
-
-    $GLOBALS['site_transients'][$name] = $value;
-    $GLOBALS['transient_ttls'][$name] = $expiration;
-
-    return true;
-}
-
-function wp_safe_remote_get($url, $args = [])
-{
-    $GLOBALS['http_requests'][] = ['url' => $url, 'args' => $args];
-
-    return array_shift($GLOBALS['http_responses']) ?? new WP_Error('unexpected_request');
-}
-
-function is_wp_error($value)
-{
-    return $value instanceof WP_Error;
-}
-
-function wp_remote_retrieve_response_code($response)
-{
-    return (int) ($response['response']['code'] ?? 0);
-}
-
-function wp_remote_retrieve_header($response, $header)
-{
-    foreach (($response['headers'] ?? []) as $name => $value) {
-        if (strtolower((string) $name) === strtolower((string) $header)) {
-            return $value;
-        }
-    }
-
-    return '';
-}
-
-function wp_remote_retrieve_body($response)
-{
-    return (string) ($response['body'] ?? '');
-}
-
-function __($text, $domain = 'default')
-{
-    return $text;
-}
-
-require dirname(__DIR__) . '/eventsales-integration-health.php';
+require __DIR__ . '/update-discovery-test-bootstrap.php';
 
 final class Update_Discovery_Test
 {
@@ -131,130 +27,6 @@ final class Update_Discovery_Test
     {
         self::ok($label, $expected === $actual);
     }
-}
-
-function reset_update_discovery_state(): void
-{
-    $GLOBALS['filters'] = [];
-    $GLOBALS['http_responses'] = [];
-    $GLOBALS['http_requests'] = [];
-    $GLOBALS['site_transients'] = [];
-    $GLOBALS['transient_ttls'] = [];
-    $GLOBALS['transient_write_fail'] = false;
-    $GLOBALS['plugin_registry'] = [];
-
-    if (method_exists(EventSales_WP_Update_Discovery::class, 'reset_request_state')) {
-        EventSales_WP_Update_Discovery::reset_request_state();
-    }
-}
-
-function http_response(int $status, string $body = '', array $headers = []): array
-{
-    return [
-        'response' => ['code' => $status],
-        'headers' => $headers,
-        'body' => $body,
-    ];
-}
-
-/** @return array<string, mixed> */
-function valid_release_manifest(array $changes = []): array
-{
-    $plugins = [
-        [
-            'slug' => 'eventsales-tickera-catalog-feed',
-            'main_file' => 'eventsales-tickera-catalog-feed.php',
-            'marketing_version' => '0.1.2',
-            'archive_filename' => 'eventsales-tickera-catalog-feed-0.1.2.zip',
-            'archive_sha256' => str_repeat('a', 64),
-            'catalog_schema_version' => '2026-08-07.v3',
-            'canonical_contract_version' => 'source_risk.v3',
-            'producer_version' => '2026-08-07.1',
-            'telemetry_version' => '2026-10-02.v1',
-        ],
-        [
-            'slug' => 'eventsales-woo-order-index-feed',
-            'main_file' => 'eventsales-woo-order-index-feed.php',
-            'marketing_version' => '0.2.2',
-            'archive_filename' => 'eventsales-woo-order-index-feed-0.2.2.zip',
-            'archive_sha256' => str_repeat('b', 64),
-            'order_index_schema_version' => '2026-08-12.v1',
-        ],
-        [
-            'slug' => 'eventsales-woo-order-line-identity',
-            'main_file' => 'eventsales-woo-order-line-identity.php',
-            'marketing_version' => '0.1.2',
-            'archive_filename' => 'eventsales-woo-order-line-identity-0.1.2.zip',
-            'archive_sha256' => str_repeat('c', 64),
-        ],
-        [
-            'slug' => 'eventsales-integration-health',
-            'main_file' => 'eventsales-integration-health.php',
-            'marketing_version' => '0.1.2',
-            'archive_filename' => 'eventsales-integration-health-0.1.2.zip',
-            'archive_sha256' => str_repeat('d', 64),
-        ],
-    ];
-
-    $manifest = [
-        'release_manifest_format_version' => '1',
-        'suite_release_id' => '2026.10.04.1',
-        'suggested_tag' => 'eventsales-wp-2026.10.04.1',
-        'source_commit' => str_repeat('1', 40),
-        'source_tree' => str_repeat('2', 40),
-        'requires_wordpress' => '5.6',
-        'requires_php' => '8.0',
-        'plugins' => $plugins,
-    ];
-
-    return array_replace($manifest, $changes);
-}
-
-function valid_release_metadata(array $changes = []): array
-{
-    $release = [
-        'tag_name' => 'eventsales-wp-2026.10.04.1',
-        'draft' => false,
-        'prerelease' => false,
-        'assets' => [
-            ['id' => 101, 'name' => 'eventsales-tickera-catalog-feed-0.1.2.zip'],
-            ['id' => 102, 'name' => 'eventsales-woo-order-index-feed-0.2.2.zip'],
-            ['id' => 103, 'name' => 'eventsales-woo-order-line-identity-0.1.2.zip'],
-            ['id' => 104, 'name' => 'eventsales-integration-health-0.1.2.zip'],
-            ['id' => 123, 'name' => 'release-manifest.json'],
-        ],
-    ];
-
-    return array_replace($release, $changes);
-}
-
-function queue_valid_release(?string $manifestBody = null, array $releaseChanges = []): void
-{
-    $manifestBody ??= json_encode(valid_release_manifest(), JSON_UNESCAPED_SLASHES);
-    $GLOBALS['http_responses'][] = http_response(
-        200,
-        json_encode(valid_release_metadata($releaseChanges), JSON_UNESCAPED_SLASHES)
-    );
-    $GLOBALS['http_responses'][] = http_response(200, $manifestBody);
-}
-
-function evaluate_plugin(string $slug, string $installedVersion = '0.1.1', ?string $uri = null, ?string $basename = null)
-{
-    $files = [
-        'eventsales-tickera-catalog-feed' => 'eventsales-tickera-catalog-feed.php',
-        'eventsales-woo-order-index-feed' => 'eventsales-woo-order-index-feed.php',
-        'eventsales-woo-order-line-identity' => 'eventsales-woo-order-line-identity.php',
-        'eventsales-integration-health' => 'eventsales-integration-health.php',
-    ];
-    $mainFile = $files[$slug] ?? 'unknown.php';
-    $pluginFile = $basename ?? $slug . '/' . $mainFile;
-    $pluginData = [
-        'UpdateURI' => $uri ?? 'https://github.com/JCSchoeman96/EventSales',
-        'Version' => $installedVersion,
-        'Name' => 'EventSales test plugin',
-    ];
-
-    return EventSales_WP_Update_Discovery::filter_update(false, $pluginData, $pluginFile, []);
 }
 
 function assert_http_request_policy(): void
@@ -748,6 +520,29 @@ Update_Discovery_Test::same(
     $unsupportedDebug['eventsales_update_discovery']['fields']['last_metadata_check_category']['value'] ?? null
 );
 Update_Discovery_Test::same('unsupported WordPress makes no remote calls', 0, count($GLOBALS['http_requests']));
+
+$GLOBALS['wp_version'] = '7.1.2';
+reset_update_discovery_state();
+queue_immutable_release();
+$immutableUpdate = evaluate_plugin('eventsales-woo-order-line-identity', '0.1.1');
+Update_Discovery_Test::ok('immutable release includes verified sentinel package', isset($immutableUpdate['package']));
+Update_Discovery_Test::ok(
+    'package field never contains raw GitHub ZIP URL',
+    is_string($immutableUpdate['package'] ?? null)
+        && EventSales_WP_Verified_Package_Delivery::is_sentinel($immutableUpdate['package'])
+);
+
+reset_update_discovery_state();
+$manifest = valid_release_manifest();
+$badDigestManifest = json_encode($manifest, JSON_UNESCAPED_SLASHES);
+queue_immutable_release($badDigestManifest, [
+    'assets' => immutable_release_assets($manifest, [
+        'eventsales-woo-order-line-identity-0.1.2.zip' => ['digest' => 'sha256:' . str_repeat('0', 64)],
+    ]),
+]);
+$digestMismatch = evaluate_plugin('eventsales-woo-order-line-identity', '0.1.1');
+Update_Discovery_Test::ok('digest mismatch omits package', !array_key_exists('package', $digestMismatch ?? []));
+Update_Discovery_Test::same('digest mismatch still notifies', '0.1.2', $digestMismatch['version'] ?? null);
 
 if (Update_Discovery_Test::$failures !== []) {
     fwrite(STDERR, "Update discovery test failures:\n - " . implode("\n - ", Update_Discovery_Test::$failures) . "\n");

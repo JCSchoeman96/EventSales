@@ -27,7 +27,7 @@
     {
       "slug": "eventsales-integration-health",
       "main_file": "eventsales-integration-health.php",
-      "marketing_version": "0.1.2"
+      "marketing_version": "0.1.3"
     }
   ]
 }
