@@ -1,9 +1,9 @@
 defmodule EventSales.Analytics.PeriodCoveragePlannerTest do
   use ExUnit.Case, async: true
 
+  alias EventSales.Analytics.MetricRules
   alias EventSales.Analytics.PeriodCoveragePlanner
   alias EventSales.Analytics.{PeriodReadPlan, TimeRules}
-  alias EventSales.Analytics.MetricRules
 
   @anchor ~U[2026-05-17 10:17:33.000000Z]
 
@@ -63,7 +63,7 @@ defmodule EventSales.Analytics.PeriodCoveragePlannerTest do
 
   test "records bounded maximum bucket cardinality for one event currency" do
     specs = PeriodCoveragePlanner.required_bucket_specs(@anchor)
-    assert length(specs) > 0
+    assert specs != []
     assert length(specs) < 2_000
     assert length(specs) == 1_502
   end

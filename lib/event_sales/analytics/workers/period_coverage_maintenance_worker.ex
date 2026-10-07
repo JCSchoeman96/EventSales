@@ -22,31 +22,37 @@ defmodule EventSales.Analytics.Workers.PeriodCoverageMaintenanceWorker do
 
     event_ids = PeriodCoverageEligibleEvents.page_event_ids(after_id, limit: batch_size)
 
-    {examined, changed, intents, enqueues, failures} =
-      Enum.reduce(event_ids, {0, 0, 0, 0, 0}, fn event_id,
-                                                 {examined, changed, intents, enqueues, failures} ->
-        examined = examined + 1
-
-        case PeriodCoverage.ensure_event_buckets(event_id, captured_now, enqueue_refresh?: true) do
-          {:ok, %{bucket_intents_created: created, refresh_enqueued?: enqueued?}} ->
-            {
-              examined,
-              if(created > 0, do: changed + 1, else: changed),
-              intents + created,
-              if(enqueued?, do: enqueues + 1, else: enqueues),
-              failures
-            }
-
-          {:error, _reason} ->
-            {examined, changed, intents, enqueues, failures + 1}
+    stats =
+      Enum.reduce(
+        event_ids,
+        %{examined: 0, changed: 0, intents: 0, enqueues: 0, failures: 0},
+        fn event_id, acc ->
+          acc = Map.update!(acc, :examined, &(&1 + 1))
+          apply_event_coverage(acc, event_id, captured_now)
         end
-      end)
+      )
+
+    {examined, changed, intents, enqueues, failures} =
+      {stats.examined, stats.changed, stats.intents, stats.enqueues, stats.failures}
 
     emit_batch_telemetry(examined, changed, intents, enqueues, failures)
 
     schedule_next_batch(event_ids, batch_size, after_id)
 
     :ok
+  end
+
+  defp apply_event_coverage(acc, event_id, captured_now) do
+    case PeriodCoverage.ensure_event_buckets(event_id, captured_now, enqueue_refresh?: true) do
+      {:ok, %{bucket_intents_created: created, refresh_enqueued?: enqueued?}} ->
+        acc
+        |> Map.update!(:changed, &if(created > 0, do: &1 + 1, else: &1))
+        |> Map.update!(:intents, &(&1 + created))
+        |> Map.update!(:enqueues, &if(enqueued?, do: &1 + 1, else: &1))
+
+      {:error, _reason} ->
+        Map.update!(acc, :failures, &(&1 + 1))
+    end
   end
 
   defp schedule_next_batch(event_ids, batch_size, _after_id) when length(event_ids) < batch_size,

@@ -1,6 +1,8 @@
 defmodule EventSales.Analytics.PeriodCoverageConcurrencyTest do
   use EventSales.DataCase, async: false
 
+  import Ecto.Query
+
   require Ash.Query
 
   alias EventSales.Analytics
@@ -8,6 +10,7 @@ defmodule EventSales.Analytics.PeriodCoverageConcurrencyTest do
   alias EventSales.Analytics.Resources.EventPeriodAggregateSnapshot
   alias EventSales.Repo
   alias EventSales.Sales.OrderUpserter
+  alias EventSales.Sales.Resources.Order
   alias EventSales.TestSupport.EventDetailCertificationHelpers
   alias EventSales.TestSupport.PeriodComparisonHelpers
   alias EventSales.TestSupport.PeriodCoverageHelpers
@@ -111,6 +114,10 @@ defmodule EventSales.Analytics.PeriodCoverageConcurrencyTest do
           }
         ]
       }
+
+      on_exit(fn ->
+        Repo.delete_all(from o in Order, where: o.woo_order_id == 90_010)
+      end)
 
       assert {:ok, _order} =
                OrderUpserter.upsert_normalized_order(source.id, normalized,

@@ -28,19 +28,10 @@ defmodule EventSales.Analytics.PeriodCoveragePlanner do
     timezone = MetricRules.business_timezone()
 
     base_specs =
-      @supported_requests
-      |> Enum.flat_map(fn request ->
-        case TimeRules.comparison_windows(timezone, captured_now_utc, request) do
-          {:ok, %ComparisonWindows{} = windows} ->
-            case PeriodReadPlan.build(windows) do
-              {:ok, plan} -> bucket_specs_from_plan(plan)
-              {:error, _} -> []
-            end
-
-          {:error, _} ->
-            []
-        end
-      end)
+      Enum.flat_map(
+        @supported_requests,
+        &bucket_specs_for_request(&1, timezone, captured_now_utc)
+      )
 
     johannesburg_envelopes =
       base_specs
@@ -74,6 +65,16 @@ defmodule EventSales.Analytics.PeriodCoveragePlanner do
   @doc false
   @spec supported_requests() :: [:today | :yesterday | {:rolling_days, 7} | {:rolling_days, 30}]
   def supported_requests, do: @supported_requests
+
+  defp bucket_specs_for_request(request, timezone, captured_now_utc) do
+    with {:ok, %ComparisonWindows{} = windows} <-
+           TimeRules.comparison_windows(timezone, captured_now_utc, request),
+         {:ok, plan} <- PeriodReadPlan.build(windows) do
+      bucket_specs_from_plan(plan)
+    else
+      _ -> []
+    end
+  end
 
   defp bucket_specs_from_plan(%{operands: operands}) do
     Enum.flat_map(operands, fn operand_plan ->
