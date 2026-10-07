@@ -29,11 +29,17 @@
     "lib/event_sales/analytics/event_scoped_dashboard.ex",
     "lib/event_sales/analytics/event_snapshot_refresh_fence.ex",
     "lib/event_sales/analytics/historical_catchup_freshness_notifier.ex",
+    "lib/event_sales/analytics/historical_catchup_period_coverage_notifier.ex",
     "lib/event_sales/analytics/hot_state_aggregator.ex",
     "lib/event_sales/analytics/metric_rules.ex",
     "lib/event_sales/analytics/order_processed_notifier.ex",
     "lib/event_sales/analytics/period_bucket_rules.ex",
     "lib/event_sales/analytics/period_comparison_reader.ex",
+    "lib/event_sales/analytics/period_coverage.ex",
+    "lib/event_sales/analytics/period_coverage_currency_resolver.ex",
+    "lib/event_sales/analytics/period_coverage_eligible_events.ex",
+    "lib/event_sales/analytics/period_coverage_materializer.ex",
+    "lib/event_sales/analytics/period_coverage_planner.ex",
     "lib/event_sales/analytics/period_dimension_aggregator.ex",
     "lib/event_sales/analytics/period_projection_invalidator.ex",
     "lib/event_sales/analytics/period_projection_refresh.ex",
@@ -62,6 +68,7 @@
     "lib/event_sales/analytics/validations/validate_dimension_source_event.ex",
     "lib/event_sales/analytics/validations/validate_dimension_ticket_type_event.ex",
     "lib/event_sales/analytics/validations/validate_period_bucket_contract.ex",
+    "lib/event_sales/analytics/workers/period_coverage_maintenance_worker.ex",
     "lib/event_sales/analytics/workers/rebuild_hot_state_worker.ex",
     "lib/event_sales/analytics/workers/refresh_snapshot_worker.ex",
     "lib/event_sales/application.ex",
@@ -415,7 +422,9 @@
     "test/support/mapping_setup_helpers.ex",
     "test/support/oban_helpers.ex",
     "test/support/period_comparison_helpers.ex",
+    "test/support/period_coverage_helpers.ex",
     "test/support/sales_helpers.ex",
+    "test/support/stub_refresh_snapshot_worker.ex",
     "test/support/telemetry_helpers.ex",
     "test/support/tickera_catalog_fixtures.ex",
     "test/support/tickera_sync_test_helpers.ex",
@@ -921,6 +930,21 @@
       "uses": []
     },
     {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.HistoricalCatchupPeriodCoverageNotifier",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/historical_catchup_period_coverage_notifier.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "notify_terminal_success"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
       "docs_count": 7,
       "moduledoc?": true,
       "name": "EventSales.Analytics.HotStateAggregator",
@@ -1110,6 +1134,107 @@
       "uses": []
     },
     {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.PeriodCoverage",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/period_coverage.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "ensure_event_buckets"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.PeriodCoverageCurrencyResolver",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/period_coverage_currency_resolver.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "currencies_for_event"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "CandidatePage",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/period_coverage_eligible_events.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 4,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.PeriodCoverageEligibleEvents",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/period_coverage_eligible_events.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "page_event_ids"
+        },
+        {
+          "arity": 2,
+          "name": "page_candidates"
+        },
+        {
+          "arity": 1,
+          "name": "collect_event_ids"
+        },
+        {
+          "arity": 0,
+          "name": "explain_sql"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.PeriodCoverageMaterializer",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/period_coverage_materializer.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "materialize"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 2,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.PeriodCoveragePlanner",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/period_coverage_planner.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "required_bucket_specs"
+        },
+        {
+          "arity": 0,
+          "name": "supported_requests"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
       "docs_count": 3,
       "moduledoc?": true,
       "name": "EventSales.Analytics.PeriodDimensionAggregator",
@@ -1152,7 +1277,7 @@
       "uses": []
     },
     {
-      "docs_count": 4,
+      "docs_count": 5,
       "moduledoc?": true,
       "name": "EventSales.Analytics.PeriodProjectionRefresh",
       "parse_error": null,
@@ -1173,6 +1298,10 @@
         {
           "arity": 2,
           "name": "dimension_delete_query"
+        },
+        {
+          "arity": 2,
+          "name": "current_johannesburg_envelope_query"
         }
       ],
       "specs?": true,
@@ -1701,6 +1830,31 @@
       "specs?": false,
       "uses": [
         "Ash.Resource.Validation"
+      ]
+    },
+    {
+      "docs_count": 2,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.Workers.PeriodCoverageMaintenanceWorker",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/workers/period_coverage_maintenance_worker.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "perform"
+        },
+        {
+          "arity": 2,
+          "name": "perform_with_opts"
+        },
+        {
+          "arity": 3,
+          "name": "schedule_continuation"
+        }
+      ],
+      "specs?": true,
+      "uses": [
+        "Oban.Worker"
       ]
     },
     {
@@ -9675,6 +9829,21 @@
     {
       "docs_count": 1,
       "moduledoc?": true,
+      "name": "EventSales.TestSupport.PeriodCoverageHelpers",
+      "parse_error": null,
+      "path": "test/support/period_coverage_helpers.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "seed_v2_currency!"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
       "name": "EventSales.TestSupport.SalesHelpers",
       "parse_error": null,
       "path": "test/support/sales_helpers.ex",
@@ -9713,6 +9882,25 @@
         }
       ],
       "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.StubRefreshSnapshotWorker",
+      "parse_error": null,
+      "path": "test/support/stub_refresh_snapshot_worker.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "enqueue_event"
+        },
+        {
+          "arity": 2,
+          "name": "enqueue_events"
+        }
+      ],
+      "specs?": false,
       "uses": []
     },
     {

@@ -1279,6 +1279,31 @@
   "oban": {
     "workers": [
       {
+        "docs_count": 2,
+        "moduledoc?": true,
+        "name": "EventSales.Analytics.Workers.PeriodCoverageMaintenanceWorker",
+        "parse_error": null,
+        "path": "lib/event_sales/analytics/workers/period_coverage_maintenance_worker.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "perform"
+          },
+          {
+            "arity": 2,
+            "name": "perform_with_opts"
+          },
+          {
+            "arity": 3,
+            "name": "schedule_continuation"
+          }
+        ],
+        "specs?": true,
+        "uses": [
+          "Oban.Worker"
+        ]
+      },
+      {
         "docs_count": 0,
         "moduledoc?": true,
         "name": "EventSales.Analytics.Workers.RebuildHotStateWorker",
