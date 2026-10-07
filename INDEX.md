@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-418
+421
 
 ## Files
 
@@ -45,9 +45,11 @@ Project root: `.`
 - `lib/event_sales/analytics/metric_rules.ex`
 - `lib/event_sales/analytics/order_processed_notifier.ex`
 - `lib/event_sales/analytics/period_bucket_rules.ex`
+- `lib/event_sales/analytics/period_comparison_reader.ex`
 - `lib/event_sales/analytics/period_dimension_aggregator.ex`
 - `lib/event_sales/analytics/period_projection_invalidator.ex`
 - `lib/event_sales/analytics/period_projection_refresh.ex`
+- `lib/event_sales/analytics/period_read_plan.ex`
 - `lib/event_sales/analytics/refund_processed_notifier.ex`
 - `lib/event_sales/analytics/resources/analytics_contribution_fact.ex`
 - `lib/event_sales/analytics/resources/daily_sales_aggregate_snapshot.ex`
@@ -424,6 +426,7 @@ Project root: `.`
 - `test/support/ingestion/stub_webhook_event_store.ex`
 - `test/support/mapping_setup_helpers.ex`
 - `test/support/oban_helpers.ex`
+- `test/support/period_comparison_helpers.ex`
 - `test/support/sales_helpers.ex`
 - `test/support/telemetry_helpers.ex`
 - `test/support/tickera_catalog_fixtures.ex`
@@ -568,8 +571,8 @@ Project root: `.`
 - `EventSales.Analytics.EventSnapshotRefreshFence` - `lib/event_sales/analytics/event_snapshot_refresh_fence.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 6
-  - public_funs: `with_serial_event_refresh/2`, `coherent_transaction_opts/0`, `lock_events_in_transaction/1`, `use_repeatable_read_isolation?/0`, `connection_backend_pid/0`, `lock_key/1`
+  - docs_count: 7
+  - public_funs: `with_serial_event_refresh/2`, `coherent_transaction_opts/0`, `prepare_coherent_transaction!/0`, `lock_events_in_transaction/1`, `use_repeatable_read_isolation?/0`, `connection_backend_pid/0`, `lock_key/1`
   - uses: _none_
 - `EventSales.Analytics.HistoricalCatchupFreshnessNotifier` - `lib/event_sales/analytics/historical_catchup_freshness_notifier.ex`
   - moduledoc?: true
@@ -601,6 +604,12 @@ Project root: `.`
   - docs_count: 1
   - public_funs: `for_instant/1`
   - uses: _none_
+- `EventSales.Analytics.PeriodComparisonReader` - `lib/event_sales/analytics/period_comparison_reader.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 2
+  - public_funs: `compare_event/4`, `load_operand_payload_for_test!/3`
+  - uses: _none_
 - `EventSales.Analytics.PeriodDimensionAggregator` - `lib/event_sales/analytics/period_dimension_aggregator.ex`
   - moduledoc?: true
   - specs?: true
@@ -618,6 +627,12 @@ Project root: `.`
   - specs?: true
   - docs_count: 4
   - public_funs: `refresh_pending_event/2`, `sale_population_query/2`, `refund_population_query/2`, `dimension_delete_query/2`
+  - uses: _none_
+- `EventSales.Analytics.PeriodReadPlan` - `lib/event_sales/analytics/period_read_plan.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 2
+  - public_funs: `build/1`, `decompose_period/2`
   - uses: _none_
 - `EventSales.Analytics.RefundProcessedNotifier` - `lib/event_sales/analytics/refund_processed_notifier.ex`
   - moduledoc?: true
@@ -2893,6 +2908,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `perform/1`
   - uses: `Oban.Worker`
+- `EventSales.TestSupport.PeriodComparisonHelpers` - `test/support/period_comparison_helpers.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 6
+  - public_funs: `default_coverage_identity/0`, `default_refreshed_at/0`, `create_event_bucket!/4`, `create_dimension_bucket!/5`, `insert_edge_contribution_fact!/6`, `plan_for/2`, `seed_comparison_projection!/7`, `seed_asymmetric_comparison_projection!/8`
+  - uses: _none_
 - `EventSales.TestSupport.SalesHelpers` - `test/support/sales_helpers.ex`
   - moduledoc?: true
   - specs?: true

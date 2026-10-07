@@ -16,16 +16,26 @@
 - `v10` — correct current C/D authority, record source lock ordering and contribution identity validation, and separate event from dimensional write-query evidence
 
 - `v11` records the verified JC-317 merge and JC-319 dimensional period population and reconciliation.
+- `v12` — JC-321 M5-04F `PeriodComparisonReader` and `PeriodReadPlan`, bounded unnest edge reads, policy/redaction tests, and query-plan evidence.
+- `v13` — JC-321 review correction: fixed projection scope AND, readiness envelope states, operand metadata coherence, edge envelope coverage, edge metadata fail-closed, decode fix, interior-hour plan fix, ATV nil semantics, EXPLAIN evidence, isolation/RR tests, explicit PostgreSQL `SET TRANSACTION` coherent-read preparation (`prepare_coherent_transaction!/0`), project index regeneration.
+- `v14` — JC-321 S2 review correction: dimensional zero-activity operand maps, single event-edge unnest query, truthful JSON EXPLAIN scan detection, `(event_id, currency, effective_at)` contribution index, global not-ready monetary redaction.
+- `v15` — JC-321 final integration cleanup: align M5-04F implementation-record base with v14 header (`eb0991a` / `835b423a`); restore `mix.lock` to current `main` (no unrelated `ex_ast` / `finch` / `req` drift).
 
-**Plan version:** `v11`
+**Plan version:** `v15`
 
 ```text
-PLAN_VERSION = v11
+PLAN_VERSION = v15
+REAUTHORIZED_BASE_SHA = eb0991a6198a7ef9484b3de46b7ac2545f828542
+REAUTHORIZED_BASE_TREE = 835b423a6798fff22caf82890680c126d10ef238
+BASE_MOVEMENT = PR #297 Ash CVE + PR #296 WordPress release certification merge
+M5_04F_STATUS = IN_REVIEW
+M5_04F_DURABLE_AUTHORITY = PENDING_MERGE
+M5_04G_AUTHORIZED = NO
 ```
 
-**Status:** JC-317 merged; JC-319 M5-04E implementation in progress
-**Last updated:** 2026-10-04
-**Change summary (v11):** Records merged JC-317 authority and JC-319 dimensional grouping, reconciliation, and atomic bulk replacement from the same validated contribution facts.
+**Status:** JC-319 M5-04E merged; JC-321 M5-04F reader final integration cleanup in review (do not merge until exact-head CI green)
+**Last updated:** 2026-10-07
+**Change summary (v15):** Canonical plan authority alignment and dependency-lock hygiene for PR #295; M5-04F durable authority remains pending merge.
 
 **Goal:** Define a canonical, currency-safe period comparison read model for event and required dimensional grains without promoting the legacy daily-v1 snapshot or inventing comparison semantics.
 
@@ -1514,7 +1524,7 @@ ROLLING_EDGE_STRATEGY = FIXED_INTERIOR_BUCKETS_PLUS_DURABLE_EXACT_CONTRIBUTION_E
 
 ## 27. Verdict
 
-M5-04A audited the repository, identified the comparison-authority conflict, and rejected Daily v1 rehabilitation and an unbounded request-time comparison reader. JC-310 records the approved previous-equivalent contract without modifying M1-07. JC-312 implements pure comparison kernels and locks hybrid rolling-edge plus contribution contracts; PR #287 is merged and is durable authority. JC-314 implemented the authorized M5-04C schema slice and merged at `eebb9a83563e2ce0e40dd9a4e069567d89acd28f`. JC-317 merged the authorized M5-04D event-period rebuild and invalidation slice in PR #291 at `5f2acf53b97b974f6abf4c3bb271e2e843fc282c`. JC-319 implements the authorized M5-04E dimensional projection slice.
+M5-04A audited the repository, identified the comparison-authority conflict, and rejected Daily v1 rehabilitation and an unbounded request-time comparison reader. JC-310 records the approved previous-equivalent contract without modifying M1-07. JC-312 implements pure comparison kernels and locks hybrid rolling-edge plus contribution contracts; PR #287 is merged and is durable authority. JC-314 implemented the authorized M5-04C schema slice and merged at `eebb9a83563e2ce0e40dd9a4e069567d89acd28f`. JC-317 merged the authorized M5-04D event-period rebuild and invalidation slice in PR #291 at `5f2acf53b97b974f6abf4c3bb271e2e843fc282c`. JC-319 merged the authorized M5-04E dimensional projection slice in PR #293. JC-321 implements the authorized M5-04F projection-only comparison reader (`PeriodComparisonReader`, `PeriodReadPlan`) on branch `feature/jc-321-m5-04f-period-comparison-reader`.
 
 ```text
 DAILY_V1_DECISION = LEGACY / NON-CANONICAL FOR M5 PERIOD REPORTING
@@ -1542,12 +1552,70 @@ JC_317_MERGE_SHA = 5f2acf53b97b974f6abf4c3bb271e2e843fc282c
 JC_317_MERGE_TREE = c6d58c43499233c22be34cdc0551d0fbae255224
 M5_04D_DURABLE_AUTHORITY = YES
 M5_04E_AUTHORIZED = YES
-M5_04E_STATUS = IN_PROGRESS
-M5_04F_AUTHORIZED = NO
+M5_04E_STATUS = MERGED
+JC_319_STATUS = MERGED
+JC_319_MERGE_SHA = 11f5bc3 (PR #293 merge commit on main)
+M5_04E_DURABLE_AUTHORITY = YES
+M5_04F_AUTHORIZED = YES
+M5_04F_STATUS = IN_REVIEW
+JC_321_STATUS = IN_REVIEW
 ROLLING_EDGE_STRATEGY = FIXED_INTERIOR_BUCKETS_PLUS_DURABLE_EXACT_CONTRIBUTION_EDGE
 ROLLING_EDGE_SCHEMA_FOUNDATION = M5-04C
-ROLLING_EDGE_POPULATION = JC-317 event period / M5-04E dimensional period
-ROLLING_EDGE_READ = M5-04F
+ROLLING_EDGE_POPULATION = JC-317 event period / JC-319 dimensional period
+ROLLING_EDGE_READ = M5-04F (PeriodComparisonReader)
+STOP_CONDITION_TRIGGERED = NONE
 ```
 
-JC-314 is complete. JC-317 owns event-period population, invalidation, and bounded replacement without reopening comparison semantics or the accepted storage model. M5-04E dimensional population is authorized through JC-319. M5-04F remains unauthorized.
+JC-314 is complete. JC-317 and JC-319 merged event and dimensional period population. JC-321 delivers the authorized M5-04F reader; M5-04G certification remains next for latency, edge-query cost, and load evidence.
+
+### M5-04F (JC-321) implementation record
+
+```text
+JC_319_STATUS = MERGED
+JC_319_MERGE_SHA = 11f5bc36f351784696aaebb9ce74656e0210d59d
+JC_319_MERGE_TREE = d11d980315fe55ea9a70ac7e3a5c29daea0d46e0
+M5_04E_DURABLE_AUTHORITY = YES
+M5_04F_AUTHORIZED = YES
+M5_04F_STATUS = IN_REVIEW
+M5_04F_DURABLE_AUTHORITY = PENDING_MERGE
+M5_04G_AUTHORIZED = NO
+
+REAUTHORIZED_BASE_SHA = eb0991a6198a7ef9484b3de46b7ac2545f828542
+REAUTHORIZED_BASE_TREE = 835b423a6798fff22caf82890680c126d10ef238
+
+PERIOD_COMPARISON_READER = EventSales.Analytics.PeriodComparisonReader
+PUBLIC_API = compare_event(event_id, currency, period_request, opts \\ [])
+
+READ_PLAN = EventSales.Analytics.PeriodReadPlan.build/1 from TimeRules.comparison_windows/3
+
+FIXED_QUERY_SCOPE_RULE = event_id AND currency AND (bucket OR …) — never OR bucket predicates outside tenant scope
+READINESS_RESULT_RULE = missing/stale operands surface current_missing / comparison_missing in envelope; not {:error, :projection_not_ready}
+OPERAND_METADATA_COHERENCE_RULE = mixed semantic_version or coverage_identity within one operand => operand not_ready
+EDGE_DIMENSION_ENVELOPE_RULE = dimension coverage validates fixed buckets UNION edge-envelope UTC hours; interior composition uses fixed buckets only
+EDGE_METADATA_MISMATCH_RULE = contribution facts with incompatible semantic/coverage in edge window => operand not_ready (no silent JOIN drop)
+READY_GRAIN_ZERO_FILL_RULE = ready parent + absent grain in operand => zero primitives and grain ready (new_activity / flat_zero / etc.)
+ATV_UNDEFINED_RULE = nil ATV operands => nil state and nil deltas (not :available)
+
+FIXED_EVENT_QUERY_COUNT = 1
+DIMENSION_COVERAGE_QUERY_COUNT = 1
+DIMENSION_INTERIOR_QUERY_COUNT = 3
+EDGE_EVENT_QUERY_COUNT = 0 (no edge fragments) | 1 (single aggregate when edge fragments exist)
+EDGE_DIMENSION_QUERY_COUNT = 0 (no edge fragments) | 3 (when edge fragments exist)
+MAX_EDGE_UNNEST_QUERY_COUNT = 4
+DIMENSION_COMPARISON_ZERO_ACTIVITY_RULE = all four additive dimensional primitives via full operand maps
+DIMENSION_READY_ZERO_FILL_STATE_RULE = zero-filled READY previous grain + positive current => new_activity
+GLOBAL_NOT_READY_REVENUE_REDACTION = monetary values/deltas/states all nil when revenue hidden
+
+REVENUE_REDACTION_RULE = Policies.can_view_revenue?/2 hides all monetary metrics, deltas, and monetary comparison states
+
+COHERENT_READ_ISOLATION = PostgreSQL REPEATABLE READ established explicitly via EventSnapshotRefreshFence.prepare_coherent_transaction!/0 inside the projection transaction before the first projection statement
+COHERENT_TRANSACTION_OPTS_ALONE = NOT sufficient PostgreSQL isolation authority (Postgrex 0.22.4 BEGIN does not apply isolation_level option)
+COHERENT_TRANSACTION_POSTGRES_ISOLATION = explicit SET TRANSACTION ISOLATION LEVEL REPEATABLE READ before first projection statement when use_repeatable_read_isolation?/0
+READER_WRITER_FENCE = NONE (reader does not acquire writer advisory lock; MVCC snapshot isolation is the coherence mechanism)
+
+EDGE_INDEX_DECISION = ADD analytics_contribution_facts_event_currency_effective_at_idx on (event_id, currency, effective_at)
+EDGE_INDEX_BEFORE_EXPLAIN = Seq Scan on analytics_contribution_facts under small-table fixture (corrected JSON walker; no rendered phrase dependency)
+EDGE_INDEX_AFTER_EXPLAIN = Bitmap/Index access on analytics_contribution_facts with event_id + currency index condition and join time filter
+EDGE_INDEX = (event_id, currency, effective_at)
+EDGE_QUERY_PLAN_VERDICT = selective index-backed edge unnest join after index + ANALYZE on large noise fixture
+```
