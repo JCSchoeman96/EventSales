@@ -1281,6 +1281,23 @@
       {
         "docs_count": 0,
         "moduledoc?": true,
+        "name": "EventSales.Analytics.Workers.PeriodCoverageMaintenanceWorker",
+        "parse_error": null,
+        "path": "lib/event_sales/analytics/workers/period_coverage_maintenance_worker.ex",
+        "public_funs": [
+          {
+            "arity": 1,
+            "name": "perform"
+          }
+        ],
+        "specs?": false,
+        "uses": [
+          "Oban.Worker"
+        ]
+      },
+      {
+        "docs_count": 0,
+        "moduledoc?": true,
         "name": "EventSales.Analytics.Workers.RebuildHotStateWorker",
         "parse_error": null,
         "path": "lib/event_sales/analytics/workers/rebuild_hot_state_worker.ex",

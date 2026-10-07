@@ -12,6 +12,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
   require Ash.Query
 
   alias EventSales.Analytics.HistoricalCatchupFreshnessNotifier
+  alias EventSales.Analytics.HistoricalCatchupPeriodCoverageNotifier
   alias EventSales.Catalog
   alias EventSales.Catalog.Changes.NormalizeBaseUrl
   alias EventSales.Catalog.Resources.{Event, SourceSystem}
@@ -1070,6 +1071,28 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecution do
 
     try do
       notifier.notify_terminal_success(updated_run, updated_cursor, notifier_opts)
+    rescue
+      _exception -> :ok
+    catch
+      _kind, _reason -> :ok
+    end
+
+    coverage_notifier =
+      Keyword.get(
+        opts,
+        :historical_catchup_period_coverage_notifier,
+        HistoricalCatchupPeriodCoverageNotifier
+      )
+
+    coverage_notifier_opts =
+      Keyword.get(opts, :historical_catchup_period_coverage_notifier_opts, [])
+
+    try do
+      coverage_notifier.notify_terminal_success(
+        updated_run,
+        updated_cursor,
+        coverage_notifier_opts
+      )
     rescue
       _exception -> :ok
     catch

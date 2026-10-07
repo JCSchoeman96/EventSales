@@ -275,7 +275,8 @@ if config_env() == :prod do
        crontab: [
          {"* * * * *", EventSales.Maintenance.ObanQueueSnapshotWorker},
          {"*/5 * * * *", EventSales.Maintenance.FailedJobAlertWorker},
-         {"*/5 * * * *", EventSales.Ingestion.Workers.RecoverTickeraCatalogAutoApplyWorker}
+         {"*/5 * * * *", EventSales.Ingestion.Workers.RecoverTickeraCatalogAutoApplyWorker},
+         {"5 * * * *", EventSales.Analytics.Workers.PeriodCoverageMaintenanceWorker}
        ]}
     ]
 

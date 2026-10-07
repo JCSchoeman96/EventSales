@@ -161,8 +161,12 @@ defmodule EventSales.Analytics.PeriodProjectionRefresh do
   defp refresh_pending_rows(_event_id, [], _opts), do: :ok
 
   defp refresh_pending_rows(event_id, pending_rows, opts) do
-    day_rows = Enum.filter(pending_rows, &(&1.bucket_kind == :johannesburg_day))
+    pending_day_rows = Enum.filter(pending_rows, &(&1.bucket_kind == :johannesburg_day))
     hour_rows = Enum.filter(pending_rows, &(&1.bucket_kind == :utc_hour))
+
+    day_rows =
+      pending_day_rows ++
+        current_johannesburg_envelopes_for_pending_hours(event_id, hour_rows, pending_day_rows)
 
     with :ok <- validate_day_coverage(day_rows, hour_rows),
          windows = coverage_windows(day_rows),
@@ -226,6 +230,66 @@ defmodule EventSales.Analytics.PeriodProjectionRefresh do
       {:ok, rows} -> {:ok, rows}
       {:error, _reason} -> {:error, :pending_period_rows_read_failed}
     end
+  end
+
+  defp current_johannesburg_envelopes_for_pending_hours(event_id, hour_rows, pending_day_rows) do
+    identities = johannesburg_identity_keys_for_uncovered_hours(hour_rows, pending_day_rows)
+
+    case identities do
+      [] -> []
+      keys -> read_current_johannesburg_envelopes(event_id, keys)
+    end
+  end
+
+  defp johannesburg_identity_keys_for_uncovered_hours(hour_rows, pending_day_rows) do
+    hour_rows
+    |> Enum.reject(&hour_covered_by_pending_day?(&1, pending_day_rows))
+    |> Enum.flat_map(&johannesburg_identity_keys_for_hour/1)
+    |> Enum.uniq()
+  end
+
+  defp hour_covered_by_pending_day?(hour, pending_day_rows) do
+    Enum.any?(pending_day_rows, &johannesburg_day_envelopes_hour?(&1, hour))
+  end
+
+  defp johannesburg_identity_keys_for_hour(hour) do
+    case PeriodBucketRules.for_instant(hour.bucket_start_utc) do
+      {:ok, buckets} ->
+        buckets
+        |> Enum.filter(&(&1.bucket_kind == :johannesburg_day))
+        |> Enum.map(fn day -> {hour.currency, day.bucket_start_utc, day.bucket_end_utc} end)
+
+      {:error, _} ->
+        []
+    end
+  end
+
+  defp read_current_johannesburg_envelopes(event_id, identities) do
+    case Ash.read(
+           EventPeriodAggregateSnapshot
+           |> Ash.Query.filter(
+             event_id == ^event_id and projection_state == :current and
+               bucket_kind == :johannesburg_day
+           ),
+           domain: Analytics
+         ) do
+      {:ok, rows} -> Enum.filter(rows, &johannesburg_row_in_identity_set?(&1, identities))
+      {:error, _} -> []
+    end
+  end
+
+  defp johannesburg_row_in_identity_set?(row, identities) do
+    Enum.any?(identities, fn {currency, start_utc, end_utc} ->
+      row.currency == currency and
+        DateTime.compare(row.bucket_start_utc, start_utc) == :eq and
+        DateTime.compare(row.bucket_end_utc, end_utc) == :eq
+    end)
+  end
+
+  defp johannesburg_day_envelopes_hour?(day_row, hour_row) do
+    day_row.currency == hour_row.currency and
+      DateTime.compare(day_row.bucket_start_utc, hour_row.bucket_start_utc) in [:lt, :eq] and
+      DateTime.compare(day_row.bucket_end_utc, hour_row.bucket_end_utc) in [:gt, :eq]
   end
 
   defp validate_day_coverage([], []), do: {:error, :missing_johannesburg_day_coverage}

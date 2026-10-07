@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-421
+430
 
 ## Files
 
@@ -41,11 +41,17 @@ Project root: `.`
 - `lib/event_sales/analytics/event_scoped_dashboard.ex`
 - `lib/event_sales/analytics/event_snapshot_refresh_fence.ex`
 - `lib/event_sales/analytics/historical_catchup_freshness_notifier.ex`
+- `lib/event_sales/analytics/historical_catchup_period_coverage_notifier.ex`
 - `lib/event_sales/analytics/hot_state_aggregator.ex`
 - `lib/event_sales/analytics/metric_rules.ex`
 - `lib/event_sales/analytics/order_processed_notifier.ex`
 - `lib/event_sales/analytics/period_bucket_rules.ex`
 - `lib/event_sales/analytics/period_comparison_reader.ex`
+- `lib/event_sales/analytics/period_coverage.ex`
+- `lib/event_sales/analytics/period_coverage_currency_resolver.ex`
+- `lib/event_sales/analytics/period_coverage_eligible_events.ex`
+- `lib/event_sales/analytics/period_coverage_materializer.ex`
+- `lib/event_sales/analytics/period_coverage_planner.ex`
 - `lib/event_sales/analytics/period_dimension_aggregator.ex`
 - `lib/event_sales/analytics/period_projection_invalidator.ex`
 - `lib/event_sales/analytics/period_projection_refresh.ex`
@@ -74,6 +80,7 @@ Project root: `.`
 - `lib/event_sales/analytics/validations/validate_dimension_source_event.ex`
 - `lib/event_sales/analytics/validations/validate_dimension_ticket_type_event.ex`
 - `lib/event_sales/analytics/validations/validate_period_bucket_contract.ex`
+- `lib/event_sales/analytics/workers/period_coverage_maintenance_worker.ex`
 - `lib/event_sales/analytics/workers/rebuild_hot_state_worker.ex`
 - `lib/event_sales/analytics/workers/refresh_snapshot_worker.ex`
 - `lib/event_sales/application.ex`
@@ -427,7 +434,9 @@ Project root: `.`
 - `test/support/mapping_setup_helpers.ex`
 - `test/support/oban_helpers.ex`
 - `test/support/period_comparison_helpers.ex`
+- `test/support/period_coverage_helpers.ex`
 - `test/support/sales_helpers.ex`
+- `test/support/stub_refresh_snapshot_worker.ex`
 - `test/support/telemetry_helpers.ex`
 - `test/support/tickera_catalog_fixtures.ex`
 - `test/support/tickera_sync_test_helpers.ex`
@@ -580,6 +589,12 @@ Project root: `.`
   - docs_count: 1
   - public_funs: `notify_terminal_success/3`
   - uses: _none_
+- `EventSales.Analytics.HistoricalCatchupPeriodCoverageNotifier` - `lib/event_sales/analytics/historical_catchup_period_coverage_notifier.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `notify_terminal_success/3`
+  - uses: _none_
 - `EventSales.Analytics.HotStateAggregator` - `lib/event_sales/analytics/hot_state_aggregator.ex`
   - moduledoc?: true
   - specs?: true
@@ -609,6 +624,36 @@ Project root: `.`
   - specs?: true
   - docs_count: 2
   - public_funs: `compare_event/4`, `load_operand_payload_for_test!/3`
+  - uses: _none_
+- `EventSales.Analytics.PeriodCoverage` - `lib/event_sales/analytics/period_coverage.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `ensure_event_buckets/3`
+  - uses: _none_
+- `EventSales.Analytics.PeriodCoverageCurrencyResolver` - `lib/event_sales/analytics/period_coverage_currency_resolver.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `currencies_for_event/1`
+  - uses: _none_
+- `EventSales.Analytics.PeriodCoverageEligibleEvents` - `lib/event_sales/analytics/period_coverage_eligible_events.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `page_event_ids/2`
+  - uses: _none_
+- `EventSales.Analytics.PeriodCoverageMaterializer` - `lib/event_sales/analytics/period_coverage_materializer.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 1
+  - public_funs: `materialize/3`
+  - uses: _none_
+- `EventSales.Analytics.PeriodCoveragePlanner` - `lib/event_sales/analytics/period_coverage_planner.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 2
+  - public_funs: `required_bucket_specs/1`, `supported_requests/0`
   - uses: _none_
 - `EventSales.Analytics.PeriodDimensionAggregator` - `lib/event_sales/analytics/period_dimension_aggregator.ex`
   - moduledoc?: true
@@ -796,6 +841,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `init/1`, `validate/3`
   - uses: `Ash.Resource.Validation`
+- `EventSales.Analytics.Workers.PeriodCoverageMaintenanceWorker` - `lib/event_sales/analytics/workers/period_coverage_maintenance_worker.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `perform/1`
+  - uses: `Oban.Worker`
 - `EventSales.Analytics.Workers.RebuildHotStateWorker` - `lib/event_sales/analytics/workers/rebuild_hot_state_worker.ex`
   - moduledoc?: true
   - specs?: false
@@ -2914,11 +2965,23 @@ Project root: `.`
   - docs_count: 6
   - public_funs: `default_coverage_identity/0`, `default_refreshed_at/0`, `create_event_bucket!/4`, `create_dimension_bucket!/5`, `insert_edge_contribution_fact!/6`, `plan_for/2`, `seed_comparison_projection!/7`, `seed_asymmetric_comparison_projection!/8`
   - uses: _none_
+- `EventSales.TestSupport.PeriodCoverageHelpers` - `test/support/period_coverage_helpers.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 1
+  - public_funs: `seed_v2_currency!/2`
+  - uses: _none_
 - `EventSales.TestSupport.SalesHelpers` - `test/support/sales_helpers.ex`
   - moduledoc?: true
   - specs?: true
   - docs_count: 1
   - public_funs: `create_source_system!/1`, `create_event!/2`, `create_ticket_type!/2`, `create_variation_ticket_type!/4`, `normalized_order_attrs_from_fixture!/2`, `create_order_from_fixture!/2`, `create_order_item_from_line!/3`, `create_mixed_event_order!/1`
+  - uses: _none_
+- `EventSales.TestSupport.StubRefreshSnapshotWorker` - `test/support/stub_refresh_snapshot_worker.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: `enqueue_event/2`, `enqueue_events/2`
   - uses: _none_
 - `EventSales.TestSupport.TelemetryHelpers` - `test/support/telemetry_helpers.ex`
   - moduledoc?: true
@@ -3129,6 +3192,7 @@ _none_
 
 ### Workers
 
+- `EventSales.Analytics.Workers.PeriodCoverageMaintenanceWorker` - `lib/event_sales/analytics/workers/period_coverage_maintenance_worker.ex`
 - `EventSales.Analytics.Workers.RebuildHotStateWorker` - `lib/event_sales/analytics/workers/rebuild_hot_state_worker.ex`
 - `EventSales.Analytics.Workers.RefreshSnapshotWorker` - `lib/event_sales/analytics/workers/refresh_snapshot_worker.ex`
 - `EventSales.Catalog.Workers.MappingChangedWorker` - `lib/event_sales/catalog/workers/mapping_changed_worker.ex`
