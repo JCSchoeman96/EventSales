@@ -63,6 +63,7 @@ defmodule EventSales.Analytics.PeriodCoverageConcurrencyTest do
       assert count > 0
 
       send(parent, :done)
+      cleanup_unboxed_event!(source, event)
     end)
 
     assert true
@@ -134,7 +135,7 @@ defmodule EventSales.Analytics.PeriodCoverageConcurrencyTest do
       reloaded = Ash.get!(EventPeriodAggregateSnapshot, zero_row.id, domain: Analytics)
       assert reloaded.projection_state == :refresh_pending
 
-      Repo.delete_all(from o in Order, where: o.woo_order_id == 90_010)
+      cleanup_unboxed_event!(source, event)
     end)
   end
 
@@ -172,7 +173,7 @@ defmodule EventSales.Analytics.PeriodCoverageConcurrencyTest do
       assert final.projection_state == :current
       assert final.gross_ticket_quantity > 0
 
-      cleanup_zero_fixture!(source, event, ticket)
+      cleanup_unboxed_event!(source, event)
     end)
   end
 
@@ -230,7 +231,7 @@ defmodule EventSales.Analytics.PeriodCoverageConcurrencyTest do
       assert final.projection_state == :current
       assert final.gross_ticket_quantity > 0
 
-      cleanup_zero_fixture!(source, event, ticket)
+      cleanup_unboxed_event!(source, event)
     end)
   end
 
@@ -297,7 +298,7 @@ defmodule EventSales.Analytics.PeriodCoverageConcurrencyTest do
       reloaded = Ash.get!(EventPeriodAggregateSnapshot, zero_row.id, domain: Analytics)
       refute reloaded.projection_state == :current and reloaded.gross_ticket_quantity == 0
 
-      cleanup_zero_fixture!(source, event, ticket)
+      cleanup_unboxed_event!(source, event)
     end)
   end
 
@@ -403,11 +404,11 @@ defmodule EventSales.Analytics.PeriodCoverageConcurrencyTest do
     {source, event, ticket, zero_row, normalized}
   end
 
-  defp cleanup_zero_fixture!(source, event, _ticket) do
+  defp cleanup_unboxed_event!(source, event) do
     event_id = Ecto.UUID.dump!(event.id)
     source_id = Ecto.UUID.dump!(source.id)
 
-    Repo.delete_all(from o in Order, where: o.woo_order_id == 90_010)
+    Repo.delete_all(from o in Order, where: o.source_system_id == ^source_id)
     Repo.delete_all(from(oi in "sales_order_items", where: oi.event_id == ^event_id))
     Repo.delete_all(from(f in "analytics_contribution_facts", where: f.event_id == ^event_id))
 
@@ -425,6 +426,11 @@ defmodule EventSales.Analytics.PeriodCoverageConcurrencyTest do
       from(r in "analytics_event_period_aggregate_snapshots", where: r.event_id == ^event_id)
     )
 
+    Repo.delete_all(
+      from(r in "ingestion_financial_reconciliation_runs", where: r.event_id == ^event_id)
+    )
+
+    Repo.delete_all(from(r in "ingestion_sync_runs", where: r.event_id == ^event_id))
     Repo.delete_all(from(tt in "catalog_ticket_types", where: tt.event_id == ^event_id))
     Repo.delete_all(from(e in "catalog_events", where: e.id == ^event_id))
     Repo.delete_all(from(s in "catalog_source_systems", where: s.id == ^source_id))
