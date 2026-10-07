@@ -95,7 +95,11 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
     if readiness.analytics_ready? do
       read_coherent_comparison(event_id, currency, plan, envelope, revenue_visible?)
     else
-      {:ok, fail_closed_envelope(envelope, readiness.blocking_reason)}
+      envelope =
+        fail_closed_envelope(envelope, readiness.blocking_reason)
+        |> redact_revenue!(revenue_visible?)
+
+      {:ok, envelope}
     end
   end
 
@@ -331,17 +335,8 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
              semantic_by_hour,
              nil
            ),
-         indexed = index_event_edge_rows(rows, edge_fragments),
-         {:ok, merged} <-
-           apply_edge_metadata_mismatch_counts(
-             indexed,
-             event_id,
-             currency,
-             edge_fragments,
-             coverage_by_hour,
-             semantic_by_hour
-           ) do
-      {:ok, finalize_event_edges(merged, edge_fragments)}
+         indexed = index_event_edge_rows(rows, edge_fragments) do
+      {:ok, finalize_event_edges(indexed, edge_fragments)}
     end
   end
 
@@ -355,98 +350,6 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
   defp zero_event_edges(edge_fragments) do
     Map.new(edge_fragments, fn fragment ->
       {edge_map_key(fragment), %{primitives: zero_primitives(), metadata_mismatch_count: 0}}
-    end)
-  end
-
-  defp apply_edge_metadata_mismatch_counts(
-         indexed,
-         event_id,
-         currency,
-         edge_fragments,
-         coverage_by_hour,
-         semantic_by_hour
-       ) do
-    case query_edge_metadata_mismatch_counts(
-           event_id,
-           currency,
-           edge_fragments,
-           coverage_by_hour,
-           semantic_by_hour
-         ) do
-      {:ok, mismatch_rows} ->
-        {:ok, merge_edge_metadata_mismatch_counts(indexed, edge_fragments, mismatch_rows)}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  defp query_edge_metadata_mismatch_counts(
-         event_id,
-         currency,
-         edge_fragments,
-         coverage_by_hour,
-         semantic_by_hour
-       ) do
-    operands = Enum.map(edge_fragments, fn f -> Atom.to_string(f.operand) end)
-    edge_indices = Enum.map(Enum.with_index(edge_fragments), fn {_, idx} -> idx end)
-    edge_starts = Enum.map(edge_fragments, & &1.edge_start_utc)
-    edge_ends = Enum.map(edge_fragments, & &1.edge_end_utc)
-
-    coverages =
-      Enum.map(edge_fragments, fn fragment ->
-        Map.fetch!(coverage_by_hour, fragment.envelope_hour_start_utc)
-      end)
-
-    semantics =
-      Enum.map(edge_fragments, fn fragment ->
-        Map.fetch!(semantic_by_hour, fragment.envelope_hour_start_utc)
-      end)
-
-    sql = """
-    SELECT
-      r.operand,
-      r.edge_start_utc,
-      r.edge_end_utc,
-      COUNT(f.id) FILTER (
-        WHERE f.coverage_identity IS DISTINCT FROM r.coverage_identity
-           OR f.semantic_version IS DISTINCT FROM r.semantic_version
-      )::bigint AS metadata_mismatch_count
-    FROM unnest($1::text[], $2::int[], $3::timestamptz[], $4::timestamptz[], $5::text[], $6::int[])
-      AS r(operand, edge_index, edge_start_utc, edge_end_utc, coverage_identity, semantic_version)
-    LEFT JOIN analytics_contribution_facts f
-      ON f.event_id = $7::uuid
-     AND f.currency = $8
-     AND f.effective_at >= r.edge_start_utc
-     AND f.effective_at < r.edge_end_utc
-    GROUP BY r.operand, r.edge_start_utc, r.edge_end_utc
-    """
-
-    params = [
-      operands,
-      edge_indices,
-      edge_starts,
-      edge_ends,
-      coverages,
-      semantics,
-      Ecto.UUID.dump!(event_id),
-      currency
-    ]
-
-    case Repo.query(sql, params) do
-      {:ok, result} -> {:ok, decode_edge_rows(result, nil)}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp merge_edge_metadata_mismatch_counts(indexed, edge_fragments, mismatch_rows) do
-    Enum.reduce(mismatch_rows, indexed, fn row, acc ->
-      fragment = find_edge_fragment!(edge_fragments, row)
-      key = {fragment.operand, fragment.edge_start_utc, fragment.edge_end_utc}
-
-      Map.update!(acc, key, fn entry ->
-        Map.put(entry, :metadata_mismatch_count, edge_metadata_mismatch_count(row))
-      end)
     end)
   end
 
@@ -1181,8 +1084,8 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
          comparable?,
          comparison_zero?
        ) do
-    current_metric = metric_value(current[:metrics] || current.metrics, metric)
-    comparison_metric = metric_value(comparison[:metrics] || comparison.metrics, metric)
+    current_metric = metric_value(operand_metrics(current), metric)
+    comparison_metric = metric_value(operand_metrics(comparison), metric)
 
     state =
       MetricRules.classify_comparison_state(%{
@@ -1225,6 +1128,13 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
   end
 
   defp atv_safe_metrics(_metric, current, comparison, state), do: {current, comparison, state}
+
+  defp operand_metrics(nil), do: nil
+
+  defp operand_metrics(%{metrics: metrics}), do: metrics
+
+  defp operand_metrics(%{} = operand),
+    do: Map.get(operand, :metrics) || Map.get(operand, "metrics")
 
   defp metric_value(nil, _metric), do: nil
   defp metric_value(metrics, metric) when is_map(metrics), do: Map.get(metrics, metric)
@@ -1295,18 +1205,14 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
       current_r = if current_readiness == :ready, do: :ready, else: :not_ready
       comparison_r = if comparison_readiness == :ready, do: :ready, else: :not_ready
 
-      zero? =
-        comparison_r == :ready and
-          comparison_grain_zero_activity?(%{primitives: comparison.primitives})
-
       comparisons =
         build_metric_comparisons(
-          %{metrics: current && current.metrics},
-          %{metrics: comparison && comparison.metrics},
+          current,
+          comparison,
           current_r,
           comparison_r,
           comparable?,
-          zero?
+          :dimension
         )
 
       %{identity: identity, metric_comparisons: comparisons}

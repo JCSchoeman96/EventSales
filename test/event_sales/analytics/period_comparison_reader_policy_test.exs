@@ -43,6 +43,7 @@ defmodule EventSales.Analytics.PeriodComparisonReaderPolicyTest do
     )
 
     %{
+      source: source,
       event: event,
       owner: owner,
       staff: staff,
@@ -102,6 +103,29 @@ defmodule EventSales.Analytics.PeriodComparisonReaderPolicyTest do
       for metric <- @quantity_metrics do
         assert row.metric_comparisons[metric].state != nil
       end
+    end
+  end
+
+  test "global analytics not ready redacts monetary comparison state for revenue-hidden actor", %{
+    source: source,
+    owner: owner
+  } do
+    event = SalesHelpers.create_event!(source, %{name: "Global not ready revenue"})
+    create_event_grant!(owner, event.id, :event_owner)
+
+    assert {:ok, result} =
+             PeriodComparisonReader.compare_event(event.id, "ZAR", :yesterday,
+               actor: owner,
+               now: @now
+             )
+
+    refute result.analytics_ready?
+    assert result.current.readiness == :not_ready
+
+    assert result.event.metric_comparisons.gross_ticket_quantity.state == :current_missing
+
+    for metric <- @monetary_metrics do
+      assert_monetary_comparison_redacted!(result.event.metric_comparisons[metric])
     end
   end
 

@@ -140,6 +140,33 @@ defmodule EventSales.TestSupport.PeriodComparisonHelpers do
     :ok
   end
 
+  @doc false
+  def seed_asymmetric_comparison_projection!(
+        event,
+        source,
+        previous_ticket,
+        current_ticket,
+        currency,
+        request,
+        now,
+        operand_attrs
+      ) do
+    {:ok, _windows, plan} = plan_for(request, now)
+    generation_id = Ecto.UUID.generate()
+
+    for operand_plan <- plan.operands do
+      {ticket, attrs} =
+        case operand_plan.operand do
+          :previous -> {previous_ticket, Map.fetch!(operand_attrs, :previous)}
+          :current -> {current_ticket, Map.fetch!(operand_attrs, :current)}
+        end
+
+      seed_operand!(event, source, ticket, currency, operand_plan, generation_id, attrs)
+    end
+
+    :ok
+  end
+
   defp seed_operand!(event, source, ticket, currency, operand_plan, generation_id, attrs) do
     primitives = Map.merge(default_primitives(), Map.take(attrs, Map.keys(default_primitives())))
 

@@ -51,6 +51,9 @@ defmodule EventSales.Analytics.Resources.AnalyticsContributionFact do
       index [:contribution_kind, :source_contribution_id],
         unique: true,
         name: "analytics_contribution_facts_source_identity_uidx"
+
+      index [:event_id, :currency, :effective_at],
+        name: "analytics_contribution_facts_event_currency_effective_at_idx"
     end
 
     check_constraints do

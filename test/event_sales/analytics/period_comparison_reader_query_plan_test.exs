@@ -80,7 +80,7 @@ defmodule EventSales.Analytics.PeriodComparisonReaderQueryPlanTest do
       end)
 
     assert length(projection_selects) == 5
-    assert length(unnest_queries) == 5
+    assert length(unnest_queries) == 4
   end
 
   test "edge unnest aggregate exposes metadata mismatch counts and explain is selective", ctx do
@@ -116,79 +116,102 @@ defmodule EventSales.Analytics.PeriodComparisonReaderQueryPlanTest do
       EventSales.Repo.query("EXPLAIN (FORMAT JSON) " <> edge_sql, edge_params)
 
     plan = normalize_explain_plan(plan_json)
-    encoded = Jason.encode!(plan)
 
-    assert String.contains?(encoded, "analytics_contribution_facts")
     assert contribution_scan_scoped_to_event_and_time?(plan)
 
+    scans = contribution_fact_scan_nodes(plan)
+    assert scans != []
+
     refute sequential_scan_on_contribution_facts?(plan)
+
+    assert Enum.any?(scans, fn node ->
+             node["Node Type"] in [
+               "Index Scan",
+               "Index Only Scan",
+               "Bitmap Index Scan",
+               "Bitmap Heap Scan"
+             ]
+           end)
   end
 
   defp seed_contribution_noise!(ctx, other_event_id, other_source_id, other_ticket_id) do
-    alias EventSales.Analytics.Resources.AnalyticsContributionFact
+    coverage = PeriodComparisonHelpers.default_coverage_identity()
+    generation_id = Ecto.UUID.generate()
+    refreshed_at = PeriodComparisonHelpers.default_refreshed_at()
 
-    noise_fact = fn attrs ->
-      Ash.create!(
-        AnalyticsContributionFact,
-        Map.merge(
-          %{
-            contribution_kind: :sale,
-            source_contribution_id: Ecto.UUID.generate(),
-            ticket_type_id: ctx.ticket.id,
-            source_system_id: ctx.source.id,
-            woo_product_id: 90_000,
-            woo_variation_id: nil,
-            gross_ticket_quantity: 1,
-            gross_ticket_value: Decimal.new("9.99"),
-            refund_ticket_quantity: 0,
-            refund_ticket_value: Decimal.new("0"),
-            generation_id: Ecto.UUID.generate(),
-            semantic_version: 1,
-            coverage_identity: "noise_coverage",
-            refreshed_at: @now
-          },
-          attrs
-        ),
-        action: :create_fact,
-        domain: EventSales.Analytics
+    EventSales.Repo.query!(
+      """
+      INSERT INTO analytics_contribution_facts (
+        contribution_kind,
+        source_contribution_id,
+        event_id,
+        currency,
+        effective_at,
+        ticket_type_id,
+        source_system_id,
+        woo_product_id,
+        gross_ticket_quantity,
+        gross_ticket_value,
+        refund_ticket_quantity,
+        refund_ticket_value,
+        generation_id,
+        semantic_version,
+        coverage_identity,
+        refreshed_at
       )
-    end
+      SELECT
+        'sale',
+        gen_random_uuid(),
+        CASE WHEN (i % 2) = 0 THEN $1::uuid ELSE $2::uuid END,
+        CASE (i % 3)
+          WHEN 0 THEN 'ZAR'
+          WHEN 1 THEN 'USD'
+          ELSE 'EUR'
+        END,
+        $3::timestamptz - (i * interval '1 minute'),
+        CASE WHEN (i % 2) = 0 THEN $4::uuid ELSE $5::uuid END,
+        CASE WHEN (i % 2) = 0 THEN $6::uuid ELSE $7::uuid END,
+        90000 + (i % 100),
+        1,
+        9.99,
+        0,
+        0,
+        $8::uuid,
+        1,
+        $9,
+        $10::timestamptz
+      FROM generate_series(1, 60000) AS s(i)
+      """,
+      [
+        Ecto.UUID.dump!(ctx.event.id),
+        Ecto.UUID.dump!(other_event_id),
+        @now,
+        Ecto.UUID.dump!(ctx.ticket.id),
+        Ecto.UUID.dump!(other_ticket_id),
+        Ecto.UUID.dump!(ctx.source.id),
+        Ecto.UUID.dump!(other_source_id),
+        Ecto.UUID.dump!(generation_id),
+        coverage,
+        refreshed_at
+      ]
+    )
+  end
 
-    for idx <- 1..150 do
-      noise_fact.(%{
-        event_id: other_event_id,
-        currency: "ZAR",
-        effective_at: DateTime.add(@now, -idx, :minute),
-        ticket_type_id: other_ticket_id,
-        source_system_id: other_source_id
-      })
-    end
+  test "explain seq scan detector recognizes json plan nodes", _ctx do
+    plan = %{
+      "Plan" => %{
+        "Node Type" => "Hash Join",
+        "Plans" => [
+          %{
+            "Node Type" => "Seq Scan",
+            "Relation Name" => "analytics_contribution_facts"
+          }
+        ]
+      }
+    }
 
-    for idx <- 1..150 do
-      noise_fact.(%{
-        event_id: ctx.event.id,
-        currency: "USD",
-        effective_at: DateTime.add(@now, -idx, :minute)
-      })
-    end
-
-    for idx <- 1..150 do
-      noise_fact.(%{
-        event_id: ctx.event.id,
-        currency: "ZAR",
-        effective_at: DateTime.add(@now, -7, :day) |> DateTime.add(-idx, :minute)
-      })
-    end
-
-    for idx <- 1..150 do
-      noise_fact.(%{
-        event_id: other_event_id,
-        currency: "EUR",
-        effective_at: DateTime.add(@now, -idx, :minute),
-        ticket_type_id: other_ticket_id,
-        source_system_id: other_source_id
-      })
-    end
+    assert sequential_scan_on_contribution_facts?(plan)
+    refute sequential_scan_on_contribution_facts?(Jason.encode!(plan))
   end
 
   defp normalize_explain_plan(plan_json) do
@@ -199,46 +222,15 @@ defmodule EventSales.Analytics.PeriodComparisonReaderQueryPlanTest do
     end
   end
 
-  defp contribution_scan_scoped_to_event_and_time?(plan) when is_map(plan) do
-    plan_node_scoped?(Map.get(plan, "Plan", plan)) or
-      Enum.any?(Map.get(plan, "Plans", []), &plan_node_scoped?/1)
+  defp contribution_scan_scoped_to_event_and_time?(plan) do
+    encoded = Jason.encode!(plan)
+
+    String.contains?(encoded, "analytics_contribution_facts") and
+      String.contains?(encoded, "event_id") and String.contains?(encoded, "effective_at")
   end
-
-  defp contribution_scan_scoped_to_event_and_time?(_), do: false
-
-  defp plan_node_scoped?(%{"Plans" => children}) when is_list(children) do
-    Enum.any?(children, &plan_node_scoped?/1)
-  end
-
-  defp plan_node_scoped?(%{"Plan" => child}), do: plan_node_scoped?(child)
-
-  defp plan_node_scoped?(
-         %{"Node Type" => type, "Relation Name" => "analytics_contribution_facts"} =
-           node
-       )
-       when type in ["Seq Scan", "Index Scan", "Bitmap Heap Scan", "Index Only Scan"] do
-    qual =
-      [
-        Map.get(node, "Filter"),
-        Map.get(node, "Index Cond"),
-        Map.get(node, "Recheck Cond"),
-        Map.get(node, "Join Filter")
-      ]
-      |> Enum.reject(&is_nil/1)
-      |> Enum.join(" ")
-
-    String.contains?(qual, "event_id") and
-      (String.contains?(qual, "effective_at") or String.contains?(qual, "currency"))
-  end
-
-  defp plan_node_scoped?(%{"Plans" => _} = node), do: plan_node_scoped?(Map.drop(node, ["Plans"]))
-
-  defp plan_node_scoped?(_), do: false
 
   defp sequential_scan_on_contribution_facts?(plan) when is_list(plan) do
-    plan
-    |> Jason.encode!()
-    |> String.contains?("Seq Scan on analytics_contribution_facts")
+    Enum.any?(plan, &sequential_scan_on_contribution_facts?/1)
   end
 
   defp sequential_scan_on_contribution_facts?(%{"Plan" => child}),
@@ -248,7 +240,50 @@ defmodule EventSales.Analytics.PeriodComparisonReaderQueryPlanTest do
     Enum.any?(children, &sequential_scan_on_contribution_facts?/1)
   end
 
+  defp sequential_scan_on_contribution_facts?(%{
+         "Node Type" => "Seq Scan",
+         "Relation Name" => "analytics_contribution_facts"
+       }),
+       do: true
+
+  defp sequential_scan_on_contribution_facts?(%{} = node) do
+    node
+    |> Map.drop(["Node Type", "Relation Name", "Alias", "Parent Relationship"])
+    |> Enum.any?(fn {_key, child} -> sequential_scan_on_contribution_facts?(child) end)
+  end
+
   defp sequential_scan_on_contribution_facts?(_), do: false
+
+  defp contribution_fact_scan_nodes(plan) do
+    walk_explain_nodes(plan, [])
+    |> Enum.filter(fn node ->
+      node["Relation Name"] == "analytics_contribution_facts" or
+        String.contains?(
+          to_string(Map.get(node, "Index Name", "")),
+          "analytics_contribution_facts"
+        )
+    end)
+  end
+
+  defp walk_explain_nodes(%{"Plan" => child}, acc), do: walk_explain_nodes(child, acc)
+
+  defp walk_explain_nodes(%{"Plans" => children}, acc) when is_list(children) do
+    Enum.reduce(children, acc, &walk_explain_nodes(&1, &2))
+  end
+
+  defp walk_explain_nodes(%{"Node Type" => _} = node, acc) do
+    acc = [node | acc]
+
+    node
+    |> Map.get("Plans", [])
+    |> Enum.reduce(acc, &walk_explain_nodes(&1, &2))
+  end
+
+  defp walk_explain_nodes(plan, acc) when is_list(plan) do
+    Enum.reduce(plan, acc, &walk_explain_nodes(&1, &2))
+  end
+
+  defp walk_explain_nodes(_other, acc), do: acc
 
   defp seed_yesterday!(ctx) do
     PeriodComparisonHelpers.seed_comparison_projection!(

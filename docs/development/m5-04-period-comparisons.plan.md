@@ -18,16 +18,20 @@
 - `v11` records the verified JC-317 merge and JC-319 dimensional period population and reconciliation.
 - `v12` — JC-321 M5-04F `PeriodComparisonReader` and `PeriodReadPlan`, bounded unnest edge reads, policy/redaction tests, and query-plan evidence.
 - `v13` — JC-321 review correction: fixed projection scope AND, readiness envelope states, operand metadata coherence, edge envelope coverage, edge metadata fail-closed, decode fix, interior-hour plan fix, ATV nil semantics, EXPLAIN evidence, isolation/RR tests, explicit PostgreSQL `SET TRANSACTION` coherent-read preparation (`prepare_coherent_transaction!/0`), project index regeneration.
+- `v14` — JC-321 S2 review correction: dimensional zero-activity operand maps, single event-edge unnest query, truthful JSON EXPLAIN scan detection, `(event_id, currency, effective_at)` contribution index, global not-ready monetary redaction.
 
-**Plan version:** `v13`
+**Plan version:** `v14`
 
 ```text
-PLAN_VERSION = v13
+PLAN_VERSION = v14
+REAUTHORIZED_BASE_SHA = 47a0d2544f836cac2920ba592c1b0abdc1778d32
+REAUTHORIZED_BASE_TREE = c709ef307aa31085bff9361133e1b5fec649f98f
+BASE_MOVEMENT = PR #297 / Ash CVE security authority
 ```
 
-**Status:** JC-319 M5-04E merged; JC-321 M5-04F reader correction pass in review (do not merge until CI green)
-**Last updated:** 2026-10-04
-**Change summary (v13):** Records PR #295 review fixes (S1 isolation, F correctness gates, truthful edge EXPLAIN, PostgreSQL repeatable-read preparation before projection statements, plan v13 metadata); M5-04F durable authority remains pending merge.
+**Status:** JC-319 M5-04E merged; JC-321 M5-04F reader S2 correction pass in review (do not merge until exact-head CI green)
+**Last updated:** 2026-10-07
+**Change summary (v14):** Records PR #295 S2 fixes (dimensional `new_activity`, duplicate edge metadata query removal, EXPLAIN/index evidence, global not-ready revenue redaction); M5-04F durable authority remains pending merge.
 
 **Goal:** Define a canonical, currency-safe period comparison read model for event and required dimensional grains without promoting the legacy daily-v1 snapshot or inventing comparison semantics.
 
@@ -1591,8 +1595,12 @@ ATV_UNDEFINED_RULE = nil ATV operands => nil state and nil deltas (not :availabl
 FIXED_EVENT_QUERY_COUNT = 1
 DIMENSION_COVERAGE_QUERY_COUNT = 1
 DIMENSION_INTERIOR_QUERY_COUNT = 3
-EDGE_EVENT_QUERY_COUNT = 0 (yesterday) | 2 (aggregate + metadata mismatch when edge fragments exist)
-EDGE_DIMENSION_QUERY_COUNT = 0 (yesterday) | 3 (when edge fragments exist)
+EDGE_EVENT_QUERY_COUNT = 0 (no edge fragments) | 1 (single aggregate when edge fragments exist)
+EDGE_DIMENSION_QUERY_COUNT = 0 (no edge fragments) | 3 (when edge fragments exist)
+MAX_EDGE_UNNEST_QUERY_COUNT = 4
+DIMENSION_COMPARISON_ZERO_ACTIVITY_RULE = all four additive dimensional primitives via full operand maps
+DIMENSION_READY_ZERO_FILL_STATE_RULE = zero-filled READY previous grain + positive current => new_activity
+GLOBAL_NOT_READY_REVENUE_REDACTION = monetary values/deltas/states all nil when revenue hidden
 
 REVENUE_REDACTION_RULE = Policies.can_view_revenue?/2 hides all monetary metrics, deltas, and monetary comparison states
 
@@ -1601,8 +1609,9 @@ COHERENT_TRANSACTION_OPTS_ALONE = NOT sufficient PostgreSQL isolation authority 
 COHERENT_TRANSACTION_POSTGRES_ISOLATION = explicit SET TRANSACTION ISOLATION LEVEL REPEATABLE READ before first projection statement when use_repeatable_read_isolation?/0
 READER_WRITER_FENCE = NONE (reader does not acquire writer advisory lock; MVCC snapshot isolation is the coherence mechanism)
 
-EDGE_INDEX_DECISION = NONE (fixture EXPLAIN on event_id + currency + effective_at range showed selective plan without new index)
-EDGE_INDEX_BEFORE_EXPLAIN = captured in test/event_sales/analytics/period_comparison_reader_query_plan_test.exs (EXPLAIN FORMAT JSON on captured edge SQL)
-EDGE_INDEX_AFTER_EXPLAIN = not applicable (no index added)
-EDGE_INDEX_EVIDENCE = period_comparison_reader_query_plan_test.exs EXPLAIN asserts analytics_contribution_facts + event_id in plan JSON
+EDGE_INDEX_DECISION = ADD analytics_contribution_facts_event_currency_effective_at_idx on (event_id, currency, effective_at)
+EDGE_INDEX_BEFORE_EXPLAIN = Seq Scan on analytics_contribution_facts under small-table fixture (corrected JSON walker; no rendered phrase dependency)
+EDGE_INDEX_AFTER_EXPLAIN = Bitmap/Index access on analytics_contribution_facts with event_id + currency index condition and join time filter
+EDGE_INDEX = (event_id, currency, effective_at)
+EDGE_QUERY_PLAN_VERDICT = selective index-backed edge unnest join after index + ANALYZE on large noise fixture
 ```
