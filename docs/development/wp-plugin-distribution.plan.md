@@ -129,11 +129,11 @@ Integration Health must remain able to report `ABSENT` / `INACTIVE` for siblings
 
 ## Upgrade / replace behaviour
 
-`wp plugin install <zip> --force` replaces plugin files only. Order-index custom tables and READY manifests must survive; activation remains additive/idempotent (no destructive schema rollback in this slice).
+WordPress `wp plugin install <zip> --force` replaces the destination contents recursively. The EventSales local certification installer validates all four destinations before replacement and refuses symlinked destinations; use that guarded installer for local package certification. Order-index custom tables and READY manifests must survive; activation remains additive/idempotent (no destructive schema rollback in this slice).
 
 ## Rollback
 
-Restore prior ZIP artifacts and reinstall with `--force`. **Warning:** order-index plugin code rollback is not database rollback — do not drop manifest tables or mutate READY state.
+Restore prior ZIP artifacts and reinstall them through `scripts/install_wordpress_plugins_local.sh`. Do not bypass the local installer with direct WP-CLI force installation. **Warning:** order-index plugin code rollback is not database rollback — do not drop manifest tables or mutate READY state.
 
 ## Site Health certification
 
