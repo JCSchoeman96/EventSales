@@ -20,22 +20,61 @@
 - `v13` — JC-321 review correction: fixed projection scope AND, readiness envelope states, operand metadata coherence, edge envelope coverage, edge metadata fail-closed, decode fix, interior-hour plan fix, ATV nil semantics, EXPLAIN evidence, isolation/RR tests, explicit PostgreSQL `SET TRANSACTION` coherent-read preparation (`prepare_coherent_transaction!/0`), project index regeneration.
 - `v14` — JC-321 S2 review correction: dimensional zero-activity operand maps, single event-edge unnest query, truthful JSON EXPLAIN scan detection, `(event_id, currency, effective_at)` contribution index, global not-ready monetary redaction.
 - `v15` — JC-321 final integration cleanup: align M5-04F implementation-record base with v14 header (`eb0991a` / `835b423a`); restore `mix.lock` to current `main` (no unrelated `ex_ast` / `finch` / `req` drift).
+- `v16` — JC-325 M5-04G1 period coverage materialization and catch-up closure (JC-321 merged; G2 not authorized).
 
-**Plan version:** `v15`
+**Plan version:** `v16`
 
 ```text
-PLAN_VERSION = v15
-REAUTHORIZED_BASE_SHA = eb0991a6198a7ef9484b3de46b7ac2545f828542
-REAUTHORIZED_BASE_TREE = 835b423a6798fff22caf82890680c126d10ef238
-BASE_MOVEMENT = PR #297 Ash CVE + PR #296 WordPress release certification merge
-M5_04F_STATUS = IN_REVIEW
-M5_04F_DURABLE_AUTHORITY = PENDING_MERGE
-M5_04G_AUTHORIZED = NO
+PLAN_VERSION = v16
+JC_321_STATUS = MERGED
+JC_321_MERGE_SHA = 4f35f5ed81324058e3400752c514b144a7cc5c99
+JC_321_MERGE_TREE = 3f0a6250299a67ae3379cfb79705fb2ac1ad6957
+M5_04F_DURABLE_AUTHORITY = YES
+M5_04G_AUTHORIZED = YES
+M5_04G1_STATUS = IN_PROGRESS
+M5_04G1_DURABLE_AUTHORITY = PENDING_MERGE
+M5_04G2_AUTHORIZED = NO
+JC_325_STATUS = IN_REVIEW
+
+ZERO_BUCKET_GAP_REPRODUCED = YES
+MOVING_HORIZON_GAP_REPRODUCED = YES
+PERIOD_COVERAGE_PLANNER = lib/event_sales/analytics/period_coverage_planner.ex
+PLANNER_SOURCE = TimeRules.comparison_windows/3 -> PeriodReadPlan -> union + Johannesburg envelopes
+COVERAGE_CURRENCY_AUTHORITY = EventAggregateSnapshot snapshot_version 2 currencies
+COVERAGE_MATERIALIZER = lib/event_sales/analytics/period_coverage_materializer.ex
+COVERAGE_INSERT_QUERY_COUNT = 1 (per chunk; 3000-row chunks for 3-currency safety)
+TERMINAL_CATCHUP_COVERAGE_TRIGGER = HistoricalCatchupPeriodCoverageNotifier post-commit
+MOVING_HORIZON_TRIGGER = PeriodCoverageMaintenanceWorker Oban cron 5 * * * *
+HOURLY_CRON_REQUIRED = YES
+MAX_REQUIRED_BUCKET_IDENTITIES = 1502
+
+ELIGIBLE_EVENT_AUTHORITY = PeriodCoverageEligibleEvents SQL selects bounded newest-run/reconciliation candidates; HistoricalCoverageEvidence.certified?/1 is canonical evidence validator; raw paging cursor advances on candidate page (not only accepted event ids)
+ELIGIBLE_EVENT_QUERY_PLAN = test/event_sales/analytics/period_coverage_query_plan_test.exs EXPLAIN (FORMAT JSON)
+
+JHB_ENVELOPE_QUERY_BOUND = PeriodProjectionRefresh.current_johannesburg_envelope_query/2 unnest identity match
+JHB_ENVELOPE_LOOKUP = read_current_johannesburg_envelopes uses bounded query only
+JHB_HISTORY_APP_FILTERING = NO (no load-all-CURRENT-then-filter)
+
+TERMINAL_COVERAGE_ANCHOR = opts[:now] / DateTime.utc_now post-commit
+SOURCE_OBSERVED_ANCHOR_USED_FOR_COVERAGE = NO
+
+SOURCE_MUTATION_RACE = PASS (period_coverage_concurrency_test.exs orderings A/B/C)
+ROLLING_30_ZERO_COVERAGE_READY = PASS (period_coverage_closure_test.exs)
+YESTERDAY_ZERO_COVERAGE_READY = PASS (period_coverage_closure_test.exs)
+
+THREE_CURRENCY_MATERIALIZATION = PASS (ZAR+USD+EUR; chunked insert_all)
+MATERIALIZER_INSERT_STRATEGY = insert_all ON CONFLICT DO NOTHING chunks of 3000 rows
+
+BACKFILL_REFRESH_CHURN_EVIDENCE = HistoricalCatchupExecutionTest real OrderUpserter + injected snapshot_refresh_scheduler counter (see multi-page terminal scheduler test; not Upserter stub call counts)
+
+REDIS_DECISION = NONE
+CACHE_DECISION = NONE
+PUBSUB_DECISION = DEFERRED_TO_G2
 ```
 
-**Status:** JC-319 M5-04E merged; JC-321 M5-04F reader final integration cleanup in review (do not merge until exact-head CI green)
+**Status:** JC-321 M5-04F merged (PR #295); JC-325 M5-04G1 period coverage in progress; M5-04G2 reconciliation/load certification not authorized.
 **Last updated:** 2026-10-07
-**Change summary (v15):** Canonical plan authority alignment and dependency-lock hygiene for PR #295; M5-04F durable authority remains pending merge.
+**Change summary (v16):** Record JC-321 merge authority, reproduced zero/moving-horizon coverage gaps, G1 coverage planner/materializer/catch-up/maintenance design, and JC-325 review corrections (eligible-event SQL authority, bounded JHB lookup, terminal wall-clock anchor, concurrency/closure/churn evidence).
 
 **Goal:** Define a canonical, currency-safe period comparison read model for event and required dimensional grains without promoting the legacy daily-v1 snapshot or inventing comparison semantics.
 

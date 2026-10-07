@@ -188,6 +188,55 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     end
   end
 
+  defmodule PeriodCoverageNotifierRecorder do
+    alias EventSales.Repo
+
+    def child_spec(opts), do: %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}}
+
+    def start_link(_opts),
+      do: Agent.start_link(fn -> %{calls: [], response: :ok} end, name: __MODULE__)
+
+    def reset!, do: Agent.update(__MODULE__, fn _ -> %{calls: [], response: :ok} end)
+
+    def calls, do: Agent.get(__MODULE__, &Enum.reverse(&1.calls))
+
+    def notify_terminal_success(run, cursor, opts) do
+      in_transaction? = Repo.in_transaction?()
+      captured_now = Keyword.get(opts, :now, DateTime.utc_now())
+
+      Agent.update(__MODULE__, fn state ->
+        %{
+          state
+          | calls: [{run, cursor, in_transaction?, captured_now} | state.calls]
+        }
+      end)
+
+      :ok
+    end
+  end
+
+  defmodule SnapshotRefreshSchedulerRecorder do
+    def child_spec(opts), do: %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}}
+
+    def start_link(_opts),
+      do: Agent.start_link(fn -> %{count: 0, event_sets: []} end, name: __MODULE__)
+
+    def reset!, do: Agent.update(__MODULE__, fn _ -> %{count: 0, event_sets: []} end)
+
+    def record(event_ids) do
+      Agent.update(__MODULE__, fn state ->
+        %{
+          count: state.count + 1,
+          event_sets: [event_ids | state.event_sets]
+        }
+      end)
+
+      :ok
+    end
+
+    def state, do: Agent.get(__MODULE__, & &1)
+  end
+
   defmodule FreshnessNotifierRecorder do
     alias EventSales.Repo
 
@@ -220,12 +269,14 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     start_supervised!(Upserter)
     start_supervised!(RefundSync)
     start_supervised!(FreshnessNotifierRecorder)
+    start_supervised!(PeriodCoverageNotifierRecorder)
     CatchupClient.reset!()
     WooClient.reset!()
     Selector.reset!()
     Upserter.reset!()
     RefundSync.reset!()
     FreshnessNotifierRecorder.reset!()
+    PeriodCoverageNotifierRecorder.reset!()
 
     source = SalesHelpers.create_source_system!(%{base_url: @source_url})
 
@@ -502,6 +553,90 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     assert [%{woo_order_id: "43", order_calls_at_sync: 1}] = RefundSync.calls()
     assert current_cursor(cursor).status == :done
     assert current_run(run).status == :completed
+  end
+
+  test "multi-page terminal records post-commit coverage notifier and churn counters", %{
+    run: run,
+    cursor: cursor
+  } do
+    CatchupClient.enqueue!(page(["42"], has_more: true, next_cursor: "u-next.cursor"))
+    WooClient.put_order!(42, {:ok, order_payload(42)})
+    Selector.set_lines!([])
+
+    assert {:continue, _, _} = run_step(run, cursor)
+
+    CatchupClient.enqueue!(
+      page(["43"], has_more: false, terminal_evidence: "u-churn-terminal-proof")
+    )
+
+    WooClient.put_order!(43, {:ok, order_payload(43)})
+    Selector.set_lines!([])
+
+    assert :ok = run_step(run, current_cursor(cursor))
+
+    assert length(Upserter.calls()) == 2
+    assert current_cursor(cursor).page == 3
+
+    coverage_calls = PeriodCoverageNotifierRecorder.calls()
+    assert length(coverage_calls) == 1
+
+    {_run, _cursor, in_transaction?, captured_now} = hd(coverage_calls)
+    refute in_transaction?
+    assert %DateTime{} = captured_now
+
+    assert [{notified_run, notified_cursor, false}] = FreshnessNotifierRecorder.calls()
+    assert notified_run.status == :completed
+    assert notified_cursor.metadata["historical_catchup"]["state"] == "catchup_terminal"
+
+    backfill_order_count = length(Upserter.calls())
+    backfill_page_count = current_cursor(cursor).page - 1
+
+    assert backfill_order_count == 2
+    assert backfill_page_count == 2
+  end
+
+  test "multi-page terminal measures real snapshot refresh scheduler enqueue attempts", %{
+    run: run,
+    cursor: cursor,
+    event: event
+  } do
+    start_supervised!(SnapshotRefreshSchedulerRecorder)
+    SnapshotRefreshSchedulerRecorder.reset!()
+
+    SalesHelpers.create_variation_ticket_type!(event, 501, 601)
+    line = woo_line(1)
+
+    upserter_opts = [snapshot_refresh_scheduler: &SnapshotRefreshSchedulerRecorder.record/1]
+
+    CatchupClient.enqueue!(page(["42"], has_more: true, next_cursor: "u-next.cursor"))
+    WooClient.put_order!(42, {:ok, order_payload(42) |> Map.put("line_items", [line])})
+    Selector.set_lines!([line])
+
+    assert {:continue, _, _} =
+             run_step(run, cursor,
+               order_upserter: OrderUpserter,
+               order_upserter_opts: upserter_opts
+             )
+
+    CatchupClient.enqueue!(
+      page(["43"], has_more: false, terminal_evidence: "u-churn-real-terminal")
+    )
+
+    WooClient.put_order!(43, {:ok, order_payload(43) |> Map.put("line_items", [woo_line(2)])})
+    Selector.set_lines!([woo_line(2)])
+
+    assert :ok =
+             run_step(run, cursor,
+               order_upserter: OrderUpserter,
+               order_upserter_opts: upserter_opts
+             )
+
+    scheduler = SnapshotRefreshSchedulerRecorder.state()
+
+    assert Upserter.calls() == []
+    assert scheduler.count == 2
+    assert Enum.all?(scheduler.event_sets, fn ids -> ids == [event.id] end)
+    refute scheduler.count == length(Upserter.calls())
   end
 
   test "empty explicit terminal page completes without a Woo order GET", %{
@@ -1141,6 +1276,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
       order_upserter: Upserter,
       order_refund_sync: RefundSync,
       historical_catchup_freshness_notifier: FreshnessNotifierRecorder,
+      historical_catchup_period_coverage_notifier: PeriodCoverageNotifierRecorder,
       now: fn -> @now end
     ]
   end
@@ -1187,10 +1323,27 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
   defp order_payload(id) do
     %{
       "id" => id,
+      "status" => "completed",
+      "currency" => "ZAR",
+      "total" => "100.00",
       "date_created_gmt" => "2026-08-04T10:00:00Z",
       "date_modified_gmt" => "2026-08-04T10:00:00Z",
+      "date_paid_gmt" => "2026-08-04T10:00:00Z",
+      "date_completed_gmt" => "2026-08-04T10:00:00Z",
       "refunds" => [],
       "line_items" => []
+    }
+  end
+
+  defp woo_line(line_id) do
+    %{
+      "id" => line_id,
+      "product_id" => 501,
+      "variation_id" => 601,
+      "quantity" => 1,
+      "subtotal" => "100.00",
+      "total" => "100.00",
+      "meta_data" => [%{"key" => "tickera_event_id", "value" => "805001"}]
     }
   end
 
