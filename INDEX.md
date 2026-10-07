@@ -2911,8 +2911,8 @@ Project root: `.`
 - `EventSales.TestSupport.PeriodComparisonHelpers` - `test/support/period_comparison_helpers.ex`
   - moduledoc?: true
   - specs?: false
-  - docs_count: 5
-  - public_funs: `default_coverage_identity/0`, `default_refreshed_at/0`, `create_event_bucket!/4`, `create_dimension_bucket!/5`, `insert_edge_contribution_fact!/6`, `plan_for/2`, `seed_comparison_projection!/7`
+  - docs_count: 6
+  - public_funs: `default_coverage_identity/0`, `default_refreshed_at/0`, `create_event_bucket!/4`, `create_dimension_bucket!/5`, `insert_edge_contribution_fact!/6`, `plan_for/2`, `seed_comparison_projection!/7`, `seed_asymmetric_comparison_projection!/8`
   - uses: _none_
 - `EventSales.TestSupport.SalesHelpers` - `test/support/sales_helpers.ex`
   - moduledoc?: true

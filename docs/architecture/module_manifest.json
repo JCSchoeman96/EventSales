@@ -9630,7 +9630,7 @@
       ]
     },
     {
-      "docs_count": 5,
+      "docs_count": 6,
       "moduledoc?": true,
       "name": "EventSales.TestSupport.PeriodComparisonHelpers",
       "parse_error": null,
@@ -9663,6 +9663,10 @@
         {
           "arity": 7,
           "name": "seed_comparison_projection!"
+        },
+        {
+          "arity": 8,
+          "name": "seed_asymmetric_comparison_projection!"
         }
       ],
       "specs?": false,
