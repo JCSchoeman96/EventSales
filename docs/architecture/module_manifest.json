@@ -9734,7 +9734,7 @@
       "uses": []
     },
     {
-      "docs_count": 25,
+      "docs_count": 26,
       "moduledoc?": true,
       "name": "EventSales.TestSupport.M5_04PeriodCertificationHelpers",
       "parse_error": null,
@@ -9835,6 +9835,10 @@
         {
           "arity": 1,
           "name": "period_bucket_semantic_fingerprint"
+        },
+        {
+          "arity": 2,
+          "name": "cleanup_unboxed_certification_fixture!"
         },
         {
           "arity": 0,

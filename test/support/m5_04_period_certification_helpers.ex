@@ -26,6 +26,9 @@ defmodule EventSales.TestSupport.M5_04PeriodCertificationHelpers do
   alias EventSales.TestSupport.M5_04PeriodRawOracle
   alias EventSales.TestSupport.PeriodCoverageHelpers
   alias EventSales.TestSupport.SalesHelpers
+  alias EventSales.TestSupport.UnboxedPostgres
+
+  import Ecto.Query
 
   @comparison_metrics [
     :gross_ticket_quantity,
@@ -538,6 +541,74 @@ defmodule EventSales.TestSupport.M5_04PeriodCertificationHelpers do
 
     {:ok, summary} = MetricRules.financial_summary(currency, primitives, 0)
     summary
+  end
+
+  # Deletes durable rows written through UnboxedPostgres (outside the SQL sandbox owner).
+  @doc false
+  def cleanup_unboxed_certification_fixture!(event_id, source_id) do
+    event_id_bin = Ecto.UUID.dump!(event_id)
+    source_id_bin = Ecto.UUID.dump!(source_id)
+    {:ok, event_id_str} = Ecto.UUID.cast(event_id)
+
+    UnboxedPostgres.with_connection(fn ->
+      order_ids =
+        from(o in "sales_orders", where: o.source_system_id == ^source_id_bin, select: o.id)
+
+      Repo.delete_all(
+        from(rl in "sales_refund_lines",
+          join: r in "sales_refunds",
+          on: rl.refund_id == r.id,
+          where: r.order_id in subquery(order_ids)
+        )
+      )
+
+      Repo.delete_all(from(r in "sales_refunds", where: r.order_id in subquery(order_ids)))
+      Repo.delete_all(from(oi in "sales_order_items", where: oi.event_id == ^event_id_bin))
+      Repo.delete_all(from(o in "sales_orders", where: o.source_system_id == ^source_id_bin))
+
+      Repo.delete_all(
+        from(j in "oban_jobs",
+          where: fragment("?->>'event_id' = ?", j.args, ^event_id_str)
+        )
+      )
+
+      Repo.delete_all(
+        from(f in "analytics_contribution_facts", where: f.event_id == ^event_id_bin)
+      )
+
+      Repo.delete_all(
+        from(s in "analytics_event_dimension_period_aggregate_snapshots",
+          where: s.event_id == ^event_id_bin
+        )
+      )
+
+      Repo.delete_all(
+        from(s in "analytics_event_dimension_aggregate_snapshots",
+          where: s.event_id == ^event_id_bin
+        )
+      )
+
+      Repo.delete_all(
+        from(s in "analytics_event_period_aggregate_snapshots",
+          where: s.event_id == ^event_id_bin
+        )
+      )
+
+      Repo.delete_all(
+        from(s in "analytics_event_aggregate_snapshots", where: s.event_id == ^event_id_bin)
+      )
+
+      Repo.delete_all(
+        from(r in "ingestion_financial_reconciliation_runs", where: r.event_id == ^event_id_bin)
+      )
+
+      Repo.delete_all(from(r in "ingestion_sync_runs", where: r.event_id == ^event_id_bin))
+      Repo.delete_all(from(tt in "catalog_ticket_types", where: tt.event_id == ^event_id_bin))
+      Repo.delete_all(from(e in "catalog_events", where: e.id == ^event_id_bin))
+      Repo.delete_all(from(s in "catalog_source_systems", where: s.id == ^source_id_bin))
+    end)
+
+    :ok
   end
 
   @doc false

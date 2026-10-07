@@ -32,27 +32,31 @@ defmodule EventSales.TestSupport.M5_04PeriodLoadHarness do
     fixture = build_fixture!(now)
     telemetry = start_telemetry!()
 
-    reader_results =
-      for request <- @requests,
-          concurrency <- cohorts do
-        measure_reader_cohort(fixture, request, concurrency, samples)
-      end
+    try do
+      reader_results =
+        for request <- @requests,
+            concurrency <- cohorts do
+          measure_reader_cohort(fixture, request, concurrency, samples)
+        end
 
-    memory = measure_memory_boundedness!(fixture, samples)
-    rebuild = measure_rebuild_tiers!(fixture)
+      memory = measure_memory_boundedness!(fixture, samples)
+      rebuild = measure_rebuild_tiers!(fixture)
 
-    telemetry_stats = stop_telemetry!(telemetry)
+      telemetry_stats = stop_telemetry!(telemetry)
 
-    %{
-      pool_size: pool_size,
-      samples_per_cohort: samples,
-      concurrency_cohorts: cohorts,
-      reader_results: reader_results,
-      memory: memory,
-      rebuild: rebuild,
-      telemetry: telemetry_stats
-    }
-    |> print_evidence!()
+      %{
+        pool_size: pool_size,
+        samples_per_cohort: samples,
+        concurrency_cohorts: cohorts,
+        reader_results: reader_results,
+        memory: memory,
+        rebuild: rebuild,
+        telemetry: telemetry_stats
+      }
+      |> print_evidence!()
+    after
+      Cert.cleanup_unboxed_certification_fixture!(fixture.event.id, fixture.source.id)
+    end
   end
 
   @doc false
@@ -218,7 +222,7 @@ defmodule EventSales.TestSupport.M5_04PeriodLoadHarness do
         end
         |> Enum.sort()
 
-      %{
+      result = %{
         tier: name,
         contribution_sales: sale_count,
         sample_count: length(durations),
@@ -226,6 +230,9 @@ defmodule EventSales.TestSupport.M5_04PeriodLoadHarness do
         p95: percentile(durations, 95),
         p99: percentile(durations, 99)
       }
+
+      Cert.cleanup_unboxed_certification_fixture!(event.id, source.id)
+      result
     end)
   end
 

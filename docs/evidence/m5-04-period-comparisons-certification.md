@@ -2,9 +2,9 @@
 
 ## 1. Verdict
 
-**PASS** (certification-only; no production semantic changes; no STOP gates triggered).
+**BLOCKED** — measured G2 evidence is complete on-branch, but durable certification requires exact-head CI **7/7 green**. Integration was blocked by an unboxed concurrency-test durable-row leak (fixed in isolation follow-up); re-validate after green CI.
 
-Load/rebuild/fence/backfill measurements recorded below. Harness is not part of default CI timing gates.
+Load/rebuild/fence/backfill measurements recorded below. Harness is not part of default CI timing gates (`@tag :m5_04_certification_load`).
 
 ## 2. Authority / identities
 
@@ -18,7 +18,7 @@ M5_04G1_DURABLE_AUTHORITY = YES
 M5_04G2_STATUS = IN_PROGRESS
 M5_04G2_DURABLE_AUTHORITY = PENDING_MERGE
 M5_04_COMPLETE = NO
-CERTIFICATION_VERDICT = PASS
+CERTIFICATION_VERDICT = BLOCKED
 ```
 
 ## 3. Environment

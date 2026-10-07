@@ -20,6 +20,11 @@ defmodule EventSales.Analytics.M5_04PeriodConcurrencyTest do
     UnboxedPostgres.with_exclusive_setup(fn ->
       source = SalesHelpers.create_source_system!()
       event = Cert.prepare_analytics_ready_event!(source)
+
+      on_exit(fn ->
+        Cert.cleanup_unboxed_certification_fixture!(event.id, source.id)
+      end)
+
       ticket = SalesHelpers.create_ticket_type!(event, %{name: "RR late refund"})
 
       {order, item, order_snap} =
