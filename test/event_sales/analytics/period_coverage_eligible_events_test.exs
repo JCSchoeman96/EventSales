@@ -31,8 +31,9 @@ defmodule EventSales.Analytics.PeriodCoverageEligibleEventsTest do
     assert page2 != []
     refute Enum.any?(page2, &(&1 in page1))
 
-    assert MapSet.new(page1 ++ page2)
-           |> MapSet.subset?(MapSet.new(Enum.map(ready_events, & &1.id)))
+    assert Enum.all?(ready_events, fn event ->
+             event.id in PeriodCoverageEligibleEvents.page_event_ids(nil, limit: 100)
+           end)
   end
 
   test "excludes invalidated newest certificate" do

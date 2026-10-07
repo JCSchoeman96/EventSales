@@ -9,34 +9,36 @@ defmodule EventSales.Analytics.PeriodCoverageMaintenanceWorkerTest do
   alias EventSales.TestSupport.PeriodCoverageHelpers
   alias EventSales.TestSupport.{SalesHelpers, StubRefreshSnapshotWorker}
 
-  @now ~U[2026-05-17 10:00:00.000000Z]
-
   setup do
     source = SalesHelpers.create_source_system!()
     events = for i <- 1..3, do: ready_event!(source, "Maintenance #{i}")
-    %{events: events}
+
+    %{events: events, source: source}
   end
 
-  test "pages with stable cursor and chains full pages only", %{events: _events} do
-    page1 = PeriodCoverageEligibleEvents.page_event_ids(nil, limit: 2)
+  test "pages with stable cursor and chains full pages only", %{events: events} do
+    page1 = page1_for(events, 2)
     assert length(page1) == 2
     assert page1 == Enum.sort(page1)
 
     assert :ok =
              perform_job(PeriodCoverageMaintenanceWorker, %{
                "batch_size" => 2,
-               "after_event_id" => nil
+               "after_event_id" => cursor_before(events)
              })
 
     assert_enqueued(
       worker: PeriodCoverageMaintenanceWorker,
-      args: %{"batch_size" => 2, "after_event_id" => List.last(page1)}
+      args: %{
+        "batch_size" => 2,
+        "after_event_id" => List.last(page1)
+      }
     )
   end
 
-  test "short final page does not enqueue another batch", %{events: _events} do
-    last_id =
-      PeriodCoverageEligibleEvents.page_event_ids(nil, limit: 100) |> List.last()
+  test "short final page does not enqueue another batch", %{events: events} do
+    page = page1_for(events, 100)
+    last_id = List.last(page)
 
     assert :ok =
              perform_job(PeriodCoverageMaintenanceWorker, %{
@@ -47,8 +49,10 @@ defmodule EventSales.Analytics.PeriodCoverageMaintenanceWorkerTest do
     refute_enqueued(worker: PeriodCoverageMaintenanceWorker)
   end
 
-  test "eligible event failure is counted and batch still schedules the next page" do
-    page = PeriodCoverageEligibleEvents.page_event_ids(nil, limit: 3)
+  test "eligible event failure is counted and batch still schedules the next page", %{
+    events: events
+  } do
+    page = page1_for(events, 3)
     assert length(page) == 3
 
     handler_id = {__MODULE__, :failures, make_ref()}
@@ -69,7 +73,7 @@ defmodule EventSales.Analytics.PeriodCoverageMaintenanceWorkerTest do
                PeriodCoverageMaintenanceWorker.perform(%Oban.Job{
                  args: %{
                    "batch_size" => 3,
-                   "after_event_id" => nil,
+                   "after_event_id" => cursor_before(events),
                    "period_coverage_opts" => [
                      refresh_snapshot_worker:
                        EventSales.Analytics.PeriodCoverageMaintenanceWorkerTest.StubFailingRefreshWorker
@@ -107,7 +111,7 @@ defmodule EventSales.Analytics.PeriodCoverageMaintenanceWorkerTest do
              )
   end
 
-  test "emits batch duration telemetry without high-cardinality labels" do
+  test "emits batch duration telemetry without high-cardinality labels", %{events: events} do
     handler_id = {__MODULE__, :maintenance_duration, make_ref()}
     parent = self()
 
@@ -122,7 +126,12 @@ defmodule EventSales.Analytics.PeriodCoverageMaintenanceWorkerTest do
       )
 
     try do
-      assert :ok = perform_job(PeriodCoverageMaintenanceWorker, %{"batch_size" => 1})
+      assert :ok =
+               perform_job(PeriodCoverageMaintenanceWorker, %{
+                 "batch_size" => 1,
+                 "after_event_id" => cursor_before(events)
+               })
+
       assert_receive {:maintenance_telemetry, measurements, metadata}
 
       assert is_integer(measurements.duration)
@@ -139,6 +148,26 @@ defmodule EventSales.Analytics.PeriodCoverageMaintenanceWorkerTest do
     EventDetailCertificationHelpers.certify_analytics_ready!(event)
     PeriodCoverageHelpers.seed_v2_currency!(event, "ZAR")
     event
+  end
+
+  defp cursor_before(events) do
+    first_id = events |> Enum.map(& &1.id) |> Enum.min()
+
+    PeriodCoverageEligibleEvents.page_event_ids(nil, limit: 500)
+    |> Enum.take_while(&(&1 < first_id))
+    |> List.last()
+    |> case do
+      nil -> "00000000-0000-0000-0000-000000000000"
+      id -> id
+    end
+  end
+
+  defp page1_for(events, limit) do
+    first_id = events |> Enum.map(& &1.id) |> Enum.min()
+    after_id = cursor_before(events)
+
+    PeriodCoverageEligibleEvents.page_event_ids(after_id, limit: limit)
+    |> Enum.filter(fn id -> id >= first_id end)
   end
 
   defmodule StubFailingRefreshWorker do
