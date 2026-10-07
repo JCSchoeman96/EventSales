@@ -165,7 +165,7 @@ Publication is a separate, explicit, irreversible operator action. Perform it on
 
 Promotion policy: use the attested candidate artifact bytes. Never publish assets that disagree with the reviewed candidate manifest.
 
-For the first release, prepare concise notes that identify the suite as the first EventSales WordPress release and describe the catalogue feed, historical order index, order-line identity, Integration Health, delivery telemetry, and read-only update discovery. State WordPress 5.6 and PHP 8.0 minimums, and that native update discovery requires WordPress 5.8. Discovery is notification-only. It provides no package URL and does not enable automatic updates.
+For the first release, prepare concise notes that identify the suite as the first EventSales WordPress release and describe the catalogue feed, historical order index, order-line identity, Integration Health, delivery telemetry, and read-only update discovery. State WordPress 5.6 and PHP 8.0 minimums, and that native update discovery requires WordPress 5.8. JC-320 discovery is notification-first. WP-SOURCE-08 adds optional manual native installs via verified package sentinels on immutable releases only. Discovery never exposes raw GitHub ZIP URLs and does not enable automatic updates.
 
 ## Install / upgrade locally (certification)
 
