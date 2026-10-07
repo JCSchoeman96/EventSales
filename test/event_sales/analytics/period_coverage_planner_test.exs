@@ -9,7 +9,7 @@ defmodule EventSales.Analytics.PeriodCoveragePlannerTest do
 
   test "required_bucket_specs unions all four supported comparison requests" do
     timezone = MetricRules.business_timezone()
-    specs = PeriodCoveragePlanner.required_bucket_specs(@anchor)
+    {:ok, specs} = PeriodCoveragePlanner.required_bucket_specs(@anchor)
 
     manual_union =
       PeriodCoveragePlanner.supported_requests()
@@ -49,7 +49,7 @@ defmodule EventSales.Analytics.PeriodCoveragePlannerTest do
   end
 
   test "every required utc hour is enveloped by a johannesburg day spec" do
-    specs = PeriodCoveragePlanner.required_bucket_specs(@anchor)
+    {:ok, specs} = PeriodCoveragePlanner.required_bucket_specs(@anchor)
     hours = Enum.filter(specs, &(&1.bucket_kind == :utc_hour))
     days = Enum.filter(specs, &(&1.bucket_kind == :johannesburg_day))
 
@@ -62,7 +62,7 @@ defmodule EventSales.Analytics.PeriodCoveragePlannerTest do
   end
 
   test "records bounded maximum bucket cardinality for one event currency" do
-    specs = PeriodCoveragePlanner.required_bucket_specs(@anchor)
+    {:ok, specs} = PeriodCoveragePlanner.required_bucket_specs(@anchor)
     assert specs != []
     assert length(specs) < 2_000
     assert length(specs) == 1_502

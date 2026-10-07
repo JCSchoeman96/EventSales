@@ -188,6 +188,33 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     end
   end
 
+  defmodule PeriodCoverageNotifierRecorder do
+    alias EventSales.Repo
+
+    def child_spec(opts), do: %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}}
+
+    def start_link(_opts),
+      do: Agent.start_link(fn -> %{calls: [], response: :ok} end, name: __MODULE__)
+
+    def reset!, do: Agent.update(__MODULE__, fn _ -> %{calls: [], response: :ok} end)
+
+    def calls, do: Agent.get(__MODULE__, &Enum.reverse(&1.calls))
+
+    def notify_terminal_success(run, cursor, opts) do
+      in_transaction? = Repo.in_transaction?()
+      captured_now = Keyword.get(opts, :now, DateTime.utc_now())
+
+      Agent.update(__MODULE__, fn state ->
+        %{
+          state
+          | calls: [{run, cursor, in_transaction?, captured_now} | state.calls]
+        }
+      end)
+
+      :ok
+    end
+  end
+
   defmodule FreshnessNotifierRecorder do
     alias EventSales.Repo
 
@@ -220,12 +247,14 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     start_supervised!(Upserter)
     start_supervised!(RefundSync)
     start_supervised!(FreshnessNotifierRecorder)
+    start_supervised!(PeriodCoverageNotifierRecorder)
     CatchupClient.reset!()
     WooClient.reset!()
     Selector.reset!()
     Upserter.reset!()
     RefundSync.reset!()
     FreshnessNotifierRecorder.reset!()
+    PeriodCoverageNotifierRecorder.reset!()
 
     source = SalesHelpers.create_source_system!(%{base_url: @source_url})
 
@@ -502,6 +531,56 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     assert [%{woo_order_id: "43", order_calls_at_sync: 1}] = RefundSync.calls()
     assert current_cursor(cursor).status == :done
     assert current_run(run).status == :completed
+  end
+
+  test "multi-page terminal records post-commit coverage notifier and churn counters", %{
+    run: run,
+    cursor: cursor
+  } do
+    CatchupClient.enqueue!(page(["42"], has_more: true, next_cursor: "u-next.cursor"))
+    WooClient.put_order!(42, {:ok, order_payload(42)})
+    Selector.set_lines!([])
+
+    assert {:continue, _, _} = run_step(run, cursor)
+
+    CatchupClient.enqueue!(
+      page(["43"], has_more: false, terminal_evidence: "u-churn-terminal-proof")
+    )
+
+    WooClient.put_order!(43, {:ok, order_payload(43)})
+    Selector.set_lines!([])
+
+    assert :ok = run_step(run, current_cursor(cursor))
+
+    assert length(Upserter.calls()) == 2
+    assert current_cursor(cursor).page == 3
+
+    coverage_calls = PeriodCoverageNotifierRecorder.calls()
+    assert length(coverage_calls) == 1
+
+    {_run, _cursor, in_transaction?, captured_now} = hd(coverage_calls)
+    refute in_transaction?
+    assert %DateTime{} = captured_now
+
+    assert [{notified_run, notified_cursor, false}] = FreshnessNotifierRecorder.calls()
+    assert notified_run.status == :completed
+    assert notified_cursor.metadata["historical_catchup"]["state"] == "catchup_terminal"
+
+    backfill_order_count = length(Upserter.calls())
+    backfill_page_count = current_cursor(cursor).page - 1
+
+    assert backfill_order_count == 2
+    assert backfill_page_count == 2
+
+    Process.put(:jc325_backfill_churn, %{
+      backfill_order_count: backfill_order_count,
+      backfill_page_count: backfill_page_count,
+      backfill_enqueue_attempts: backfill_order_count,
+      backfill_pending_job_count: 0,
+      backfill_refresh_executions: :not_observable_in_stubbed_upserter_harness,
+      backfill_fence_acquisitions: :not_observable_in_stubbed_upserter_harness,
+      terminal_coverage_enqueue_count: length(coverage_calls)
+    })
   end
 
   test "empty explicit terminal page completes without a Woo order GET", %{
@@ -1141,6 +1220,7 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
       order_upserter: Upserter,
       order_refund_sync: RefundSync,
       historical_catchup_freshness_notifier: FreshnessNotifierRecorder,
+      historical_catchup_period_coverage_notifier: PeriodCoverageNotifierRecorder,
       now: fn -> @now end
     ]
   end

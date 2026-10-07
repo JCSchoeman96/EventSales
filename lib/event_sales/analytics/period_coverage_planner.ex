@@ -23,24 +23,30 @@ defmodule EventSales.Analytics.PeriodCoveragePlanner do
   Returns the deduplicated union of canonical bucket identities required for all
   supported comparison requests at `captured_now_utc`.
   """
-  @spec required_bucket_specs(DateTime.t()) :: [bucket_spec()]
+  @spec required_bucket_specs(DateTime.t()) :: {:ok, [bucket_spec()]} | {:error, term()}
   def required_bucket_specs(%DateTime{} = captured_now_utc) do
     timezone = MetricRules.business_timezone()
 
-    base_specs =
-      Enum.flat_map(
-        @supported_requests,
-        &bucket_specs_for_request(&1, timezone, captured_now_utc)
-      )
+    with {:ok, base_specs} <- collect_request_specs(timezone, captured_now_utc) do
+      johannesburg_envelopes =
+        base_specs
+        |> Enum.filter(&(&1.bucket_kind == :utc_hour))
+        |> Enum.flat_map(&johannesburg_envelope_for_hour/1)
 
-    johannesburg_envelopes =
-      base_specs
-      |> Enum.filter(&(&1.bucket_kind == :utc_hour))
-      |> Enum.flat_map(&johannesburg_envelope_for_hour/1)
+      {:ok,
+       (base_specs ++ johannesburg_envelopes)
+       |> Enum.uniq_by(&bucket_identity_key/1)
+       |> Enum.sort_by(&bucket_sort_key/1)}
+    end
+  end
 
-    (base_specs ++ johannesburg_envelopes)
-    |> Enum.uniq_by(&bucket_identity_key/1)
-    |> Enum.sort_by(&bucket_sort_key/1)
+  defp collect_request_specs(timezone, captured_now_utc) do
+    Enum.reduce_while(@supported_requests, {:ok, []}, fn request, {:ok, acc} ->
+      case bucket_specs_for_request(request, timezone, captured_now_utc) do
+        {:ok, specs} -> {:cont, {:ok, acc ++ specs}}
+        {:error, reason} -> {:halt, {:error, {:period_coverage_plan_failed, request, reason}}}
+      end
+    end)
   end
 
   defp johannesburg_envelope_for_hour(%{bucket_start_utc: hour_start}) do
@@ -70,9 +76,11 @@ defmodule EventSales.Analytics.PeriodCoveragePlanner do
     with {:ok, %ComparisonWindows{} = windows} <-
            TimeRules.comparison_windows(timezone, captured_now_utc, request),
          {:ok, plan} <- PeriodReadPlan.build(windows) do
-      bucket_specs_from_plan(plan)
+      {:ok, bucket_specs_from_plan(plan)}
     else
-      _ -> []
+      {:error, :too_many_edge_fragments} -> {:error, :too_many_edge_fragments}
+      {:error, reason} -> {:error, reason}
+      _ -> {:error, :comparison_windows_failed}
     end
   end
 

@@ -640,8 +640,8 @@ Project root: `.`
 - `EventSales.Analytics.PeriodCoverageEligibleEvents` - `lib/event_sales/analytics/period_coverage_eligible_events.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 1
-  - public_funs: `page_event_ids/2`
+  - docs_count: 2
+  - public_funs: `page_event_ids/2`, `explain_sql/0`
   - uses: _none_
 - `EventSales.Analytics.PeriodCoverageMaterializer` - `lib/event_sales/analytics/period_coverage_materializer.ex`
   - moduledoc?: true
@@ -670,8 +670,8 @@ Project root: `.`
 - `EventSales.Analytics.PeriodProjectionRefresh` - `lib/event_sales/analytics/period_projection_refresh.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 4
-  - public_funs: `refresh_pending_event/2`, `sale_population_query/2`, `refund_population_query/2`, `dimension_delete_query/2`
+  - docs_count: 5
+  - public_funs: `refresh_pending_event/2`, `sale_population_query/2`, `refund_population_query/2`, `dimension_delete_query/2`, `current_johannesburg_envelope_query/2`
   - uses: _none_
 - `EventSales.Analytics.PeriodReadPlan` - `lib/event_sales/analytics/period_read_plan.ex`
   - moduledoc?: true

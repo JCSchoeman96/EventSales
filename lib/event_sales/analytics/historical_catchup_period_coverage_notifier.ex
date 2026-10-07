@@ -12,35 +12,36 @@ defmodule EventSales.Analytics.HistoricalCatchupPeriodCoverageNotifier do
   @doc "Ensures comparison bucket coverage exists after terminal catch-up success."
   @spec notify_terminal_success(SyncRun.t(), SyncCursor.t(), notifier_opts()) :: :ok
   def notify_terminal_success(run, cursor, opts \\ []) do
-    case terminal_anchor(run, cursor) do
-      {:ok, event_id, %DateTime{} = captured_now} ->
-        coverage_opts = Keyword.get(opts, :period_coverage_opts, [])
-
-        case PeriodCoverage.ensure_event_buckets(event_id, captured_now, coverage_opts) do
-          {:ok, _result} -> :ok
-          {:error, _reason} -> :ok
-        end
-
-      _invalid ->
-        :ok
-    end
-  end
-
-  defp terminal_anchor(
-         %SyncRun{sync_type: :historical_backfill, status: :completed} = run,
-         %SyncCursor{} = cursor
-       ) do
     with :ok <- validate_terminal_shape(run, cursor),
          :catchup_terminal <- HistoricalCatchupEvidence.state(cursor.metadata),
-         {:ok, %{source_observed_at: %DateTime{} = source_observed_at}} <-
-           HistoricalCatchupEvidence.from_metadata(cursor.metadata) do
-      {:ok, run.event_id, source_observed_at}
+         {:ok, event_id} <- terminal_event_id(run, cursor) do
+      captured_now = coverage_captured_now(opts)
+
+      coverage = Keyword.get(opts, :period_coverage, PeriodCoverage)
+
+      case coverage.ensure_event_buckets(event_id, captured_now, coverage_opts(opts)) do
+        {:ok, _result} -> :ok
+        {:error, _reason} -> :ok
+      end
     else
-      _invalid -> :error
+      _invalid -> :ok
     end
   end
 
-  defp terminal_anchor(_run, _cursor), do: :error
+  defp terminal_event_id(%SyncRun{event_id: event_id}, _cursor) when is_binary(event_id),
+    do: {:ok, event_id}
+
+  defp terminal_event_id(_run, _cursor), do: :error
+
+  defp coverage_captured_now(opts) do
+    case Keyword.get(opts, :now) do
+      %DateTime{} = instant -> DateTime.truncate(instant, :microsecond)
+      fun when is_function(fun, 0) -> DateTime.truncate(fun.(), :microsecond)
+      nil -> DateTime.utc_now() |> DateTime.truncate(:microsecond)
+    end
+  end
+
+  defp coverage_opts(opts), do: Keyword.get(opts, :period_coverage_opts, [])
 
   defp validate_terminal_shape(run, cursor) do
     if valid_uuid?(run.id) and valid_uuid?(run.event_id) and cursor.sync_run_id == run.id and

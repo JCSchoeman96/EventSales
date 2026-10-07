@@ -11,6 +11,8 @@ defmodule EventSales.Analytics.PeriodCoverageMaterializer do
   @coverage_identity "m5_04d:event_period_bucket_v1"
   @semantic_version 1
   @zero Decimal.new("0")
+  # 19 columns per row; stay under Postgrex 65535 bind parameter limit.
+  @insert_chunk_rows 3_000
 
   @type result :: %{
           bucket_intents_created: non_neg_integer(),
@@ -32,18 +34,30 @@ defmodule EventSales.Analytics.PeriodCoverageMaterializer do
          {:ok, currencies} <-
            PeriodCoverageCurrencyResolver.currencies_for_event(canonical_event_id) do
       if currencies == [] do
-        refresh_enqueued? =
-          maybe_enqueue_snapshot_without_currency(canonical_event_id, opts)
+        case maybe_enqueue_snapshot_without_currency(canonical_event_id, opts) do
+          :ok ->
+            {:ok,
+             %{
+               bucket_intents_created: 0,
+               refresh_enqueued?: true,
+               currencies: []
+             }}
 
-        {:ok,
-         %{
-           bucket_intents_created: 0,
-           refresh_enqueued?: refresh_enqueued?,
-           currencies: []
-         }}
+          {:ok, :skipped} ->
+            {:ok,
+             %{
+               bucket_intents_created: 0,
+               refresh_enqueued?: false,
+               currencies: []
+             }}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
       else
-        bucket_specs = PeriodCoveragePlanner.required_bucket_specs(captured_now_utc)
-        persist_and_enqueue(canonical_event_id, currencies, bucket_specs, opts)
+        with {:ok, bucket_specs} <- PeriodCoveragePlanner.required_bucket_specs(captured_now_utc) do
+          persist_and_enqueue(canonical_event_id, currencies, bucket_specs, opts)
+        end
       end
     end
   end
@@ -79,17 +93,24 @@ defmodule EventSales.Analytics.PeriodCoverageMaterializer do
     if rows == [] do
       {0, []}
     else
-      Repo.insert_all(@period_snapshots, rows,
-        on_conflict: :nothing,
-        conflict_target: [
-          :event_id,
-          :currency,
-          :bucket_kind,
-          :bucket_start_utc,
-          :bucket_end_utc
-        ],
-        returning: [:id]
-      )
+      rows
+      |> Enum.chunk_every(@insert_chunk_rows)
+      |> Enum.reduce({0, []}, fn chunk, {count, returned} ->
+        {chunk_count, chunk_rows} =
+          Repo.insert_all(@period_snapshots, chunk,
+            on_conflict: :nothing,
+            conflict_target: [
+              :event_id,
+              :currency,
+              :bucket_kind,
+              :bucket_start_utc,
+              :bucket_end_utc
+            ],
+            returning: [:id]
+          )
+
+        {count + chunk_count, returned ++ List.wrap(chunk_rows)}
+      end)
     end
   end
 
@@ -135,11 +156,11 @@ defmodule EventSales.Analytics.PeriodCoverageMaterializer do
       worker = Keyword.get(opts, :refresh_snapshot_worker, RefreshSnapshotWorker)
 
       case worker.enqueue_event(event_id, opts) do
-        :ok -> true
-        {:error, _} -> false
+        :ok -> :ok
+        {:error, reason} -> {:error, {:period_coverage_snapshot_enqueue_failed, reason}}
       end
     else
-      false
+      {:ok, :skipped}
     end
   end
 

@@ -1164,7 +1164,7 @@
       "uses": []
     },
     {
-      "docs_count": 1,
+      "docs_count": 2,
       "moduledoc?": true,
       "name": "EventSales.Analytics.PeriodCoverageEligibleEvents",
       "parse_error": null,
@@ -1173,6 +1173,10 @@
         {
           "arity": 2,
           "name": "page_event_ids"
+        },
+        {
+          "arity": 0,
+          "name": "explain_sql"
         }
       ],
       "specs?": true,
@@ -1255,7 +1259,7 @@
       "uses": []
     },
     {
-      "docs_count": 4,
+      "docs_count": 5,
       "moduledoc?": true,
       "name": "EventSales.Analytics.PeriodProjectionRefresh",
       "parse_error": null,
@@ -1276,6 +1280,10 @@
         {
           "arity": 2,
           "name": "dimension_delete_query"
+        },
+        {
+          "arity": 2,
+          "name": "current_johannesburg_envelope_query"
         }
       ],
       "specs?": true,

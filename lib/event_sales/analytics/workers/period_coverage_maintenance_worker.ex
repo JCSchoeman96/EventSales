@@ -16,9 +16,12 @@ defmodule EventSales.Analytics.Workers.PeriodCoverageMaintenanceWorker do
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: args}) do
+    started_at = System.monotonic_time()
     batch_size = Map.get(args, "batch_size", @default_batch_size)
     after_id = Map.get(args, "after_event_id")
     captured_now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+    coverage_opts = coverage_opts_from_args(args)
 
     event_ids = PeriodCoverageEligibleEvents.page_event_ids(after_id, limit: batch_size)
 
@@ -28,22 +31,25 @@ defmodule EventSales.Analytics.Workers.PeriodCoverageMaintenanceWorker do
         %{examined: 0, changed: 0, intents: 0, enqueues: 0, failures: 0},
         fn event_id, acc ->
           acc = Map.update!(acc, :examined, &(&1 + 1))
-          apply_event_coverage(acc, event_id, captured_now)
+          apply_event_coverage(acc, event_id, captured_now, coverage_opts)
         end
       )
 
     {examined, changed, intents, enqueues, failures} =
       {stats.examined, stats.changed, stats.intents, stats.enqueues, stats.failures}
 
-    emit_batch_telemetry(examined, changed, intents, enqueues, failures)
+    duration_ms =
+      System.convert_time_unit(System.monotonic_time() - started_at, :native, :millisecond)
+
+    emit_batch_telemetry(examined, changed, intents, enqueues, failures, duration_ms)
 
     schedule_next_batch(event_ids, batch_size, after_id)
 
     :ok
   end
 
-  defp apply_event_coverage(acc, event_id, captured_now) do
-    case PeriodCoverage.ensure_event_buckets(event_id, captured_now, enqueue_refresh?: true) do
+  defp apply_event_coverage(acc, event_id, captured_now, coverage_opts) do
+    case PeriodCoverage.ensure_event_buckets(event_id, captured_now, coverage_opts) do
       {:ok, %{bucket_intents_created: created, refresh_enqueued?: enqueued?}} ->
         acc
         |> Map.update!(:changed, &if(created > 0, do: &1 + 1, else: &1))
@@ -67,7 +73,15 @@ defmodule EventSales.Analytics.Workers.PeriodCoverageMaintenanceWorker do
     |> Oban.insert()
   end
 
-  defp emit_batch_telemetry(examined, changed, intents, enqueues, failures) do
+  defp coverage_opts_from_args(args) do
+    case Map.get(args, "period_coverage_opts") do
+      nil -> [enqueue_refresh?: true]
+      opts when is_list(opts) -> Keyword.merge([enqueue_refresh?: true], opts)
+      _other -> [enqueue_refresh?: true]
+    end
+  end
+
+  defp emit_batch_telemetry(examined, changed, intents, enqueues, failures, duration_ms) do
     Telemetry.emit(
       [:event_sales, :analytics, :period_coverage, :maintenance],
       %{
@@ -75,7 +89,8 @@ defmodule EventSales.Analytics.Workers.PeriodCoverageMaintenanceWorker do
         events_changed: changed,
         bucket_intents_created: intents,
         refresh_enqueues: enqueues,
-        failures: failures
+        failures: failures,
+        duration: duration_ms
       },
       %{component: :period_coverage}
     )

@@ -32,7 +32,9 @@ JC_321_MERGE_TREE = 3f0a6250299a67ae3379cfb79705fb2ac1ad6957
 M5_04F_DURABLE_AUTHORITY = YES
 M5_04G_AUTHORIZED = YES
 M5_04G1_STATUS = IN_PROGRESS
+M5_04G1_DURABLE_AUTHORITY = PENDING_MERGE
 M5_04G2_AUTHORIZED = NO
+JC_325_STATUS = IN_REVIEW
 
 ZERO_BUCKET_GAP_REPRODUCED = YES
 MOVING_HORIZON_GAP_REPRODUCED = YES
@@ -40,12 +42,31 @@ PERIOD_COVERAGE_PLANNER = lib/event_sales/analytics/period_coverage_planner.ex
 PLANNER_SOURCE = TimeRules.comparison_windows/3 -> PeriodReadPlan -> union + Johannesburg envelopes
 COVERAGE_CURRENCY_AUTHORITY = EventAggregateSnapshot snapshot_version 2 currencies
 COVERAGE_MATERIALIZER = lib/event_sales/analytics/period_coverage_materializer.ex
-COVERAGE_INSERT_QUERY_COUNT = 1
+COVERAGE_INSERT_QUERY_COUNT = 1 (per chunk; 3000-row chunks for 3-currency safety)
 TERMINAL_CATCHUP_COVERAGE_TRIGGER = HistoricalCatchupPeriodCoverageNotifier post-commit
 MOVING_HORIZON_TRIGGER = PeriodCoverageMaintenanceWorker Oban cron 5 * * * *
 HOURLY_CRON_REQUIRED = YES
 MAX_REQUIRED_BUCKET_IDENTITIES = 1502
-BACKFILL_REFRESH_CHURN_EVIDENCE = DEFERRED_MEASUREMENT_IN_G1_TESTS
+
+ELIGIBLE_EVENT_AUTHORITY = PeriodCoverageEligibleEvents LATERAL SQL (newest certified historical run + newest terminal reconciliation, no findings)
+ELIGIBLE_EVENT_QUERY_PLAN = test/event_sales/analytics/period_coverage_query_plan_test.exs EXPLAIN (FORMAT JSON)
+
+JHB_ENVELOPE_QUERY_BOUND = PeriodProjectionRefresh.current_johannesburg_envelope_query/2 unnest identity match
+JHB_ENVELOPE_LOOKUP = read_current_johannesburg_envelopes uses bounded query only
+JHB_HISTORY_APP_FILTERING = NO (no load-all-CURRENT-then-filter)
+
+TERMINAL_COVERAGE_ANCHOR = opts[:now] / DateTime.utc_now post-commit
+SOURCE_OBSERVED_ANCHOR_USED_FOR_COVERAGE = NO
+
+SOURCE_MUTATION_RACE = PASS (period_coverage_concurrency_test.exs orderings A/B/C)
+ROLLING_30_ZERO_COVERAGE_READY = PASS (period_coverage_closure_test.exs)
+YESTERDAY_ZERO_COVERAGE_READY = PASS (period_coverage_closure_test.exs)
+
+THREE_CURRENCY_MATERIALIZATION = PASS (ZAR+USD+EUR; chunked insert_all)
+MATERIALIZER_INSERT_STRATEGY = insert_all ON CONFLICT DO NOTHING chunks of 3000 rows
+
+BACKFILL_REFRESH_CHURN_EVIDENCE = HistoricalCatchupExecutionTest multi-page terminal (2 orders, 2 pages, terminal_coverage_enqueue_count=1; refresh/fence NOT_OBSERVABLE in stub harness)
+
 REDIS_DECISION = NONE
 CACHE_DECISION = NONE
 PUBSUB_DECISION = DEFERRED_TO_G2
@@ -53,7 +74,7 @@ PUBSUB_DECISION = DEFERRED_TO_G2
 
 **Status:** JC-321 M5-04F merged (PR #295); JC-325 M5-04G1 period coverage in progress; M5-04G2 reconciliation/load certification not authorized.
 **Last updated:** 2026-10-07
-**Change summary (v16):** Record JC-321 merge authority, reproduced zero/moving-horizon coverage gaps, and G1 coverage planner/materializer/catch-up/maintenance design.
+**Change summary (v16):** Record JC-321 merge authority, reproduced zero/moving-horizon coverage gaps, G1 coverage planner/materializer/catch-up/maintenance design, and JC-325 review corrections (eligible-event SQL authority, bounded JHB lookup, terminal wall-clock anchor, concurrency/closure/churn evidence).
 
 **Goal:** Define a canonical, currency-safe period comparison read model for event and required dimensional grains without promoting the legacy daily-v1 snapshot or inventing comparison semantics.
 

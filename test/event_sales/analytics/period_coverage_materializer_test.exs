@@ -124,6 +124,66 @@ defmodule EventSales.Analytics.PeriodCoverageMaterializerTest do
     assert reloaded.projection_state == :stale
   end
 
+  for state <- [:refresh_pending, :rebuilding, :unavailable] do
+    @tag state: state
+    test "does not overwrite #{state} rows", %{event: event, source: source, ticket: ticket} do
+      state = unquote(state)
+
+      PeriodComparisonHelpers.seed_comparison_projection!(
+        event,
+        source,
+        ticket,
+        "ZAR",
+        :yesterday,
+        @now,
+        %{
+          current: %{gross_ticket_quantity: 1, gross_ticket_value: Decimal.new("10.00")},
+          previous: %{gross_ticket_quantity: 1, gross_ticket_value: Decimal.new("10.00")}
+        }
+      )
+
+      row =
+        EventPeriodAggregateSnapshot
+        |> Ash.Query.filter(event_id == ^event.id)
+        |> Ash.Query.limit(1)
+        |> Ash.read_one!(domain: Analytics)
+
+      Ash.update!(row, %{projection_state: state}, action: :update_snapshot, domain: Analytics)
+
+      before =
+        snapshot_fingerprint(Ash.get!(EventPeriodAggregateSnapshot, row.id, domain: Analytics))
+
+      assert {:ok, _} =
+               PeriodCoverageMaterializer.materialize(event.id, @now, enqueue_refresh?: false)
+
+      reloaded = Ash.get!(EventPeriodAggregateSnapshot, row.id, domain: Analytics)
+      assert reloaded.projection_state == state
+      assert snapshot_fingerprint(reloaded) == before
+    end
+  end
+
+  test "three canonical v2 currencies materialize with bounded insert chunks", %{event: event} do
+    for currency <- ["USD", "EUR"] do
+      PeriodCoverageHelpers.seed_v2_currency!(event, currency)
+    end
+
+    {result, queries} =
+      capture_insert_queries(fn ->
+        PeriodCoverageMaterializer.materialize(event.id, @now,
+          refresh_snapshot_worker: StubRefreshSnapshotWorker,
+          enqueue_refresh?: false
+        )
+      end)
+
+    {:ok, specs} = EventSales.Analytics.PeriodCoveragePlanner.required_bucket_specs(@now)
+
+    assert {:ok, %{bucket_intents_created: created}} = result
+    assert created == length(specs) * 3
+
+    insert_queries = Enum.filter(queries, &String.contains?(&1, "INSERT INTO"))
+    assert length(insert_queries) in [1, 2]
+  end
+
   test "full planner materialize then snapshot refresh publishes CURRENT zeros", %{event: event} do
     assert {:ok, %{bucket_intents_created: created}} =
              PeriodCoverageMaterializer.materialize(event.id, @later, enqueue_refresh?: false)
@@ -192,5 +252,35 @@ defmodule EventSales.Analytics.PeriodCoverageMaterializerTest do
 
   defp snapshot_fingerprint(row) do
     {row.id, row.generation_id, row.refreshed_at, row.updated_at, row.projection_state}
+  end
+
+  defp capture_insert_queries(fun) do
+    handler_id = {__MODULE__, :inserts, make_ref()}
+    parent = self()
+
+    :ok =
+      :telemetry.attach(
+        handler_id,
+        EventSales.Repo.config()[:telemetry_prefix] ++ [:query],
+        fn _event, _measurements, metadata, {test_pid, id} ->
+          send(test_pid, {id, metadata.query})
+        end,
+        {parent, handler_id}
+      )
+
+    try do
+      result = fun.()
+      {result, collect_sql(handler_id, [])}
+    after
+      :telemetry.detach(handler_id)
+    end
+  end
+
+  defp collect_sql(handler_id, acc) do
+    receive do
+      {^handler_id, sql} -> collect_sql(handler_id, [sql | acc])
+    after
+      0 -> Enum.reverse(acc)
+    end
   end
 end

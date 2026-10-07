@@ -264,26 +264,45 @@ defmodule EventSales.Analytics.PeriodProjectionRefresh do
     end
   end
 
-  defp read_current_johannesburg_envelopes(event_id, identities) do
-    case Ash.read(
-           EventPeriodAggregateSnapshot
-           |> Ash.Query.filter(
-             event_id == ^event_id and projection_state == :current and
-               bucket_kind == :johannesburg_day
-           ),
-           domain: Analytics
-         ) do
-      {:ok, rows} -> Enum.filter(rows, &johannesburg_row_in_identity_set?(&1, identities))
-      {:error, _} -> []
-    end
+  @doc false
+  @spec current_johannesburg_envelope_query(Ecto.UUID.t(), [
+          {String.t(), DateTime.t(), DateTime.t()}
+        ]) :: Ecto.Query.t()
+  def current_johannesburg_envelope_query(event_id, identities) when is_list(identities) do
+    currencies = Enum.map(identities, fn {currency, _, _} -> currency end)
+    starts = Enum.map(identities, fn {_, start_utc, _} -> start_utc end)
+    ends = Enum.map(identities, fn {_, _, end_utc} -> end_utc end)
+
+    from(row in EventPeriodAggregateSnapshot,
+      where: row.event_id == ^event_id,
+      where: row.projection_state == :current,
+      where: row.bucket_kind == :johannesburg_day,
+      where:
+        fragment(
+          "(?, ?, ?) IN (SELECT * FROM unnest(?::varchar[], ?::timestamptz[], ?::timestamptz[]))",
+          row.currency,
+          row.bucket_start_utc,
+          row.bucket_end_utc,
+          ^currencies,
+          ^starts,
+          ^ends
+        )
+    )
   end
 
-  defp johannesburg_row_in_identity_set?(row, identities) do
-    Enum.any?(identities, fn {currency, start_utc, end_utc} ->
-      row.currency == currency and
-        DateTime.compare(row.bucket_start_utc, start_utc) == :eq and
-        DateTime.compare(row.bucket_end_utc, end_utc) == :eq
-    end)
+  defp read_current_johannesburg_envelopes(event_id, identities) do
+    case identities do
+      [] ->
+        []
+
+      identities ->
+        query = current_johannesburg_envelope_query(event_id, identities)
+
+        case Ash.read(query, domain: Analytics) do
+          {:ok, rows} -> rows
+          {:error, _} -> []
+        end
+    end
   end
 
   defp johannesburg_day_envelopes_hour?(day_row, hour_row) do
