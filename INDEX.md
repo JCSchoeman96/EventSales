@@ -2953,8 +2953,8 @@ Project root: `.`
 - `EventSales.TestSupport.M5_04PeriodCertificationHelpers` - `test/support/m5_04_period_certification_helpers.ex`
   - moduledoc?: true
   - specs?: false
-  - docs_count: 26
-  - public_funs: `supported_requests/0`, `comparison_metrics/0`, `comparison_windows!/2`, `oracle_summary!/3`, `oracle_summary_for_operand!/4`, `operand_period_bounds/2`, `financial_oracle_period/2`, `prepare_analytics_ready_event!/2`, `seed_currency!/2`, `refresh_period_projections!/2`, `capture_order_snapshot!/1`, `invalidate_order_change!/2`, `invalidate_refund_change!/2`, `create_completed_sale!/5`, `create_qualifying_refund!/5`, `ingest_sale_invalidate_only!/6`, `ingest_sale_and_refresh!/7`, `compare_event!/5`, `assert_reader_operands_match_oracle!/5`, `assert_operand_metrics_match_oracle!/5`, `assert_dimensional_sums_match_event!/2`, `assert_variation_subset_matches_facts!/4`, `contribution_semantic_fingerprint/1`, `period_bucket_semantic_fingerprint/1`, `cleanup_unboxed_certification_fixture!/2`, `certification_admin!/0`
+  - docs_count: 29
+  - public_funs: `supported_requests/0`, `comparison_metrics/0`, `comparison_windows!/2`, `oracle_summary!/3`, `oracle_summary_for_operand!/4`, `operand_period_bounds/2`, `financial_oracle_period/2`, `prepare_analytics_ready_event!/2`, `seed_currency!/2`, `refresh_period_projections!/2`, `capture_order_snapshot!/1`, `invalidate_order_change!/2`, `invalidate_refund_change!/2`, `create_completed_sale!/5`, `create_qualifying_refund!/5`, `ingest_sale_invalidate_only!/6`, `ingest_sale_and_refresh!/7`, `compare_event!/5`, `assert_reader_operands_match_oracle!/5`, `assert_operand_metrics_match_oracle!/5`, `assert_dimensional_sums_match_event!/2`, `assert_variation_subset_matches_facts!/4`, `contribution_semantic_fingerprint/1`, `period_bucket_semantic_fingerprint/1`, `create_unboxed_certification_source!/0`, `register_unboxed_source_cleanup!/1`, `cleanup_unboxed_certification_fixture!/2`, `cleanup_unboxed_certification_source!/1`, `certification_admin!/0`
   - uses: _none_
 - `EventSales.TestSupport.M5_04PeriodLoadHarness` - `test/support/m5_04_period_load_harness.ex`
   - moduledoc?: true

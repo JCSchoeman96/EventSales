@@ -29,12 +29,13 @@ defmodule EventSales.TestSupport.M5_04PeriodLoadHarness do
       Application.get_env(:event_sales, EventSales.Repo)[:pool_size] ||
         String.to_integer(System.get_env("TEST_DATABASE_POOL_SIZE", "10"))
 
-    fixture = build_fixture!(now)
+    source = SalesHelpers.create_source_system!()
 
     try do
+      fixture = build_fixture_for_source!(source, now)
       measure_and_report!(fixture, samples, cohorts, pool_size)
     after
-      Cert.cleanup_unboxed_certification_fixture!(fixture.event.id, fixture.source.id)
+      Cert.cleanup_unboxed_certification_source!(source.id)
     end
   end
 
@@ -72,24 +73,28 @@ defmodule EventSales.TestSupport.M5_04PeriodLoadHarness do
   @doc false
   def build_fixture!(now) do
     source = SalesHelpers.create_source_system!()
-    event = Cert.prepare_analytics_ready_event!(source)
 
     try do
-      ticket = SalesHelpers.create_ticket_type!(event, %{name: "Load ticket"})
-      admin = Cert.certification_admin!()
-      sale_at = DateTime.add(now, -2 * 86_400, :second)
-
-      Cert.ingest_sale_and_refresh!(event, nil, source, ticket, sale_at, now,
-        line_total: Decimal.new("55.00"),
-        line_tax: Decimal.new("8.25")
-      )
-
-      %{event: event, admin: admin, source: source, ticket: ticket, now: now, currency: "ZAR"}
+      build_fixture_for_source!(source, now)
     rescue
       error ->
-        Cert.cleanup_unboxed_certification_fixture!(event.id, source.id)
+        Cert.cleanup_unboxed_certification_source!(source.id)
         reraise error, __STACKTRACE__
     end
+  end
+
+  defp build_fixture_for_source!(source, now) do
+    event = Cert.prepare_analytics_ready_event!(source)
+    ticket = SalesHelpers.create_ticket_type!(event, %{name: "Load ticket"})
+    admin = Cert.certification_admin!()
+    sale_at = DateTime.add(now, -2 * 86_400, :second)
+
+    Cert.ingest_sale_and_refresh!(event, nil, source, ticket, sale_at, now,
+      line_total: Decimal.new("55.00"),
+      line_tax: Decimal.new("8.25")
+    )
+
+    %{event: event, admin: admin, source: source, ticket: ticket, now: now, currency: "ZAR"}
   end
 
   defp measure_reader_cohort(fixture, request, concurrency, samples) do
@@ -207,9 +212,9 @@ defmodule EventSales.TestSupport.M5_04PeriodLoadHarness do
 
     Enum.map(tiers, fn {name, sale_count} ->
       source = SalesHelpers.create_source_system!()
-      event = Cert.prepare_analytics_ready_event!(source)
 
       try do
+        event = Cert.prepare_analytics_ready_event!(source)
         ticket = SalesHelpers.create_ticket_type!(event, %{name: "Rebuild #{name}"})
 
         Enum.reduce(1..sale_count, nil, fn i, snap ->
@@ -250,7 +255,7 @@ defmodule EventSales.TestSupport.M5_04PeriodLoadHarness do
           p99: percentile(durations, 99)
         }
       after
-        Cert.cleanup_unboxed_certification_fixture!(event.id, source.id)
+        Cert.cleanup_unboxed_certification_source!(source.id)
       end
     end)
   end
