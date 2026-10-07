@@ -61,7 +61,11 @@ export EVENTSALES_ALLOW_LOCAL_WP_PLUGIN_REPLACE=1
 bash scripts/install_wordpress_plugins_local.sh tmp/wordpress-plugin-dist/<source_commit>
 ```
 
-The script reads `home` and `siteurl` from WordPress before replacing plugins. It installs from ZIP archives, not symlinks.
+The script reads `home` and `siteurl` from WordPress before replacing plugins. It resolves `WP_PLUGIN_DIR` from that WordPress runtime, verifies all four package archives, and preflights all four plugin destinations before the first replacement.
+
+The local ZIP replacement installer deliberately refuses symlinked EventSales plugin destinations and plugin directories containing symlinks. Developer symlink installations must be converted manually to ordinary plugin directories before package certification; the installer will not unlink or replace those symlinks. WordPress force overwrite recursively clears destination contents, which can otherwise walk through a directory symlink into a developer worktree. This is a safety property of EventSales local certification tooling, not a production WordPress requirement.
+
+If a WordPress error occurs after replacement begins, the installer reports `PARTIAL_INSTALL_POSSIBLE`; the four plugin replacements are not transactional.
 
 ### Activation order
 
@@ -77,7 +81,7 @@ After install, confirm Site Health registers EventSales direct tests and the **E
 ## Rollback
 
 1. Build or locate a prior distribution directory with known `manifest.json`.
-2. Re-run `install_wordpress_plugins_local.sh` against that directory (or `wp plugin install <zip> --force` per plugin).
+2. Re-run `install_wordpress_plugins_local.sh` against that directory. The local certification installer performs the same destination safety checks for rollback; do not bypass them with direct `wp plugin install <zip> --force` commands.
 
 **Order index warning:** rolling back plugin PHP does **not** roll back database schema or READY manifests. Do not drop manifest tables, truncate them, or destructively downgrade schema. Plugin code rollback and data rollback are separate operations.
 

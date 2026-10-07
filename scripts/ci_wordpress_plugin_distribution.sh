@@ -8,6 +8,7 @@ cd "$ROOT"
 source "$ROOT/scripts/lib/wordpress_plugin_release_common.sh"
 
 bash "$ROOT/integrations/wordpress/tests/plugin-packaging-git-object-negative-test.sh"
+bash "$ROOT/scripts/tests/install_wordpress_plugins_local_safety_test.sh"
 php "$ROOT/integrations/wordpress/tests/plugin-distribution-test.php" --source
 bash "$ROOT/scripts/build_wordpress_plugins.sh" --ref HEAD
 COMMIT="$(git rev-parse HEAD)"

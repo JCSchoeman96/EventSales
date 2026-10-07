@@ -182,7 +182,9 @@ Requires `home` and `siteurl` of `http://localhost:10059`. Install prior package
 ## Rollback preflight and code rollback
 
 1. Run `--mode rollback` transition check from current manifest to target older manifest.
-2. If preflight passes, reinstall older ZIPs with `install_wordpress_plugins_local.sh` or `wp plugin install <zip> --force`.
+2. If preflight passes, reinstall older ZIPs with `scripts/install_wordpress_plugins_local.sh`.
+
+The transition check validates release-manifest rules; it does not inspect local WordPress plugin destinations. The local installer separately verifies every EventSales destination before replacing any package and refuses symlinked destinations. Do not bypass it with `wp plugin install --force` during local certification. If a destination is a symlink, an operator must first prepare an ordinary plugin-directory deployment layout manually.
 
 **Order index:** code rollback does not revert database schema or READY manifests. Do not drop or truncate manifest tables.
 
