@@ -2,7 +2,12 @@
 
 ## 1. Verdict
 
-**BLOCKED** — measured G2 evidence is complete on-branch, but durable certification requires exact-head CI **7/7 green**. Integration was blocked by an unboxed concurrency-test durable-row leak (fixed in isolation follow-up); re-validate after green CI.
+**PASS** — measured JC-326 G2 evidence is complete on the certified technical HEAD. The unboxed committed-fixture leak was corrected with source-scoped teardown before event preparation. Johannesburg-envelope EXPLAIN certification is deterministic (selective fixture, `ANALYZE`, structural identity-index assertion). Exact-head CI on the accepted technical HEAD completed **7/7 green on attempt 1**. Durable G2 authority still waits for PR #300 merge.
+
+```text
+TECHNICAL_EVIDENCE_ACCEPTED = YES
+MERGE_AUTHORITY_ESTABLISHED = NO
+```
 
 Load/rebuild/fence/backfill measurements recorded below. Harness is not part of default CI timing gates (`@tag :m5_04_certification_load`).
 
@@ -18,7 +23,17 @@ M5_04G1_DURABLE_AUTHORITY = YES
 M5_04G2_STATUS = IN_PROGRESS
 M5_04G2_DURABLE_AUTHORITY = PENDING_MERGE
 M5_04_COMPLETE = NO
-CERTIFICATION_VERDICT = BLOCKED
+CERTIFICATION_VERDICT = PASS
+
+CERTIFIED_TECHNICAL_HEAD_SHA = 2294dd8bdfcf9a1e0eb3ace45e6d3dc249ba011a
+CERTIFIED_TECHNICAL_HEAD_TREE = 818ffaee3cfa28aaf4a54ff2263e85bfc11be88d
+
+CERTIFIED_CI_RUN_ID = 37664175166
+CERTIFIED_CI_RUN_NUMBER = 829
+CERTIFIED_CI_RUN_ATTEMPT = 1
+CERTIFIED_CI_HEAD_SHA = 2294dd8bdfcf9a1e0eb3ace45e6d3dc249ba011a
+CERTIFIED_CI_REQUIRED_JOBS = 7/7
+CERTIFIED_CI_CONCLUSION = PASS
 ```
 
 ## 3. Environment
@@ -124,6 +139,13 @@ QUERY_PLAN_EDGE_READ = PASS (delegated suite)
 QUERY_PLAN_ELIGIBLE_EVENTS = PASS (delegated suite)
 QUERY_PLAN_JHB_ENVELOPE = PASS (delegated suite)
 NEW_INDEX_REQUIRED = NO
+
+JHB_ENVELOPE_SELECTIVE_FIXTURE_ROWS = 1200
+JHB_ENVELOPE_PLANNER_STATS = ANALYZE
+JHB_ENVELOPE_EXPECTED_INDEX = analytics_event_period_aggregate_snapshots_identity_idx
+JHB_ENVELOPE_INDEX_ASSERTION = STRUCTURAL_EXACT_NAME
+JHB_ENVELOPE_SEQ_SCAN_ALLOWED = NO
+FORCED_ENABLE_SEQSCAN_OFF = NO
 ```
 
 ## 10. Reader load
