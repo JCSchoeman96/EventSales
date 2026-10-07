@@ -9,7 +9,7 @@ The active `eventsales-integration-health` plugin owns the shared updater. Its u
 | `eventsales-tickera-catalog-feed` | `eventsales-tickera-catalog-feed.php` | `0.1.2` |
 | `eventsales-woo-order-index-feed` | `eventsales-woo-order-index-feed.php` | `0.2.2` |
 | `eventsales-woo-order-line-identity` | `eventsales-woo-order-line-identity.php` | `0.1.2` |
-| `eventsales-integration-health` | `eventsales-integration-health.php` | `0.1.2` |
+| `eventsales-integration-health` | `eventsales-integration-health.php` | `0.1.3` (WP-SOURCE-08 verifier owner) |
 
 Other plugins that use a GitHub `Update URI` pass through without an EventSales request or response.
 
@@ -31,9 +31,19 @@ The updater sends no cookies, authorization, site URL, order data, ticket-holder
 
 For a valid manifest row whose marketing version is greater than the installed version, WordPress receives the plugin slug, release version, fixed GitHub release details URL, required PHP version, and `autoupdate: false`.
 
-The response omits `package`. It contains no ZIP URL, release asset URL, workflow artifact URL, or temporary signed URL. This release metadata can notify an administrator that a newer version may exist. It cannot authorize WordPress to download or install code.
+WP-SOURCE-06 responses never include a raw GitHub ZIP URL, release-assets host URL, or workflow artifact URL.
 
-Installation remains a separate WP-SOURCE-05 operator process. Before a release candidate is promoted for installation, the release-candidate workflow must run from the default branch and its `actions/attest@v4` attestations must be verified. The operator then verifies archive hashes and upgrade-transition preflight before publishing and manually installing a reviewed package.
+When WP-SOURCE-08 execution authority succeeds on an `immutable: true` public release, the response also includes:
+
+```text
+package = eventsales-verified://<github-release-id>/<asset-id>/<slug>
+```
+
+That sentinel is not downloadable without Integration Health’s `upgrader_pre_download` handler. If execution authority fails (mutable release, bad asset digest, incomplete eight-asset set, and similar), the JC-320 notification fields may still appear but `package` must be absent.
+
+Clicking **Update now** re-fetches the exact GitHub release by ID, re-validates the manifest and asset digest, streams the asset to a temp file, checks SHA-256, and only then returns the path to `Plugin_Upgrader`. EventSales plugin auto-updates are denied via `auto_update_plugin`.
+
+Manual operator installs from WP-SOURCE-05 remain supported for environments that do not use native verified updates.
 
 ## Site Health and diagnostics
 
@@ -47,10 +57,11 @@ Run the fake-response PHP tests and the distribution/release checks from the rep
 
 ```bash
 php integrations/wordpress/eventsales-integration-health/tests/update-discovery-test.php
+php integrations/wordpress/eventsales-integration-health/tests/verified-package-delivery-test.php
 php integrations/wordpress/eventsales-integration-health/tests/integration-health-test.php
 bash scripts/ci_wordpress_plugin_distribution.sh
 ```
 
-The update-discovery tests do not contact GitHub. They cover cache sharing, plugin identity, supported WordPress versions, version comparisons, release and manifest validation, HTTP failures, redirects, the package-free response, and Site Health's no-network behavior.
+The discovery and verified-package tests do not contact GitHub. They cover notification vs execution authority, sentinel parsing, click-time revalidation, redirects, streaming, hash verification, auto-update denial, and Site Health's no-network behavior.
 
-The next real candidate after JC-320 should use catalog `0.1.2`, order index `0.2.2`, order-line identity `0.1.2`, and Integration Health `0.1.2`. JC-320 itself must not publish or promote that release. Follow the release process in [the WP-SOURCE-05 lifecycle guide](wordpress-plugin-release-lifecycle.md) after the implementation merges.
+The published immutable release `eventsales-wp-2026.10.04.1` carries catalog `0.1.2`, order index `0.2.2`, order-line identity `0.1.2`, and Integration Health `0.1.2`. After JC-328 merges, the next source candidate should bump Integration Health to `0.1.3` while sibling plugin versions stay unchanged until their bytes change. Follow [the WP-SOURCE-05 lifecycle guide](wordpress-plugin-release-lifecycle.md) before any new publication.

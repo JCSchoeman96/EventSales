@@ -11,10 +11,18 @@ if (!defined('ABSPATH')) {
  *
  * GitHub release metadata may tell administrators that a newer reviewed
  * release exists. This class never requests a plugin archive and never gives
- * WordPress a package URL to download or install.
+ * WordPress a raw GitHub package URL. Verified package delivery may offer a
+ * non-network sentinel when immutable release execution authority succeeds.
  */
 final class EventSales_WP_Update_Discovery
 {
+    /** @var array<string, array{main_file: string}> */
+    public const PLUGINS = [
+        'eventsales-tickera-catalog-feed' => ['main_file' => 'eventsales-tickera-catalog-feed.php'],
+        'eventsales-woo-order-index-feed' => ['main_file' => 'eventsales-woo-order-index-feed.php'],
+        'eventsales-woo-order-line-identity' => ['main_file' => 'eventsales-woo-order-line-identity.php'],
+        'eventsales-integration-health' => ['main_file' => 'eventsales-integration-health.php'],
+    ];
     public const UPDATE_URI = 'https://github.com/JCSchoeman96/EventSales';
     public const UPDATE_HOOK = 'update_plugins_github.com';
     public const CACHE_KEY = 'eventsales_wp_update_discovery_v1';
@@ -32,14 +40,6 @@ final class EventSales_WP_Update_Discovery
     private static bool $skip_remote_for_site_health_request = false;
     private static bool $request_cache_loaded = false;
     private static ?array $request_metadata = null;
-
-    /** @var array<string, array{main_file: string}> */
-    private const PLUGINS = [
-        'eventsales-tickera-catalog-feed' => ['main_file' => 'eventsales-tickera-catalog-feed.php'],
-        'eventsales-woo-order-index-feed' => ['main_file' => 'eventsales-woo-order-index-feed.php'],
-        'eventsales-woo-order-line-identity' => ['main_file' => 'eventsales-woo-order-line-identity.php'],
-        'eventsales-integration-health' => ['main_file' => 'eventsales-integration-health.php'],
-    ];
 
     /** @var list<string> */
     private const FAILURE_CATEGORIES = [
@@ -137,13 +137,39 @@ final class EventSales_WP_Update_Discovery
 
         self::record_cached_category('update_available');
 
-        return [
+        $response = [
             'slug' => $slug,
             'version' => $remoteVersion,
             'url' => self::UPDATE_URI . '/releases/tag/' . $metadata['tag'],
             'requires_php' => $metadata['requires_php'],
             'autoupdate' => false,
         ];
+
+        $packageOffer = $metadata['packages'][$slug] ?? null;
+        $githubReleaseId = $metadata['github_release_id'] ?? null;
+        if (is_array($packageOffer)
+            && is_int($githubReleaseId)
+            && $githubReleaseId > 0
+            && isset($packageOffer['asset_id'])
+            && is_int($packageOffer['asset_id'])
+            && $packageOffer['asset_id'] > 0) {
+            $response['package'] = EventSales_WP_Verified_Package_Delivery::build_sentinel(
+                $githubReleaseId,
+                $packageOffer['asset_id'],
+                $slug
+            );
+        }
+
+        return $response;
+    }
+
+    /**
+     * @param array<string, mixed> $manifest
+     * @return array{metadata?: array<string, mixed>, error?: string}
+     */
+    public static function validate_release_manifest_for_tag(array $manifest, string $releaseTag): array
+    {
+        return self::validate_manifest($manifest, $releaseTag);
     }
 
     /**
@@ -362,8 +388,18 @@ final class EventSales_WP_Update_Discovery
             return self::failure($validation['error'], $assetResponse['http_status']);
         }
 
+        $metadata = $validation['metadata'];
+        $releaseId = $release['id'] ?? null;
+        if (is_int($releaseId) && $releaseId > 0) {
+            $metadata['github_release_id'] = $releaseId;
+            $packages = EventSales_WP_Verified_Package_Delivery::package_offers_for_release($release, $manifest);
+            if ($packages !== []) {
+                $metadata['packages'] = $packages;
+            }
+        }
+
         return [
-            'metadata' => $validation['metadata'],
+            'metadata' => $metadata,
             'http_status' => $assetResponse['http_status'],
         ];
     }
@@ -683,6 +719,30 @@ final class EventSales_WP_Update_Discovery
             if (!isset($metadata['plugins'][$slug]['version'])
                 || !self::valid_marketing_version($metadata['plugins'][$slug]['version'])) {
                 return false;
+            }
+        }
+
+        if (isset($metadata['github_release_id'])
+            && (!is_int($metadata['github_release_id']) || $metadata['github_release_id'] < 1)) {
+            return false;
+        }
+
+        if (isset($metadata['packages'])) {
+            if (!is_array($metadata['packages']) || count($metadata['packages']) !== count(self::PLUGINS)) {
+                return false;
+            }
+            foreach (self::PLUGINS as $slug => $_plugin) {
+                $offer = $metadata['packages'][$slug] ?? null;
+                if (!is_array($offer)
+                    || !is_int($offer['asset_id'] ?? null)
+                    || $offer['asset_id'] < 1
+                    || !is_int($offer['asset_size'] ?? null)
+                    || $offer['asset_size'] < 1
+                    || !is_string($offer['archive_sha256'] ?? null)
+                    || preg_match('/^[0-9a-f]{64}$/', $offer['archive_sha256']) !== 1
+                    || !is_string($offer['archive_filename'] ?? null)) {
+                    return false;
+                }
             }
         }
 
