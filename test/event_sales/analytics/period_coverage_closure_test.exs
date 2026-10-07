@@ -9,7 +9,6 @@ defmodule EventSales.Analytics.PeriodCoverageClosureTest do
   alias EventSales.Analytics.PeriodCoverage
   alias EventSales.Analytics.Resources.EventPeriodAggregateSnapshot
   alias EventSales.Analytics.SnapshotRefresh
-  alias EventSales.Repo
   alias EventSales.TestSupport.EventDetailCertificationHelpers
   alias EventSales.TestSupport.PeriodCoverageHelpers
   alias EventSales.TestSupport.SalesHelpers

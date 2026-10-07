@@ -301,8 +301,7 @@ defmodule EventSales.Analytics.PeriodCoverageConcurrencyTest do
     end)
   end
 
-  defp zero_bucket_fixture!(opts \\ []) do
-    include_order? = Keyword.get(opts, :order?, false)
+  defp zero_bucket_fixture!(order?: include_order?) do
     source = SalesHelpers.create_source_system!()
     event = SalesHelpers.create_event!(source, %{name: "Race zero bucket"})
     ticket = SalesHelpers.create_ticket_type!(event, %{name: "GA"})

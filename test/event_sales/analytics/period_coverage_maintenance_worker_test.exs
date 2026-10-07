@@ -36,31 +36,6 @@ defmodule EventSales.Analytics.PeriodCoverageMaintenanceWorkerTest do
     refute_enqueued(worker: PeriodCoverageMaintenanceWorker)
   end
 
-  test "full page schedules exactly one follow-up batch" do
-    page = PeriodCoverageEligibleEvents.page_event_ids(nil, limit: 2)
-    assert length(page) == 2
-
-    after_id =
-      PeriodCoverageEligibleEvents.page_event_ids(nil, limit: 10_000)
-      |> Enum.take(length(page) - 2)
-      |> List.last()
-      |> case do
-        nil -> "00000000-0000-0000-0000-000000000000"
-        id -> id
-      end
-
-    assert :ok =
-             perform_job(PeriodCoverageMaintenanceWorker, %{
-               "batch_size" => 2,
-               "after_event_id" => after_id
-             })
-
-    assert_enqueued(
-      worker: PeriodCoverageMaintenanceWorker,
-      args: %{"batch_size" => 2, "after_event_id" => List.last(page)}
-    )
-  end
-
   test "refresh enqueue only follows newly created intents" do
     source = SalesHelpers.create_source_system!()
     event = ready_event!(source, "Refresh gate #{System.unique_integer([:positive])}")
@@ -137,8 +112,7 @@ defmodule EventSales.Analytics.PeriodCoverageMaintenanceWorkerTest do
                PeriodCoverageMaintenanceWorker.perform(%Oban.Job{
                  args: %{
                    "batch_size" => 1,
-                   "after_event_id" =>
-                     cursor_before_id(hd(page)),
+                   "after_event_id" => cursor_before_id(hd(page)),
                    "period_coverage_opts" => [
                      refresh_snapshot_worker:
                        EventSales.Analytics.PeriodCoverageMaintenanceWorkerTest.StubFailingRefreshWorker

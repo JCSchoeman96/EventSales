@@ -5,7 +5,6 @@ defmodule EventSales.Analytics.PeriodCoverageQueryPlanTest do
   alias EventSales.Analytics.PeriodCoverageEligibleEvents
   alias EventSales.Analytics.PeriodCoverageMaterializer
   alias EventSales.Analytics.PeriodProjectionRefresh
-  alias EventSales.Analytics.Resources.EventPeriodAggregateSnapshot
   alias EventSales.Repo
   alias EventSales.TestSupport.EventDetailCertificationHelpers
   alias EventSales.TestSupport.PeriodComparisonHelpers
