@@ -39,9 +39,10 @@ defmodule EventSales.TestSupport.M5_04PeriodLoadHarness do
   end
 
   defp measure_and_report!(fixture, samples, cohorts, pool_size) do
-    telemetry = start_telemetry!()
+    telemetry = nil
 
     try do
+      telemetry = start_telemetry!()
       reader_results =
         for request <- @requests,
             concurrency <- cohorts do
