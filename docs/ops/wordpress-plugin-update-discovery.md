@@ -64,4 +64,4 @@ bash scripts/ci_wordpress_plugin_distribution.sh
 
 The discovery and verified-package tests do not contact GitHub. They cover notification vs execution authority, sentinel parsing, click-time revalidation, redirects, streaming, hash verification, auto-update denial, and Site Health's no-network behavior.
 
-The next real candidate after JC-320 should use catalog `0.1.2`, order index `0.2.2`, order-line identity `0.1.2`, and Integration Health `0.1.2`. JC-320 itself must not publish or promote that release. Follow the release process in [the WP-SOURCE-05 lifecycle guide](wordpress-plugin-release-lifecycle.md) after the implementation merges.
+The published immutable release `eventsales-wp-2026.10.04.1` carries catalog `0.1.2`, order index `0.2.2`, order-line identity `0.1.2`, and Integration Health `0.1.2`. After JC-328 merges, the next source candidate should bump Integration Health to `0.1.3` while sibling plugin versions stay unchanged until their bytes change. Follow [the WP-SOURCE-05 lifecycle guide](wordpress-plugin-release-lifecycle.md) before any new publication.

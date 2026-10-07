@@ -166,6 +166,89 @@ Verified_Package_Test::same(
     EventSales_WP_Verified_Package_Delivery::filter_pre_download(false, 'https://downloads.wordpress.org/plugin.zip', $upgrader, ['plugin' => $basename])
 );
 
+reset_verified_package_state();
+queue_revalidate_download($manifestBody, $releaseById, $zipBytes);
+$singleHook = EventSales_WP_Verified_Package_Delivery::filter_pre_download(
+    false,
+    $sentinel,
+    $upgrader,
+    [
+        'plugin' => $basename,
+        'type' => 'plugin',
+        'action' => 'update',
+    ]
+);
+Verified_Package_Test::ok('filter_pre_download single update returns verified path', is_string($singleHook));
+Verified_Package_Test::same('filter_pre_download single update category', 'package_verified', EventSales_WP_Verified_Package_Delivery::read_diagnostics()['category']);
+
+reset_verified_package_state();
+queue_revalidate_download($manifestBody, $releaseById, $zipBytes);
+$bulkHook = EventSales_WP_Verified_Package_Delivery::filter_pre_download(
+    false,
+    $sentinel,
+    $upgrader,
+    ['plugin' => $basename]
+);
+Verified_Package_Test::ok('filter_pre_download bulk shape accepts plugin-only hook_extra', is_string($bulkHook));
+
+$healthBasename = 'eventsales-integration-health/eventsales-integration-health.php';
+$healthAssetId = 203;
+$healthSentinel = EventSales_WP_Verified_Package_Delivery::build_sentinel(405862040, $healthAssetId, 'eventsales-integration-health');
+$healthZip = str_repeat('H', 128);
+$healthManifest = valid_release_manifest();
+$healthManifest['plugins'][3]['archive_sha256'] = hash('sha256', $healthZip);
+$healthManifestBody = json_encode($healthManifest, JSON_UNESCAPED_SLASHES);
+$healthRelease = valid_release_metadata([
+    'id' => 405862040,
+    'immutable' => true,
+    'assets' => immutable_release_assets($healthManifest),
+]);
+
+reset_verified_package_state();
+queue_revalidate_download($healthManifestBody, $healthRelease, $healthZip);
+$selfHook = EventSales_WP_Verified_Package_Delivery::filter_pre_download(
+    false,
+    $healthSentinel,
+    $upgrader,
+    ['plugin' => $healthBasename]
+);
+Verified_Package_Test::ok('filter_pre_download integration health self-update', is_string($selfHook));
+
+reset_verified_package_state();
+$badSentinelHook = EventSales_WP_Verified_Package_Delivery::filter_pre_download(
+    false,
+    'eventsales-verified://not-valid',
+    $upgrader,
+    ['plugin' => $basename]
+);
+Verified_Package_Test::ok('filter_pre_download malformed sentinel rejected', is_wp_error($badSentinelHook));
+
+reset_verified_package_state();
+$mismatchHook = EventSales_WP_Verified_Package_Delivery::filter_pre_download(
+    false,
+    $sentinel,
+    $upgrader,
+    ['plugin' => 'eventsales-tickera-catalog-feed/eventsales-tickera-catalog-feed.php']
+);
+Verified_Package_Test::ok('filter_pre_download plugin basename mismatch rejected', is_wp_error($mismatchHook));
+
+reset_verified_package_state();
+$manifestStatic = valid_release_manifest();
+$staticBody = json_encode($manifestStatic, JSON_UNESCAPED_SLASHES);
+$assetsMissingState = immutable_release_assets($manifestStatic);
+foreach ($assetsMissingState as &$assetRow) {
+    if (($assetRow['name'] ?? '') === 'manifest.json') {
+        unset($assetRow['state']);
+    }
+}
+unset($assetRow);
+queue_immutable_release($staticBody, [
+    'assets' => $assetsMissingState,
+]);
+$missingStateUpdate = evaluate_plugin('eventsales-woo-order-line-identity', '0.1.1');
+Verified_Package_Test::ok('static asset missing state omits package', !array_key_exists('package', $missingStateUpdate ?? []));
+Verified_Package_Test::same('static asset missing state still notifies', '0.1.2', $missingStateUpdate['version'] ?? null);
+
 $diag = json_encode(EventSales_WP_Verified_Package_Delivery::read_diagnostics());
 Verified_Package_Test::ok('diagnostics omit temp paths', !str_contains($diag, sys_get_temp_dir()));
 

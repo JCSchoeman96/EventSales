@@ -400,7 +400,7 @@ final class EventSales_WP_Verified_Package_Delivery
             return false;
         }
 
-        if (($asset['state'] ?? 'uploaded') !== 'uploaded') {
+        if (($asset['state'] ?? null) !== 'uploaded') {
             return false;
         }
 
