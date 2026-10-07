@@ -33,6 +33,28 @@ defmodule EventSales.Analytics.EventSnapshotRefreshFence do
   end
 
   @doc false
+  @spec prepare_coherent_transaction!() :: :ok
+  def prepare_coherent_transaction! do
+    unless Repo.in_transaction?() do
+      raise ArgumentError,
+            "prepare_coherent_transaction!/0 requires an open Repo transaction"
+    end
+
+    if use_repeatable_read_isolation?() do
+      case Repo.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ", []) do
+        {:ok, _} ->
+          :ok
+
+        {:error, reason} ->
+          raise DBConnection.ConnectionError,
+                "failed to set PostgreSQL transaction isolation to repeatable read: #{inspect(reason)}"
+      end
+    else
+      :ok
+    end
+  end
+
+  @doc false
   @spec lock_events_in_transaction([Ecto.UUID.t() | String.t()]) ::
           :ok | {:error, :invalid_event_id | :event_snapshot_refresh_fence_failed}
   def lock_events_in_transaction(event_ids) when is_list(event_ids) do

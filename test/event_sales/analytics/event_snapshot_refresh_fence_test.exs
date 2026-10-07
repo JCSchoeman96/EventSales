@@ -6,26 +6,43 @@ defmodule EventSales.Analytics.EventSnapshotRefreshFenceTest do
   alias EventSales.TestSupport.EventSnapshotRefreshTestSupport
   alias EventSales.TestSupport.UnboxedPostgres
 
-  test "unboxed refresh transaction uses repeatable read after the session fence" do
-    event_id = Ecto.UUID.generate()
-
+  test "prepare_coherent_transaction! establishes repeatable read before projection statements" do
     UnboxedPostgres.with_connection(fn ->
       assert EventSnapshotRefreshFence.use_repeatable_read_isolation?()
 
-      EventSnapshotRefreshFence.with_serial_event_refresh(event_id, fn ->
-        transaction_opts =
-          [timeout: 30_000] ++ EventSnapshotRefreshFence.coherent_transaction_opts()
+      transaction_opts =
+        [timeout: 30_000] ++ EventSnapshotRefreshFence.coherent_transaction_opts()
 
-        assert {:ok, :ok} =
-                 Repo.transaction(
-                   fn ->
-                     level = EventSnapshotRefreshTestSupport.transaction_isolation_level()
-                     assert String.downcase(level) == "repeatable read"
-                     :ok
-                   end,
-                   transaction_opts
-                 )
-      end)
+      assert {:ok, :ok} =
+               Repo.transaction(
+                 fn ->
+                   :ok = EventSnapshotRefreshFence.prepare_coherent_transaction!()
+
+                   level = EventSnapshotRefreshTestSupport.transaction_isolation_level()
+                   assert String.downcase(level) == "repeatable read"
+                   :ok
+                 end,
+                 transaction_opts
+               )
+    end)
+  end
+
+  test "coherent_transaction_opts alone does not establish repeatable read on Postgrex" do
+    UnboxedPostgres.with_connection(fn ->
+      assert EventSnapshotRefreshFence.use_repeatable_read_isolation?()
+
+      transaction_opts =
+        [timeout: 30_000] ++ EventSnapshotRefreshFence.coherent_transaction_opts()
+
+      assert {:ok, level} =
+               Repo.transaction(
+                 fn ->
+                   EventSnapshotRefreshTestSupport.transaction_isolation_level()
+                 end,
+                 transaction_opts
+               )
+
+      assert String.downcase(level) == "read committed"
     end)
   end
 

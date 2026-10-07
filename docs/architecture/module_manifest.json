@@ -33,9 +33,11 @@
     "lib/event_sales/analytics/metric_rules.ex",
     "lib/event_sales/analytics/order_processed_notifier.ex",
     "lib/event_sales/analytics/period_bucket_rules.ex",
+    "lib/event_sales/analytics/period_comparison_reader.ex",
     "lib/event_sales/analytics/period_dimension_aggregator.ex",
     "lib/event_sales/analytics/period_projection_invalidator.ex",
     "lib/event_sales/analytics/period_projection_refresh.ex",
+    "lib/event_sales/analytics/period_read_plan.ex",
     "lib/event_sales/analytics/refund_processed_notifier.ex",
     "lib/event_sales/analytics/resources/analytics_contribution_fact.ex",
     "lib/event_sales/analytics/resources/daily_sales_aggregate_snapshot.ex",
@@ -412,6 +414,7 @@
     "test/support/ingestion/stub_webhook_event_store.ex",
     "test/support/mapping_setup_helpers.ex",
     "test/support/oban_helpers.ex",
+    "test/support/period_comparison_helpers.ex",
     "test/support/sales_helpers.ex",
     "test/support/telemetry_helpers.ex",
     "test/support/tickera_catalog_fixtures.ex",
@@ -864,7 +867,7 @@
       "uses": []
     },
     {
-      "docs_count": 6,
+      "docs_count": 7,
       "moduledoc?": true,
       "name": "EventSales.Analytics.EventSnapshotRefreshFence",
       "parse_error": null,
@@ -877,6 +880,10 @@
         {
           "arity": 0,
           "name": "coherent_transaction_opts"
+        },
+        {
+          "arity": 0,
+          "name": "prepare_coherent_transaction!"
         },
         {
           "arity": 1,
@@ -1084,6 +1091,25 @@
       "uses": []
     },
     {
+      "docs_count": 2,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.PeriodComparisonReader",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/period_comparison_reader.ex",
+      "public_funs": [
+        {
+          "arity": 4,
+          "name": "compare_event"
+        },
+        {
+          "arity": 3,
+          "name": "load_operand_payload_for_test!"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
       "docs_count": 3,
       "moduledoc?": true,
       "name": "EventSales.Analytics.PeriodDimensionAggregator",
@@ -1147,6 +1173,25 @@
         {
           "arity": 2,
           "name": "dimension_delete_query"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 2,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.PeriodReadPlan",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/period_read_plan.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "build"
+        },
+        {
+          "arity": 2,
+          "name": "decompose_period"
         }
       ],
       "specs?": true,
@@ -9583,6 +9628,49 @@
       "uses": [
         "Oban.Worker"
       ]
+    },
+    {
+      "docs_count": 6,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.PeriodComparisonHelpers",
+      "parse_error": null,
+      "path": "test/support/period_comparison_helpers.ex",
+      "public_funs": [
+        {
+          "arity": 0,
+          "name": "default_coverage_identity"
+        },
+        {
+          "arity": 0,
+          "name": "default_refreshed_at"
+        },
+        {
+          "arity": 4,
+          "name": "create_event_bucket!"
+        },
+        {
+          "arity": 5,
+          "name": "create_dimension_bucket!"
+        },
+        {
+          "arity": 6,
+          "name": "insert_edge_contribution_fact!"
+        },
+        {
+          "arity": 2,
+          "name": "plan_for"
+        },
+        {
+          "arity": 7,
+          "name": "seed_comparison_projection!"
+        },
+        {
+          "arity": 8,
+          "name": "seed_asymmetric_comparison_projection!"
+        }
+      ],
+      "specs?": false,
+      "uses": []
     },
     {
       "docs_count": 1,
