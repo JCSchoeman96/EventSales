@@ -334,8 +334,8 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
              coverage_by_hour,
              semantic_by_hour,
              nil
-           ),
-         indexed = index_event_edge_rows(rows, edge_fragments) do
+           ) do
+      indexed = index_event_edge_rows(rows, edge_fragments)
       {:ok, finalize_event_edges(indexed, edge_fragments)}
     end
   end
