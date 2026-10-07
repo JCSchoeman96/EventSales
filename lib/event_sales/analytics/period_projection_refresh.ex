@@ -290,19 +290,10 @@ defmodule EventSales.Analytics.PeriodProjectionRefresh do
     )
   end
 
-  defp read_current_johannesburg_envelopes(event_id, identities) do
-    case identities do
-      [] ->
-        []
-
-      identities ->
-        query = current_johannesburg_envelope_query(event_id, identities)
-
-        case Ash.read(query, domain: Analytics) do
-          {:ok, rows} -> rows
-          {:error, _} -> []
-        end
-    end
+  defp read_current_johannesburg_envelopes(event_id, identities) when is_list(identities) do
+    event_id
+    |> current_johannesburg_envelope_query(identities)
+    |> Repo.all()
   end
 
   defp johannesburg_day_envelopes_hour?(day_row, hour_row) do

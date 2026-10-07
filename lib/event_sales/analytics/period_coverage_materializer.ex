@@ -34,31 +34,39 @@ defmodule EventSales.Analytics.PeriodCoverageMaterializer do
          {:ok, currencies} <-
            PeriodCoverageCurrencyResolver.currencies_for_event(canonical_event_id) do
       if currencies == [] do
-        case maybe_enqueue_snapshot_without_currency(canonical_event_id, opts) do
-          :ok ->
-            {:ok,
-             %{
-               bucket_intents_created: 0,
-               refresh_enqueued?: true,
-               currencies: []
-             }}
-
-          {:ok, :skipped} ->
-            {:ok,
-             %{
-               bucket_intents_created: 0,
-               refresh_enqueued?: false,
-               currencies: []
-             }}
-
-          {:error, reason} ->
-            {:error, reason}
-        end
+        materialize_without_currencies(canonical_event_id, opts)
       else
-        with {:ok, bucket_specs} <- PeriodCoveragePlanner.required_bucket_specs(captured_now_utc) do
-          persist_and_enqueue(canonical_event_id, currencies, bucket_specs, opts)
-        end
+        materialize_with_currencies(canonical_event_id, currencies, captured_now_utc, opts)
       end
+    end
+  end
+
+  defp materialize_without_currencies(event_id, opts) do
+    case maybe_enqueue_snapshot_without_currency(event_id, opts) do
+      :ok ->
+        {:ok,
+         %{
+           bucket_intents_created: 0,
+           refresh_enqueued?: true,
+           currencies: []
+         }}
+
+      {:ok, :skipped} ->
+        {:ok,
+         %{
+           bucket_intents_created: 0,
+           refresh_enqueued?: false,
+           currencies: []
+         }}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp materialize_with_currencies(event_id, currencies, captured_now_utc, opts) do
+    with {:ok, bucket_specs} <- PeriodCoveragePlanner.required_bucket_specs(captured_now_utc) do
+      persist_and_enqueue(event_id, currencies, bucket_specs, opts)
     end
   end
 

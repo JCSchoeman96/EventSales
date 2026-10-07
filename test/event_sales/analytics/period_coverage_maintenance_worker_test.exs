@@ -5,10 +5,9 @@ defmodule EventSales.Analytics.PeriodCoverageMaintenanceWorkerTest do
   alias EventSales.Analytics.PeriodCoverage
   alias EventSales.Analytics.PeriodCoverageEligibleEvents
   alias EventSales.Analytics.Workers.PeriodCoverageMaintenanceWorker
-  alias EventSales.TestSupport.StubRefreshSnapshotWorker
   alias EventSales.TestSupport.EventDetailCertificationHelpers
   alias EventSales.TestSupport.PeriodCoverageHelpers
-  alias EventSales.TestSupport.SalesHelpers
+  alias EventSales.TestSupport.{SalesHelpers, StubRefreshSnapshotWorker}
 
   @now ~U[2026-05-17 10:00:00.000000Z]
 

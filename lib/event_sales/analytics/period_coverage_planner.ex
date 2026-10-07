@@ -80,7 +80,6 @@ defmodule EventSales.Analytics.PeriodCoveragePlanner do
     else
       {:error, :too_many_edge_fragments} -> {:error, :too_many_edge_fragments}
       {:error, reason} -> {:error, reason}
-      _ -> {:error, :comparison_windows_failed}
     end
   end
 

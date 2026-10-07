@@ -28,7 +28,7 @@ defmodule EventSales.Analytics.PeriodCoverageEligibleEventsTest do
     assert page1 == Enum.sort(page1)
 
     page2 = PeriodCoverageEligibleEvents.page_event_ids(List.last(page1), limit: 2)
-    assert length(page2) >= 1
+    assert page2 != []
     refute Enum.any?(page2, &(&1 in page1))
 
     assert MapSet.new(page1 ++ page2)
