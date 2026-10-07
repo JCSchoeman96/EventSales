@@ -20,13 +20,13 @@ defmodule EventSales.Analytics.M5_04PeriodIsolationRegressionTest do
     UnboxedPostgres.with_exclusive_setup(fn ->
       source = SalesHelpers.create_source_system!()
       event = Cert.prepare_analytics_ready_event!(source)
-      ticket = SalesHelpers.create_ticket_type!(event, %{name: "Isolation probe"})
-
-      Cert.ingest_sale_and_refresh!(event, nil, source, ticket, @sale_at, @now)
 
       on_exit(fn ->
         Cert.cleanup_unboxed_certification_fixture!(event.id, source.id)
       end)
+
+      ticket = SalesHelpers.create_ticket_type!(event, %{name: "Isolation probe"})
+      Cert.ingest_sale_and_refresh!(event, nil, source, ticket, @sale_at, @now)
 
       Cert.cleanup_unboxed_certification_fixture!(event.id, source.id)
     end)

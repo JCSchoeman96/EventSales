@@ -30,6 +30,15 @@ defmodule EventSales.TestSupport.M5_04PeriodLoadHarness do
         String.to_integer(System.get_env("TEST_DATABASE_POOL_SIZE", "10"))
 
     fixture = build_fixture!(now)
+
+    try do
+      measure_and_report!(fixture, samples, cohorts, pool_size)
+    after
+      Cert.cleanup_unboxed_certification_fixture!(fixture.event.id, fixture.source.id)
+    end
+  end
+
+  defp measure_and_report!(fixture, samples, cohorts, pool_size) do
     telemetry = start_telemetry!()
 
     try do
@@ -41,8 +50,7 @@ defmodule EventSales.TestSupport.M5_04PeriodLoadHarness do
 
       memory = measure_memory_boundedness!(fixture, samples)
       rebuild = measure_rebuild_tiers!(fixture)
-
-      telemetry_stats = stop_telemetry!(telemetry)
+      telemetry_stats = finalize_telemetry!(telemetry)
 
       %{
         pool_size: pool_size,
@@ -55,7 +63,7 @@ defmodule EventSales.TestSupport.M5_04PeriodLoadHarness do
       }
       |> print_evidence!()
     after
-      Cert.cleanup_unboxed_certification_fixture!(fixture.event.id, fixture.source.id)
+      detach_telemetry!(telemetry)
     end
   end
 
@@ -63,16 +71,23 @@ defmodule EventSales.TestSupport.M5_04PeriodLoadHarness do
   def build_fixture!(now) do
     source = SalesHelpers.create_source_system!()
     event = Cert.prepare_analytics_ready_event!(source)
-    ticket = SalesHelpers.create_ticket_type!(event, %{name: "Load ticket"})
-    admin = Cert.certification_admin!()
-    sale_at = DateTime.add(now, -2 * 86_400, :second)
 
-    Cert.ingest_sale_and_refresh!(event, nil, source, ticket, sale_at, now,
-      line_total: Decimal.new("55.00"),
-      line_tax: Decimal.new("8.25")
-    )
+    try do
+      ticket = SalesHelpers.create_ticket_type!(event, %{name: "Load ticket"})
+      admin = Cert.certification_admin!()
+      sale_at = DateTime.add(now, -2 * 86_400, :second)
 
-    %{event: event, admin: admin, source: source, ticket: ticket, now: now, currency: "ZAR"}
+      Cert.ingest_sale_and_refresh!(event, nil, source, ticket, sale_at, now,
+        line_total: Decimal.new("55.00"),
+        line_tax: Decimal.new("8.25")
+      )
+
+      %{event: event, admin: admin, source: source, ticket: ticket, now: now, currency: "ZAR"}
+    rescue
+      error ->
+        Cert.cleanup_unboxed_certification_fixture!(event.id, source.id)
+        reraise error, __STACKTRACE__
+    end
   end
 
   defp measure_reader_cohort(fixture, request, concurrency, samples) do
@@ -191,48 +206,50 @@ defmodule EventSales.TestSupport.M5_04PeriodLoadHarness do
     Enum.map(tiers, fn {name, sale_count} ->
       source = SalesHelpers.create_source_system!()
       event = Cert.prepare_analytics_ready_event!(source)
-      ticket = SalesHelpers.create_ticket_type!(event, %{name: "Rebuild #{name}"})
 
-      Enum.reduce(1..sale_count, nil, fn i, snap ->
-        paid_at = DateTime.add(fixture.now, -i * 3600, :second)
+      try do
+        ticket = SalesHelpers.create_ticket_type!(event, %{name: "Rebuild #{name}"})
 
-        {_order, _item, snap} =
-          Cert.ingest_sale_and_refresh!(event, snap, source, ticket, paid_at, fixture.now,
-            line_total: Decimal.new("10.00"),
-            line_tax: Decimal.new("1.50")
-          )
+        Enum.reduce(1..sale_count, nil, fn i, snap ->
+          paid_at = DateTime.add(fixture.now, -i * 3600, :second)
 
-        snap
-      end)
+          {_order, _item, snap} =
+            Cert.ingest_sale_and_refresh!(event, snap, source, ticket, paid_at, fixture.now,
+              line_total: Decimal.new("10.00"),
+              line_tax: Decimal.new("1.50")
+            )
 
-      durations =
-        for _ <- 1..10 do
-          {us, :ok} =
-            :timer.tc(fn ->
-              case SnapshotRefresh.refresh_event(event.id,
-                     now: fixture.now,
-                     refreshed_at: fixture.now
-                   ) do
-                {:ok, _} -> :ok
-                other -> raise "rebuild failed: #{inspect(other)}"
-              end
-            end)
+          snap
+        end)
 
-          div(us, 1000)
-        end
-        |> Enum.sort()
+        durations =
+          for _ <- 1..10 do
+            {us, :ok} =
+              :timer.tc(fn ->
+                case SnapshotRefresh.refresh_event(event.id,
+                       now: fixture.now,
+                       refreshed_at: fixture.now
+                     ) do
+                  {:ok, _} -> :ok
+                  other -> raise "rebuild failed: #{inspect(other)}"
+                end
+              end)
 
-      result = %{
-        tier: name,
-        contribution_sales: sale_count,
-        sample_count: length(durations),
-        p50: percentile(durations, 50),
-        p95: percentile(durations, 95),
-        p99: percentile(durations, 99)
-      }
+            div(us, 1000)
+          end
+          |> Enum.sort()
 
-      Cert.cleanup_unboxed_certification_fixture!(event.id, source.id)
-      result
+        %{
+          tier: name,
+          contribution_sales: sale_count,
+          sample_count: length(durations),
+          p50: percentile(durations, 50),
+          p95: percentile(durations, 95),
+          p99: percentile(durations, 99)
+        }
+      after
+        Cert.cleanup_unboxed_certification_fixture!(event.id, source.id)
+      end
     end)
   end
 
@@ -253,9 +270,9 @@ defmodule EventSales.TestSupport.M5_04PeriodLoadHarness do
     %{handler_id: handler_id, parent: parent, queue_times: [], query_times: []}
   end
 
-  defp stop_telemetry!(%{handler_id: handler_id} = state) do
-    :telemetry.detach(handler_id)
+  defp finalize_telemetry!(state) do
     drain = drain_measurements(state, state.queue_times, state.query_times)
+    detach_telemetry!(state)
 
     %{
       db_queue_p50: percentile(Enum.sort(drain.queue_times), 50),
@@ -264,6 +281,15 @@ defmodule EventSales.TestSupport.M5_04PeriodLoadHarness do
       db_query_p50: percentile(Enum.sort(drain.query_times), 50),
       pool_timeout_count: 0
     }
+  end
+
+  defp detach_telemetry!(nil), do: :ok
+
+  defp detach_telemetry!(%{handler_id: handler_id}) do
+    case :telemetry.detach(handler_id) do
+      :ok -> :ok
+      {:error, :not_found} -> :ok
+    end
   end
 
   defp drain_measurements(state, queue_acc, query_acc) do
