@@ -1,10 +1,10 @@
 # WP-SOURCE-08 verified package delivery plan
 
-Plan ID: JC-328  
-Plan version: v1  
-Status: implemented on branch `parallel/wp-verified-package-delivery`  
-Scope: EventSales WordPress native manual updates with immutable release verification  
-Last updated: 2026-10-07  
+Plan ID: JC-328
+Plan version: v1
+Status: implemented on branch `parallel/wp-verified-package-delivery`
+Scope: EventSales WordPress native manual updates with immutable release verification
+Last updated: 2026-10-07
 Authority: Linear JC-328; supersedes notification-only assumptions in WP-SOURCE-06 docs where they conflict on installability
 
 ### Revision log
