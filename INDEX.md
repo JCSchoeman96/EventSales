@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-430
+431
 
 ## Files
 
@@ -431,6 +431,7 @@ Project root: `.`
 - `test/support/ingestion/memory_rate_limiter_adapter.ex`
 - `test/support/ingestion/memory_webhook_buffer_adapter.ex`
 - `test/support/ingestion/stub_webhook_event_store.ex`
+- `test/support/m5_04_period_certification_helpers.ex`
 - `test/support/mapping_setup_helpers.ex`
 - `test/support/oban_helpers.ex`
 - `test/support/period_comparison_helpers.ex`
@@ -2946,6 +2947,12 @@ Project root: `.`
   - specs?: true
   - docs_count: 0
   - public_funs: `set_persist_error/1`, `clear!/0`, `create_receive/1`
+  - uses: _none_
+- `EventSales.TestSupport.M5_04PeriodCertificationHelpers` - `test/support/m5_04_period_certification_helpers.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 23
+  - public_funs: `supported_requests/0`, `comparison_metrics/0`, `comparison_windows!/2`, `oracle_summary!/3`, `oracle_summary_for_operand!/4`, `financial_oracle_period/2`, `oracle_operand_supported?/4`, `prepare_analytics_ready_event!/2`, `seed_currency!/2`, `refresh_period_projections!/2`, `capture_order_snapshot!/1`, `invalidate_order_change!/2`, `invalidate_refund_change!/2`, `create_completed_sale!/5`, `create_qualifying_refund!/5`, `ingest_sale_and_refresh!/7`, `compare_event!/5`, `assert_reader_operands_match_oracle!/5`, `assert_operand_metrics_match_oracle!/5`, `assert_dimensional_sums_match_event!/2`, `assert_variation_subset_matches_facts!/4`, `contribution_semantic_fingerprint/1`, `period_bucket_semantic_fingerprint/1`
   - uses: _none_
 - `EventSales.TestSupport.MappingSetupHelpers` - `test/support/mapping_setup_helpers.ex`
   - moduledoc?: true

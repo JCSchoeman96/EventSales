@@ -21,20 +21,27 @@
 - `v14` — JC-321 S2 review correction: dimensional zero-activity operand maps, single event-edge unnest query, truthful JSON EXPLAIN scan detection, `(event_id, currency, effective_at)` contribution index, global not-ready monetary redaction.
 - `v15` — JC-321 final integration cleanup: align M5-04F implementation-record base with v14 header (`eb0991a` / `835b423a`); restore `mix.lock` to current `main` (no unrelated `ex_ast` / `finch` / `req` drift).
 - `v16` — JC-325 M5-04G1 period coverage materialization and catch-up closure (JC-321 merged; G2 not authorized).
+- `v17` — JC-326 M5-04G2 final reconciliation, load, and scale certification (JC-325 merged; certification-only pass).
 
-**Plan version:** `v16`
+**Plan version:** `v17`
 
 ```text
-PLAN_VERSION = v16
+PLAN_VERSION = v17
 JC_321_STATUS = MERGED
 JC_321_MERGE_SHA = 4f35f5ed81324058e3400752c514b144a7cc5c99
 JC_321_MERGE_TREE = 3f0a6250299a67ae3379cfb79705fb2ac1ad6957
 M5_04F_DURABLE_AUTHORITY = YES
 M5_04G_AUTHORIZED = YES
-M5_04G1_STATUS = IN_PROGRESS
-M5_04G1_DURABLE_AUTHORITY = PENDING_MERGE
-M5_04G2_AUTHORIZED = NO
-JC_325_STATUS = IN_REVIEW
+JC_325_STATUS = MERGED
+JC_325_MERGE_SHA = d527cb9cc9afab930c0f007ed2ff6b20a4095086
+JC_325_MERGE_TREE = 2949fed049e55a82e8fc95ff8f29424c951542e6
+M5_04G1_DURABLE_AUTHORITY = YES
+M5_04G1_STATUS = MERGED
+M5_04G2_STATUS = IN_PROGRESS
+M5_04G2_DURABLE_AUTHORITY = PENDING_MERGE
+M5_04G2_AUTHORIZED = YES
+M5_04_COMPLETE = NO
+JC_326_STATUS = IN_PROGRESS
 
 ZERO_BUCKET_GAP_REPRODUCED = YES
 MOVING_HORIZON_GAP_REPRODUCED = YES
@@ -67,14 +74,19 @@ MATERIALIZER_INSERT_STRATEGY = insert_all ON CONFLICT DO NOTHING chunks of 3000 
 
 BACKFILL_REFRESH_CHURN_EVIDENCE = HistoricalCatchupExecutionTest real OrderUpserter + injected snapshot_refresh_scheduler counter (see multi-page terminal scheduler test; not Upserter stub call counts)
 
-REDIS_DECISION = NONE
-CACHE_DECISION = NONE
-PUBSUB_DECISION = DEFERRED_TO_G2
+REDIS_DECISION = DEFERRED_TO_G2_EVIDENCE
+CACHE_DECISION = DEFERRED_TO_G2_EVIDENCE
+PUBSUB_DECISION = DEFERRED_TO_G2_EVIDENCE
+G2_CERTIFICATION_DOC = docs/evidence/m5-04-period-comparisons-certification.md
+G2_RECONCILIATION_SUITE = test/event_sales/analytics/m5_04_period_reconciliation_test.exs
+G2_QUERY_PLAN_SUITE = test/event_sales/analytics/m5_04_period_query_plan_test.exs
+G2_CONCURRENCY_SUITE = test/event_sales/analytics/m5_04_period_concurrency_test.exs
+G2_LOAD_HARNESS = scripts/certification/m5_04_period_load.exs
 ```
 
-**Status:** JC-321 M5-04F merged (PR #295); JC-325 M5-04G1 period coverage in progress; M5-04G2 reconciliation/load certification not authorized.
+**Status:** JC-325 M5-04G1 merged (PR #299); JC-326 M5-04G2 certification in progress (tests + evidence; no production semantic changes in first pass).
 **Last updated:** 2026-10-07
-**Change summary (v16):** Record JC-321 merge authority, reproduced zero/moving-horizon coverage gaps, G1 coverage planner/materializer/catch-up/maintenance design, and JC-325 review corrections (eligible-event SQL authority, bounded JHB lookup, terminal wall-clock anchor, concurrency/closure/churn evidence).
+**Change summary (v17):** Record JC-325 merge authority, G1 durable closure, and JC-326 G2 certification scope (oracle reconciliation suites, plan evidence, load harness; cache/Redis/PubSub decisions via evidence doc).
 
 **Goal:** Define a canonical, currency-safe period comparison read model for event and required dimensional grains without promoting the legacy daily-v1 snapshot or inventing comparison semantics.
 
