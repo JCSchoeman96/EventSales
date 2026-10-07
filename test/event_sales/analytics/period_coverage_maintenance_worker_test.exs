@@ -11,7 +11,9 @@ defmodule EventSales.Analytics.PeriodCoverageMaintenanceWorkerTest do
 
   test "eligible page query returns stable ascending ids" do
     source = SalesHelpers.create_source_system!()
-    _event = ready_event!(source, "Paging #{System.unique_integer([:positive])}")
+
+    events =
+      for _ <- 1..3, do: ready_event!(source, "Paging #{System.unique_integer([:positive])}")
 
     page1 = PeriodCoverageEligibleEvents.page_event_ids(nil, limit: 2)
     assert length(page1) == 2
@@ -20,6 +22,11 @@ defmodule EventSales.Analytics.PeriodCoverageMaintenanceWorkerTest do
     page2 = PeriodCoverageEligibleEvents.page_event_ids(List.last(page1), limit: 2)
     assert page2 != []
     refute Enum.any?(page2, &(&1 in page1))
+
+    assert Enum.all?(
+             events,
+             &(&1.id in PeriodCoverageEligibleEvents.page_event_ids(nil, limit: 100))
+           )
   end
 
   test "short tail page does not enqueue another batch" do
@@ -91,8 +98,13 @@ defmodule EventSales.Analytics.PeriodCoverageMaintenanceWorkerTest do
   end
 
   test "eligible event failure increments failures without aborting the worker batch" do
-    page = PeriodCoverageEligibleEvents.page_event_ids(nil, limit: 1)
-    assert page != []
+    source = SalesHelpers.create_source_system!()
+    event = ready_event!(source, "Failure #{System.unique_integer([:positive])}")
+
+    page =
+      PeriodCoverageEligibleEvents.page_event_ids(cursor_before_id(event.id), limit: 1)
+
+    assert page == [event.id]
 
     handler_id = {__MODULE__, :failures, make_ref()}
     parent = self()
@@ -112,7 +124,7 @@ defmodule EventSales.Analytics.PeriodCoverageMaintenanceWorkerTest do
                PeriodCoverageMaintenanceWorker.perform(%Oban.Job{
                  args: %{
                    "batch_size" => 1,
-                   "after_event_id" => cursor_before_id(hd(page)),
+                   "after_event_id" => cursor_before_id(event.id),
                    "period_coverage_opts" => [
                      refresh_snapshot_worker:
                        EventSales.Analytics.PeriodCoverageMaintenanceWorkerTest.StubFailingRefreshWorker
