@@ -1164,7 +1164,17 @@
       "uses": []
     },
     {
-      "docs_count": 2,
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "CandidatePage",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/period_coverage_eligible_events.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 4,
       "moduledoc?": true,
       "name": "EventSales.Analytics.PeriodCoverageEligibleEvents",
       "parse_error": null,
@@ -1173,6 +1183,14 @@
         {
           "arity": 2,
           "name": "page_event_ids"
+        },
+        {
+          "arity": 2,
+          "name": "page_candidates"
+        },
+        {
+          "arity": 1,
+          "name": "collect_event_ids"
         },
         {
           "arity": 0,
@@ -1815,7 +1833,7 @@
       ]
     },
     {
-      "docs_count": 0,
+      "docs_count": 2,
       "moduledoc?": true,
       "name": "EventSales.Analytics.Workers.PeriodCoverageMaintenanceWorker",
       "parse_error": null,
@@ -1824,9 +1842,17 @@
         {
           "arity": 1,
           "name": "perform"
+        },
+        {
+          "arity": 2,
+          "name": "perform_with_opts"
+        },
+        {
+          "arity": 3,
+          "name": "schedule_continuation"
         }
       ],
-      "specs?": false,
+      "specs?": true,
       "uses": [
         "Oban.Worker"
       ]

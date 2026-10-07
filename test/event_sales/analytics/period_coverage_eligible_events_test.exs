@@ -7,6 +7,7 @@ defmodule EventSales.Analytics.PeriodCoverageEligibleEventsTest do
   alias EventSales.Ingestion
   alias EventSales.Ingestion.AnalyticsReadinessResolver
   alias EventSales.Ingestion.FinancialReconciliationRuns
+  alias EventSales.Ingestion.HistoricalCoverageEvidence
   alias EventSales.Ingestion.Resources.{FinancialReconciliationRun, SyncRun}
   alias EventSales.Repo
   alias EventSales.TestSupport.{FinancialReconciliationHelpers, SalesHelpers}
@@ -23,17 +24,19 @@ defmodule EventSales.Analytics.PeriodCoverageEligibleEventsTest do
              )
            end)
 
-    page1 = PeriodCoverageEligibleEvents.page_event_ids(nil, limit: 2)
-    assert length(page1) == 2
-    assert page1 == Enum.sort(page1)
+    page1 = PeriodCoverageEligibleEvents.page_candidates(nil, limit: 2)
+    assert page1.candidates_examined == 2
+    assert page1.event_ids == Enum.sort(page1.event_ids)
 
-    page2 = PeriodCoverageEligibleEvents.page_event_ids(List.last(page1), limit: 2)
-    assert page2 != []
-    refute Enum.any?(page2, &(&1 in page1))
+    page2 =
+      PeriodCoverageEligibleEvents.page_candidates(page1.next_after_event_id, limit: 2)
 
-    assert Enum.all?(ready_events, fn event ->
-             event.id in PeriodCoverageEligibleEvents.page_event_ids(nil, limit: 100)
-           end)
+    assert page2.candidates_examined > 0
+    refute Enum.any?(page2.event_ids, &(&1 in page1.event_ids))
+
+    collected = PeriodCoverageEligibleEvents.collect_event_ids(limit: 100)
+
+    assert Enum.all?(ready_events, fn event -> event.id in collected end)
   end
 
   test "excludes invalidated newest certificate" do
@@ -51,7 +54,7 @@ defmodule EventSales.Analytics.PeriodCoverageEligibleEventsTest do
       [Ecto.UUID.dump!(sync_run.id)]
     )
 
-    refute event.id in PeriodCoverageEligibleEvents.page_event_ids(nil, limit: 100)
+    refute event.id in PeriodCoverageEligibleEvents.collect_event_ids(limit: 100)
   end
 
   test "excludes incomplete certificate" do
@@ -64,7 +67,7 @@ defmodule EventSales.Analytics.PeriodCoverageEligibleEventsTest do
       [Ecto.UUID.dump!(sync_run.id)]
     )
 
-    refute event.id in PeriodCoverageEligibleEvents.page_event_ids(nil, limit: 100)
+    refute event.id in PeriodCoverageEligibleEvents.collect_event_ids(limit: 100)
   end
 
   test "excludes when newest terminal reconciliation is failed after older passed" do
@@ -77,7 +80,7 @@ defmodule EventSales.Analytics.PeriodCoverageEligibleEventsTest do
     set_finished_at!(passed, ~U[2026-09-21 10:00:00.000000Z])
     set_finished_at!(failed, ~U[2026-09-21 11:00:00.000000Z])
 
-    refute event.id in PeriodCoverageEligibleEvents.page_event_ids(nil, limit: 100)
+    refute event.id in PeriodCoverageEligibleEvents.collect_event_ids(limit: 100)
   end
 
   test "excludes passed reconciliation with findings" do
@@ -86,7 +89,7 @@ defmodule EventSales.Analytics.PeriodCoverageEligibleEventsTest do
     sync_run = FinancialReconciliationHelpers.certified_run!(event)
     terminal_run!(event, :matched, sync_run, [:currency_conflict])
 
-    refute event.id in PeriodCoverageEligibleEvents.page_event_ids(nil, limit: 100)
+    refute event.id in PeriodCoverageEligibleEvents.collect_event_ids(limit: 100)
   end
 
   test "excludes scope-mismatched reconciliation" do
@@ -99,7 +102,62 @@ defmodule EventSales.Analytics.PeriodCoverageEligibleEventsTest do
       [Ecto.UUID.dump!(run.id)]
     )
 
-    refute event.id in PeriodCoverageEligibleEvents.page_event_ids(nil, limit: 100)
+    refute event.id in PeriodCoverageEligibleEvents.collect_event_ids(limit: 100)
+  end
+
+  test "excludes malformed coverage_evidence with only result certified" do
+    source = SalesHelpers.create_source_system!()
+    event = ready_event!(source, "Malformed evidence")
+    sync_run = latest_cert!(event)
+
+    refute HistoricalCoverageEvidence.certified?(%{"result" => "certified"})
+
+    Repo.query!(
+      "UPDATE ingestion_sync_runs SET coverage_evidence = $1::jsonb WHERE id = $2",
+      [Jason.encode!(%{"result" => "certified"}), Ecto.UUID.dump!(sync_run.id)]
+    )
+
+    refute event.id in PeriodCoverageEligibleEvents.collect_event_ids(limit: 100)
+  end
+
+  test "newer invalid certified-at candidate does not resurrect older valid certificate" do
+    source = SalesHelpers.create_source_system!()
+    event = SalesHelpers.create_event!(source, %{name: "Superseded cert"})
+    older = FinancialReconciliationHelpers.certified_run!(event)
+    terminal_run!(event, :matched, older)
+
+    newer = FinancialReconciliationHelpers.certified_run!(event)
+    terminal_run!(event, :matched, newer)
+
+    Repo.query!(
+      "UPDATE ingestion_sync_runs SET coverage_evidence = $1::jsonb WHERE id = $2",
+      [Jason.encode!(%{"result" => "certified"}), Ecto.UUID.dump!(newer.id)]
+    )
+
+    refute HistoricalCoverageEvidence.certified?(%{"result" => "certified"})
+    refute event.id in PeriodCoverageEligibleEvents.collect_event_ids(limit: 100)
+  end
+
+  test "raw candidate page advances cursor when evidence is invalid" do
+    source = SalesHelpers.create_source_system!()
+
+    for name <- ["Malformed A", "Malformed B"] do
+      event = SalesHelpers.create_event!(source, %{name: name})
+      sync_run = FinancialReconciliationHelpers.certified_run!(event)
+      terminal_run!(event, :matched, sync_run)
+
+      Repo.query!(
+        "UPDATE ingestion_sync_runs SET coverage_evidence = $1::jsonb WHERE id = $2",
+        [Jason.encode!(%{"result" => "certified"}), Ecto.UUID.dump!(sync_run.id)]
+      )
+    end
+
+    page = PeriodCoverageEligibleEvents.page_candidates(nil, limit: 1)
+
+    assert page.event_ids == []
+    assert page.candidates_examined == 1
+    assert page.has_more?
+    assert page.next_after_event_id
   end
 
   defp ready_event!(source, name) do

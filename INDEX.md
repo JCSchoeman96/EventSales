@@ -637,11 +637,17 @@ Project root: `.`
   - docs_count: 1
   - public_funs: `currencies_for_event/1`
   - uses: _none_
+- `CandidatePage` - `lib/event_sales/analytics/period_coverage_eligible_events.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
 - `EventSales.Analytics.PeriodCoverageEligibleEvents` - `lib/event_sales/analytics/period_coverage_eligible_events.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 2
-  - public_funs: `page_event_ids/2`, `explain_sql/0`
+  - docs_count: 4
+  - public_funs: `page_event_ids/2`, `page_candidates/2`, `collect_event_ids/1`, `explain_sql/0`
   - uses: _none_
 - `EventSales.Analytics.PeriodCoverageMaterializer` - `lib/event_sales/analytics/period_coverage_materializer.ex`
   - moduledoc?: true
@@ -843,9 +849,9 @@ Project root: `.`
   - uses: `Ash.Resource.Validation`
 - `EventSales.Analytics.Workers.PeriodCoverageMaintenanceWorker` - `lib/event_sales/analytics/workers/period_coverage_maintenance_worker.ex`
   - moduledoc?: true
-  - specs?: false
-  - docs_count: 0
-  - public_funs: `perform/1`
+  - specs?: true
+  - docs_count: 2
+  - public_funs: `perform/1`, `perform_with_opts/2`, `schedule_continuation/3`
   - uses: `Oban.Worker`
 - `EventSales.Analytics.Workers.RebuildHotStateWorker` - `lib/event_sales/analytics/workers/rebuild_hot_state_worker.ex`
   - moduledoc?: true

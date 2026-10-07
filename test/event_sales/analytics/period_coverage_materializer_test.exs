@@ -44,6 +44,16 @@ defmodule EventSales.Analytics.PeriodCoverageMaterializerTest do
            )
   end
 
+  test "refresh_enqueued? is false when enqueue_refresh? is disabled", %{event: event} do
+    assert {:ok, %{bucket_intents_created: created, refresh_enqueued?: false}} =
+             PeriodCoverageMaterializer.materialize(event.id, @now,
+               enqueue_refresh?: false,
+               refresh_snapshot_worker: StubRefreshSnapshotWorker
+             )
+
+    assert created > 0
+  end
+
   test "idempotent materialize creates zero rows and does not enqueue refresh", %{event: event} do
     worker = StubRefreshSnapshotWorker
 

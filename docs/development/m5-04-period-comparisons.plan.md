@@ -48,7 +48,7 @@ MOVING_HORIZON_TRIGGER = PeriodCoverageMaintenanceWorker Oban cron 5 * * * *
 HOURLY_CRON_REQUIRED = YES
 MAX_REQUIRED_BUCKET_IDENTITIES = 1502
 
-ELIGIBLE_EVENT_AUTHORITY = PeriodCoverageEligibleEvents LATERAL SQL (newest certified historical run + newest terminal reconciliation, no findings)
+ELIGIBLE_EVENT_AUTHORITY = PeriodCoverageEligibleEvents SQL selects bounded newest-run/reconciliation candidates; HistoricalCoverageEvidence.certified?/1 is canonical evidence validator; raw paging cursor advances on candidate page (not only accepted event ids)
 ELIGIBLE_EVENT_QUERY_PLAN = test/event_sales/analytics/period_coverage_query_plan_test.exs EXPLAIN (FORMAT JSON)
 
 JHB_ENVELOPE_QUERY_BOUND = PeriodProjectionRefresh.current_johannesburg_envelope_query/2 unnest identity match
@@ -65,7 +65,7 @@ YESTERDAY_ZERO_COVERAGE_READY = PASS (period_coverage_closure_test.exs)
 THREE_CURRENCY_MATERIALIZATION = PASS (ZAR+USD+EUR; chunked insert_all)
 MATERIALIZER_INSERT_STRATEGY = insert_all ON CONFLICT DO NOTHING chunks of 3000 rows
 
-BACKFILL_REFRESH_CHURN_EVIDENCE = HistoricalCatchupExecutionTest multi-page terminal (2 orders, 2 pages, terminal_coverage_enqueue_count=1; refresh/fence NOT_OBSERVABLE in stub harness)
+BACKFILL_REFRESH_CHURN_EVIDENCE = HistoricalCatchupExecutionTest real OrderUpserter + injected snapshot_refresh_scheduler counter (see multi-page terminal scheduler test; not Upserter stub call counts)
 
 REDIS_DECISION = NONE
 CACHE_DECISION = NONE

@@ -27,17 +27,24 @@ defmodule EventSales.Analytics.PeriodCoveragePlanner do
   def required_bucket_specs(%DateTime{} = captured_now_utc) do
     timezone = MetricRules.business_timezone()
 
-    with {:ok, base_specs} <- collect_request_specs(timezone, captured_now_utc) do
-      johannesburg_envelopes =
-        base_specs
-        |> Enum.filter(&(&1.bucket_kind == :utc_hour))
-        |> Enum.flat_map(&johannesburg_envelope_for_hour/1)
-
+    with {:ok, base_specs} <- collect_request_specs(timezone, captured_now_utc),
+         {:ok, johannesburg_envelopes} <- johannesburg_envelopes_for_hours(base_specs) do
       {:ok,
        (base_specs ++ johannesburg_envelopes)
        |> Enum.uniq_by(&bucket_identity_key/1)
        |> Enum.sort_by(&bucket_sort_key/1)}
     end
+  end
+
+  defp johannesburg_envelopes_for_hours(base_specs) do
+    base_specs
+    |> Enum.filter(&(&1.bucket_kind == :utc_hour))
+    |> Enum.reduce_while({:ok, []}, fn hour, {:ok, acc} ->
+      case johannesburg_envelope_for_hour(hour) do
+        {:ok, envelopes} -> {:cont, {:ok, acc ++ envelopes}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
   end
 
   defp collect_request_specs(timezone, captured_now_utc) do
@@ -52,19 +59,20 @@ defmodule EventSales.Analytics.PeriodCoveragePlanner do
   defp johannesburg_envelope_for_hour(%{bucket_start_utc: hour_start}) do
     case PeriodBucketRules.for_instant(hour_start) do
       {:ok, buckets} ->
-        buckets
-        |> Enum.filter(&(&1.bucket_kind == :johannesburg_day))
-        |> Enum.map(fn day ->
-          %{
-            bucket_kind: day.bucket_kind,
-            bucket_timezone: day.bucket_timezone,
-            bucket_start_utc: day.bucket_start_utc,
-            bucket_end_utc: day.bucket_end_utc
-          }
-        end)
+        {:ok,
+         buckets
+         |> Enum.filter(&(&1.bucket_kind == :johannesburg_day))
+         |> Enum.map(fn day ->
+           %{
+             bucket_kind: day.bucket_kind,
+             bucket_timezone: day.bucket_timezone,
+             bucket_start_utc: day.bucket_start_utc,
+             bucket_end_utc: day.bucket_end_utc
+           }
+         end)}
 
-      {:error, _} ->
-        []
+      {:error, reason} ->
+        {:error, {:johannesburg_envelope_for_hour_failed, reason}}
     end
   end
 

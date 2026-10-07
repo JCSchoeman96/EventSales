@@ -1279,7 +1279,7 @@
   "oban": {
     "workers": [
       {
-        "docs_count": 0,
+        "docs_count": 2,
         "moduledoc?": true,
         "name": "EventSales.Analytics.Workers.PeriodCoverageMaintenanceWorker",
         "parse_error": null,
@@ -1288,9 +1288,17 @@
           {
             "arity": 1,
             "name": "perform"
+          },
+          {
+            "arity": 2,
+            "name": "perform_with_opts"
+          },
+          {
+            "arity": 3,
+            "name": "schedule_continuation"
           }
         ],
-        "specs?": false,
+        "specs?": true,
         "uses": [
           "Oban.Worker"
         ]

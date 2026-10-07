@@ -10,24 +10,35 @@ defmodule EventSales.Analytics.Workers.PeriodCoverageMaintenanceWorker do
 
   alias EventSales.Analytics.PeriodCoverage
   alias EventSales.Analytics.PeriodCoverageEligibleEvents
+  alias EventSales.Analytics.PeriodCoverageEligibleEvents.CandidatePage
   alias EventSales.Telemetry
 
   @default_batch_size 50
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: args}) do
+  def perform(%Oban.Job{} = job) do
+    case perform_with_opts(job, []) do
+      :ok -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc false
+  @spec perform_with_opts(Oban.Job.t(), keyword()) :: :ok | {:error, term()}
+  def perform_with_opts(%Oban.Job{args: args} = _job, opts) do
     started_at = System.monotonic_time()
     batch_size = Map.get(args, "batch_size", @default_batch_size)
     after_id = Map.get(args, "after_event_id")
     captured_now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
     coverage_opts = coverage_opts_from_args(args)
+    continuation_inserter = Keyword.get(opts, :continuation_inserter, &Oban.insert/1)
 
-    event_ids = PeriodCoverageEligibleEvents.page_event_ids(after_id, limit: batch_size)
+    page = PeriodCoverageEligibleEvents.page_candidates(after_id, limit: batch_size)
 
     stats =
       Enum.reduce(
-        event_ids,
+        page.event_ids,
         %{examined: 0, changed: 0, intents: 0, enqueues: 0, failures: 0},
         fn event_id, acc ->
           acc = Map.update!(acc, :examined, &(&1 + 1))
@@ -43,9 +54,7 @@ defmodule EventSales.Analytics.Workers.PeriodCoverageMaintenanceWorker do
 
     emit_batch_telemetry(examined, changed, intents, enqueues, failures, duration_ms)
 
-    schedule_next_batch(event_ids, batch_size, after_id)
-
-    :ok
+    schedule_continuation(page, batch_size, continuation_inserter)
   end
 
   defp apply_event_coverage(acc, event_id, captured_now, coverage_opts) do
@@ -61,16 +70,31 @@ defmodule EventSales.Analytics.Workers.PeriodCoverageMaintenanceWorker do
     end
   end
 
-  defp schedule_next_batch(event_ids, batch_size, _after_id) when length(event_ids) < batch_size,
+  @doc false
+  @spec schedule_continuation(CandidatePage.t(), pos_integer(), (Oban.Job.changeset() -> term())) ::
+          :ok | {:error, term()}
+  def schedule_continuation(%CandidatePage{has_more?: false}, _batch_size, _inserter), do: :ok
+
+  def schedule_continuation(%CandidatePage{has_more?: true, next_after_event_id: nil}, _, _),
     do: :ok
 
-  defp schedule_next_batch(event_ids, _batch_size, _after_id) when event_ids == [], do: :ok
+  def schedule_continuation(
+        %CandidatePage{has_more?: true, next_after_event_id: after_event_id},
+        batch_size,
+        inserter
+      )
+      when is_binary(after_event_id) and is_function(inserter, 1) do
+    job =
+      __MODULE__.new(%{
+        "after_event_id" => after_event_id,
+        "batch_size" => batch_size
+      })
 
-  defp schedule_next_batch(event_ids, batch_size, _after_id) do
-    last_id = List.last(event_ids)
-
-    __MODULE__.new(%{"after_event_id" => last_id, "batch_size" => batch_size})
-    |> Oban.insert()
+    case inserter.(job) do
+      {:ok, _job} -> :ok
+      {:error, reason} -> {:error, reason}
+      other -> {:error, {:invalid_continuation_insert_result, other}}
+    end
   end
 
   defp coverage_opts_from_args(args) do

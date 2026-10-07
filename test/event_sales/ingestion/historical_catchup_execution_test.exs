@@ -215,6 +215,28 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
     end
   end
 
+  defmodule SnapshotRefreshSchedulerRecorder do
+    def child_spec(opts), do: %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}}
+
+    def start_link(_opts),
+      do: Agent.start_link(fn -> %{count: 0, event_sets: []} end, name: __MODULE__)
+
+    def reset!, do: Agent.update(__MODULE__, fn _ -> %{count: 0, event_sets: []} end)
+
+    def record(event_ids) do
+      Agent.update(__MODULE__, fn state ->
+        %{
+          count: state.count + 1,
+          event_sets: [event_ids | state.event_sets]
+        }
+      end)
+
+      :ok
+    end
+
+    def state, do: Agent.get(__MODULE__, & &1)
+  end
+
   defmodule FreshnessNotifierRecorder do
     alias EventSales.Repo
 
@@ -571,16 +593,50 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
 
     assert backfill_order_count == 2
     assert backfill_page_count == 2
+  end
 
-    Process.put(:jc325_backfill_churn, %{
-      backfill_order_count: backfill_order_count,
-      backfill_page_count: backfill_page_count,
-      backfill_enqueue_attempts: backfill_order_count,
-      backfill_pending_job_count: 0,
-      backfill_refresh_executions: :not_observable_in_stubbed_upserter_harness,
-      backfill_fence_acquisitions: :not_observable_in_stubbed_upserter_harness,
-      terminal_coverage_enqueue_count: length(coverage_calls)
-    })
+  test "multi-page terminal measures real snapshot refresh scheduler enqueue attempts", %{
+    run: run,
+    cursor: cursor,
+    event: event
+  } do
+    start_supervised!(SnapshotRefreshSchedulerRecorder)
+    SnapshotRefreshSchedulerRecorder.reset!()
+
+    SalesHelpers.create_variation_ticket_type!(event, 501, 601)
+    line = woo_line(1)
+
+    upserter_opts = [snapshot_refresh_scheduler: &SnapshotRefreshSchedulerRecorder.record/1]
+
+    CatchupClient.enqueue!(page(["42"], has_more: true, next_cursor: "u-next.cursor"))
+    WooClient.put_order!(42, {:ok, order_payload(42) |> Map.put("line_items", [line])})
+    Selector.set_lines!([line])
+
+    assert {:continue, _, _} =
+             run_step(run, cursor,
+               order_upserter: OrderUpserter,
+               order_upserter_opts: upserter_opts
+             )
+
+    CatchupClient.enqueue!(
+      page(["43"], has_more: false, terminal_evidence: "u-churn-real-terminal")
+    )
+
+    WooClient.put_order!(43, {:ok, order_payload(43) |> Map.put("line_items", [woo_line(2)])})
+    Selector.set_lines!([woo_line(2)])
+
+    assert :ok =
+             run_step(run, cursor,
+               order_upserter: OrderUpserter,
+               order_upserter_opts: upserter_opts
+             )
+
+    scheduler = SnapshotRefreshSchedulerRecorder.state()
+
+    assert Upserter.calls() == []
+    assert scheduler.count == 2
+    assert Enum.all?(scheduler.event_sets, fn ids -> ids == [event.id] end)
+    refute scheduler.count == length(Upserter.calls())
   end
 
   test "empty explicit terminal page completes without a Woo order GET", %{
@@ -1267,10 +1323,27 @@ defmodule EventSales.Ingestion.HistoricalCatchupExecutionTest do
   defp order_payload(id) do
     %{
       "id" => id,
+      "status" => "completed",
+      "currency" => "ZAR",
+      "total" => "100.00",
       "date_created_gmt" => "2026-08-04T10:00:00Z",
       "date_modified_gmt" => "2026-08-04T10:00:00Z",
+      "date_paid_gmt" => "2026-08-04T10:00:00Z",
+      "date_completed_gmt" => "2026-08-04T10:00:00Z",
       "refunds" => [],
       "line_items" => []
+    }
+  end
+
+  defp woo_line(line_id) do
+    %{
+      "id" => line_id,
+      "product_id" => 501,
+      "variation_id" => 601,
+      "quantity" => 1,
+      "subtotal" => "100.00",
+      "total" => "100.00",
+      "meta_data" => [%{"key" => "tickera_event_id", "value" => "805001"}]
     }
   end
 

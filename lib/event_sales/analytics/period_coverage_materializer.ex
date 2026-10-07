@@ -84,8 +84,13 @@ defmodule EventSales.Analytics.PeriodCoverageMaterializer do
   defp transaction_materialize(event_id, currencies, bucket_specs, refresh_worker, opts) do
     with :ok <- EventSnapshotRefreshFence.lock_events_in_transaction([event_id]),
          {inserted, _} <- insert_missing_intents(event_id, currencies, bucket_specs),
-         :ok <- maybe_enqueue_refresh(inserted, event_id, refresh_worker, opts) do
-      %{bucket_intents_created: inserted, refresh_enqueued?: inserted > 0, currencies: currencies}
+         {:ok, refresh_enqueued?} <-
+           maybe_enqueue_refresh(inserted, event_id, refresh_worker, opts) do
+      %{
+        bucket_intents_created: inserted,
+        refresh_enqueued?: refresh_enqueued?,
+        currencies: currencies
+      }
     end
   end
 
@@ -146,16 +151,16 @@ defmodule EventSales.Analytics.PeriodCoverageMaterializer do
     }
   end
 
-  defp maybe_enqueue_refresh(0, _event_id, _worker, _opts), do: :ok
+  defp maybe_enqueue_refresh(0, _event_id, _worker, _opts), do: {:ok, false}
 
   defp maybe_enqueue_refresh(inserted, event_id, worker, opts) when inserted > 0 do
     if Keyword.get(opts, :enqueue_refresh?, true) do
       case worker.enqueue_event(event_id, opts) do
-        :ok -> :ok
+        :ok -> {:ok, true}
         {:error, reason} -> Repo.rollback(reason)
       end
     else
-      :ok
+      {:ok, false}
     end
   end
 
