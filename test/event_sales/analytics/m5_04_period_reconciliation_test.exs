@@ -42,6 +42,47 @@ defmodule EventSales.Analytics.M5_04PeriodReconciliationTest do
 
   describe "event-level oracle reconciliation" do
     @tag :m5_04_semantic
+    test "today previous-equivalent operand reconciles via raw boundary oracle", ctx do
+      sale_at = DateTime.add(@now, -26 * 3600, :second)
+
+      Cert.ingest_sale_and_refresh!(
+        ctx.event,
+        nil,
+        ctx.source,
+        ctx.ticket_a,
+        sale_at,
+        @now
+      )
+
+      windows = Cert.comparison_windows!(:today, @now)
+
+      result =
+        Cert.assert_reader_operands_match_oracle!(
+          ctx.event.id,
+          "ZAR",
+          :today,
+          ctx.admin,
+          @now
+        )
+
+      bounds = Cert.operand_period_bounds(windows, :previous)
+
+      raw =
+        EventSales.TestSupport.M5_04PeriodRawOracle.financial_summary!(
+          ctx.event.id,
+          bounds.start_utc,
+          bounds.end_utc,
+          "ZAR"
+        )
+
+      for metric <- Cert.comparison_metrics() do
+        assert Decimal.equal?(
+                 Map.fetch!(result.comparison.metrics, metric),
+                 Map.fetch!(raw, metric)
+               )
+      end
+    end
+
     test "sale-only reconciles for all supported requests", ctx do
       {_order, _item, snap} =
         Cert.ingest_sale_and_refresh!(

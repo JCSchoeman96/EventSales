@@ -23,6 +23,7 @@ defmodule EventSales.TestSupport.M5_04PeriodCertificationHelpers do
   alias EventSales.Sales
   alias EventSales.Sales.Resources.{Order, OrderItem, Refund, RefundLine}
   alias EventSales.TestSupport.EventDetailCertificationHelpers
+  alias EventSales.TestSupport.M5_04PeriodRawOracle
   alias EventSales.TestSupport.PeriodCoverageHelpers
   alias EventSales.TestSupport.SalesHelpers
 
@@ -74,8 +75,37 @@ defmodule EventSales.TestSupport.M5_04PeriodCertificationHelpers do
 
   @doc false
   def oracle_summary_for_operand!(event_id, %ComparisonWindows{} = windows, operand, currency) do
-    period = financial_oracle_period(windows, operand)
-    oracle_summary!(event_id, period, currency)
+    bounds = operand_period_bounds(windows, operand)
+    preset = financial_oracle_period(windows, operand)
+
+    case EventAggregator.financial_summaries_for_event_period(event_id, preset) do
+      {:ok, summaries} ->
+        Map.get(summaries, currency) || zero_financial_summary(currency)
+
+      {:error, :invalid_period} ->
+        M5_04PeriodRawOracle.financial_summary!(
+          event_id,
+          bounds.start_utc,
+          bounds.end_utc,
+          currency
+        )
+
+      {:error, :unsupported_period_kind} ->
+        M5_04PeriodRawOracle.financial_summary!(
+          event_id,
+          bounds.start_utc,
+          bounds.end_utc,
+          currency
+        )
+
+      {:error, reason} ->
+        flunk("oracle_summary_for_operand!: #{inspect(reason)}")
+    end
+  end
+
+  @doc false
+  def operand_period_bounds(%ComparisonWindows{} = windows, operand) do
+    if operand == :current, do: windows.current, else: windows.previous
   end
 
   @doc false
@@ -101,30 +131,6 @@ defmodule EventSales.TestSupport.M5_04PeriodCertificationHelpers do
         end
     end
   end
-
-  @doc false
-  def oracle_operand_supported?(
-        event_id,
-        %ComparisonWindows{request: :today} = windows,
-        :previous,
-        _currency
-      ) do
-    period = financial_oracle_period(windows, :previous)
-
-    candidate = %Period{
-      start_utc: period.start_utc,
-      end_utc: period.end_utc,
-      kind: :yesterday,
-      timezone: MetricRules.business_timezone()
-    }
-
-    case EventAggregator.financial_summaries_for_event_period(event_id, candidate) do
-      {:ok, _} -> true
-      _ -> false
-    end
-  end
-
-  def oracle_operand_supported?(_event_id, _windows, _operand, _currency), do: true
 
   @doc false
   def prepare_analytics_ready_event!(source, attrs \\ %{}) do
@@ -302,6 +308,22 @@ defmodule EventSales.TestSupport.M5_04PeriodCertificationHelpers do
   end
 
   @doc false
+  def ingest_sale_invalidate_only!(
+        event,
+        before_snapshot,
+        source,
+        ticket,
+        paid_at,
+        overrides \\ %{}
+      ) do
+    overrides = Map.new(overrides)
+    {order, item} = create_completed_sale!(source, event, ticket, paid_at, overrides)
+    after_snapshot = capture_order_snapshot!(order)
+    invalidate_order_change!(before_snapshot, after_snapshot)
+    {order, item, after_snapshot}
+  end
+
+  @doc false
   def ingest_sale_and_refresh!(
         event,
         before_snapshot,
@@ -362,27 +384,6 @@ defmodule EventSales.TestSupport.M5_04PeriodCertificationHelpers do
 
   @doc false
   def assert_operand_metrics_match_oracle!(event_id, currency, windows, operand, reader_metrics) do
-    if windows.request == :today and operand == :previous and
-         not oracle_operand_supported?(event_id, windows, operand, currency) do
-      :ok
-    else
-      do_assert_operand_metrics_match_oracle!(
-        event_id,
-        currency,
-        windows,
-        operand,
-        reader_metrics
-      )
-    end
-  end
-
-  defp do_assert_operand_metrics_match_oracle!(
-         event_id,
-         currency,
-         windows,
-         operand,
-         reader_metrics
-       ) do
     oracle = oracle_summary_for_operand!(event_id, windows, operand, currency)
 
     for metric <- @comparison_metrics do
@@ -537,5 +538,40 @@ defmodule EventSales.TestSupport.M5_04PeriodCertificationHelpers do
 
     {:ok, summary} = MetricRules.financial_summary(currency, primitives, 0)
     summary
+  end
+
+  @doc false
+  def certification_admin! do
+    alias EventSales.Accounts
+    alias EventSales.Accounts.Resources.{Role, User, UserRole}
+
+    user =
+      Ash.create!(
+        User,
+        %{
+          email: "m5-04-cert-#{System.unique_integer()}@example.com",
+          name: "M5-04 Certification",
+          password: "valid-pass-123",
+          password_confirmation: "valid-pass-123"
+        },
+        action: :register_with_password,
+        domain: Accounts
+      )
+
+    role =
+      Role
+      |> Ash.Query.filter(name == ^:admin)
+      |> Ash.read_one!(domain: Accounts)
+      |> case do
+        nil -> Ash.create!(Role, %{name: :admin}, action: :create, domain: Accounts)
+        role -> role
+      end
+
+    Ash.create!(UserRole, %{user_id: user.id, role_id: role.id},
+      action: :create,
+      domain: Accounts
+    )
+
+    user
   end
 end

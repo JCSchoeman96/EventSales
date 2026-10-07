@@ -37,16 +37,6 @@ defmodule EventSales.Analytics.M5_04PeriodQueryPlanTest do
     assert Enum.any?(relation_nodes(refund_plan, "sales_refund_lines"), &refund_line_index?/1)
   end
 
-  test "G2 reader and coverage plan suites remain present" do
-    for file <- [
-          "test/event_sales/analytics/period_comparison_reader_query_plan_test.exs",
-          "test/event_sales/analytics/period_coverage_query_plan_test.exs",
-          "test/event_sales/analytics/period_projection_query_plan_test.exs"
-        ] do
-      assert File.exists?(file)
-    end
-  end
-
   defp period_window(fixture) do
     %{
       currency: "ZAR",
