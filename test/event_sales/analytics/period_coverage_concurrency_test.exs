@@ -115,10 +115,6 @@ defmodule EventSales.Analytics.PeriodCoverageConcurrencyTest do
         ]
       }
 
-      on_exit(fn ->
-        Repo.delete_all(from o in Order, where: o.woo_order_id == 90_010)
-      end)
-
       assert {:ok, _order} =
                OrderUpserter.upsert_normalized_order(source.id, normalized,
                  snapshot_refresh_scheduler: fn _ -> :ok end
@@ -126,6 +122,8 @@ defmodule EventSales.Analytics.PeriodCoverageConcurrencyTest do
 
       reloaded = Ash.get!(EventPeriodAggregateSnapshot, zero_row.id, domain: Analytics)
       assert reloaded.projection_state == :refresh_pending
+
+      Repo.delete_all(from o in Order, where: o.woo_order_id == 90_010)
     end)
   end
 end
