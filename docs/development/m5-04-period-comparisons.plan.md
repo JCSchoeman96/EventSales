@@ -24,9 +24,9 @@
 
 ```text
 PLAN_VERSION = v14
-REAUTHORIZED_BASE_SHA = 47a0d2544f836cac2920ba592c1b0abdc1778d32
-REAUTHORIZED_BASE_TREE = c709ef307aa31085bff9361133e1b5fec649f98f
-BASE_MOVEMENT = PR #297 / Ash CVE security authority
+REAUTHORIZED_BASE_SHA = eb0991a6198a7ef9484b3de46b7ac2545f828542
+REAUTHORIZED_BASE_TREE = (origin/main at rebase 2026-10-07)
+BASE_MOVEMENT = PR #297 Ash CVE + PR #296 WordPress release certification merge
 ```
 
 **Status:** JC-319 M5-04E merged; JC-321 M5-04F reader S2 correction pass in review (do not merge until exact-head CI green)

@@ -1133,9 +1133,6 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
 
   defp operand_metrics(%{metrics: metrics}), do: metrics
 
-  defp operand_metrics(%{} = operand),
-    do: Map.get(operand, :metrics) || Map.get(operand, "metrics")
-
   defp metric_value(nil, _metric), do: nil
   defp metric_value(metrics, metric) when is_map(metrics), do: Map.get(metrics, metric)
 
@@ -1148,10 +1145,8 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
         :refund_ticket_value
       ],
       fn key ->
-        case Map.fetch!(primitives, key) do
-          %Decimal{} = d -> Decimal.equal?(d, @zero)
-          n when is_integer(n) -> n == 0
-        end
+        %Decimal{} = d = Map.fetch!(primitives, key)
+        Decimal.equal?(d, @zero)
       end
     )
   end
