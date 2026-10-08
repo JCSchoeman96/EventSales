@@ -419,6 +419,9 @@
     "test/support/ingestion/memory_rate_limiter_adapter.ex",
     "test/support/ingestion/memory_webhook_buffer_adapter.ex",
     "test/support/ingestion/stub_webhook_event_store.ex",
+    "test/support/m5_04_period_certification_helpers.ex",
+    "test/support/m5_04_period_load_harness.ex",
+    "test/support/m5_04_period_raw_oracle.ex",
     "test/support/mapping_setup_helpers.ex",
     "test/support/oban_helpers.ex",
     "test/support/period_comparison_helpers.ex",
@@ -9728,6 +9731,167 @@
         }
       ],
       "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 29,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.M5_04PeriodCertificationHelpers",
+      "parse_error": null,
+      "path": "test/support/m5_04_period_certification_helpers.ex",
+      "public_funs": [
+        {
+          "arity": 0,
+          "name": "supported_requests"
+        },
+        {
+          "arity": 0,
+          "name": "comparison_metrics"
+        },
+        {
+          "arity": 2,
+          "name": "comparison_windows!"
+        },
+        {
+          "arity": 3,
+          "name": "oracle_summary!"
+        },
+        {
+          "arity": 4,
+          "name": "oracle_summary_for_operand!"
+        },
+        {
+          "arity": 2,
+          "name": "operand_period_bounds"
+        },
+        {
+          "arity": 2,
+          "name": "financial_oracle_period"
+        },
+        {
+          "arity": 2,
+          "name": "prepare_analytics_ready_event!"
+        },
+        {
+          "arity": 2,
+          "name": "seed_currency!"
+        },
+        {
+          "arity": 2,
+          "name": "refresh_period_projections!"
+        },
+        {
+          "arity": 1,
+          "name": "capture_order_snapshot!"
+        },
+        {
+          "arity": 2,
+          "name": "invalidate_order_change!"
+        },
+        {
+          "arity": 2,
+          "name": "invalidate_refund_change!"
+        },
+        {
+          "arity": 5,
+          "name": "create_completed_sale!"
+        },
+        {
+          "arity": 5,
+          "name": "create_qualifying_refund!"
+        },
+        {
+          "arity": 6,
+          "name": "ingest_sale_invalidate_only!"
+        },
+        {
+          "arity": 7,
+          "name": "ingest_sale_and_refresh!"
+        },
+        {
+          "arity": 5,
+          "name": "compare_event!"
+        },
+        {
+          "arity": 5,
+          "name": "assert_reader_operands_match_oracle!"
+        },
+        {
+          "arity": 5,
+          "name": "assert_operand_metrics_match_oracle!"
+        },
+        {
+          "arity": 2,
+          "name": "assert_dimensional_sums_match_event!"
+        },
+        {
+          "arity": 4,
+          "name": "assert_variation_subset_matches_facts!"
+        },
+        {
+          "arity": 1,
+          "name": "contribution_semantic_fingerprint"
+        },
+        {
+          "arity": 1,
+          "name": "period_bucket_semantic_fingerprint"
+        },
+        {
+          "arity": 0,
+          "name": "create_unboxed_certification_source!"
+        },
+        {
+          "arity": 1,
+          "name": "register_unboxed_source_cleanup!"
+        },
+        {
+          "arity": 2,
+          "name": "cleanup_unboxed_certification_fixture!"
+        },
+        {
+          "arity": 1,
+          "name": "cleanup_unboxed_certification_source!"
+        },
+        {
+          "arity": 0,
+          "name": "certification_admin!"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 2,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.M5_04PeriodLoadHarness",
+      "parse_error": null,
+      "path": "test/support/m5_04_period_load_harness.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "run!"
+        },
+        {
+          "arity": 1,
+          "name": "build_fixture!"
+        }
+      ],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.TestSupport.M5_04PeriodRawOracle",
+      "parse_error": null,
+      "path": "test/support/m5_04_period_raw_oracle.ex",
+      "public_funs": [
+        {
+          "arity": 4,
+          "name": "financial_summary!"
+        }
+      ],
+      "specs?": false,
       "uses": []
     },
     {

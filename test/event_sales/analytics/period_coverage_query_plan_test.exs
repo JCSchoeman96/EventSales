@@ -13,6 +13,10 @@ defmodule EventSales.Analytics.PeriodCoverageQueryPlanTest do
   alias EventSales.TestSupport.StubRefreshSnapshotWorker
 
   @now ~U[2026-05-17 10:00:00.000000Z]
+  @event_period_snapshots_table "analytics_event_period_aggregate_snapshots"
+  @bucket_identity_index "analytics_event_period_aggregate_snapshots_identity_idx"
+  # Enough current johannesburg_day buckets on one event that identity lookup beats a seq scan.
+  @johannesburg_envelope_noise_rows 1_200
 
   setup do
     source = SalesHelpers.create_source_system!()
@@ -58,7 +62,7 @@ defmodule EventSales.Analytics.PeriodCoverageQueryPlanTest do
       {"ZAR", ~U[2026-05-16 22:00:00.000000Z], ~U[2026-05-17 22:00:00.000000Z]}
     ]
 
-    insert_johannesburg_noise_rows!(event, 60)
+    insert_johannesburg_noise_rows!(event, @johannesburg_envelope_noise_rows)
 
     PeriodComparisonHelpers.create_event_bucket!(
       event.id,
@@ -76,12 +80,13 @@ defmodule EventSales.Analytics.PeriodCoverageQueryPlanTest do
       }
     )
 
-    query = PeriodProjectionRefresh.current_johannesburg_envelope_query(event.id, identities)
-    {sql, params} = Repo.to_sql(:all, query)
+    analyze_event_period_snapshots!()
 
-    assert {:ok, %{rows: [[plan_json]]}} = Repo.query("EXPLAIN (FORMAT JSON) #{sql}", params)
-    plan = normalize_explain_plan(plan_json)
-    assert plan_uses_index?(plan)
+    query = PeriodProjectionRefresh.current_johannesburg_envelope_query(event.id, identities)
+    plan = explain_all_plan!(query)
+
+    assert_event_period_identity_index_use!(plan)
+    refute_event_period_seq_scan!(plan)
 
     rows =
       PeriodProjectionRefresh.current_johannesburg_envelope_query(event.id, identities)
@@ -169,9 +174,49 @@ defmodule EventSales.Analytics.PeriodCoverageQueryPlanTest do
   defp normalize_explain_plan([plan | _]) when is_map(plan), do: plan
   defp normalize_explain_plan(plan) when is_map(plan), do: plan
 
-  defp plan_uses_index?(plan) do
-    plan
-    |> Jason.encode!()
-    |> String.contains?("Index")
+  defp explain_all_plan!(query) do
+    {sql, params} = Repo.to_sql(:all, query)
+
+    assert {:ok, %{rows: [[plan_json]]}} = Repo.query("EXPLAIN (FORMAT JSON) #{sql}", params)
+
+    normalize_explain_plan(plan_json) |> plan_root()
   end
+
+  defp plan_root([%{"Plan" => root}]), do: root
+  defp plan_root(%{"Plan" => root}), do: root
+
+  defp analyze_event_period_snapshots! do
+    {:ok, _} = Repo.query("ANALYZE #{@event_period_snapshots_table}")
+  end
+
+  defp assert_event_period_identity_index_use!(plan) do
+    index_nodes =
+      flatten_plan(plan)
+      |> Enum.filter(fn node ->
+        node["Node Type"] in ["Index Scan", "Bitmap Index Scan", "Index Only Scan"] and
+          node["Index Name"] == @bucket_identity_index
+      end)
+
+    assert index_nodes != [],
+           "expected #{@bucket_identity_index} on #{@event_period_snapshots_table}, plan: #{inspect(plan)}"
+  end
+
+  defp refute_event_period_seq_scan!(plan) do
+    refute Enum.any?(
+             relation_nodes(plan, @event_period_snapshots_table),
+             &(&1["Node Type"] == "Seq Scan")
+           ),
+           "expected no sequential scan on #{@event_period_snapshots_table}, plan: #{inspect(plan)}"
+  end
+
+  defp relation_nodes(plan, relation) do
+    flatten_plan(plan)
+    |> Enum.filter(&(&1["Relation Name"] == relation))
+  end
+
+  defp flatten_plan(%{"Plans" => children} = node) do
+    [node | Enum.flat_map(children, &flatten_plan/1)]
+  end
+
+  defp flatten_plan(node) when is_map(node), do: [node]
 end
