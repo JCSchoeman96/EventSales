@@ -4,7 +4,7 @@
 | --- | --- |
 | Document | Canonical Path 1 execution roadmap |
 | Plan ID | `path-1-phase-breakdown` |
-| Plan version | `v25` |
+| Plan version | `v26` |
 | Status | ACTIVE — repository-native execution contract |
 | Scope | Path 1 M1–M7 gated implementation sequence |
 | Authority | This file wins for Path 1 task sequencing and physical ownership assumptions |
@@ -21,7 +21,7 @@
 | Historical planning source | Supplied `EVENTSALES_PATH_1_UPDATED_PHASE_BREAKDOWN.md` (v1 conceptual plan; superseded for physical assumptions) |
 | Path 2 / Phase 5E | PAUSED |
 | Prepared | 2026-08-09 |
-| Last updated | 2026-09-29 |
+| Last updated | 2026-10-08 |
 | Audit base HEAD | `a90f4a6d991510684dde80a538c0847635de2ee9` |
 
 ### Revision log
@@ -51,6 +51,7 @@
 - `v23` — PRE-M5-02B through PRE-M5-02F COMPLETE (PASS); PR #251 metrics certification merged and post-merge CI passed; `GAP-PRE-M5-METRICS` CLOSED; `GAP-PRE-M5-TIME` remains OPEN; M5 remains BLOCKED; next = PRE-M5-TIME
 - `v24` — PRE-M5-TIME COMPLETE (PASS); TIME-G1 PR #264 merged (`c1fc8cd...` / approved head `c23053a...`); exact merge-SHA CI #695 passed 6/6; `GAP-PRE-M5-TIME` CLOSED; all PRE-M5 gates CLOSED; M5 AUTHORIZED; next M5-01 Base Event Aggregates.
 - `v25` — M5-01 COMPLETE (PASS); M5-01B PR #268 merged (`f420437`); M5-01C certification PR #269 merged (`42d830343c3baa714cec2eda8568d00ddb981abe` / tree `cbf5b19ddbdaabc6cf8ba86b177aeccefb4e8b96`); B01–B23 certified; next M5-02 — Ticket/Product/Variation Aggregates.
+- `v26` — M5-02 COMPLETE (PASS; PR #276); M5-03 COMPLETE (PASS; PR #282); M5-04 COMPLETE (PASS; PR #300); next M5-05 — Deterministic Sales Velocity.
 
 ### Conflict rule
 
@@ -192,12 +193,26 @@ M5-01 evidence: docs/evidence/m5-01-base-event-aggregates-certification.md
 M5-01 implementation: PR #268
 M5-01 certification: PR #269
 M5-01 merge authority: 42d830343c3baa714cec2eda8568d00ddb981abe
-Current Path 1 task: M5-02 — Ticket/Product/Variation Aggregates
+M5-02: COMPLETE (PASS)
+M5-02 evidence: docs/evidence/m5-02-ticket-product-variation-aggregates-certification.md
+M5-02 certification: PR #276
+M5-02 merge: fdd3b4bfb96e31f8c099774f93f4091fe9e915c0
+M5-03: COMPLETE (PASS)
+M5-03 evidence: docs/evidence/m5-03-revenue-refund-dimensional-aggregates-certification.md
+M5-03 certification: PR #282
+M5-03 merge: 388938a8c443ecfca3fa63476ecbcfc452b456a9
+M5-04: COMPLETE (PASS)
+M5-04 evidence: PR #300
+M5-04 merge: 9ed4a65a10ddd876773cc4be9bff0efd41f1412a
+M5-04 merge tree: 6c0d5a27606c337649357f410bd1c8a7ff3c4a02
+M5-04 certification: docs/evidence/m5-04-period-comparisons-certification.md
+M5 COMPLETE: NO
+Current Path 1 task: M5-05 — Deterministic Sales Velocity
 M5 AUTHORIZATION: AUTHORIZED
 GAP-PRE-M5-METRICS: CLOSED
 GAP-PRE-M5-TIME: CLOSED
 GAP-PRE-M5-READY-IX: CLOSED
-NEXT: M5-02 — Ticket/Product/Variation Aggregates
+NEXT: M5-05 — Deterministic Sales Velocity
 ```
 
 ---
@@ -1088,10 +1103,10 @@ P1-00 COMPLETE
 → GAP-PRE-M5-TIME CLOSED
 → M5 AUTHORIZED
 → M5-01 — Base Event Aggregates COMPLETE (PASS)
-→ M5-02 — Ticket/Product/Variation Aggregates NEXT
-→ M5-03 — Revenue / Refund Aggregates
-→ M5-04 — Period Comparisons
-→ M5-05 — Deterministic Sales Velocity
+→ M5-02 — Ticket/Product/Variation Aggregates COMPLETE (PASS)
+→ M5-03 — Revenue / Refund Aggregates COMPLETE (PASS)
+→ M5-04 — Period Comparisons COMPLETE (PASS)
+→ M5-05 — Deterministic Sales Velocity NEXT
 → M5-06 — Capacity / Occupancy
 → M5-07 — Freshness and Data-Quality Projection
 → M5-08 — Hot/Warm/Cold Caching
@@ -1193,7 +1208,7 @@ FINANCIAL RECONCILIATION CONTRACT:
 LOCKED (concept C; exact Decimal; ticket-scoped)
 
 Current Path 1 task:
-M5-02 — Ticket/Product/Variation Aggregates
+M5-05 — Deterministic Sales Velocity
 
 M5-01:
 COMPLETE (PASS)
@@ -1274,7 +1289,49 @@ GAP-PRE-M5-READY-IX:
 CLOSED
 
 NEXT:
-M5-02 — Ticket/Product/Variation Aggregates
+M5-05 — Deterministic Sales Velocity
+
+M5-02:
+COMPLETE (PASS)
+
+M5-02 evidence:
+docs/evidence/m5-02-ticket-product-variation-aggregates-certification.md
+
+M5-02 certification:
+PR #276
+
+M5-02 merge:
+fdd3b4bfb96e31f8c099774f93f4091fe9e915c0
+
+M5-03:
+COMPLETE (PASS)
+
+M5-03 evidence:
+docs/evidence/m5-03-revenue-refund-dimensional-aggregates-certification.md
+
+M5-03 certification:
+PR #282
+
+M5-03 merge:
+388938a8c443ecfca3fa63476ecbcfc452b456a9
+
+M5-04:
+COMPLETE (PASS)
+
+M5-04 evidence:
+PR #300
+
+M5-04 merge:
+9ed4a65a10ddd876773cc4be9bff0efd41f1412a
+
+M5-04 merge tree:
+6c0d5a27606c337649357f410bd1c8a7ff3c4a02
+
+M5-04 certification:
+docs/evidence/m5-04-period-comparisons-certification.md
+
+M5 COMPLETE:
+NO
 
 M1-C:
 COMPLETE (PASS)
@@ -1383,8 +1440,12 @@ GAP-PRE-M5-METRICS = CLOSED.
 GAP-PRE-M5-TIME = CLOSED.
 M5 AUTHORIZATION = AUTHORIZED.
 M5-01 = COMPLETE (PASS).
-NEXT = M5-02 — Ticket/Product/Variation Aggregates.
+M5-02 = COMPLETE (PASS).
+M5-03 = COMPLETE (PASS).
+M5-04 = COMPLETE (PASS).
+M5 COMPLETE = NO.
+NEXT = M5-05 — Deterministic Sales Velocity.
 M5: AUTHORIZED.
 DO NOT REOPEN M2-07 SCOPE.
-M5-02 is the next authorized programme task after M5-01D closeout PR merge.
+M5-05 is the next authorized programme task after M5-04 G2 merge (PR #300).
 ```

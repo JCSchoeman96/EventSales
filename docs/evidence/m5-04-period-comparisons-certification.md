@@ -2,11 +2,11 @@
 
 ## 1. Verdict
 
-**PASS** — measured JC-326 G2 evidence is complete on the certified technical HEAD. The unboxed committed-fixture leak was corrected with source-scoped teardown before event preparation. Johannesburg-envelope EXPLAIN certification is deterministic (selective fixture, `ANALYZE`, structural identity-index assertion). Exact-head CI on the accepted technical HEAD completed **7/7 green on attempt 1**. Durable G2 authority still waits for PR #300 merge.
+**PASS** — measured JC-326 G2 evidence is complete on the certified technical HEAD. The unboxed committed-fixture leak was corrected with source-scoped teardown before event preparation. Johannesburg-envelope EXPLAIN certification is deterministic (selective fixture, `ANALYZE`, structural identity-index assertion). Exact-head CI on the accepted technical HEAD completed **7/7 green on attempt 1**. PR #300 merged to `main`; merge tree matches the integrated PR head tree validated by CI #831.
 
 ```text
 TECHNICAL_EVIDENCE_ACCEPTED = YES
-MERGE_AUTHORITY_ESTABLISHED = NO
+MERGE_AUTHORITY_ESTABLISHED = YES
 ```
 
 Load/rebuild/fence/backfill measurements recorded below. Harness is not part of default CI timing gates (`@tag :m5_04_certification_load`).
@@ -17,12 +17,14 @@ Load/rebuild/fence/backfill measurements recorded below. Harness is not part of 
 LINEAR = JC-326
 BASE_SHA = d527cb9cc9afab930c0f007ed2ff6b20a4095086
 BASE_TREE = 2949fed049e55a82e8fc95ff8f29424c951542e6
-PLAN_VERSION = v17
-JC_326_STATUS = IN_REVIEW
+PLAN_VERSION = v18
+JC_326_STATUS = MERGED
+JC_326_MERGE_SHA = 9ed4a65a10ddd876773cc4be9bff0efd41f1412a
+JC_326_MERGE_TREE = 6c0d5a27606c337649357f410bd1c8a7ff3c4a02
 M5_04G1_DURABLE_AUTHORITY = YES
-M5_04G2_STATUS = IN_PROGRESS
-M5_04G2_DURABLE_AUTHORITY = PENDING_MERGE
-M5_04_COMPLETE = NO
+M5_04G2_STATUS = MERGED
+M5_04G2_DURABLE_AUTHORITY = YES
+M5_04_COMPLETE = YES
 CERTIFICATION_VERDICT = PASS
 
 CERTIFIED_TECHNICAL_HEAD_SHA = 2294dd8bdfcf9a1e0eb3ace45e6d3dc249ba011a
@@ -34,6 +36,17 @@ CERTIFIED_CI_RUN_ATTEMPT = 1
 CERTIFIED_CI_HEAD_SHA = 2294dd8bdfcf9a1e0eb3ace45e6d3dc249ba011a
 CERTIFIED_CI_REQUIRED_JOBS = 7/7
 CERTIFIED_CI_CONCLUSION = PASS
+
+INTEGRATED_PR_HEAD_SHA = b6a8fc106051d1f91bdc93a260c39925e2d531a2
+INTEGRATED_PR_HEAD_TREE = 6c0d5a27606c337649357f410bd1c8a7ff3c4a02
+
+INTEGRATED_HEAD_CI_RUN_ID = 37678781179
+INTEGRATED_HEAD_CI_RUN_NUMBER = 831
+INTEGRATED_HEAD_CI_ATTEMPT = 1
+INTEGRATED_HEAD_CI_REQUIRED_JOBS = 7/7
+INTEGRATED_HEAD_CI_CONCLUSION = PASS
+
+MERGE_TREE_MATCHES_INTEGRATED_HEAD_TREE = YES
 ```
 
 ## 3. Environment
