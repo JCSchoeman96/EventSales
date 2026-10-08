@@ -3,15 +3,18 @@
 | Field | Value |
 | --- | --- |
 | Plan ID | m5-02-ticket-product-variation-aggregates |
-| Plan version | v3 |
+| Plan version | v4 |
 | Linear | JC-299 (M5-02F) |
-| Status | IN REVIEW (PR #276; merge pending) |
+| Status | COMPLETE (PASS) |
+| M5_02F_PR | 276 |
+| M5_02F_MERGE_SHA | `fdd3b4bfb96e31f8c099774f93f4091fe9e915c0` |
 | Programme base SHA | `191666b670d4c0d9dac1b6c91d30201a0300358a` |
 | Programme base tree | `c25e9192cf8e5049ea0619e248a4306bf30c5beb` |
-| Last updated | 2026-09-30 |
+| Last updated | 2026-10-08 |
 
 ### Revision log
 
+- `v4` — M5-02F merge authority (PR #276); exact-head CI provenance; durable COMPLETE (PASS).
 - `v3` — B23 matrix cites `order_upserter_historical_coverage_test.exs` (mutation enqueue + negative controls), not dimension refresh persistence tests.
 - `v2` — Full slice merge authority (M5-02B–F); auditable PASS matrix with test citations; EventDetail readiness propagation evidence.
 - `v1` — Initial M5-02F EventDetail conformance draft.
@@ -26,9 +29,17 @@
 | M5-02C | [#273](https://github.com/JCSchoeman96/EventSales/pull/273) | `a2746c0b640ac7adeeac0556c0ea6db94d4f37cd` | `DimensionAggregator` + query plans |
 | M5-02D | [#274](https://github.com/JCSchoeman96/EventSales/pull/274) | `ddc3e21f048e281d1aa2c49c0a9c10aeb33922db` | `SnapshotRefresh` dimensional persist + invalidation |
 | M5-02E | [#275](https://github.com/JCSchoeman96/EventSales/pull/275) | `191666b670d4c0d9dac1b6c91d30201a0300358a` | `DimensionSnapshotReader` + policy |
-| M5-02F | [#276](https://github.com/JCSchoeman96/EventSales/pull/276) | **PENDING** | Implementation commit `799d1ffd7d81614af387a79f1570f152eb0729d1` (reviewed); correction commits on same PR |
+| M5-02F | [#276](https://github.com/JCSchoeman96/EventSales/pull/276) | `fdd3b4bfb96e31f8c099774f93f4091fe9e915c0` | Implementation commit `799d1ffd7d81614af387a79f1570f152eb0729d1` (reviewed); correction commits on same PR |
 
-Do not record a merge SHA for M5-02F until GitHub merge is verified.
+### M5-02F exact-head CI (verified)
+
+```text
+M5_02F_FINAL_HEAD = e351082b0ce0d3a671240bfb8c0e9469777bf204
+M5_02F_EXACT_HEAD_CI_RUN = 36763020324
+M5_02F_EXACT_HEAD_CI_RUN_NUMBER = 724
+M5_02F_EXACT_HEAD_CI_ATTEMPT = 1
+M5_02F_EXACT_HEAD_CI = PASS
+```
 
 ---
 
@@ -113,4 +124,4 @@ bash scripts/dev_local.sh test test/event_sales/ingestion/analytics_readiness_re
 bash scripts/dev_local.sh quality-pr
 ```
 
-Exact-head GitHub CI on PR #276 must be 6/6 before merge.
+Exact-head GitHub CI on PR #276 final reviewed head: PASS (run #724, attempt 1; see M5-02F exact-head CI block above).
