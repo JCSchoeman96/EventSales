@@ -18,13 +18,13 @@ TREND_STATUS=OWNER_DECISION_REQUIRED
 
 RAW_SCAN_DECISION=FORBIDDEN
 HOT_STATE_CANONICAL_AUTHORITY=NO
-VELOCITY_PRIMARY_METRIC=OWNER_DECISION_REQUIRED_RECOMMEND_GROSS_TICKET_QUANTITY_PER_HOUR
+VELOCITY_PRIMARY_METRIC=OWNER_DECISION_REQUIRED_RECOMMEND_GROSS_TICKET_QUANTITY_RATE
 VELOCITY_SUPPORTING_METRICS=OWNER_DECISION_REQUIRED_NET_QTY_RATE_AND_REFUND_QTY_RATE;MONETARY_RATES_OWNER_DECISION_REQUIRED
-VELOCITY_UNIT=PER_HOUR
+VELOCITY_UNIT=OWNER_DECISION_REQUIRED_RECOMMEND_PER_HOUR
 WINDOWS=15M,30M,60M
-PREVIOUS_EQUIVALENT_RULE=IMMEDIATELY_PRECEDING_EQUAL_DURATION
+PREVIOUS_EQUIVALENT_RULE=OWNER_DECISION_REQUIRED_RECOMMEND_IMMEDIATELY_PRECEDING_EQUAL_DURATION
 REFUND_TREATMENT=SALE_GROSS_AT_SALE_EFFECTIVE_TIME;REFUND_AT_REFUND_EFFECTIVE_TIME
-TREND_RULE=ABSOLUTE_RATE_DELTA_AND_DIRECTION;PERCENTAGE_OWNER_DECISION_REQUIRED
+TREND_RULE=OWNER_DECISION_REQUIRED_RECOMMEND_ABSOLUTE_RATE_DELTA_AND_DIRECTION;PERCENTAGE_OWNER_DECISION_REQUIRED
 ZERO_BASELINE_RULE=OWNER_DECISION_REQUIRED_REUSE_M5_04_STATES_WHERE_VALID
 MULTI_CURRENCY_RULE=ONE_CURRENCY_PER_READ_NO_CROSS_CURRENCY_SUM
 RAW_TABLE_INTERACTIVE_READS=NONE
@@ -65,9 +65,9 @@ Management must receive a deterministic, bounded, decision-grade measure of rece
 The smallest correct system needs these parts, in order:
 
 1. An owner-approved definition of what “velocity” means, including Gross versus Net, quantity versus value, rate display, and trend behavior.
-2. Exact current and previous-equivalent UTC windows from one captured instant.
+2. The current 15m, 30m, and 60m UTC windows from one captured instant are locked by programme authority. Any trend-comparison baseline is a separate owner decision; recommendation: immediately preceding equal-duration windows.
 3. The existing period decomposition: complete UTC-hour buckets plus bounded partial-hour contribution edges.
-4. A single coherent read of the three current windows and their three previous-equivalent windows from the existing event-period projection and contribution facts.
+4. A single coherent read of the three locked current windows plus any owner-approved comparison operands; the proposed previous-equivalent operands require approval before use.
 5. A derived Decimal rate and trend envelope. Persist neither.
 6. The existing analytics readiness, event authorization, currency scope, and revenue-redaction rules.
 7. Conformance and load evidence before any cache or Redis decision changes.
@@ -96,13 +96,13 @@ All listed values are event-scoped and currency-partitioned where money is invol
 | VelocityRequest | Analytics read boundary; event UUID, one currency, fixed window set, actor | Accept only the approved 15m, 30m, and 60m choices. Do not accept raw query parameters as domain input. | Request value | Stateless |
 | CapturedNow | Analytics reader; one UTC DateTime for one response | Capture once, normalize to UTC, use as every current window end. Never use BEAM execution duration as denominator. | Request-scoped derived value | Stateless |
 | CurrentVelocityWindow | TimeRules; identified by duration and current bounds | For duration D, bounds are [N-D, N). It is a continuous elapsed UTC window, not a Johannesburg civil day. | Derived Period | Stateless |
-| PreviousEquivalentVelocityWindow | TimeRules; same duration as its current window | For D, bounds are [N-2D, N-D). It ends exactly where the current window begins. | Derived Period | Stateless |
+| PreviousEquivalentVelocityWindow | TimeRules; only if an owner-approved trend baseline uses a prior window | Proposed identity uses the same duration as its current window; recommended bounds for D are [N-2D, N-D), ending where current [N-D, N) begins. These bounds are not implementation authority until approved. | Derived Period | Stateless |
 | PeriodReadPlan | PeriodReadPlan; operand plus exact bucket/edge bounds | Reuse existing decomposition. No second edge algorithm. Missing envelope coverage makes the operand not ready. | Derived plan | Stateless |
 | EventPeriodAggregateSnapshot | Period projection owner; event, currency, bucket kind, bucket start/end | Contains additive Gross/Refund quantity and value plus semantic and coverage identity. Only a CURRENT row with compatible metadata proves coverage, including an explicit all-zero row. | Durable projection | Existing states: current, stale, refresh_pending, rebuilding, unavailable |
 | AnalyticsContributionFact | Period projection owner; contribution kind plus source contribution UUID | Sale facts use sale-effective time. Refund facts use refund-effective time and exact parent-line binding. Edge facts must match their bucket envelope’s coverage identity and semantic version. | Durable projection | Replaced by existing refresh/rebuild contract |
 | VelocityPrimitives | VelocityRules; one event/currency/window operand | Four additive primitives: gross quantity, refund quantity, gross value, refund value. Net quantity/value derive by canonical subtraction. Never clamp negative Net. | Derived | Stateless |
-| VelocityRate | VelocityRules; metric, currency if monetary, window duration | Canonical unit is per hour. Store no rate. Quantity and money calculations use Decimal and no floating point. | Derived | Stateless |
-| VelocityTrend | VelocityRules; metric and current/previous operand pair | Absolute rate delta and direction derive from the two rates. Percentage behavior remains owner-controlled for zero and negative baselines. | Derived | Stateless |
+| VelocityRate | VelocityRules; metric, currency if monetary, window duration | Derived only after the owner approves a canonical unit; per hour is recommended. Store no rate. Quantity and money calculations should use Decimal and no floating point. | Derived | Stateless |
+| VelocityTrend | VelocityRules; metric and owner-approved current/comparison operand pair | Optional derived value. Absolute rate delta, direction, and percentage inclusion each require owner approval; zero and negative baseline behavior is unresolved. | Derived | Stateless |
 | AnalyticsReadiness | AnalyticsReadinessResolver; event | ANALYTICS_READY remains derived from durable completeness/reconciliation evidence and is not a freshness signal. | Derived from durable evidence | Existing resolver states and blocking reasons |
 | RevenueVisibility | Policies.can_view_revenue?/2; actor and event | Governs every monetary primitive, rate, delta, percentage, and monetary state. Quantity visibility still requires event access. | Derived policy result | Stateless |
 | ProjectionCoverage | Period projection rows; event, currency, bucket identity, semantic version, coverage identity | Bucket and edge metadata must be current and compatible. Missing or stale coverage fails closed. | Durable projection metadata | Uses the snapshot lifecycle states above |
@@ -151,6 +151,7 @@ Until the owner resolves the primary metric and monetary-rate inclusion, the pla
 M5 programme authority explicitly lists last 15, 30, and 60 minutes. M5-04 separately owns today, yesterday, rolling 7 days, and rolling 30 days. M5-05 MVP therefore uses exactly 15m, 30m, and 60m for velocity. It does not add arbitrary custom windows or reimplement M5-04 period choices.
 
 For each duration D and one captured UTC instant N:
+The current window columns below are locked. The previous_start_utc and previous_end_utc values show only the recommended comparison baseline, pending owner approval.
 
 | Window | start_utc | end_utc | captured_now_utc | duration | timezone semantics | previous_start_utc | previous_end_utc |
 |---|---|---|---|---|---|---|---|
@@ -158,39 +159,31 @@ For each duration D and one captured UTC instant N:
 | 30m | N - 30 minutes | N | N | 1,800 seconds | Exact elapsed UTC | N - 60 minutes | N - 30 minutes |
 | 60m | N - 60 minutes | N | N | 3,600 seconds | Exact elapsed UTC | N - 120 minutes | N - 60 minutes |
 
-All intervals are half-open: [start, end). N is captured once for the complete three-window response. Durations use elapsed UTC time and are unaffected by Johannesburg daylight-saving or civil-day boundaries. All three current windows end at N; their previous-equivalent windows are the immediately preceding interval of equal duration. Custom arbitrary velocity windows are out of the MVP.
+All intervals are half-open: [start, end). N is captured once for the complete set of three locked current windows. Durations use elapsed UTC time and are unaffected by Johannesburg daylight-saving or civil-day boundaries. The previous_start_utc and previous_end_utc columns are an immediately preceding equal-duration recommendation only; the comparison baseline requires owner approval before implementation. Custom arbitrary current velocity windows are out of the MVP.
 
 ## Rate denominator, numeric type, and rounding
 
-- The canonical unit is tickets per hour for quantity metrics and currency units per hour for monetary metrics.
-- For a metric total X over duration D minutes, the exact normalized calculation is X × 60 / D.
-- The only MVP durations are 15, 30, and 60 minutes, so the exact multipliers are 4, 2, and 1. This avoids a repeating Decimal division in the canonical rate calculation.
-- Convert integer quantity totals to Decimal before rate arithmetic. Preserve Decimal money values and currency labels.
-- Use Decimal only. Never convert to a float.
-- Do not round additive totals or canonical rates. Round only at display formatting.
-- Duration is fixed and positive. Zero-duration behavior is invalid input, not a numeric result. Never use process runtime as the denominator.
-- The display precision and display rounding mode are OWNER_DECISION_REQUIRED. Recommendation: show two decimal places using an explicit Decimal rounding mode, while retaining the unrounded canonical Decimal result for calculations.
+The canonical normalization unit is an OWNER_DECISION_REQUIRED product choice. Recommendation: tickets per hour for quantity and currency units per hour for monetary measures. Do not treat per-hour as accepted product authority until the owner records it.
 
-Example: 15 tickets over 30 minutes becomes 30 tickets/hour. It is not stored as 15 per “half-hour” and is not divided by request execution time.
+- If per-hour is approved, a total X over duration D minutes normalizes as X × 60 / D. For the fixed 15m, 30m, and 60m windows, the exact multipliers are 4, 2, and 1.
+- Convert integer quantity totals to Decimal before rate arithmetic. Preserve Decimal money values and currency labels. Decimal arithmetic and no floating point are architectural recommendations.
+- Do not round additive totals or canonical rates; round only for display. The display precision and rounding mode remain OWNER_DECISION_REQUIRED.
+- The approved current windows have positive fixed durations. No rate may use process execution time as its denominator.
+
+Example if per-hour is approved: 15 tickets over 30 minutes becomes 30 tickets/hour. Until approval, that is an illustration of the recommendation, not the product contract.
 
 ## Trend semantics
 
-The deterministic numeric trend candidate is:
+Trend composition and comparison baseline remain OWNER_DECISION_REQUIRED. These are recommendations, not implementation invariants:
 
-- absolute delta per hour = current rate − previous-equivalent rate;
-- direction = up when the absolute delta is positive, down when it is negative, unchanged when it is zero;
-- direction describes numeric movement only. It does not label movement as good or bad.
+- Whether to include an absolute rate delta. If approved, calculate current rate minus the owner-approved previous-equivalent rate using matching units.
+- Whether to include a direction field. If approved, numeric direction may be up, down, or unchanged; it must not label a movement good or bad.
+- Whether the comparison baseline is the immediately preceding equal-duration interval. If approved for duration D and captured UTC instant N, the proposed pair is current [N-D, N) and previous [N-2D, N-D).
+- Whether to include percentage change, and its behavior for zero or negative previous rates, especially negative Net.
 
-Percentage rate change and its states are OWNER_DECISION_REQUIRED. M5-04 MetricRules already has explicit comparison states such as flat_zero, new_activity, baseline_zero, current_missing, comparison_missing, and not_comparable. It emits no infinity, NaN, divide-by-zero, or fabricated 100 percent result.
+M5-04 MetricRules has explicit comparison states such as flat_zero, new_activity, baseline_zero, current_missing, comparison_missing, and not_comparable. Reusing a state is appropriate only where its existing preconditions match; it does not select M5-05 trend semantics. Any percentage rule or new explicit state requires owner approval before implementation. Never emit infinity, NaN, divide-by-zero, or a fabricated 100 percent result.
 
-Recommendation for owner decision:
-
-- Reuse the existing missing, flat-zero, new-activity, and zero-baseline distinctions where their exact preconditions apply.
-- Derive a percentage only for a positive previous rate. Preserve the absolute delta and direction when the prior rate is zero or negative.
-- For Net rates with a negative previous baseline, do not emit a percentage until its interpretation and state are approved. If approved, add an explicit state rather than encoding status as a numeric sentinel.
-- Keep a negative current or previous Net rate intact. Do not use absolute-value denominators or reinterpret a negative Net rate as zero.
-
-The proposed positive-baseline rule avoids the sign inversion that a conventional percentage formula can produce when a Net baseline is negative. It is a recommendation, not a locked product decision.
+Negative Net remains mathematically intact regardless of the chosen trend presentation. Do not clamp a negative rate, use an absolute-value denominator, or reinterpret negative Net as zero. No concrete delta, direction, percentage, or zero-baseline behavior is authorized until recorded by the owner.
 
 ## Currency and readiness behavior
 
@@ -207,7 +200,7 @@ The proposed positive-baseline rule avoids the sign inversion that a conventiona
 
 | Component | Decision | Reason |
 |---|---|---|
-| TimeRules | EXTEND | Reuse the captured-now and half-open UTC rules. Add only the fixed 15m/30m/60m recent comparison requests after semantic approval. Do not generalize to arbitrary durations. |
+| TimeRules | EXTEND | Reuse captured-now and half-open UTC rules for the locked 15m/30m/60m current windows. Add a previous-window comparison request only after the owner approves its baseline. Do not generalize to arbitrary durations. |
 | PeriodReadPlan | REUSE | Call the existing decomposition for each approved current/previous pair. Retain the existing fixed-hour plus bounded-edge algorithm and per-pair four-edge guard. |
 | EventPeriodAggregateSnapshot | REUSE | It already stores event/currency fixed bucket primitives and coverage lifecycle. No new durable velocity resource is needed. |
 | AnalyticsContributionFact | REUSE | It already stores exact sale/refund effective-time primitives and has the event/currency/effective-time index. |
@@ -228,7 +221,7 @@ The proposed positive-baseline rule avoids the sign inversion that a conventiona
 |---|---|---|
 | A. Extend PeriodComparisonReader with rate derivation | Not selected | It reuses the existing coherent reader but would mix comparison projection assembly with velocity rate/trend semantics and enlarge an already large reader. Extending its accepted period inputs alone would not provide one coherent read for all three windows. |
 | B. Add VelocityReader with copied projection queries | REJECT | It duplicates bucket coverage, exact edge aggregation, currency isolation, metadata checks, and race-sensitive query logic. |
-| C. Extract a narrow event-level projection composition kernel | RECOMMENDED | M5-05 needs all three current/previous pairs under one captured now and one coherent transaction. A shared kernel avoids copied projection SQL and avoids fetching M5-04’s dimension families for an event-level velocity read. |
+| C. Extract a narrow event-level projection composition kernel | RECOMMENDED | If the owner approves three previous-equivalent operands, the shared kernel can compose all six operands under one captured now and coherent transaction. It avoids copied projection SQL and avoids fetching M5-04 dimension families for an event-level velocity read. |
 
 The extraction must be a behavior-preserving M5-04 change before VelocityReader depends on it. Exact M5-04 regression suites remain required. If a small seam cannot be extracted without changing certified behavior, stop and request an architecture decision rather than building a second query path.
 
@@ -257,9 +250,37 @@ Future certification must include:
 3. A query-count bound showing statement count is independent of historical order/refund row count. Query results may scale with the fixed bucket/edge set and projection cardinality, not the underlying source history.
 4. A selective EXPLAIN test for the actual projection and contribution-fact SQL. Do not add an index without before-change EXPLAIN evidence showing a selective-path problem and owner approval.
 
+## Coherent transaction law
+
+The accepted M5-04 ordering is mandatory for PeriodComparisonReader extraction and any future VelocityReader.
+
+~~~text
+TRANSACTION_OWNER=PeriodComparisonReader / VelocityReader caller
+TRANSACTION_OPTS=EventSnapshotRefreshFence.coherent_transaction_opts()
+PRE_FIRST_PROJECTION_ACTION=EventSnapshotRefreshFence.prepare_coherent_transaction!()
+SHARED_PROJECTION_KERNEL_STARTS_TRANSACTION=NO
+SECOND_TRANSACTION=FORBIDDEN
+~~~
+
+The caller opens `Repo.transaction/2` with `EventSnapshotRefreshFence.coherent_transaction_opts/0`. Inside that transaction, the caller runs `:ok = EventSnapshotRefreshFence.prepare_coherent_transaction!/0` before the first projection SQL statement. Only after preparation succeeds may it call ProjectionPeriodReader. The kernel must not call `Repo.transaction/2`, own a transaction, or issue projection SQL before preparation. Using the options function without the preparation function is incorrect and does not establish the accepted repeatable-read contract.
+
+PeriodComparisonReader must preserve its accepted sequence. VelocityReader must use the same sequence for all approved operands. Architectural pseudocode for the future VelocityReader:
+
+~~~elixir
+Repo.transaction(
+  fn ->
+    :ok = EventSnapshotRefreshFence.prepare_coherent_transaction!()
+    # Then and only then read all approved projection operands.
+  end,
+  EventSnapshotRefreshFence.coherent_transaction_opts()
+)
+~~~
+
 ## Concurrency and coherence
 
-The read must use EventSnapshotRefreshFence.coherent_transaction_opts() and the M5-04 repeatable-read pattern. Capture and plan the windows before the transaction. Read all six operands inside one fenced transaction so one response cannot combine different committed projection generations.
+Capture `now` and create the locked current windows before opening the transaction. If the owner approves previous-equivalent windows, plan those operands from the same captured `now`. Read all approved operands inside one transaction satisfying the law above, so a response cannot combine committed projection generations.
+
+
 
 | Race | Required result |
 |---|---|
@@ -298,6 +319,7 @@ If revenue is hidden, redact Gross, refund, and Net monetary rates and every com
 - Oban: existing projection rebuild and coverage work only. No new read jobs.
 
 Expected period-plan shape:
+The following edge shapes describe the immediately preceding equal-duration recommendation only, and apply if the owner approves that comparison baseline.
 
 | Window pair | Interior buckets | Edge bound |
 |---|---|---|
@@ -305,7 +327,7 @@ Expected period-plan shape:
 | 30m current + previous | Usually none | At most two sub-hour edges per operand, four total |
 | 60m current + previous | One exact UTC-hour bucket per operand when aligned; otherwise no complete hour and at most two partial-hour edges | At most two partial edges per operand, four total |
 
-All three pairs use a fixed six-operand plan set. The shared reader should issue set-based bucket and edge reads with query count bounded by that plan and the readiness/security support reads, not by historical source row count. Do not use per-bucket or per-currency N+1 reads. Deduplicate identical bucket specs across windows before fetching them. Keep contribution facts bounded by the selected edge intervals and the existing event/currency/effective-time index.
+If the previous-equivalent baseline is approved, the three pairs form a fixed six-operand plan set. The shared reader should issue set-based bucket and edge reads with query count bounded by that plan and the readiness/security support reads, not by historical source row count. Do not use per-bucket or per-currency N+1 reads. Deduplicate identical bucket specs across windows before fetching them. Keep contribution facts bounded by the selected edge intervals and the existing event/currency/effective-time index.
 
 No request reads or holds memory proportional to historical order or refund rows.
 
@@ -329,13 +351,13 @@ Every phase below is future work. The owner decisions listed at the end must be 
 
 ### M5-05B — Owner-approved windows and pure velocity rules
 
-- Objective: encode only the approved fixed windows, exact per-hour Decimal rate, and trend contract.
+- Objective: encode the locked current windows and only the rate/trend semantics that the owner has approved.
 - Exact writable production files: lib/event_sales/analytics/time_rules.ex; new lib/event_sales/analytics/velocity_rules.ex.
 - Exact tests: test/event_sales/analytics/time_rules_test.exs; new test/event_sales/analytics/velocity_rules_test.exs.
-- Dependencies: written owner decisions for primary numerator, money-rate inclusion, quantity presentation, percentage semantics including negative Net, and display formatting.
-- Invariants: one captured now; [start,end); 15/30/60 only; exact previous-equivalent bounds; no floating point; no rounding before display; preserve negative Net.
-- Performance review: pure CPU work over six bounded operands; no database, cache, Redis, PubSub, worker, or index.
-- STOP: any owner decision is absent; any custom duration is requested; a formula requires changing M5 financial semantics.
+- Dependencies: written authoritative decisions before B starts: primary numerator; supporting metrics; monetary-rate inclusion; canonical normalization unit; previous-equivalent comparison baseline; whether absolute delta is included; whether direction is included; percentage behavior including zero and negative baselines; display precision/rounding; and the public three-window result shape if B depends on it.
+- Invariants: one captured now; locked current windows are half-open 15m/30m/60m UTC; use a previous baseline only if owner-approved; implement only approved numerator, units, trend fields, and formatting; no floating point; no rounding before display; preserve negative Net.
+- Performance review: pure CPU work over the approved bounded operands; no database, cache, Redis, PubSub, worker, or index.
+- STOP: any required owner decision is absent; any custom current duration is requested; the implementation treats a recommendation as approved; a formula requires changing M5 financial semantics.
 
 ### M5-05C — Extract event-level projection composition
 
@@ -343,19 +365,31 @@ Every phase below is future work. The owner decisions listed at the end must be 
 - Exact writable production files: new lib/event_sales/analytics/projection_period_reader.ex; lib/event_sales/analytics/period_comparison_reader.ex.
 - Exact tests: new test/event_sales/analytics/projection_period_reader_test.exs; test/event_sales/analytics/period_read_plan_test.exs; test/event_sales/analytics/period_comparison_reader_test.exs; test/event_sales/analytics/period_comparison_reader_correctness_test.exs; test/event_sales/analytics/period_comparison_reader_policy_test.exs; test/event_sales/analytics/period_comparison_reader_query_plan_test.exs; test/event_sales/analytics/period_comparison_reader_concurrency_test.exs; test/event_sales/analytics/period_comparison_reader_isolation_test.exs; test/event_sales/analytics/period_comparison_reader_matrix_test.exs; test/event_sales/analytics/m5_04_period_concurrency_test.exs; test/event_sales/analytics/m5_04_period_backfill_churn_test.exs; test/event_sales/analytics/m5_04_period_query_plan_test.exs; test/event_sales/analytics/m5_04_period_isolation_regression_test.exs; test/event_sales/analytics/m5_04_period_reconciliation_test.exs; test/event_sales/analytics/period_coverage_gap_test.exs; test/event_sales/analytics/period_coverage_closure_test.exs.
 - Dependencies: M5-05B owner decisions recorded; extraction boundary reviewed before implementation.
-- Invariants: existing M5-04 response semantics unchanged; same coherent transaction; no raw sales/refund read; no dimension query moved into the event-level kernel; no new period decomposition.
+- Invariants: existing M5-04 response semantics unchanged; preserve Repo.transaction → prepare_coherent_transaction! → shared event projection composition order; same caller-owned coherent transaction; no raw sales/refund read; no dimension query moved into the event-level kernel; no new period decomposition.
 - Performance review: preserve current set-based bucket and edge query shapes. Capture SQL telemetry before and after; query count must not grow with source history.
-- STOP: extraction changes current M5-04 behavior, requires a competing projection history, or needs an index without selective before-EXPLAIN evidence.
+- STOP: extraction changes current M5-04 behavior; moves or removes prepare_coherent_transaction!/0; starts a nested/second transaction; lets ProjectionPeriodReader own a transaction; requires a competing projection history; or needs an index without selective before-EXPLAIN evidence.
 
 ### M5-05D — Multi-window projection-backed VelocityReader
 
-- Objective: read all 15m/30m/60m current and previous operands at one captured now and derive the approved velocity envelope.
+- Objective: read the three locked 15m/30m/60m current operands, plus comparison operands only if their baseline was approved, at one captured now and derive only the approved velocity envelope.
 - Exact writable production files: new lib/event_sales/analytics/velocity_reader.ex; reuse TimeRules, PeriodReadPlan, ProjectionPeriodReader, MetricRules, and VelocityRules.
 - Exact tests: new test/event_sales/analytics/velocity_reader_test.exs; new test/event_sales/analytics/velocity_reader_policy_test.exs; new test/event_sales/analytics/velocity_reader_query_plan_test.exs; test/event_sales/analytics/period_read_plan_test.exs and test/event_sales/analytics/projection_period_reader_test.exs.
-- Dependencies: M5-05B and M5-05C.
-- Invariants: one actor, event, currency, captured now, and RR projection snapshot per response; all six operands keep their labels; fail closed on any missing/stale coverage; no raw fallback; no persisted derived rate.
-- Performance review: at most three pair plans, at most four edges per pair, fixed query-count ceiling, one event/currency scope, no N+1.
-- STOP: one coherent transaction cannot cover all six operands; projection metadata cannot prove edge coverage; velocity requires a new durable resource.
+- Dependencies: M5-05B and M5-05C; all required owner decisions recorded; approved result shape and comparison baseline available.
+- Transaction contract: VelocityReader is the transaction owner. Architectural pseudocode:
+
+~~~elixir
+Repo.transaction(
+  fn ->
+    :ok = EventSnapshotRefreshFence.prepare_coherent_transaction!()
+    # Then and only then read all approved projection operands.
+  end,
+  EventSnapshotRefreshFence.coherent_transaction_opts()
+)
+~~~
+
+- Invariants: one actor, event, currency, captured now, and caller-owned RR projection snapshot per response; all current operands and any approved previous operands keep their labels; prepare_coherent_transaction!/0 runs inside the Repo.transaction callback before the first projection query; fail closed on missing/stale coverage; no raw fallback; no persisted derived rate; ProjectionPeriodReader starts no transaction.
+- Performance review: at most three current plans plus three approved comparison plans, at most four edges per approved pair, fixed query-count ceiling, one event/currency scope, no N+1.
+- STOP: preparation is absent or follows projection SQL; a nested/second transaction is introduced; the shared kernel owns a transaction; one coherent transaction cannot cover all approved operands; projection metadata cannot prove edge coverage; velocity requires a new durable resource.
 
 ### M5-05E — Existing analytics facade and visibility policy
 
@@ -390,72 +424,86 @@ No M5-05 phase authorizes UI changes, new resources, migrations, indexes, worker
 
 ## TOON prompts for later authorized phases
 
-These prompts do not authorize execution. Do not run them while the owner decisions remain unresolved.
+These prompts are planning aids, not execution authority. Each serial phase requires its own later admission. Owner decisions listed below must be recorded before M5-05B starts.
 
-### Scaffolding TOON — M5-05B pure contract
+### Scaffolding TOON — M5-05 Deterministic Sales Velocity
 
 | Field | Content |
 |---|---|
-| Task | Create the approved M5-05 time-window and pure velocity-rule foundation. |
-| Objective | Give later readers fixed exact recent windows and deterministic Decimal per-hour rates/trends without adding persistence. |
-| Output | Modify lib/event_sales/analytics/time_rules.ex; create lib/event_sales/analytics/velocity_rules.ex; update test/event_sales/analytics/time_rules_test.exs; create test/event_sales/analytics/velocity_rules_test.exs. |
-| Note | Begin only after the product owner records the primary metric, monetary-rate inclusion, percentage and negative-baseline behavior, and display precision. Support only 15m, 30m, 60m. Capture now once. Use half-open UTC periods and adjacent equal-duration comparison periods. Keep canonical rates Decimal and unrounded. Do not touch resources, migrations, indexes, raw sales tables, cache, TTL, Redis, PubSub, Oban, or UI. Stop if the approved decisions conflict with M5-02/M5-03/M5-04 semantics. |
+| Task | Scaffold the complete serial M5-05 programme from owner decisions through measured acceleration review. |
+| Objective | Keep the future work ordered as owner decisions → M5-05B pure time/rate/trend rules → M5-05C shared projection composition → M5-05D VelocityReader → M5-05E analytics facade and policy → M5-05F conformance certification → M5-05G measured load and acceleration decision. |
+| Output | Preserve six separately reviewable B-G phase admissions, each with its exact writable files, dependencies, tests, invariants, performance review, and STOP rules. This planning document is the only output of this scaffold; no implementation artifact is created. |
+| Note | THIS SCAFFOLD DOES NOT AUTHORIZE IMPLEMENTATION. Each B-G phase requires a separate later admission, and B must wait for authoritative owner decisions on every listed semantic. Indexes: existing only; no new index without selective BEFORE EXPLAIN evidence. Cache: NO_CHANGE. TTL: none introduced. Redis structure: none selected. Invalidation: existing projection lifecycle and coverage identity only; no new mechanism. PubSub: existing event-scoped post-refresh signal only; no new broadcast. Concurrency: use the coherent transaction law below; the caller prepares the transaction before projection SQL and the shared kernel owns no transaction. STOP: any phase lacks admission; an owner decision is missing; raw-table fallback, new resource, index, cache, Redis, PubSub, worker, scheduler, or UI scope is proposed without separate authority. |
 
-### M5-05C micro-prompt — shared projection kernel
+### M5-05B micro-prompt — owner-approved time and pure velocity rules
+
+| Field | Content |
+|---|---|
+| Task | Implement only the owner-approved fixed-window and pure velocity-rule contract. |
+| Objective | Provide deterministic time windows and pure Decimal rate/trend rules without persistence. |
+| Output | Modify lib/event_sales/analytics/time_rules.ex; create lib/event_sales/analytics/velocity_rules.ex; update test/event_sales/analytics/time_rules_test.exs; create test/event_sales/analytics/velocity_rules_test.exs. |
+| Note | Begin only after authoritative decisions record the primary numerator; supporting quantity/refund metrics; monetary-rate inclusion; canonical normalization unit; previous-equivalent baseline; whether absolute delta and direction are included; percentage behavior for zero and negative baselines; display precision/rounding; and the public three-window result shape if B depends on it. Keep the current 15m/30m/60m windows. Do not implement unapproved recommendations. Indexes: existing only; no new index. Cache: NO_CHANGE. TTL: none introduced. Redis structure: none. Invalidation: none; pure rules only. PubSub: existing signal only; no new behavior. Concurrency: pure deterministic calculations; no database transaction or shared state. STOP: any required decision is missing; arbitrary current windows are requested; a formula changes M5 financial semantics. |
+
+### M5-05C micro-prompt — shared projection composition
 
 | Field | Content |
 |---|---|
 | Task | Extract event-level period projection composition from PeriodComparisonReader. |
-| Objective | Let the existing comparison reader and a future multi-window velocity reader share the same bucket, edge, coverage, and metadata rules. |
-| Output | Create lib/event_sales/analytics/projection_period_reader.ex; modify lib/event_sales/analytics/period_comparison_reader.ex; add test/event_sales/analytics/projection_period_reader_test.exs; run test/event_sales/analytics/period_comparison_reader_test.exs, test/event_sales/analytics/period_comparison_reader_correctness_test.exs, test/event_sales/analytics/period_comparison_reader_policy_test.exs, test/event_sales/analytics/period_comparison_reader_isolation_test.exs, test/event_sales/analytics/period_comparison_reader_query_plan_test.exs, test/event_sales/analytics/period_comparison_reader_concurrency_test.exs, test/event_sales/analytics/period_comparison_reader_matrix_test.exs, test/event_sales/analytics/period_read_plan_test.exs, the M5-04 regression files listed above, test/event_sales/analytics/period_coverage_gap_test.exs, and test/event_sales/analytics/period_coverage_closure_test.exs. |
-| Note | Preserve the existing public comparison response and RR/EventSnapshotRefreshFence behavior. Keep dimension-family queries in PeriodComparisonReader. Reuse PeriodReadPlan. Do not add raw source queries, new index, resource, cache, TTL, Redis, PubSub, worker, or UI. Stop if extraction changes M5-04 behavior or requires a second projection history. |
+| Objective | Share bucket, edge, coverage, and metadata logic between M5-04 and the future multi-window reader. |
+| Output | Create lib/event_sales/analytics/projection_period_reader.ex; modify lib/event_sales/analytics/period_comparison_reader.ex; add test/event_sales/analytics/projection_period_reader_test.exs; run test/event_sales/analytics/period_read_plan_test.exs, test/event_sales/analytics/period_comparison_reader_test.exs, test/event_sales/analytics/period_comparison_reader_correctness_test.exs, test/event_sales/analytics/period_comparison_reader_policy_test.exs, test/event_sales/analytics/period_comparison_reader_query_plan_test.exs, test/event_sales/analytics/period_comparison_reader_concurrency_test.exs, test/event_sales/analytics/period_comparison_reader_isolation_test.exs, test/event_sales/analytics/period_comparison_reader_matrix_test.exs, test/event_sales/analytics/m5_04_period_concurrency_test.exs, test/event_sales/analytics/m5_04_period_backfill_churn_test.exs, test/event_sales/analytics/m5_04_period_query_plan_test.exs, test/event_sales/analytics/m5_04_period_isolation_regression_test.exs, test/event_sales/analytics/m5_04_period_reconciliation_test.exs, test/event_sales/analytics/period_coverage_gap_test.exs, and test/event_sales/analytics/period_coverage_closure_test.exs. |
+| Note | Preserve this order exactly: caller Repo.transaction with EventSnapshotRefreshFence.coherent_transaction_opts/0 → inside transaction :ok = EventSnapshotRefreshFence.prepare_coherent_transaction!/0 → only then shared event projection composition. ProjectionPeriodReader must not start a transaction or issue SQL before preparation. Keep M5-04 response and dimension behavior unchanged. Indexes: existing only; no new index without selective BEFORE EXPLAIN. Cache: NO_CHANGE. TTL: none introduced. Redis structure: none. Invalidation: existing projection lifecycle and coverage identity only. PubSub: existing event-scoped post-refresh signal only. Concurrency: retain the caller-owned repeatable-read transaction and existing refresh-fence ordering. STOP: preparation moves after SQL or is removed; a nested/second transaction appears; the kernel owns a transaction; M5-04 behavior changes; raw-source reads or an unjustified index is required. |
 
 ### M5-05D micro-prompt — VelocityReader
 
 | Field | Content |
 |---|---|
-| Task | Add a projection-only VelocityReader for the fixed three-window set. |
-| Objective | Return current and immediately preceding equivalent rates for 15m, 30m, and 60m from one captured now and one coherent projection snapshot. |
+| Task | Add the projection-only VelocityReader after M5-05B decisions and M5-05C extraction pass. |
+| Objective | Read the three locked current windows and only owner-approved comparison operands at one captured now and one coherent projection snapshot. |
 | Output | Create lib/event_sales/analytics/velocity_reader.ex; add test/event_sales/analytics/velocity_reader_test.exs, test/event_sales/analytics/velocity_reader_policy_test.exs, and test/event_sales/analytics/velocity_reader_query_plan_test.exs. |
-| Note | Build each operand with existing PeriodReadPlan, label the three plans so edges cannot collide, and send the combined plans through ProjectionPeriodReader in one fenced RR transaction. Use one event and one requested currency. Fail closed on missing/stale coverage. No raw sales/refund fallback, no persisted velocity resource, no N+1, no cache, TTL, Redis, PubSub, worker, or UI. Stop if six operands cannot share one coherent transaction. |
+| Note | In the caller-owned Repo.transaction callback, run :ok = EventSnapshotRefreshFence.prepare_coherent_transaction!/0 first, then read all approved operands; pass EventSnapshotRefreshFence.coherent_transaction_opts/0 as the transaction options. Use existing PeriodReadPlan and ProjectionPeriodReader. Indexes: existing only; no new index without selective BEFORE EXPLAIN. Cache: NO_CHANGE. TTL: none introduced. Redis structure: none. Invalidation: current projection lifecycle and coverage identity only. PubSub: existing event-scoped post-refresh signal only. Concurrency: one captured now, event, currency, and prepared repeatable-read transaction for the complete approved operand set. STOP: missing or stale coverage falls back to raw tables; preparation is missing or late; a second transaction is created; a new durable resource is required. |
 
-### M5-05E micro-prompt — event-scoped facade and redaction
+### M5-05E micro-prompt — analytics facade and policy
 
 | Field | Content |
 |---|---|
-| Task | Add an event-scoped facade method that delegates to VelocityReader. |
-| Objective | Expose the read through the existing analytics boundary while retaining event authorization and revenue visibility. |
+| Task | Expose VelocityReader through the existing event-scoped analytics facade. |
+| Objective | Preserve event authorization, readiness, and revenue-visibility rules at the public read boundary. |
 | Output | Modify lib/event_sales/analytics/event_scoped_dashboard.ex; add test/event_sales/analytics/event_scoped_dashboard_velocity_test.exs; retain the M5-05D reader policy test. |
-| Note | Do not route velocity through HotStateAggregator or DashboardCache. Preserve identity validation, authorization, readiness, projection read, then redaction. Hide every monetary operand, rate, delta, percentage, and related state when revenue is not visible. Return no PII or source payloads. No UI, cache, TTL, Redis, PubSub, worker, or index. |
+| Note | Keep identity validation → authorization → request validation → readiness → projection read → monetary redaction. Indexes: existing only; no new index. Cache: NO_CHANGE. TTL: none introduced. Redis structure: none. Invalidation: no new mechanism; current policy and projection lifecycle apply. PubSub: existing signal only; no new behavior. Concurrency: facade delegates to the caller-owned prepared VelocityReader transaction and performs no per-window reads. STOP: HotState becomes financial authority; policy order changes; hidden money leaks through values or status; PII or source payloads are returned. |
 
-### M5-05F micro-prompt — conformance evidence
-
-| Field | Content |
-|---|---|
-| Task | Certify projection parity, refund placement, raw-read boundary, query bounds, and coherent races. |
-| Objective | Prove the implementation follows existing M5 financial and period authority for realistic velocity windows. |
-| Output | Add the focused M5-05 reconciliation, concurrency, raw-boundary, and query-plan tests named in this plan. Write only the separately authorized docs/evidence/m5-05-deterministic-sales-velocity-certification.md in that later task. |
-| Note | Include late refund during read, exact replay, missing/current-zero/stale coverage, mixed currency isolation, negative Net, cross-event isolation, SQL telemetry, constant query count, and selective EXPLAIN. No sleeps. Do not add an index without before-EXPLAIN evidence. Stop on raw source financial reads or mixed generations. |
-
-### M5-05G micro-prompt — measured scale gate
+### M5-05F micro-prompt — conformance certification
 
 | Field | Content |
 |---|---|
-| Task | Measure the three-window reader under bounded concurrency and decide whether acceleration is needed. |
-| Objective | Base cache or Redis decisions on M5-05 read and pool evidence. |
-| Output | Add the separately authorized test/event_sales/analytics/m5_05_velocity_load_evidence_test.exs and update the M5-05 certification evidence file. |
-| Note | Report fixture bounds, window/edge counts, query count, p50/p95/p99, queue/pool use, and concurrency. Preserve NO_CHANGE for cache and Redis unless measured need and a separate design approval exist. If proposing a mirror, define key, value, TTL, semantic version, coverage identity, readiness, invalidation, stampede protection, PubSub relation, and failure/fallback first. Never fall back to raw tables. |
+| Task | Certify projection parity, refund placement, raw-read boundary, bounded queries, and concurrency. |
+| Objective | Prove the approved implementation follows M5 financial semantics and the prepared coherent transaction law. |
+| Output | Add test/event_sales/analytics/m5_05_velocity_reconciliation_test.exs, test/event_sales/analytics/m5_05_velocity_concurrency_test.exs, test/event_sales/analytics/m5_05_velocity_raw_boundary_test.exs, and test/event_sales/analytics/m5_05_velocity_query_plan_test.exs. Write docs/evidence/m5-05-deterministic-sales-velocity-certification.md only under its separate certification admission. |
+| Note | Cover late refunds, exact replay, current-zero/missing/stale coverage, mixed-currency and cross-event isolation, negative Net, static raw boundary, SQL telemetry, constant query count, and selective EXPLAIN. Indexes: existing only; no new index without selective BEFORE EXPLAIN and separate approval. Cache: NO_CHANGE. TTL: none introduced. Redis structure: none. Invalidation: existing projection lifecycle and coverage identity only. PubSub: existing post-refresh signal only. Concurrency: barrier-controlled races; preparation must precede first projection SQL; no sleeps. STOP: raw source financial reads, mixed generations, failed parity, or a new mechanism without authority. |
+
+### M5-05G micro-prompt — measured load and acceleration decision
+
+| Field | Content |
+|---|---|
+| Task | Measure the approved three-window reader and decide whether acceleration merits a separate design. |
+| Objective | Base any future cache or Redis proposal on M5-05 query, pool, and load evidence. |
+| Output | Add test/event_sales/analytics/m5_05_velocity_load_evidence_test.exs and update docs/evidence/m5-05-deterministic-sales-velocity-certification.md under separate admission. |
+| Note | Report fixture bounds, windows/edges, query count, p50/p95/p99, queue/pool use, and concurrency; do not extrapolate beyond tested cohorts. Indexes: existing only; no new index without selective BEFORE EXPLAIN. Cache: NO_CHANGE unless measured evidence and separate design approval say otherwise. TTL: none selected. Redis structure: none selected. Invalidation: no new mechanism selected. PubSub: existing signal only; no new broadcast. Concurrency: project-isolated bounded load with the prepared coherent transaction. STOP: evidence is absent; do not select a Redis structure or mirror speculatively; any future mirror requires separate authority defining key/value/TTL/invalidation/stampede/PubSub/failure semantics. |
 
 ## Owner decisions required before implementation
 
-1. Primary velocity numerator: confirm Gross ticket quantity per hour as primary, or choose a different primary.
-2. Quantity and refund-rate presentation: confirm whether Net and Refund quantity rates appear beside Gross, and whether quantity can ever combine across currency partitions.
-3. Monetary velocity: decide whether Gross, Refund, and Net value rates are included as supporting measures when revenue visibility permits.
-4. Percentage trend: approve behavior for zero and negative previous rates, especially negative Net baselines. Confirm any new explicit comparison state before extending MetricRules.
-5. Display: choose displayed decimal precision and rounding mode. Canonical rates remain unrounded Decimal values.
-6. Public facade result shape: confirm that the proposed event-scoped facade method returns all three windows together. This plan recommends one captured now and one coherent transaction for the full set.
+1. Primary numerator: confirm Gross ticket quantity as primary, or select a different numerator. Gross and Net remain distinct.
+2. Supporting quantity metrics: decide whether Net ticket quantity and refund ticket quantity rates appear beside the primary metric; decide whether quantity can be combined across currency partitions.
+3. Monetary-rate inclusion: decide whether Gross, Refund, and Net value rates are included as supporting measures when revenue visibility permits.
+4. Canonical normalization unit: choose the product presentation/storage calculation unit. Per hour is recommended, not accepted authority.
+5. Previous-equivalent comparison baseline: decide whether to compare against the immediately preceding equal-duration interval. If approved for duration D and captured UTC instant N, the recommended pair is current [N-D, N) and previous [N-2D, N-D).
+6. Absolute trend delta: decide whether the trend includes current rate minus the approved previous-equivalent rate.
+7. Trend direction: decide whether to include up/down/unchanged direction alongside any approved delta.
+8. Percentage and baseline semantics: decide whether percentage change is included and define zero and negative baseline behavior, including negative Net and any explicit comparison state.
+9. Display: choose displayed decimal precision and rounding mode. Canonical rates should remain unrounded Decimal values.
+10. Public result shape: confirm whether the public facade returns all three current windows together and, if approved, their comparison operands. Resolve this before M5-05B only if its pure rules API depends on that shape; otherwise resolve before M5-05D.
 
 Until these decisions are recorded in authoritative product/Linear scope:
+
 
 ~~~text
 IMPLEMENTATION_READY=NO
@@ -499,3 +547,7 @@ M5_05_IMPLEMENTATION_AUTHORIZED=NO
 | Did it add cache, Redis, or PubSub without evidence? | NO. All remain NO_CHANGE. |
 | Did it overstate scale certification? | NO. M5-04 measurements are not presented as M5-05 evidence. |
 | Did it authorize implementation with unresolved owner decisions? | NO. IMPLEMENTATION_READY=NO. |
+| Did the plan lock per-hour, a prior-window baseline, absolute delta, or direction? | NO. Each is an explicit owner decision; the stated forms are recommendations only. |
+| Does the transaction contract require both fence functions in the correct order? | YES. The caller supplies coherent_transaction_opts/0 and invokes prepare_coherent_transaction!/0 before projection SQL. |
+| Does the programme scaffold authorize implementation? | NO. B-G each require separate later admission. |
+| Do all TOON Notes state index, cache, TTL, Redis structure, invalidation, and PubSub decisions? | YES. All seven notes name those categories. |
