@@ -4,12 +4,13 @@
 | --- | --- |
 | Plan ID | `m5-03-revenue-refund-dimensional-aggregates` |
 | Linear | JC-308 |
-| Status | IN REVIEW (manual merge required) |
+| Status | COMPLETE (PASS) |
 | Programme base SHA | `c2a4d7eb181ed7c8f84d2e98d7e3116b915df176` |
 | Programme base tree | `8c07cfc096a668a9977ff2f83c2d99f84b6b2970` |
+| M5_03F_PR | 282 |
+| M5_03F_MERGE_SHA | `388938a8c443ecfca3fa63476ecbcfc452b456a9` |
 | M5-03F PR | [#282](https://github.com/JCSchoeman96/EventSales/pull/282) |
-| M5-03F merge | PENDING |
-| Last updated | 2026-10-02 |
+| Last updated | 2026-10-08 |
 
 ## Scope
 
@@ -33,7 +34,17 @@ quantity refund, an exact value-only refund, and a complete header-only refund.
 | M5-03C | [#279](https://github.com/JCSchoeman96/EventSales/pull/279) | `c89b5ddd172d25bb1de9af11a046615016ea8768` |
 | M5-03D | [#280](https://github.com/JCSchoeman96/EventSales/pull/280) | `e247ab84a495148653eee2f48b91d99129768358` |
 | M5-03E | [#281](https://github.com/JCSchoeman96/EventSales/pull/281) | `c2a4d7eb181ed7c8f84d2e98d7e3116b915df176` |
-| M5-03F | [#282](https://github.com/JCSchoeman96/EventSales/pull/282) | PENDING |
+| M5-03F | [#282](https://github.com/JCSchoeman96/EventSales/pull/282) | `388938a8c443ecfca3fa63476ecbcfc452b456a9` |
+
+### M5-03F exact-head CI (verified)
+
+```text
+M5_03F_FINAL_HEAD = 7407b9381ee8a60d8d15e8324cd776a0fc608b85
+M5_03F_EXACT_HEAD_CI_RUN = 36973820481
+M5_03F_EXACT_HEAD_CI_RUN_NUMBER = 736
+M5_03F_EXACT_HEAD_CI_ATTEMPT = 1
+M5_03F_EXACT_HEAD_CI = PASS
+```
 
 ## Acceptance matrix
 
@@ -112,7 +123,7 @@ bash scripts/dev_local.sh test <focused M5-02/M5-03 evidence set>
                                       PASS (225 tests)
 git diff --check                       PASS
 bash scripts/dev_local.sh quality-pr  PASS (2732 tests, 0 failures)
-exact-head GitHub CI                   REQUIRED 6/6 ON FINAL REVIEWED HEAD BEFORE MERGE
+exact-head GitHub CI                   PASS (run #736, attempt 1; head 7407b9381ee8a60d8d15e8324cd776a0fc608b85)
 ```
 
 No production, schema, migration, index, worker, scheduler, cache, Redis,
