@@ -200,7 +200,7 @@ These are canonical financial-time invariants, not product presentation choices:
 
 The programme explicitly supports 15m, 30m, and 60m as recent velocity windows. Current and previous comparison operands are owner locked.
 
-| Window | `start_utc` | `end_utc` | `captured_now_utc` | Duration | Timezone semantics | Recommended previous start | Recommended previous end |
+| Window | `start_utc` | `end_utc` | `captured_now_utc` | Duration | Timezone semantics | Previous start | Previous end |
 |---|---|---|---|---:|---|---|---|
 | 15m | `N - 15 minutes` | `N` | `N` | 900 seconds | Elapsed UTC | `N - 30 minutes` | `N - 15 minutes` |
 | 30m | `N - 30 minutes` | `N` | `N` | 1,800 seconds | Elapsed UTC | `N - 60 minutes` | `N - 30 minutes` |
