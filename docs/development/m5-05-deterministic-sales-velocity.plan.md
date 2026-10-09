@@ -12,6 +12,9 @@ M5_04_STATUS=COMPLETE_PASS
 M5_05A_STATUS=COMPLETE
 M5_05_AUTHORITY_REPAIR_V3_MERGED=YES
 PR_307_MERGE_SHA=817599687543527436b5dfcff0bcdf5d4ced1410
+PR_308_MERGED=YES
+PR_308_MERGE_SHA=a4d87eba8128e921537f84285aaca6571621f1ed
+PR_308_MERGE_TREE=d8a56c14788989b3840132430b1e7dcf0ab5b6c3
 
 OWNER_DECISION_REQUIRED=NO
 OWNER_AUTHORITY_RECORD=docs/evidence/m5-05-owner-product-authority.md
@@ -19,7 +22,10 @@ OWNER_AUTHORITY_ISSUE=JC-332
 OWNER_ACCEPTANCE_DATE=2026-10-09
 
 M5_05B_AUTHORIZED=YES
-M5_05B_STATUS=AWAITING_RECONCILED_MERGE
+M5_05B_PR=306
+M5_05B_STATUS=IN_REVIEW
+M5_05B_RECONCILED_BASE_SHA=a4d87eba8128e921537f84285aaca6571621f1ed
+M5_05B_RECONCILED_BASE_TREE=d8a56c14788989b3840132430b1e7dcf0ab5b6c3
 M5_05C_AUTHORIZED=NO
 M5_05C_GATE=PENDING_M5_05B_MERGE_AND_POST_MERGE_VERIFY
 M5_05_IMPLEMENTATION_AUTHORIZED=M5_05B_ONLY
@@ -66,7 +72,7 @@ NEW_INDEX_REQUIRED=NO
 M5_05D_OPTION_A_GATE=BEFORE_PUBLIC_READER;GO_OR_NO_GO
 ~~~
 
-**Active contract:** This file is the canonical M5-05 plan. Owner product semantics are durably recorded in `docs/evidence/m5-05-owner-product-authority.md` and [JC-332](https://linear.app/jc-dev/issue/JC-332/eventsales-m5-05a-deterministic-sales-velocity-planning-and). **This v4 amendment authorizes M5-05B only** (pure `TimeRules` / `VelocityRules` kernel and focused tests). It does not authorize M5-05C+, readers, migrations, resources, indexes, cache, Redis, PubSub, or UI. Peer implementation exists on open PR #306; reconcile that branch only after this authority merges to `main`.
+**Active contract:** This file is the canonical M5-05 plan. Owner product semantics are durably recorded in `docs/evidence/m5-05-owner-product-authority.md` and [JC-332](https://linear.app/jc-dev/issue/JC-332/eventsales-m5-05a-deterministic-sales-velocity-planning-and). **This v4 amendment authorizes M5-05B only** (pure `TimeRules` / `VelocityRules` kernel and focused tests). It does not authorize M5-05C+, readers, migrations, resources, indexes, cache, Redis, PubSub, or UI. PR #308 merged v4 authority to `main`; open PR #306 is reconciled onto that base and **IN_REVIEW** for M5-05B merge.
 
 ## Authority history
 
@@ -374,7 +380,7 @@ Keep future code under `lib/event_sales/analytics/`. Candidate responsibilities 
 
 ## M5-05 serial phase design
 
-M5-05B is **authorized** (owner decisions recorded 2026-10-09). M5-05C and later phases each require separate admission after prior phase merge and verification. Open PR #306 implements the kernel peer; merge only after this v4 authority is on `main` and the branch is rebased/reconciled.
+M5-05B is **authorized** (owner decisions recorded 2026-10-09). M5-05C and later phases each require separate admission after prior phase merge and verification. PR #308 installed v4 on `main`; open PR #306 carries the reconciled M5-05B kernel peer and is **IN_REVIEW** (rebased onto merge `a4d87eba…`).
 
 ### M5-05B — pure windows and velocity rules (AUTHORIZED)
 
@@ -543,9 +549,13 @@ No phase authorizes a UI, new durable resource, migration, index, worker, schedu
 ~~~text
 PR_304_MERGED=YES
 PR_304_OWNER_SEMANTIC_LOCKS=NOT_DURABLY_PROVEN_HISTORICAL
+PR_308_MERGED=YES
+PR_308_MERGE_SHA=a4d87eba8128e921537f84285aaca6571621f1ed
 OWNER_DECISION_REQUIRED=NO
 OWNER_AUTHORITY_RECORD=docs/evidence/m5-05-owner-product-authority.md
 M5_05B_AUTHORIZED=YES
+M5_05B_PR=306
+M5_05B_STATUS=IN_REVIEW
 M5_05C_AUTHORIZED=NO
 M5_05_IMPLEMENTATION_AUTHORIZED=M5_05B_ONLY
 IMPLEMENTATION_READY=M5_05B_YES
