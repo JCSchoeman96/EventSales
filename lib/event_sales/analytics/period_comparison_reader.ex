@@ -16,9 +16,7 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
   alias EventSales.Analytics.TimeRules
   alias EventSales.Analytics.TimeRules.ComparisonWindows
 
-  alias EventSales.Analytics.Resources.{
-    EventDimensionPeriodAggregateSnapshot
-  }
+  alias EventSales.Analytics.Resources.EventDimensionPeriodAggregateSnapshot
 
   alias EventSales.Analytics.EventSnapshotRefreshFence
   alias EventSales.Ingestion.AnalyticsReadinessResolver
