@@ -26,7 +26,7 @@ usage() {
 check_tools() {
   local tool
 
-  for tool in elixir mix curl ss pg_isready psql python3; do
+  for tool in elixir mix curl ss pg_isready psql python3 devcore-project; do
     command -v "${tool}" >/dev/null 2>&1 ||
       problem "${tool} is unavailable" "Local development requires ${tool}." "Install ${tool} and retry."
   done
@@ -34,7 +34,20 @@ check_tools() {
 }
 
 mix_dev() {
-  env -u MIX_TEST_PARTITION MIX_ENV=dev mix "$@"
+  devcore-project run dev -- env -u MIX_TEST_PARTITION MIX_ENV=dev mix "$@"
+}
+
+mix_test() {
+  devcore-project run test -- env -u MIX_TEST_PARTITION MIX_ENV=test \
+    TEST_DATABASE_NAME="${TEST_DATABASE_NAME}" mix "$@"
+}
+
+mix_test_partition() {
+  local partition="$1"
+  shift
+
+  devcore-project run test -- env MIX_TEST_PARTITION="${partition}" MIX_ENV=test \
+    TEST_DATABASE_NAME="${TEST_DATABASE_NAME}" mix "$@"
 }
 
 configure_phoenix() {
@@ -66,19 +79,64 @@ validate_local_env_file() {
 }
 
 prepare_local_env() {
-  [[ ! -L "${REPO_ROOT}/.env.local" ]] ||
+  local env_file="${REPO_ROOT}/.env.local"
+  local example_file="${REPO_ROOT}/.env.local.example"
+
+  [[ ! -L "${env_file}" ]] ||
     problem ".env.local must be a regular file" \
       "Local configuration cannot be a symlink because it could load the root .env." \
       "Replace .env.local with a regular file and set permissions to 600."
 
-  if [[ ! -e "${REPO_ROOT}/.env.local" ]]; then
-    [[ -f "${REPO_ROOT}/.env.local.example" ]] ||
+  [[ -f "${example_file}" ]] ||
       problem ".env.local.example is missing" "The local template is required." "Restore .env.local.example."
 
-    cp "${REPO_ROOT}/.env.local.example" "${REPO_ROOT}/.env.local"
-    chmod 600 "${REPO_ROOT}/.env.local"
+  if [[ ! -e "${env_file}" ]]; then
+    cp "${example_file}" "${env_file}"
+    chmod 600 "${env_file}"
     log "Created .env.local"
+  else
+    python3 - "${example_file}" "${env_file}" <<'PY'
+from pathlib import Path
+import os
+import re
+import tempfile
+import sys
+
+example = Path(sys.argv[1])
+target = Path(sys.argv[2])
+current = target.read_text()
+keys = {
+    match.group(1)
+    for line in current.splitlines()
+    if (match := re.match(r"\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=", line))
+}
+missing = []
+for line in example.read_text().splitlines():
+    match = re.match(r"\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=", line)
+    if match and match.group(1) not in keys:
+        keys.add(match.group(1))
+        missing.append(line)
+
+if missing:
+    text = current.rstrip() + "\n\n" + "\n".join(missing) + "\n"
+    fd, temporary = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent, text=True)
+    try:
+        with os.fdopen(fd, "w") as stream:
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, target)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+PY
   fi
+}
+
+activate_devcore_project() {
+  devcore-project plan
+  devcore-project activate
 }
 
 load_local_env() {
@@ -313,6 +371,7 @@ prepare_runtime() {
   log "Checking local configuration"
   check_tools
   prepare_local_env
+  activate_devcore_project
   load_local_env
   validate_local_configuration
   load_catalogue_secret
@@ -333,6 +392,7 @@ prepare_runtime() {
 migrate_dev_command() {
   check_tools
   prepare_local_env
+  activate_devcore_project
   load_local_env
   validate_local_configuration
   verify_dev_postgres
@@ -348,6 +408,7 @@ migrate_dev_command() {
 test_command() {
   check_tools
   prepare_local_env
+  activate_devcore_project
   load_local_env
   validate_test_configuration
 
@@ -409,11 +470,11 @@ test_command() {
     log "Creating and migrating isolated TEST database ${database_name}"
 
     if [[ -n "${current_partition}" ]]; then
-      MIX_ENV=test MIX_TEST_PARTITION="${current_partition}" mix ecto.create
-      MIX_ENV=test MIX_TEST_PARTITION="${current_partition}" mix ecto.migrate
+      mix_test_partition "${current_partition}" ecto.create
+      mix_test_partition "${current_partition}" ecto.migrate
     else
-      env -u MIX_TEST_PARTITION MIX_ENV=test mix ecto.create
-      env -u MIX_TEST_PARTITION MIX_ENV=test mix ecto.migrate
+      mix_test ecto.create
+      mix_test ecto.migrate
     fi
 
     local identity
@@ -430,8 +491,8 @@ test_command() {
     local pid
 
     for current_partition in "${partitions[@]}"; do
-      MIX_ENV=test MIX_TEST_PARTITION="${current_partition}" \
-        mix test --partitions "${partition_count}" "${test_args[@]}" &
+      mix_test_partition "${current_partition}" test --partitions "${partition_count}" \
+        "${test_args[@]}" &
       test_pids+=("$!")
     done
 
@@ -443,13 +504,14 @@ test_command() {
 
     return "${test_status}"
   else
-    env -u MIX_TEST_PARTITION MIX_ENV=test mix test "${test_args[@]}"
+    mix_test test "${test_args[@]}"
   fi
 }
 
 quality_pr_command() {
   check_tools
   prepare_local_env
+  activate_devcore_project
   load_local_env
   validate_test_configuration
 
@@ -463,8 +525,8 @@ quality_pr_command() {
       "Check the workstation dev-core stack without starting or stopping it from this repository."
 
   log "Creating and migrating isolated TEST database ${TEST_DATABASE_NAME} for the full quality gate"
-  env -u MIX_TEST_PARTITION MIX_ENV=test mix ecto.create
-  env -u MIX_TEST_PARTITION MIX_ENV=test mix ecto.migrate
+  mix_test ecto.create
+  mix_test ecto.migrate
 
   local identity
   identity="$(test_database_identity || true)"
@@ -474,12 +536,13 @@ quality_pr_command() {
       "Verify the local TEST role, database, and PostgreSQL TEST endpoint."
 
   log "Running mix quality.pr against PostgreSQL TEST database ${TEST_DATABASE_NAME}"
-  env -u MIX_TEST_PARTITION MIX_ENV=test mix quality.pr
+  mix_test quality.pr
 }
 
 quality_ci_command() {
   check_tools
   prepare_local_env
+  activate_devcore_project
   load_local_env
   validate_test_configuration
 
@@ -493,8 +556,8 @@ quality_ci_command() {
       "Check the workstation dev-core stack without starting or stopping it from this repository."
 
   log "Creating and migrating isolated TEST database ${TEST_DATABASE_NAME} for the full CI gate"
-  env -u MIX_TEST_PARTITION MIX_ENV=test mix ecto.create
-  env -u MIX_TEST_PARTITION MIX_ENV=test mix ecto.migrate
+  mix_test ecto.create
+  mix_test ecto.migrate
 
   local identity
   identity="$(test_database_identity || true)"
@@ -504,7 +567,7 @@ quality_ci_command() {
       "Verify the local TEST role, database, and PostgreSQL TEST endpoint."
 
   log "Running mix quality.ci against PostgreSQL TEST database ${TEST_DATABASE_NAME}"
-  env -u MIX_TEST_PARTITION MIX_ENV=test mix quality.ci
+  mix_test quality.ci
 }
 
 start_command() {
@@ -526,7 +589,7 @@ start_command() {
   printf '%s\n' "$$" >"${PHOENIX_PID_FILE}"
   log "Starting Phoenix at ${PHOENIX_URL}"
   export PORT="${PHOENIX_PORT}"
-  exec env -u MIX_TEST_PARTITION MIX_ENV=dev mix phx.server
+  exec devcore-project run dev -- env -u MIX_TEST_PARTITION MIX_ENV=dev mix phx.server
 }
 
 catalogue_dry_run_command() {
@@ -613,6 +676,10 @@ doctor_command() {
   log "Checking local configuration"
   check_tools
 
+  prepare_local_env
+  devcore-project plan
+  devcore-project doctor
+  devcore-project render
   load_local_env
   configure_phoenix
   validate_local_configuration

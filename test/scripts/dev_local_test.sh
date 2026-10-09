@@ -27,6 +27,10 @@ bash -n "${SCRIPT}"
 assert_contains 'local command="${1:-start}"'
 assert_contains 'catalogue-dry-run'
 assert_contains 'mix_dev eventsales.catalog.dry_run'
+assert_contains 'devcore-project plan'
+assert_contains 'devcore-project activate'
+assert_contains 'devcore-project run dev --'
+assert_contains 'devcore-project run test --'
 assert_contains 'quality_pr_command'
 assert_contains 'quality_ci_command'
 assert_contains 'readonly PHOENIX_PORT="${PORT:-4001}"'
@@ -61,12 +65,23 @@ assert_absent 'down -v'
 assert_absent 'reset)'
 assert_absent 'queue_apply'
 assert_absent 'ApplyTickeraCatalogWorker'
+if grep -Eq '^TICKERA_CATALOG_FEED_SECRET=' "${REPO_ROOT}/.env.local.example"; then
+  fail "catalogue secrets must come from the local secret file, not the rendered env file"
+fi
+if grep -Eq '^TICKERA_CATALOG_FEED_ENABLED=' "${REPO_ROOT}/.env.local.example"; then
+  fail "the local script must control catalogue feed enablement for each command"
+fi
+grep -Fq 'TICKERA_CATALOG_FEED_SECRET' "${REPO_ROOT}/.devcore/render-map.tsv" ||
+  fail "bootstrap must purge any stale catalogue secret from .env.local"
 
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "${tmp_dir}"' EXIT
 
 mkdir -p "${tmp_dir}/repo/scripts" "${tmp_dir}/repo/deps" "${tmp_dir}/bin"
+export DEVCORE_CALLS_FILE="${tmp_dir}/devcore-calls"
+export REAL_PYTHON3_BIN="$(command -v python3)"
 cp "${SCRIPT}" "${tmp_dir}/repo/scripts/dev_local.sh"
+cp "${REPO_ROOT}/.env.local.example" "${tmp_dir}/repo/.env.local.example"
 printf 'local-test-secret' >"${tmp_dir}/catalog-secret"
 
 sed \
@@ -110,6 +125,9 @@ chmod +x "${tmp_dir}/bin/psql"
 
 cat >"${tmp_dir}/bin/python3" <<'EOF'
 #!/usr/bin/env bash
+if [[ "$*" != *"redis_probe.py"* ]]; then
+  exec "${REAL_PYTHON3_BIN}" "$@"
+fi
 printf '%s\n' "$*" >>"${REDIS_PROBE_CALLS_FILE:-/dev/null}"
 if [[ " $* " == *" version "* ]]; then
   printf '7\n'
@@ -126,6 +144,16 @@ printf '%s|%s|%s\n' "\$*" "\${MIX_ENV:-unset}" "\${MIX_TEST_PARTITION:-unset}" \
   >>"\${MIX_ENV_CALLS_FILE:-/dev/null}"
 EOF
 chmod +x "${tmp_dir}/bin/mix"
+
+cat >"${tmp_dir}/bin/devcore-project" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"${DEVCORE_CALLS_FILE:-/dev/null}"
+if [[ "${1:-}" == "run" ]]; then
+  shift 3
+  exec "$@"
+fi
+EOF
+chmod +x "${tmp_dir}/bin/devcore-project"
 
 assert_doctor_passes() {
   local description="$1"
@@ -159,6 +187,29 @@ assert_doctor_fails_with() {
 }
 
 assert_doctor_passes "regular mode-600 .env.local"
+
+cat >"${tmp_dir}/repo/.env.local" <<'EOF'
+EVENTSALES_DEV_DATABASE_USERNAME=eventsales_dev
+EVENTSALES_DEV_DATABASE_PASSWORD=dev-bootstrap-placeholder
+TEST_DATABASE_USERNAME=eventsales_test
+TEST_DATABASE_PASSWORD=test-bootstrap-placeholder
+TEST_DATABASE_HOST=127.0.0.1
+TEST_DATABASE_PORT=55433
+TEST_DATABASE_NAME=event_sales_test
+REDIS_URL=redis://127.0.0.1:56379/0
+TEST_REDIS_URL=redis://127.0.0.1:56380/0
+WEBHOOK_RATE_LIMIT_REDIS_URL=redis://127.0.0.1:56379/0
+EOF
+chmod 600 "${tmp_dir}/repo/.env.local"
+assert_doctor_passes "sparse bootstrap-generated .env.local"
+grep -Fq 'TICKERA_CATALOG_FEED_BASE_URL=http://localhost:10059' "${tmp_dir}/repo/.env.local" ||
+  fail "local defaults must be restored after devcore-project creates a sparse env file"
+
+sed \
+  -e "s|^EVENTSALES_CATALOG_SECRET_FILE=.*$|EVENTSALES_CATALOG_SECRET_FILE=${tmp_dir}/catalog-secret|" \
+  -e 's|^TEST_DATABASE_NAME=.*$|TEST_DATABASE_NAME=event_sales_test_smoke|' \
+  "${REPO_ROOT}/.env.local.example" >"${tmp_dir}/repo/.env.local"
+chmod 600 "${tmp_dir}/repo/.env.local"
 
 : >"${tmp_dir}/pg_isready-calls"
 : >"${tmp_dir}/psql-calls"
@@ -208,6 +259,11 @@ chmod 600 "${tmp_dir}/repo/.env.local"
 
 PATH="${tmp_dir}/bin:${PATH}" bash "${tmp_dir}/repo/scripts/dev_local.sh" catalogue-dry-run
 
+grep -Fxq 'plan' "${tmp_dir}/devcore-calls" || fail "local runtime must resolve the dev-core contract"
+grep -Fxq 'activate' "${tmp_dir}/devcore-calls" || fail "local runtime must activate the worktree dev-core allocation"
+grep -Fxq 'run dev -- env -u MIX_TEST_PARTITION MIX_ENV=dev mix eventsales.catalog.dry_run' \
+  "${tmp_dir}/devcore-calls" || fail "development Mix tasks must run through devcore-project"
+
 grep -Fxq 'ecto.migrate' "${tmp_dir}/mix-calls" || fail "catalogue dry-run must migrate the development database"
 if grep -Fxq 'ecto.create' "${tmp_dir}/mix-calls"; then
   fail "local startup must not create a database outside the workstation infrastructure owner"
@@ -254,6 +310,11 @@ PSQL_CALLS_FILE="${tmp_dir}/psql-calls" \
   MIX_ENV_CALLS_FILE="${tmp_dir}/mix-env-calls" \
   PATH="${tmp_dir}/bin:${PATH}" \
   bash "${tmp_dir}/repo/scripts/dev_local.sh" test test/example_test.exs
+
+grep -Fxq 'plan' "${tmp_dir}/devcore-calls" || fail "test runner must resolve the dev-core contract"
+grep -Fxq 'activate' "${tmp_dir}/devcore-calls" || fail "test runner must activate the worktree dev-core allocation"
+grep -Eq '^run test -- env -u MIX_TEST_PARTITION MIX_ENV=test TEST_DATABASE_NAME=event_sales_test_run_[^ ]+ mix ecto.create$' \
+  "${tmp_dir}/devcore-calls" || fail "TEST Mix tasks must run through devcore-project with the isolated database"
 
 grep -Fxq 'ecto.create' "${tmp_dir}/mix-calls" ||
   fail "local tests must create an isolated TEST database"
