@@ -2,9 +2,9 @@
 
 ~~~text
 PLAN_ID=m5-05-deterministic-sales-velocity
-PLAN_VERSION=v6
-BASE_SHA=7574fce2978dfa7b3b4b4a98081e28a22973c474
-BASE_TREE=c9a22d83e409e2b22ad81169e06335b7ea2b2543
+PLAN_VERSION=v7
+BASE_SHA=e75213f4152161b9c1ac1959a869af1d6e9a58ec
+BASE_TREE=f0e7c5be9204fb76cdc7ea596264f2ca545c90b0
 
 M5_02_STATUS=COMPLETE_PASS
 M5_03_STATUS=COMPLETE_PASS
@@ -35,14 +35,77 @@ PR_306_EXACT_HEAD_CI_RUN=37897423938
 PR_306_EXACT_HEAD_CI=PASS_7_OF_7
 PR_306_POST_MERGE_TREE_VERIFY=PASS
 M5_05C_AUTHORIZED=YES
-M5_05C_STATUS=AUTHORIZED_NOT_STARTED
+M5_05C_PR=312
+M5_05C_STATUS=COMPLETE_PASS
 M5_05C_GATE=ADMITTED_AFTER_M5_05B_POST_MERGE_VERIFY
-M5_05D_AUTHORIZED=NO
+PR_312_HEAD_SHA=593081c05f34b5c2e51e617d32a7f5c79295a372
+PR_312_HEAD_TREE=06d7f07d97be7cb7a31c361c44fb0a1c51a18e43
+PR_312_EXACT_HEAD_CI_RUN=37929322765
+PR_312_EXACT_HEAD_CI=PASS_7_OF_7
+PR_312_MERGED=YES
+PR_312_MERGE_SHA=353546800740679d35607de6fd7104818de64c86
+PR_312_MERGE_TREE=06d7f07d97be7cb7a31c361c44fb0a1c51a18e43
+PR_312_POST_MERGE_TREE_VERIFY=PASS
+PR_312_M5_04_REGRESSION=86_TESTS_0_FAILURES
+QUERY_SHAPE=PRESERVED
+SECOND_EVENT_QUERY=NO
+DEV_CORE_COMMIT_IN_PR_312=NO
+NEW_DB_INDEX=NO
+M5_05D_WORK_IN_PR_312=NONE
+M5_05E_WORK_IN_PR_312=NONE
+PR_313=MERGED_DEV_CORE_BASELINE_ONLY
+PR_313_HEAD_SHA=06384b815541079b09a6bd25085c7e658cc8328b
+PR_313_MERGE_SHA=e75213f4152161b9c1ac1959a869af1d6e9a58ec
+PR_313_MERGE_TREE=f0e7c5be9204fb76cdc7ea596264f2ca545c90b0
+PR_313_CI_RUN=37933163418
+PR_313_CI=PASS_7_OF_7
+PR_313_M5_05_SEMANTIC_CHANGE=NONE
+PR_313_ANALYTICS_PRODUCTION_CHANGE=NONE
+SHARED_EVENT_PROJECTION_KERNEL=EventSales.Analytics.ProjectionPeriodReader.read/3
+EVENT_PROJECTION_QUERY_IMPLEMENTATIONS=1
+TRANSACTION_OWNER=PeriodComparisonReader/caller
+PROJECTION_PERIOD_READER_STARTS_TRANSACTION=NO
+PROJECTION_PERIOD_READER_CALLS_PREPARE=NO
+DIMENSION_BEHAVIOR_MOVED=NO
+METRIC_RULES_MOVED=NO
+M5_04_BEHAVIOR_CHANGE=NONE
+M5_04_QUERY_SHAPE_CHANGE=NONE
+M5_04_EVENT_ROWS_AND_EDGES_RETAINED=YES
+CACHE_CHANGE=NO
+REDIS_CHANGE=NO
+PUBSUB_CHANGE=NO
+OBAN_CHANGE=NO
+M5_05D_AUTHORIZED=YES
+M5_05D_STATUS=ACTIVE_D1
+M5_05D1_AUTHORIZED=YES
+M5_05D1_STATUS=AUTHORIZED_NOT_STARTED
+M5_05D2_AUTHORIZED=NO
+M5_05D2_STATUS=BLOCKED_PENDING_D1_REVIEW
 M5_05E_AUTHORIZED=NO
 M5_05F_AUTHORIZED=NO
 M5_05G_AUTHORIZED=NO
-M5_05_IMPLEMENTATION_AUTHORIZED=M5_05C_ONLY
-IMPLEMENTATION_READY=M5_05C_YES
+M5_05_IMPLEMENTATION_AUTHORIZED=M5_05D1_ONLY
+IMPLEMENTATION_READY=M5_05D1_YES
+OPTION_A_DECISION=PENDING
+M5_05E_GATE=BLOCKED_PENDING_M5_05D2_OPTION_A_GO
+CONCURRENCY_COHORTS=1,20,50
+CONCURRENCY_COHORT_MEANING=ACTUAL_CONCURRENT_CALLERS
+CALLER_COUNT_MAY_EXCEED_DB_POOL_SIZE=YES
+CALLER_COUNT_CAPPED_TO_DB_POOL_SIZE=NO
+DB_POOL_SIZE_REMAINS=10
+DB_QUEUE_PRESSURE_IS_PART_OF_MEASUREMENT=YES
+COHORT_START_BARRIER=YES
+SAMPLES_PER_CASE_PER_COHORT=100
+WARMUP_CALLS_PER_CASE=10
+TEST_DATABASE_POOL_SIZE=10
+NORMAL_EDGE_FACTS_PER_TOUCHED_UTC_HOUR=200
+HIGH_DENSITY_EDGE_FACTS_PER_TOUCHED_UTC_HOUR=20000
+SELECTIVITY_BACKGROUND_FACTS=20000
+NORMAL_C50_P99_MAX_MS=100
+HIGH_DENSITY_C50_P99_MAX_MS=150
+D1_WRITABLE_FILE=test/event_sales/analytics/m5_05_velocity_option_a_gate_test.exs
+D1_EXECUTION_PATH=bash scripts/dev_local.sh test
+D2_EVIDENCE_FILE=docs/evidence/m5-05-deterministic-sales-velocity-certification.md
 
 PR_304_MERGED=YES
 PR_304_MERGE_SHA=dfe6687369f284e97e5ffcca4a5e79d4c1c8479e
@@ -85,7 +148,7 @@ NEW_INDEX_REQUIRED=NO
 M5_05D_OPTION_A_GATE=BEFORE_PUBLIC_READER;GO_OR_NO_GO
 ~~~
 
-**Active contract:** This file is the canonical M5-05 plan. Owner product semantics are durably recorded in `docs/evidence/m5-05-owner-product-authority.md` and [JC-332](https://linear.app/jc-dev/issue/JC-332/eventsales-m5-05a-deterministic-sales-velocity-planning-and). **v4 locked owner semantics; v5 recorded status/admission; v6 clarifies generated-artifact scope only.** v6 changes no owner semantics, C architecture or behavior, or D+ authorization. M5-05B is **COMPLETE_PASS** on `main` via merged PR #306 (reviewed head tree equals merge tree). **M5-05C only** is authorized as behavior-preserving shared projection extraction. M5-05D+ remain unauthorized. Post-merge verification for #306 is merge commit + parents + merge tree equality with reviewed green PR tree; no merge-SHA CI run is required.
+**Active contract:** This is the canonical M5-05 plan. Owner product semantics remain in `docs/evidence/m5-05-owner-product-authority.md` and JC-332. v7 closes M5-05C from verified PR #312 evidence and authorizes only M5-05D1 measurement. PR #313 is the current Dev Core repository baseline only. D1 cannot establish canonical Option-A authority or authorize E. D2 must review the complete D1 evidence before recording GO or NO_GO.
 
 ## Authority history
 
@@ -97,6 +160,7 @@ M5_05D_OPTION_A_GATE=BEFORE_PUBLIC_READER;GO_OR_NO_GO
 - **v4 (2026-10-09):** owner explicitly approved the semantic batch in JC-332 and `docs/evidence/m5-05-owner-product-authority.md`. `OWNER_DECISION_REQUIRED = NO`. **M5-05B is authorized**; M5-05C remained unauthorized until M5-05B merged and was post-merge verified on `main`.
 - **v5 (2026-10-09):** M5-05B **COMPLETE_PASS** via PR #306 merge `e7ea13be93b4fc235bf2085a73ebec036cd9e5fd` (tree `0a967b95318c0487a597bd5dd8f8df8e5a59eef2`; reviewed head `56b3a3d333cdc45adbd8bb8b4b777ea205a6138c`; exact-head CI run `37897423938` 7/7 PASS). **M5-05C authorized** (`AUTHORIZED_NOT_STARTED`). M5-05D+ blocked. Owner semantic contract unchanged from v4.
 - **v6 (2026-10-09):** clarified that M5-05C may include deterministic project-index outputs generated by `mix project.index` when C source/test changes alter them. This is a mechanical scope clarification only. Owner semantics, C architecture and behavior, transaction law, and D+ authorization are unchanged.
+- **v7 (2026-10-09):** closes M5-05C as COMPLETE_PASS from PR #312 (head `593081c05f34b5c2e51e617d32a7f5c79295a372`, tree `06d7f07d97be7cb7a31c361c44fb0a1c51a18e43`, exact-head CI run `37929322765`, 7/7 PASS; merge `353546800740679d35607de6fd7104818de64c86`, merge tree matches reviewed tree). PR #313 (`e75213f4152161b9c1ac1959a869af1d6e9a58ec`) is recorded as a Dev Core baseline and adds no M5-05 semantic or analytics production change. Authorizes M5-05D1 measurement only, with fixtures, cohorts, query-plan rules, and thresholds frozen below. D2 and E/F/G remain unauthorized.
 
 ## Ultimate outcome and backward plan
 
@@ -427,25 +491,62 @@ TTL_STRATEGY=NONE_IN_C
 
 If implementation evidence suggests a new index, **STOP C**; index admission is separate.
 
-### Serial programme gate (D+ blocked)
+### M5-05C closeout record
+
+```text
+M5_05C_AUTHORIZED=YES
+M5_05C_PR=312
+M5_05C_STATUS=COMPLETE_PASS
+PR_312_HEAD_SHA=593081c05f34b5c2e51e617d32a7f5c79295a372
+PR_312_HEAD_TREE=06d7f07d97be7cb7a31c361c44fb0a1c51a18e43
+PR_312_EXACT_HEAD_CI_RUN=37929322765
+PR_312_EXACT_HEAD_CI=PASS_7_OF_7
+PR_312_MERGED=YES
+PR_312_MERGE_SHA=353546800740679d35607de6fd7104818de64c86
+PR_312_MERGE_TREE=06d7f07d97be7cb7a31c361c44fb0a1c51a18e43
+PR_312_POST_MERGE_TREE_VERIFY=PASS
+PR_312_M5_04_REGRESSION=86_TESTS_0_FAILURES
+QUERY_SHAPE=PRESERVED
+SECOND_EVENT_QUERY=NO
+DEV_CORE_COMMIT_IN_PR_312=NO
+NEW_DB_INDEX=NO
+M5_05D_WORK_IN_PR_312=NONE
+M5_05E_WORK_IN_PR_312=NONE
+SHARED_EVENT_PROJECTION_KERNEL=EventSales.Analytics.ProjectionPeriodReader.read/3
+EVENT_PROJECTION_QUERY_IMPLEMENTATIONS=1
+TRANSACTION_OWNER=PeriodComparisonReader/caller
+PROJECTION_PERIOD_READER_STARTS_TRANSACTION=NO
+PROJECTION_PERIOD_READER_CALLS_PREPARE=NO
+DIMENSION_BEHAVIOR_MOVED=NO
+METRIC_RULES_MOVED=NO
+M5_04_BEHAVIOR_CHANGE=NONE
+M5_04_QUERY_SHAPE_CHANGE=NONE
+M5_04_EVENT_ROWS_AND_EDGES_RETAINED=YES
+CACHE_CHANGE=NO
+REDIS_CHANGE=NO
+PUBSUB_CHANGE=NO
+OBAN_CHANGE=NO
+```
+
+The `event_rows` and `event_edges` evidence remains available for existing M5-04 certification. PR #313 only advances the repository base for the Dev Core local environment. It is not an M5-05 phase implementation.
+
+### M5-05 serial programme gate
 
 ```text
 M5-05A COMPLETE
-        ↓
+  ↓
 M5-05B COMPLETE_PASS
-        ↓
-M5-05C AUTHORIZED_NOT_STARTED
-        ↓
-M5-05D BLOCKED_PENDING_C
-        ↓
-M5-05E BLOCKED_PENDING_D_OPTION_A_GO
-        ↓
-M5-05F BLOCKED_PENDING_E
-        ↓
-M5-05G BLOCKED_PENDING_F
+  ↓
+M5-05C COMPLETE_PASS
+  ↓
+M5-05D1 AUTHORIZED_NOT_STARTED
+  ↓
+M5-05D2 BLOCKED_PENDING_D1_REVIEW
+  ├── OPTION_A_GO: D complete; E still needs separate admission
+  └── OPTION_A_NO_GO: E remains blocked; new architecture needs separate admission
 ```
 
-M5-05C completion does **not** automatically authorize D without separate admission. Do not authorize performance gate, `VelocityReader`, facade integration, certification suite, load test, cache/Redis acceleration, or M5-06 via this admission.
+M5-05D1 measurement does not authorize a public reader, `VelocityReader`, facade integration, D2 evidence, or M5-06.
 
 ## No-raw-scan invariant
 
@@ -514,7 +615,7 @@ An approved current/previous equal-duration pair has at most four edge fragments
 
 The existing `(event_id, currency, effective_at)` index is the starting query shape. No new index is authorized without selective before-`EXPLAIN` evidence. No N+1. Do not add a cache or Redis because the roadmap mentions hot summaries.
 
-PR #304's performance analysis identified sub-hour edge density as a risk, not as a solved or certified property. The pre-reader M5-05D gate must measure the intended query shape using representative normal and high-density fixtures, all supported windows, aligned/unaligned 60m cases, query count, rows/edge cardinality, plans, pool/queue behavior, and concurrency cohorts 1/20/50. A proposed 100ms normal-density p99 at concurrency 50 is a target only, not certification or an already accepted GO threshold. The D admission must set its pass criteria and fixtures before measurement. D must return `OPTION_A=NO_GO` before public reader integration if evidence is unacceptable. A NO_GO does not authorize finer buckets, a resource, or an index; those require a separate architecture admission.
+PR #304 identified sub-hour edge density as a risk. M5-05D1 now freezes the measurement before execution. It measures normal and dense fixtures for 15m, 30m, unaligned 60m, and aligned 60m; it captures query counts, edge cardinality, query plans, telemetry, pool/queue behavior, and cohorts 1/20/50. At cohort 50, normal-density p99 must be at most 100ms and high-density p99 at most 150ms. These are local D gate criteria, not production SLAs. Any failure produces preliminary NO_GO. D2 records the canonical decision. NO_GO does not authorize a finer bucket, resource, index, cache, Redis, migration, or alternative reader architecture.
 
 Do not claim 100K concurrent users, sub-100ms behavior, or flash-sale safety as certified without M5-05 evidence. M5-04 latency results are not M5-05 certification.
 
@@ -536,7 +637,7 @@ Keep future code under `lib/event_sales/analytics/`. Candidate responsibilities 
 
 ## M5-05 serial phase design
 
-M5-05A is **COMPLETE**. M5-05B is **COMPLETE_PASS** on `main` (PR #306). **M5-05C is authorized** (`AUTHORIZED_NOT_STARTED`). M5-05D+ each require separate admission after prior phase merge and verification.
+M5-05A is **COMPLETE**. M5-05B is **COMPLETE_PASS** via PR #306. M5-05C is **COMPLETE_PASS** via PR #312. M5-05D is active for D1 measurement only. D2, E, F, and G remain unauthorized.
 
 ### M5-05B — pure windows and velocity rules (COMPLETE_PASS)
 
@@ -549,7 +650,11 @@ M5-05A is **COMPLETE**. M5-05B is **COMPLETE_PASS** on `main` (PR #306). **M5-05
 - **Performance review:** bounded pure CPU work; no DB, cache, Redis, PubSub, worker, scheduler, or index.
 - **STOP:** arbitrary windows; changes to locked M5-04 comparison primitives; reader/SQL/cache/resource work in B.
 
-### M5-05C — behavior-preserving shared projection extraction (AUTHORIZED_NOT_STARTED)
+### M5-05C — behavior-preserving shared projection extraction (COMPLETE_PASS)
+
+- **Status:** COMPLETE_PASS via PR #312. The merge tree equals the reviewed head tree. Exact-head CI run `37929322765` passed all seven jobs on attempt 1.
+- **Accepted result:** `EventSales.Analytics.ProjectionPeriodReader.read/3` is the single shared event-projection query implementation. `PeriodComparisonReader` or its caller owns the transaction. The projection reader starts no transaction and does not call preparation. Dimension behavior and MetricRules did not move. M5-04 behavior and query shape did not change.
+- **PR #313 baseline:** merged Dev Core local-environment changes only. It changed no M5-05 semantics or analytics production code.
 
 - **Objective:** extract event-level bucket/edge/coverage composition for reuse without changing certified M5-04 behavior.
 - **Exact writable files:** new `lib/event_sales/analytics/projection_period_reader.ex`; modify `lib/event_sales/analytics/period_comparison_reader.ex`; add `test/event_sales/analytics/projection_period_reader_test.exs`. Regression tests to run include `period_comparison_reader_test.exs`, `period_comparison_reader_correctness_test.exs`, `period_comparison_reader_policy_test.exs`, `period_comparison_reader_query_plan_test.exs`, `period_comparison_reader_concurrency_test.exs`, `period_comparison_reader_isolation_test.exs`, `period_comparison_reader_matrix_test.exs`, `m5_04_period_concurrency_test.exs`, `m5_04_period_backfill_churn_test.exs`, `m5_04_period_query_plan_test.exs`, `m5_04_period_isolation_regression_test.exs`, `m5_04_period_reconciliation_test.exs`, `period_coverage_gap_test.exs`, and `period_coverage_closure_test.exs`.
@@ -561,18 +666,144 @@ M5-05A is **COMPLETE**. M5-05B is **COMPLETE_PASS** on `main` (PR #306). **M5-05
 
 ### M5-05D — pre-reader Option A query-plan and load gate
 
-- **Objective:** measure the shared bucket/edge query shape before any public `VelocityReader` integration and issue `OPTION_A=GO` or `OPTION_A=NO_GO`.
-- **Exact writable files:** add `test/event_sales/analytics/m5_05_velocity_option_a_gate_test.exs`; update `docs/evidence/m5-05-deterministic-sales-velocity-certification.md` only in a separately admitted evidence task.
-- **Dependencies:** M5-05C passes; approved test fixtures, cohorts, and pass criteria; current product decisions do not broaden projection SQL.
-- **Invariants:** measure existing projections/facts only; include sub-hour dense-edge cases, normal and high-density fixtures, 15m/30m/60m, aligned/unaligned 60m, selective `EXPLAIN`, telemetry, query count, rows scanned, pool/queue, and cohorts 1/20/50; report target versus measured result separately.
-- **Performance review:** a normal-density p99 target of 100ms at concurrency 50 is a candidate target, not certified. The D admission must confirm the acceptance threshold before claiming GO. A high-density NO_GO blocks public reader integration.
-- **STOP:** missing approved pass criteria or representative fixture; unacceptable edge density or plan; selective index evidence absent; any attempt to auto-add a finer bucket/resource/index/cache. `OPTION_A=NO_GO` requires separate architecture admission before redesign.
+- **Status:** D active as D1 only; `M5-05D1=AUTHORIZED_NOT_STARTED`; `M5-05D2=BLOCKED_PENDING_D1_REVIEW`.
+- **Objective:** measure `ProjectionPeriodReader.read/3` before any public `VelocityReader` integration. D1 emits only a preliminary GO/NO_GO assessment. D2 later records the canonical decision.
+- **Dependencies:** M5-05C COMPLETE_PASS; fixture cardinalities, query expectations, cohorts, and acceptance criteria are fixed in the M5-05D1 admission below.
+- **Writable scope:** D1 may create only `test/event_sales/analytics/m5_05_velocity_option_a_gate_test.exs`. D2 may update `docs/evidence/m5-05-deterministic-sales-velocity-certification.md` only under separate admission.
+- **STOP:** environment pool size differs from 10; Dev Core doctor fails; a required fixture or query invariant is ambiguous; a required measurement is skipped; or measurement would require changing production SQL, indexes, cache, Redis, PubSub, Oban, resource, or migration scope.
+
+### M5-05D1 Option-A measurement admission
+
+This section freezes D1 before measurement. D1 is a tagged, explicit certification/load test, not an ordinary CI timing gate. Follow the existing M5-04 load-evidence setup, including unboxed/exclusive PostgreSQL setup where that harness requires it. D1 has no support-module, production-file, or existing-test changes. Its only writable file is:
+
+```text
+CREATE test/event_sales/analytics/m5_05_velocity_option_a_gate_test.exs
+```
+
+Run it only through the Dev Core wrapper after:
+
+```bash
+bash scripts/dev_local.sh doctor
+bash scripts/dev_local.sh status
+```
+
+The certification invocation is:
+
+```bash
+bash scripts/dev_local.sh test \
+  test/event_sales/analytics/m5_05_velocity_option_a_gate_test.exs
+```
+
+If `doctor` fails, stop. That is an environment failure, not Option-A evidence. Do not bypass the wrapper, create project-local PostgreSQL or Redis, or edit generated `.env.local` database credentials.
+
+The D lifecycle is:
+
+```text
+AUTHORIZED_NOT_STARTED
+  → MEASUREMENT_IN_PROGRESS
+  → D1_EVIDENCE_READY
+  → D2_REVIEW
+      ├── OPTION_A_GO
+      └── OPTION_A_NO_GO
+```
+
+Start measurement only on the admitted base with the fixture cardinalities, query expectations, cohorts, and thresholds below. Mark D1 evidence ready only after the full matrix ran, no required case was skipped, raw output was retained, and no architecture changed during measurement. D2 may record GO only if every query-plan/selectivity invariant and accepted performance criterion passes. Any mandatory plan invariant or accepted threshold failure requires NO_GO.
+
+`OPTION_A_GO` completes D but leaves E unauthorized until a separate closeout/admission PR. `OPTION_A_NO_GO` keeps E blocked and authorizes no index, finer bucket, cache, Redis, resource, migration, or alternative reader architecture.
+
+Measure only the existing `ProjectionPeriodReader.read/3`. Do not copy M5-04 reader behavior into D1 or add a public reader. Plan setup may call `TimeRules.velocity_windows/2` and `PeriodReadPlan.build/1`. Every measured read uses the caller-owned coherent transaction:
+
+```elixir
+Repo.transaction(
+  fn ->
+    EventSnapshotRefreshFence.prepare_coherent_transaction!()
+    ProjectionPeriodReader.read(event_id, currency, plan)
+  end,
+  EventSnapshotRefreshFence.coherent_transaction_opts()
+)
+```
+
+Use fixed `captured_now_utc` anchors and cases:
+
+Run all four cases once for normal density and once for high density.
+
+| Case | Anchor | Window |
+|---|---|---|
+| Unaligned 15m | `2026-05-17T10:17:33Z` | 15m |
+| Unaligned 30m | `2026-05-17T10:17:33Z` | 30m |
+| Unaligned 60m | `2026-05-17T10:17:33Z` | 60m |
+| Aligned 60m | `2026-05-17T11:00:00Z` | 60m |
+
+Freeze fixture sizes, cohorts, sample counts, warmups, and test pool:
+
+```text
+NORMAL_EDGE_FACTS_PER_TOUCHED_UTC_HOUR=200
+HIGH_DENSITY_EDGE_FACTS_PER_TOUCHED_UTC_HOUR=20000
+SELECTIVITY_BACKGROUND_FACTS=20000
+CONCURRENCY_COHORTS=1,20,50
+CONCURRENCY_COHORT_MEANING=ACTUAL_CONCURRENT_CALLERS
+CALLER_COUNT_MAY_EXCEED_DB_POOL_SIZE=YES
+CALLER_COUNT_CAPPED_TO_DB_POOL_SIZE=NO
+DB_POOL_SIZE_REMAINS=10
+DB_QUEUE_PRESSURE_IS_PART_OF_MEASUREMENT=YES
+COHORT_START_BARRIER=YES
+MAX_SIMULTANEOUS_CALLERS_OBSERVED_MUST_EQUAL_REQUESTED=YES
+SAMPLES_PER_CASE_PER_COHORT=100
+WARMUP_CALLS_PER_CASE=10
+TEST_DATABASE_POOL_SIZE=10
+```
+
+Each cohort value is the number of caller workers released together, not the number of available database connections. Never cap caller workers with `min(concurrency, pool_size)` or equivalent logic. Keep the database pool at 10 so the pool constrains connections naturally while D1 measures queue pressure.
+
+The M5-04 load harness is a structural reference for telemetry, cleanup, unboxed PostgreSQL setup, percentile reporting, and evidence formatting. Its worker-count cap:
+
+```elixir
+worker_count = max(min(min(concurrency, pool_size), samples), 1)
+```
+
+must not be copied into D1. That cap reduces cohorts 20 and 50 to ten workers with a pool of 10 and would invalidate the intended concurrency evidence.
+
+For every density, window case, and cohort, create exactly the cohort's number of caller workers. Put all workers behind a start barrier and release them together. A `max_concurrency: 50` setting alone does not prove that 50 measured calls overlapped. Instrument active measured calls and report:
+
+```text
+REQUESTED_CALLER_CONCURRENCY=
+ACTUAL_CALLER_WORKERS=
+MAX_SIMULTANEOUS_CALLERS_OBSERVED=
+DB_POOL_SIZE=
+```
+
+Require `REQUESTED_CALLER_CONCURRENCY == ACTUAL_CALLER_WORKERS` for every cohort and require the observed maximum to reach the cohort size before labeling its measurements valid. In particular, cohort 50 must report 50 actual caller workers and a database pool size of 10. If the synchronized workers do not overlap at the requested count, report the actual maximum and stop with invalid measurement setup. Do not report that run as cohort 20 or 50.
+
+Distribute the 100 measured calls evenly across exactly the cohort's workers. Cohort 1 assigns 100 calls to its worker, cohort 20 assigns 5 calls per worker, and cohort 50 assigns 2 calls per worker. Every worker participates in the synchronized start. Keep the 10 warmup calls outside the measured samples.
+
+Pool waits at cohorts 20 and 50 are intentional measurement evidence. End-to-end latency includes caller execution, connection checkout and queue pressure, database query time, and projection composition. Report Repo query and DB queue telemetry separately. Keep `POOL_TIMEOUTS=0` as a mandatory criterion. Do not enlarge the pool to match caller concurrency.
+
+Background facts must use unrelated events, currencies, and effective-time ranges. Insert projection/fact rows with bounded bulk operations. Do not create WooCommerce Orders for this fixture. If the canonical test pool differs from 10, stop before measuring.
+
+For each read, enforce the query-count contract:
+
+| Case | Event snapshot SELECTs | Event edge UNNEST queries |
+|---|---:|---:|
+| Aligned 60m | 1 | 0 |
+| Unaligned 15m/30m/60m | 1 | 1 |
+
+The one unaligned edge query may aggregate all current/previous fragments. Do not issue a query per fragment or bucket. Any extra interactive SELECT, N+1, or raw financial-source read fails the query-shape gate with `OPTION_A_QUERY_SHAPE=FAIL`.
+
+Capture the actual edge SQL and parameters through Repo telemetry. Run `ANALYZE` after fixture population, then run `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` for each density and unaligned window against its captured query and parameters. The predicate must include `event_id`, `currency`, `effective_at >= edge_start`, and `effective_at < edge_end`. Each plan must use `analytics_contribution_facts_event_currency_effective_at_idx` through an index or bitmap-index path. A sequential scan on `analytics_contribution_facts` fails with `OPTION_A_QUERY_PLAN=FAIL`. Never run `SET enable_seqscan = off` or add an index.
+
+Report end-to-end p50/p95/p99/max; Repo-query and DB-queue p50/p95/p99; pool timeouts; query counts; edge result cardinality; fixture cardinality; EXPLAIN node types, selected index, actual rows, rows-removed evidence when present, and buffers. Do not load the full fact fixture into application memory to calculate these statistics. Warmups do not count toward percentiles.
+
+Every case, density, and cohort requires zero read errors, not-ready results, and pool timeouts, plus passing query-count and index-selectivity invariants with no sequential scan or raw source read. At concurrency 50, normal-density p99 must be at most 100ms and high-density p99 at most 150ms. Cohorts 1 and 20 require zero errors, not-ready results, and pool timeouts, and must report their p50/p95/p99. Latency need not increase monotonically by cohort.
+
+D1 prints a complete machine-readable result and writes local-only raw evidence to `tmp/m5_05_velocity_option_a_gate_evidence.txt`. It may report `PRELIMINARY_OPTION_A=GO` or `PRELIMINARY_OPTION_A=NO_GO`; only D2 may record `OPTION_A=GO` or `OPTION_A=NO_GO` in the reserved evidence file. D1 does not authorize E.
+
+After measurement starts, do not change fixture counts, samples, cohorts, thresholds, windows, SQL, or indexes; do not skip a failing case or rerun to find a faster result. A valid NO_GO is a complete measurement outcome. This gate does not certify 100K users, production hardware, PgBouncer, cross-region, or end-to-end flash-sale behavior. Cache, Redis, PubSub, Oban, and new-index decisions remain unchanged. A NO_GO authorizes no alternate architecture.
 
 ### M5-05E — projection-backed VelocityReader and existing facade integration
 
 - **Objective:** add the approved read through the existing event-scoped analytics facade, using the extracted kernel and accepted policy contract.
 - **Exact writable files:** add `lib/event_sales/analytics/velocity_reader.ex`; modify `lib/event_sales/analytics/event_scoped_dashboard.ex`; add `test/event_sales/analytics/velocity_reader_test.exs`, `test/event_sales/analytics/velocity_reader_policy_test.exs`, `test/event_sales/analytics/velocity_reader_query_plan_test.exs`, and `test/event_sales/analytics/event_scoped_dashboard_velocity_test.exs`.
-- **Dependencies:** B owner decisions and pure rules accepted; C extraction passes; D returns `OPTION_A=GO`; response shape and comparison operands are approved.
+- **Dependencies:** B owner decisions and pure rules accepted; C extraction passes; D2 records `OPTION_A=GO`; a separate closeout/admission authorizes E; response shape and comparison operands are approved.
 - **Transaction law:** the reader caller owns `Repo.transaction/2`; pass `EventSnapshotRefreshFence.coherent_transaction_opts/0`; first inside-callback action is `:ok = EventSnapshotRefreshFence.prepare_coherent_transaction!/0`; only then read all approved projection operands. ProjectionPeriodReader owns no transaction.
 - **Invariants:** identity validation → authorization → ANALYTICS_READY → projection read → approved derivation → revenue redaction; one captured now/event/currency/transaction; no raw fallback; fail closed on missing coverage; quantity under revenue redaction follows its recorded owner decision; no PII.
 - **Performance review:** query count is bounded by the fixed approved plan set; set-based reads, no N+1; any SQL-shape change repeats relevant D evidence.
@@ -604,8 +835,8 @@ No phase authorizes a UI, new durable resource, migration, index, worker, schedu
 |---|---|
 | Task | Plan the complete M5-05 programme from accepted owner decisions through measured acceleration review. |
 | Objective | Preserve serial order: owner decisions → M5-05B pure windows/rate/trend rules → M5-05C shared projection extraction → M5-05D pre-reader query-plan/load gate → M5-05E VelocityReader and existing facade → M5-05F conformance certification → M5-05G full-reader load and acceleration decision. |
-| Output | This v6 canonical plan plus owner authority evidence. M5-05B COMPLETE_PASS; M5-05C authorized; D–G require later admission. |
-| Note | M5-05C implementation authorized only. M5-05D+ blocked. The three handwritten C files remain the implementation scope; deterministic generated project-index outputs are allowed only under the M5-05C generated-output rule. Database indexes: existing only. Cache/Redis/PubSub: NO_CHANGE. STOP: raw fallback; M5-04 semantic change; unapproved resource, database index, cache, Redis, PubSub, worker, scheduler, or UI. |
+| Output | This v7 canonical plan records M5-05C COMPLETE_PASS and admits M5-05D1 measurement only. |
+| Note | D1 measures only the existing projection reader. D2 evidence/decision remains unauthorized pending review. E/F/G remain unauthorized. Database indexes: existing only. Cache/Redis/PubSub/Oban: NO_CHANGE. |
 
 ## M5-05B micro-prompt — pure approved velocity rules
 
@@ -630,9 +861,9 @@ No phase authorizes a UI, new durable resource, migration, index, worker, schedu
 | Field | Content |
 |---|---|
 | Task | Measure the shared Option A bucket/edge query shape before public reader integration. |
-| Objective | Return `OPTION_A=GO` or `OPTION_A=NO_GO` from approved query-plan and load evidence, including dense sub-hour edge cases. |
+| Objective | D1 reports a preliminary GO/NO_GO from the frozen query-plan and load criteria, including dense sub-hour edges. D2 records the canonical `OPTION_A=GO` or `OPTION_A=NO_GO`. |
 | Output | Add `test/event_sales/analytics/m5_05_velocity_option_a_gate_test.exs`; update `docs/evidence/m5-05-deterministic-sales-velocity-certification.md` only in its separate admission; no reader integration. |
-| Note | Measure 15m/30m/60m, aligned/unaligned 60m, normal/high-density edges, selective EXPLAIN, telemetry, query count, rows, pool/queue, and cohorts 1/20/50. Indexes: existing only; a proposed index needs selective BEFORE EXPLAIN and separate authority. Cache: NO_CHANGE. TTL: none introduced. Redis structure: none. Invalidation: existing projection lifecycle/coverage identity only. PubSub: existing signal only; no new broadcast. Concurrency: bounded measured cohorts; no extrapolation. STOP: criteria/fixtures unapproved, edge density unacceptable, or a finer bucket/resource/index/cache is proposed automatically; NO_GO needs separate architecture admission. |
+| Note | Follow the frozen M5-05D1 fixture sizes, query invariants, and thresholds in this plan. Use `bash scripts/dev_local.sh test`. D1 emits preliminary evidence only; D2 records the canonical decision under separate admission. Existing indexes only. Cache/Redis/PubSub/Oban: NO_CHANGE. No result authorizes a new architecture. |
 
 ## M5-05E micro-prompt — VelocityReader and facade
 
@@ -641,7 +872,7 @@ No phase authorizes a UI, new durable resource, migration, index, worker, schedu
 | Task | Expose the owner-approved projection-backed velocity read through the existing analytics facade. |
 | Objective | Return only approved measures under event access, readiness, revenue visibility, and one coherent projection snapshot. |
 | Output | Add `lib/event_sales/analytics/velocity_reader.ex`; modify `lib/event_sales/analytics/event_scoped_dashboard.ex`; add `test/event_sales/analytics/velocity_reader_test.exs`, `test/event_sales/analytics/velocity_reader_policy_test.exs`, `test/event_sales/analytics/velocity_reader_query_plan_test.exs`, and `test/event_sales/analytics/event_scoped_dashboard_velocity_test.exs`. |
-| Note | Requires B decisions, C pass, D `OPTION_A=GO`, and approved output shape. Name `EventSnapshotRefreshFence.coherent_transaction_opts/0` and `EventSnapshotRefreshFence.prepare_coherent_transaction!/0`; `prepare_coherent_transaction!/0` executes inside the caller transaction before first projection SQL. Indexes: existing only; no new index without selective BEFORE EXPLAIN. Cache: NO_CHANGE. TTL: none introduced. Redis structure: none. Invalidation: existing projection lifecycle/coverage identity only. PubSub: existing event-scoped post-refresh signal only. Concurrency: one captured now and caller-owned prepared transaction for all operands; kernel starts no transaction. STOP: preparation missing/late, second transaction, raw fallback, stale-as-zero, policy-order change, or M5-04 semantic change. |
+| Note | Requires B decisions, C pass, D2 `OPTION_A=GO`, a separate E admission, and approved output shape. Name `EventSnapshotRefreshFence.coherent_transaction_opts/0` and `EventSnapshotRefreshFence.prepare_coherent_transaction!/0`; `prepare_coherent_transaction!/0` executes inside the caller transaction before first projection SQL. Indexes: existing only; no new index without selective BEFORE EXPLAIN. Cache: NO_CHANGE. TTL: none introduced. Redis structure: none. Invalidation: existing projection lifecycle/coverage identity only. PubSub: existing event-scoped post-refresh signal only. Concurrency: one captured now and caller-owned prepared transaction for all operands; kernel starts no transaction. STOP: preparation missing/late, second transaction, raw fallback, stale-as-zero, policy-order change, or M5-04 semantic change. |
 
 ## M5-05F micro-prompt — conformance certification
 
@@ -703,7 +934,7 @@ No phase authorizes a UI, new durable resource, migration, index, worker, schedu
 | Coherent transaction options and preparation both named and ordered | YES |
 | Shared kernel starts a transaction or a second transaction is permitted | NO |
 | Every phase requires later admission | YES |
-| M5-05B COMPLETE_PASS on main; M5-05C authorized; D+ blocked | YES |
+| M5-05B and M5-05C COMPLETE_PASS; only D1 measurement is authorized | YES |
 | M5-05C admission freezes transaction owner and dimension stay-out | YES |
 | M5-05C generated outputs are mechanically produced and do not expand application scope | YES |
 
@@ -722,21 +953,41 @@ M5_05B_AUTHORIZED=YES
 M5_05B_PR=306
 M5_05B_STATUS=COMPLETE_PASS
 M5_05C_AUTHORIZED=YES
-M5_05C_STATUS=AUTHORIZED_NOT_STARTED
-M5_05D_AUTHORIZED=NO
+M5_05C_PR=312
+M5_05C_STATUS=COMPLETE_PASS
+M5_05D_AUTHORIZED=YES
+M5_05D_STATUS=ACTIVE_D1
+M5_05D1_AUTHORIZED=YES
+M5_05D1_STATUS=AUTHORIZED_NOT_STARTED
+M5_05D2_AUTHORIZED=NO
+M5_05D2_STATUS=BLOCKED_PENDING_D1_REVIEW
 M5_05E_AUTHORIZED=NO
 M5_05F_AUTHORIZED=NO
 M5_05G_AUTHORIZED=NO
-M5_05_IMPLEMENTATION_AUTHORIZED=M5_05C_ONLY
-IMPLEMENTATION_READY=M5_05C_YES
+M5_05_IMPLEMENTATION_AUTHORIZED=M5_05D1_ONLY
+IMPLEMENTATION_READY=M5_05D1_YES
+OPTION_A_DECISION=PENDING
+M5_05E_GATE=BLOCKED_PENDING_M5_05D2_OPTION_A_GO
 DIMENSION_EXTRACTION_IN_C=NO
 PROJECTION_PERIOD_READER_OWNS_TRANSACTION=NO
-PLAN_VERSION=v6
+PLAN_VERSION=v7
 OWNER_SEMANTIC_CHANGE=NONE
 M5_05C_ARCHITECTURE_CHANGE=NONE
 M5_05C_BEHAVIOR_CHANGE=NONE
-M5_05D_PLUS_AUTHORIZATION_CHANGE=NONE
+PR_313_M5_05_CONFLICT=NO
+M5_05D1_WRITABLE_FILE=test/event_sales/analytics/m5_05_velocity_option_a_gate_test.exs
+M5_05D2_EVIDENCE_FILE=docs/evidence/m5-05-deterministic-sales-velocity-certification.md
 M5_05C_HANDWRITTEN_SCOPE=CREATE lib/event_sales/analytics/projection_period_reader.ex; MODIFY lib/event_sales/analytics/period_comparison_reader.ex; CREATE test/event_sales/analytics/projection_period_reader_test.exs
 M5_05C_GENERATED_OUTPUTS=INDEX.md; docs/architecture/module_manifest.json; docs/architecture/domain_map.json
 GENERATED_OUTPUT_RULE=only mix project.index; only changed outputs; attributable solely to C source/test; no hand edits; no unrelated churn
+100K_CONCURRENT_USERS_CERTIFIED=NO
+PRODUCTION_HARDWARE_LATENCY_CERTIFIED=NO
+PGBOUNCER_RUNTIME_CERTIFIED=NO
+CROSS_REGION_CERTIFIED=NO
+FLASH_SALE_END_TO_END_CERTIFIED=NO
+CACHE_DECISION=NO_CHANGE
+REDIS_DECISION=NO_CHANGE
+PUBSUB_DECISION=NO_CHANGE
+OBAN_DECISION=NO_CHANGE
+NEW_DB_INDEX=NO
 ~~~
