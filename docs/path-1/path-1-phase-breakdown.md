@@ -4,7 +4,7 @@
 | --- | --- |
 | Document | Canonical Path 1 execution roadmap |
 | Plan ID | `path-1-phase-breakdown` |
-| Plan version | `v28` |
+| Plan version | `v29` |
 | Status | ACTIVE — repository-native execution contract |
 | Scope | Path 1 M1–M7 gated implementation sequence |
 | Authority | This file wins for Path 1 task sequencing and physical ownership assumptions |
@@ -22,7 +22,7 @@
 | Path 2 / Phase 5E | PAUSED |
 | Prepared | 2026-08-09 |
 | Last updated | 2026-10-09 |
-| Audit base HEAD | `e75213f4152161b9c1ac1959a869af1d6e9a58ec` |
+| Audit base HEAD | `0f76f792e76379bba7c341ecc5cfc23ecfa7f612` |
 
 ### Revision log
 
@@ -53,7 +53,8 @@
 - `v25` — M5-01 COMPLETE (PASS); M5-01B PR #268 merged (`f420437`); M5-01C certification PR #269 merged (`42d830343c3baa714cec2eda8568d00ddb981abe` / tree `cbf5b19ddbdaabc6cf8ba86b177aeccefb4e8b96`); B01–B23 certified; next M5-02 — Ticket/Product/Variation Aggregates.
 - `v26` — M5-02 COMPLETE (PASS; PR #276); M5-03 COMPLETE (PASS; PR #282); M5-04 COMPLETE (PASS; PR #300); next M5-05 — Deterministic Sales Velocity.
 - `v27` — M5-05A owner authority COMPLETE; M5-05B COMPLETE (PASS) via PR #306, merge `e7ea13be93b4fc235bf2085a73ebec036cd9e5fd`, tree `0a967b95318c0487a597bd5dd8f8df8e5a59eef2`; M5-05C behavior-preserving shared projection extraction authorized; M5-05D+ remain blocked.
-- `v28` — M5-05C COMPLETE_PASS via PR #312 (reviewed head `593081c05f34b5c2e51e617d32a7f5c79295a372`, head/merge tree `06d7f07d97be7cb7a31c361c44fb0a1c51a18e43`, exact-head CI run `37929322765` 7/7 PASS; merge `353546800740679d35607de6fd7104818de64c86`); authorizes M5-05D1 Option-A measurement only. D2 waits for D1 review; E/F/G remain blocked. PR #313 is the Dev Core baseline only and is not an M5-05 phase implementation.
+- `v28` — M5-05C COMPLETE_PASS via PR #312 (reviewed head `593081c05f34b5c2e51e617d32a7f5c79295a372`, head/merge tree `06d7f07d97be7cb7a31c361c44fb0a1c51a18e43`, exact-head CI run `37929322765` 7/7 PASS; merge `353546800740679d35607de6fd7104818de64c86`); authorized M5-05D1 Option-A measurement only. D2 awaited review; E/F/G remained blocked. PR #313 is the Dev Core baseline only and is not an M5-05 phase implementation.
+- `v29` — PR #315 D1 COMPLETE_VALID and D2 COMPLETE_NO_GO. Reviewed head/tree ``70dd18176360e93624fe2a58d7975df18d69ff1d`` / ``ffc0b83c12deb3d4f2091176017b1ca522f5b54d``, exact-head CI run `37959876953` (`pull_request`, attempt 1, 7/7 PASS), merge ``0f76f792e76379bba7c341ecc5cfc23ecfa7f612`` / tree ``ffc0b83c12deb3d4f2091176017b1ca522f5b54d`` with tree equality and verified GitHub signature. Canonical evidence records 24 measurement rows and six EXPLAIN plans. `OPTION_A=NO_GO`; D3 remediation-design admission is blocked pending separate admission; E/F/G remain blocked. Path-1 audit base is ``0f76f792e76379bba7c341ecc5cfc23ecfa7f612``.
 
 ### Conflict rule
 
@@ -213,16 +214,19 @@ M5-05 — Deterministic Sales Velocity: ACTIVE
 M5-05A — COMPLETE
 M5-05B — COMPLETE (PASS)
 M5-05C — COMPLETE_PASS
-M5-05D — ACTIVE
-M5-05D1 — NEXT / AUTHORIZED
-M5-05D2 — BLOCKED_PENDING_D1_REVIEW
-M5-05E+ — BLOCKED
-Current Path 1 task: M5-05D1 — Option-A pre-reader query-plan/load measurement
+M5-05D — COMPLETE_NO_GO
+M5-05D1 — COMPLETE_VALID
+M5-05D2 — COMPLETE_NO_GO
+M5-05D3 — BLOCKED_PENDING_SEPARATE_ADMISSION
+OPTION_A — NO_GO
+M5-05E — BLOCKED_BY_OPTION_A_NO_GO
+M5-05F/G — BLOCKED
+Current Path 1 task: M5-05D3 — Option-A NO_GO remediation-design admission
 M5 AUTHORIZATION: AUTHORIZED
 GAP-PRE-M5-METRICS: CLOSED
 GAP-PRE-M5-TIME: CLOSED
 GAP-PRE-M5-READY-IX: CLOSED
-NEXT: M5-05D1 — Option-A pre-reader query-plan/load measurement
+NEXT: M5-05D3 — Option-A NO_GO remediation-design admission
 ```
 
 ---
@@ -1120,10 +1124,13 @@ P1-00 COMPLETE
 → M5-05A — COMPLETE
 → M5-05B — COMPLETE (PASS)
 → M5-05C — COMPLETE_PASS
-→ M5-05D — ACTIVE
-→ M5-05D1 — NEXT / AUTHORIZED
-→ M5-05D2 — BLOCKED_PENDING_D1_REVIEW
-→ M5-05E+ — BLOCKED
+→ M5-05D — COMPLETE_NO_GO
+→ M5-05D1 — COMPLETE_VALID
+→ M5-05D2 — COMPLETE_NO_GO
+→ M5-05D3 — BLOCKED_PENDING_SEPARATE_ADMISSION
+→ OPTION_A — NO_GO
+→ M5-05E — BLOCKED_BY_OPTION_A_NO_GO
+→ M5-05F/G — BLOCKED
 → M5-06 — Capacity / Occupancy
 → M5-07 — Freshness and Data-Quality Projection
 → M5-08 — Hot/Warm/Cold Caching
@@ -1225,7 +1232,7 @@ FINANCIAL RECONCILIATION CONTRACT:
 LOCKED (concept C; exact Decimal; ticket-scoped)
 
 Current Path 1 task:
-M5-05D1 — Option-A pre-reader query-plan/load measurement
+M5-05D3 — Option-A NO_GO remediation-design admission
 
 M5-05 — Deterministic Sales Velocity:
 ACTIVE
@@ -1240,13 +1247,28 @@ M5-05C:
 COMPLETE_PASS
 
 M5-05D:
-ACTIVE
+COMPLETE_NO_GO
 
 M5-05D1:
-NEXT / AUTHORIZED
+COMPLETE_VALID
 
 M5-05D2:
-BLOCKED_PENDING_D1_REVIEW
+COMPLETE_NO_GO
+
+M5-05D3:
+BLOCKED_PENDING_SEPARATE_ADMISSION
+
+OPTION_A:
+NO_GO
+
+M5-05E:
+BLOCKED_BY_OPTION_A_NO_GO
+
+M5-05F:
+BLOCKED
+
+M5-05G:
+BLOCKED
 
 M5-01:
 COMPLETE (PASS)
@@ -1327,7 +1349,7 @@ GAP-PRE-M5-READY-IX:
 CLOSED
 
 NEXT:
-M5-05D1 — Option-A pre-reader query-plan/load measurement
+M5-05D3 — Option-A NO_GO remediation-design admission
 
 M5-02:
 COMPLETE (PASS)
@@ -1486,12 +1508,16 @@ M5-05 — Deterministic Sales Velocity = ACTIVE.
 M5-05A = COMPLETE.
 M5-05B = COMPLETE (PASS).
 M5-05C = COMPLETE_PASS.
-M5-05D = ACTIVE.
-M5-05D1 = NEXT / AUTHORIZED.
-M5-05D2 = BLOCKED_PENDING_D1_REVIEW.
-M5-05E+ = BLOCKED.
-NEXT = M5-05D1 — Option-A pre-reader query-plan/load measurement.
-M5: AUTHORIZED.
+M5-05D1 = COMPLETE_VALID.
+M5-05D2 = COMPLETE_NO_GO.
+M5-05D = COMPLETE_NO_GO.
+OPTION_A = NO_GO.
+M5-05D3 = BLOCKED_PENDING_SEPARATE_ADMISSION.
+M5-05E = BLOCKED_BY_OPTION_A_NO_GO.
+M5-05F = BLOCKED.
+M5-05G = BLOCKED.
+NEXT = M5-05D3 — Option-A NO_GO remediation-design admission.
+M5: ACTIVE / NOT COMPLETE.
+M5-05 implementation authorization = NONE.
 DO NOT REOPEN M2-07 SCOPE.
-Only M5-05D1 measurement is authorized. D1 does not authorize E.
 ```
