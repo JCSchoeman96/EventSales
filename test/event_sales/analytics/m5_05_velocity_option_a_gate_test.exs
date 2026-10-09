@@ -59,6 +59,14 @@ defmodule EventSales.Analytics.M5_05VelocityOptionAGateTest do
     assert percentile(Enum.to_list(1..100), 99) == 99
   end
 
+  test "evidence encodes binary UUID parameters as hexadecimal strings" do
+    uuid_bytes = <<241, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15>>
+
+    assert evidence_param(uuid_bytes) == %{
+             binary_hex: "f10102030405060708090a0b0c0d0e0f"
+           }
+  end
+
   @tag :m5_05_d1_certification_load
   test "runs the explicit D1 Option-A measurement gate" do
     if explicit_invocation?(System.argv()) do
@@ -538,9 +546,17 @@ defmodule EventSales.Analytics.M5_05VelocityOptionAGateTest do
       raw_source_reads: raw,
       pass: pass,
       edge_sql: if(edge_query, do: edge_query.sql),
-      edge_params: if(edge_query, do: edge_query.params)
+      edge_params: if(edge_query, do: Enum.map(edge_query.params, &evidence_param/1))
     }
   end
+
+  defp evidence_param(value) when is_binary(value) do
+    if String.valid?(value), do: value, else: %{binary_hex: Base.encode16(value, case: :lower)}
+  end
+
+  defp evidence_param(%DateTime{} = value), do: DateTime.to_iso8601(value)
+  defp evidence_param(values) when is_list(values), do: Enum.map(values, &evidence_param/1)
+  defp evidence_param(value), do: value
 
   defp maybe_explain!(report, _fixture, %{id: "60m_aligned"}, _probe), do: report
 
@@ -1032,7 +1048,9 @@ defmodule EventSales.Analytics.M5_05VelocityOptionAGateTest do
             head_sha: previous["head_sha"],
             head_tree: previous["head_tree"],
             invalid_reason: previous["invalid_reason"],
-            measurement_rows: length(previous["measurement_rows"] || [])
+            measurement_rows:
+              previous["attempted_measurement_rows"] ||
+                length(previous["measurement_rows"] || [])
           }
         ]
     else
