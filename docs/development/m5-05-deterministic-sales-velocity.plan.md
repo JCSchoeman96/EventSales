@@ -2,9 +2,9 @@
 
 ~~~text
 PLAN_ID=m5-05-deterministic-sales-velocity
-PLAN_VERSION=v4
-BASE_SHA=817599687543527436b5dfcff0bcdf5d4ced1410
-BASE_TREE=6c7799f6eecadb37e5ba2b1c8f8d4c6bf88e07b6
+PLAN_VERSION=v5
+BASE_SHA=1852a171027e5083cbb3ccd0ef3cdc45789e8ed6
+BASE_TREE=ac91c4ff86c47667c324ec08f87c2e16ab1e4de9
 
 M5_02_STATUS=COMPLETE_PASS
 M5_03_STATUS=COMPLETE_PASS
@@ -23,13 +23,26 @@ OWNER_ACCEPTANCE_DATE=2026-10-09
 
 M5_05B_AUTHORIZED=YES
 M5_05B_PR=306
-M5_05B_STATUS=IN_REVIEW
+M5_05B_STATUS=COMPLETE_PASS
 M5_05B_RECONCILED_BASE_SHA=a4d87eba8128e921537f84285aaca6571621f1ed
 M5_05B_RECONCILED_BASE_TREE=d8a56c14788989b3840132430b1e7dcf0ab5b6c3
-M5_05C_AUTHORIZED=NO
-M5_05C_GATE=PENDING_M5_05B_MERGE_AND_POST_MERGE_VERIFY
-M5_05_IMPLEMENTATION_AUTHORIZED=M5_05B_ONLY
-IMPLEMENTATION_READY=M5_05B_YES
+PR_306_MERGED=YES
+PR_306_HEAD_SHA=56b3a3d333cdc45adbd8bb8b4b777ea205a6138c
+PR_306_HEAD_TREE=0a967b95318c0487a597bd5dd8f8df8e5a59eef2
+PR_306_MERGE_SHA=e7ea13be93b4fc235bf2085a73ebec036cd9e5fd
+PR_306_MERGE_TREE=0a967b95318c0487a597bd5dd8f8df8e5a59eef2
+PR_306_EXACT_HEAD_CI_RUN=37897423938
+PR_306_EXACT_HEAD_CI=PASS_7_OF_7
+PR_306_POST_MERGE_TREE_VERIFY=PASS
+M5_05C_AUTHORIZED=YES
+M5_05C_STATUS=AUTHORIZED_NOT_STARTED
+M5_05C_GATE=ADMITTED_AFTER_M5_05B_POST_MERGE_VERIFY
+M5_05D_AUTHORIZED=NO
+M5_05E_AUTHORIZED=NO
+M5_05F_AUTHORIZED=NO
+M5_05G_AUTHORIZED=NO
+M5_05_IMPLEMENTATION_AUTHORIZED=M5_05C_ONLY
+IMPLEMENTATION_READY=M5_05C_YES
 
 PR_304_MERGED=YES
 PR_304_MERGE_SHA=dfe6687369f284e97e5ffcca4a5e79d4c1c8479e
@@ -72,7 +85,7 @@ NEW_INDEX_REQUIRED=NO
 M5_05D_OPTION_A_GATE=BEFORE_PUBLIC_READER;GO_OR_NO_GO
 ~~~
 
-**Active contract:** This file is the canonical M5-05 plan. Owner product semantics are durably recorded in `docs/evidence/m5-05-owner-product-authority.md` and [JC-332](https://linear.app/jc-dev/issue/JC-332/eventsales-m5-05a-deterministic-sales-velocity-planning-and). **This v4 amendment authorizes M5-05B only** (pure `TimeRules` / `VelocityRules` kernel and focused tests). It does not authorize M5-05C+, readers, migrations, resources, indexes, cache, Redis, PubSub, or UI. PR #308 merged v4 authority to `main`; open PR #306 is reconciled onto that base and **IN_REVIEW** for M5-05B merge.
+**Active contract:** This file is the canonical M5-05 plan. Owner product semantics are durably recorded in `docs/evidence/m5-05-owner-product-authority.md` and [JC-332](https://linear.app/jc-dev/issue/JC-332/eventsales-m5-05a-deterministic-sales-velocity-planning-and). **v4 locked owner semantics; v5 is status/admission only** and does not change that contract. M5-05B is **COMPLETE_PASS** on `main` via merged PR #306 (reviewed head tree equals merge tree). **M5-05C only** is authorized as behavior-preserving shared projection extraction. M5-05D+ remain unauthorized. Post-merge verification for #306 is merge commit + parents + merge tree equality with reviewed green PR tree; no merge-SHA CI run is required.
 
 ## Authority history
 
@@ -81,7 +94,8 @@ M5_05D_OPTION_A_GATE=BEFORE_PUBLIC_READER;GO_OR_NO_GO
 - PR #304 is merged repository history. The owner-lock assertion is not durable owner acceptance: the PR has no review or discussion comments, and JC-332 has no recorded acceptance of those product choices. Merge status does not create product authority.
 - PR #305's correction was independently reviewed clean, including its one-file scope and exact-head CI. It is retained as review evidence; it is not merged and is not the base for this repair.
 - v3 (PR #307) preserved technical findings and blocked implementation until durable owner acceptance.
-- **v4 (2026-10-09):** owner explicitly approved the semantic batch in JC-332 and `docs/evidence/m5-05-owner-product-authority.md`. `OWNER_DECISION_REQUIRED = NO`. **M5-05B is authorized**; M5-05C remains unauthorized until M5-05B merges and is post-merge verified on `main`.
+- **v4 (2026-10-09):** owner explicitly approved the semantic batch in JC-332 and `docs/evidence/m5-05-owner-product-authority.md`. `OWNER_DECISION_REQUIRED = NO`. **M5-05B is authorized**; M5-05C remained unauthorized until M5-05B merged and was post-merge verified on `main`.
+- **v5 (2026-10-09):** M5-05B **COMPLETE_PASS** via PR #306 merge `e7ea13be93b4fc235bf2085a73ebec036cd9e5fd` (tree `0a967b95318c0487a597bd5dd8f8df8e5a59eef2`; reviewed head `56b3a3d333cdc45adbd8bb8b4b777ea205a6138c`; exact-head CI run `37897423938` 7/7 PASS). **M5-05C authorized** (`AUTHORIZED_NOT_STARTED`). M5-05D+ blocked. Owner semantic contract unchanged from v4.
 
 ## Ultimate outcome and backward plan
 
@@ -265,10 +279,14 @@ The regression risk is high because M5-04 is certified. Preserve semantic respon
 The accepted M5-04 transaction contract applies to the extraction and every future velocity projection read.
 
 ~~~text
-TRANSACTION_OWNER=PeriodComparisonReader / future VelocityReader caller
+TRANSACTION_OWNER=PeriodComparisonReader/caller
+PROJECTION_PERIOD_READER_OWNS_TRANSACTION=NO
+NESTED_TRANSACTION_ALLOWED=NO
 TRANSACTION_OPTS=EventSnapshotRefreshFence.coherent_transaction_opts/0
 PRE_FIRST_PROJECTION_ACTION=EventSnapshotRefreshFence.prepare_coherent_transaction!/0
+PREPARE_COHERENT_TRANSACTION_REQUIRED=YES
 PREPARE_LOCATION=INSIDE Repo.transaction
+PREPARE_POSITION=FIRST_INSIDE_TRANSACTION_BEFORE_PROJECTION_STATEMENT
 PREPARE_ORDER=BEFORE FIRST PROJECTION STATEMENT
 PREPARE_BEFORE_FIRST_PROJECTION=YES
 SHARED_KERNEL_STARTS_TRANSACTION=NO
@@ -290,6 +308,124 @@ Repo.transaction(
 ~~~
 
 Any implementation using only `coherent_transaction_opts/0`, preparing after projection SQL, removing preparation, nesting a second transaction, or letting `ProjectionPeriodReader` own a transaction is incorrect.
+
+Certified M5-04 caller sequence (unchanged by M5-05C admission):
+
+```text
+PeriodComparisonReader
+  ↓
+Repo.transaction(
+  EventSnapshotRefreshFence.coherent_transaction_opts()
+)
+  ↓
+FIRST action inside transaction:
+EventSnapshotRefreshFence.prepare_coherent_transaction!()
+  ↓
+ProjectionPeriodReader event-level composition
+```
+
+`ProjectionPeriodReader` assumes an already-prepared coherent transaction. It must not call `Repo.transaction/2` or `EventSnapshotRefreshFence.prepare_coherent_transaction!/0`.
+
+## M5-05C Admission Record
+
+**Purpose:** freeze extraction boundary and transaction ownership before any M5-05C implementation. M5-05C is **not** the VelocityReader.
+
+### C owns (`EventSales.Analytics.ProjectionPeriodReader`, `lib/event_sales/analytics/projection_period_reader.ex`)
+
+Event-level projection composition only:
+
+- fixed event bucket specification/fetch
+- bounded event contribution-edge aggregation
+- event envelope coverage validation
+- `projection_state` validation
+- `semantic_version` compatibility
+- `coverage_identity` compatibility
+- event-level current/previous primitive composition
+
+It consumes an already-built `PeriodReadPlan`. It must not construct a second period decomposition algorithm.
+
+### C does not own
+
+Keep outside `ProjectionPeriodReader`:
+
+- actor authorization
+- event-access policy
+- currency/request validation
+- `ANALYTICS_READY` resolution
+- capturing `now`
+- `TimeRules` window construction
+- `PeriodReadPlan` construction
+- `Repo.transaction/2`
+- coherent transaction options
+- revenue visibility/redaction
+- public comparison response shape
+- dimension comparison behavior
+- `MetricRules` business semantics
+- velocity rate/trend derivation
+
+### M5-04 preservation (extraction only)
+
+~~~text
+M5_04_PUBLIC_RESPONSE_CHANGE=NONE
+M5_04_POLICY_CHANGE=NONE
+M5_04_METRIC_SEMANTIC_CHANGE=NONE
+M5_04_PERIOD_CHANGE=NONE
+M5_04_DIMENSION_BEHAVIOR_CHANGE=NONE
+M5_04_QUERY_BOUNDARY_BROADENING=NONE
+~~~
+
+Dimension logic remains in `PeriodComparisonReader` during C unless a later separately reviewed phase admits otherwise. Do not use C to clean up dimension behavior. Do not make `ProjectionPeriodReader` generic enough to own unrelated future concerns (YAGNI).
+
+### M5-05C implementation scope (contract only; not implemented in v5)
+
+```text
+CREATE: lib/event_sales/analytics/projection_period_reader.ex
+MODIFY: lib/event_sales/analytics/period_comparison_reader.ex
+CREATE: test/event_sales/analytics/projection_period_reader_test.exs
+```
+
+M5-05C implementation must run the existing M5-04 regression family listed under the M5-05C phase definition in this plan.
+
+### M5-05C performance and scaling admission
+
+| Layer | Position |
+|---|---|
+| `EventPeriodAggregateSnapshot` | cold/durable Postgres projection |
+| `AnalyticsContributionFact` | cold/durable exact edge facts |
+| `ProjectionPeriodReader` | synchronous bounded composition |
+
+No new hot/warm layer in C. Queries remain bounded by `event_id`, `currency`, selected bucket specs, and selected edge envelopes. No raw `Order`, `OrderItem`, `Refund`, or WooCommerce source tables on the interactive projection path. Before/after C: compare SQL statement count, query shape, rows/envelopes selected, and M5-04 query-plan regression behavior; extraction must not create N+1 behavior.
+
+~~~text
+NEW_INDEX_REQUIRED=NO
+CACHE_CHANGE=NO
+REDIS_CHANGE=NO
+PUBSUB_CHANGE=NO
+OBAN_CHANGE=NO
+TTL_STRATEGY=NONE_IN_C
+~~~
+
+If implementation evidence suggests a new index, **STOP C**; index admission is separate.
+
+### Serial programme gate (D+ blocked)
+
+```text
+M5-05A COMPLETE
+        ↓
+M5-05B COMPLETE_PASS
+        ↓
+M5-05C AUTHORIZED_NOT_STARTED
+        ↓
+M5-05D BLOCKED_PENDING_C
+        ↓
+M5-05E BLOCKED_PENDING_D_OPTION_A_GO
+        ↓
+M5-05F BLOCKED_PENDING_E
+        ↓
+M5-05G BLOCKED_PENDING_F
+```
+
+M5-05C completion does **not** automatically authorize D without separate admission. Do not authorize performance gate, `VelocityReader`, facade integration, certification suite, load test, cache/Redis acceleration, or M5-06 via this admission.
 
 ## No-raw-scan invariant
 
@@ -380,9 +516,11 @@ Keep future code under `lib/event_sales/analytics/`. Candidate responsibilities 
 
 ## M5-05 serial phase design
 
-M5-05B is **authorized** (owner decisions recorded 2026-10-09). M5-05C and later phases each require separate admission after prior phase merge and verification. PR #308 installed v4 on `main`; open PR #306 carries the reconciled M5-05B kernel peer and is **IN_REVIEW** (rebased onto merge `a4d87eba…`).
+M5-05A is **COMPLETE**. M5-05B is **COMPLETE_PASS** on `main` (PR #306). **M5-05C is authorized** (`AUTHORIZED_NOT_STARTED`). M5-05D+ each require separate admission after prior phase merge and verification.
 
-### M5-05B — pure windows and velocity rules (AUTHORIZED)
+### M5-05B — pure windows and velocity rules (COMPLETE_PASS)
+
+- **Status:** COMPLETE_PASS via PR #306 merge `e7ea13be93b4fc235bf2085a73ebec036cd9e5fd` (tree `0a967b95318c0487a597bd5dd8f8df8e5a59eef2`; reviewed head CI run `37897423938` 7/7 PASS).
 
 - **Objective:** implement owner-locked current-window, numerator, unit, rate, and trend rules as pure calculations (`TimeRules.velocity_windows/2`, `VelocityRules`).
 - **Exact writable files:** `lib/event_sales/analytics/time_rules.ex`; `lib/event_sales/analytics/velocity_rules.ex`; `test/event_sales/analytics/time_rules_test.exs`; `test/event_sales/analytics/velocity_rules_test.exs`; `test/event_sales/analytics/period_read_plan_test.exs` (geometry proof; `PeriodReadPlan` behavior unchanged unless a RED test proves a gap).
@@ -391,11 +529,11 @@ M5-05B is **authorized** (owner decisions recorded 2026-10-09). M5-05C and later
 - **Performance review:** bounded pure CPU work; no DB, cache, Redis, PubSub, worker, scheduler, or index.
 - **STOP:** arbitrary windows; changes to locked M5-04 comparison primitives; reader/SQL/cache/resource work in B.
 
-### M5-05C — behavior-preserving shared projection extraction
+### M5-05C — behavior-preserving shared projection extraction (AUTHORIZED_NOT_STARTED)
 
 - **Objective:** extract event-level bucket/edge/coverage composition for reuse without changing certified M5-04 behavior.
 - **Exact writable files:** new `lib/event_sales/analytics/projection_period_reader.ex`; modify `lib/event_sales/analytics/period_comparison_reader.ex`; add `test/event_sales/analytics/projection_period_reader_test.exs`. Regression tests to run include `period_comparison_reader_test.exs`, `period_comparison_reader_correctness_test.exs`, `period_comparison_reader_policy_test.exs`, `period_comparison_reader_query_plan_test.exs`, `period_comparison_reader_concurrency_test.exs`, `period_comparison_reader_isolation_test.exs`, `period_comparison_reader_matrix_test.exs`, `m5_04_period_concurrency_test.exs`, `m5_04_period_backfill_churn_test.exs`, `m5_04_period_query_plan_test.exs`, `m5_04_period_isolation_regression_test.exs`, `m5_04_period_reconciliation_test.exs`, `period_coverage_gap_test.exs`, and `period_coverage_closure_test.exs`.
-- **Dependencies:** M5-05B passes and merges; separate C admission; extraction boundary and transaction owner reviewed before coding.
+- **Dependencies:** M5-05B COMPLETE_PASS on `main`; v5 C admission (this plan); extraction boundary and transaction owner frozen in **M5-05C Admission Record** before coding.
 - **Invariants:** move only event-level bucket fetch, bounded contribution edges, coverage-envelope validation, metadata compatibility, and operand primitive composition; preserve dimensions and public comparison behavior; preserve `Repo.transaction` → `prepare_coherent_transaction!` → shared projection composition; no raw table read or second decomposition/query implementation.
 - **Performance review:** compare SQL and query count before/after; statement count stays bounded independently of historical source rows.
 - **STOP:** extraction changes M5-04 behavior; preparation is removed/moved late; shared kernel starts a transaction; a nested transaction appears; projection metadata cannot prove coverage; a new index is needed without selective before-`EXPLAIN` evidence.
@@ -445,8 +583,8 @@ No phase authorizes a UI, new durable resource, migration, index, worker, schedu
 |---|---|
 | Task | Plan the complete M5-05 programme from accepted owner decisions through measured acceleration review. |
 | Objective | Preserve serial order: owner decisions → M5-05B pure windows/rate/trend rules → M5-05C shared projection extraction → M5-05D pre-reader query-plan/load gate → M5-05E VelocityReader and existing facade → M5-05F conformance certification → M5-05G full-reader load and acceleration decision. |
-| Output | This v4 canonical plan plus owner authority evidence. M5-05B authorized; C–G require later admission. |
-| Note | M5-05B authorized only. M5-05C+ blocked until B merges and is verified. Indexes: existing only. Cache/Redis/PubSub: NO_CHANGE. STOP: raw fallback; M5-04 semantic change; unapproved resource, index, cache, Redis, PubSub, worker, scheduler, or UI. |
+| Output | This v5 canonical plan plus owner authority evidence. M5-05B COMPLETE_PASS; M5-05C authorized; D–G require later admission. |
+| Note | M5-05C implementation authorized only. M5-05D+ blocked. Indexes: existing only. Cache/Redis/PubSub: NO_CHANGE. STOP: raw fallback; M5-04 semantic change; unapproved resource, index, cache, Redis, PubSub, worker, scheduler, or UI. |
 
 ## M5-05B micro-prompt — pure approved velocity rules
 
@@ -455,7 +593,7 @@ No phase authorizes a UI, new durable resource, migration, index, worker, schedu
 | Task | Implement one owner-approved pure time/rate/trend contract. |
 | Objective | Make accepted current windows and approved rate/trend arithmetic deterministic without persistence or I/O. |
 | Output | Modify `lib/event_sales/analytics/time_rules.ex`; add `lib/event_sales/analytics/velocity_rules.ex`; update `test/event_sales/analytics/time_rules_test.exs`; add `test/event_sales/analytics/velocity_rules_test.exs`. |
-| Note | **Authorized** per v4 owner record. Current windows 15m/30m/60m; `velocity_windows/2`; reuse M5-04 percentage semantics. Pure rules only. STOP: reader/SQL/cache/resource scope; MetricRules primitive changes. |
+| Note | **COMPLETE_PASS** on `main` (PR #306). Current windows 15m/30m/60m; `velocity_windows/2`; reuse M5-04 percentage semantics. Pure rules only. STOP: reader/SQL/cache/resource scope; MetricRules primitive changes. |
 
 ## M5-05C micro-prompt — shared projection composition
 
@@ -464,7 +602,7 @@ No phase authorizes a UI, new durable resource, migration, index, worker, schedu
 | Task | Extract the event-level projection composition used by the accepted M5-04 reader. |
 | Objective | Reuse fixed-bucket, bounded-edge, coverage, and metadata checks for a future velocity reader without changing M5-04 behavior. |
 | Output | Add `lib/event_sales/analytics/projection_period_reader.ex`; modify `lib/event_sales/analytics/period_comparison_reader.ex`; add `test/event_sales/analytics/projection_period_reader_test.exs`; run the M5-04 regression tests listed in the phase definition. |
-| Note | Move only event-level composition. Name both required calls: `EventSnapshotRefreshFence.coherent_transaction_opts/0` and `EventSnapshotRefreshFence.prepare_coherent_transaction!/0`. The caller starts the transaction; `prepare_coherent_transaction!/0` runs inside it before first projection SQL. Indexes: existing only; no new index without selective BEFORE EXPLAIN. Cache: NO_CHANGE. TTL: none introduced. Redis structure: none. Invalidation: existing projection lifecycle/coverage identity only. PubSub: existing event-scoped post-refresh signal only; no new broadcast. Concurrency: preserve `Repo.transaction` → preparation → shared composition; shared kernel starts no transaction. STOP: preparation removed/late, nested transaction, M5-04 change, copied query path, raw read, or unsafe extraction. |
+| Note | **Authorized** per v5 admission record. Move only event-level composition. Not the VelocityReader. Name both required calls: `EventSnapshotRefreshFence.coherent_transaction_opts/0` and `EventSnapshotRefreshFence.prepare_coherent_transaction!/0`. The caller starts the transaction; `prepare_coherent_transaction!/0` runs inside it before first projection SQL; `ProjectionPeriodReader` must not start a transaction or call prepare. Indexes: existing only; no new index without selective BEFORE EXPLAIN. Cache: NO_CHANGE. TTL: none introduced. Redis structure: none. Invalidation: existing projection lifecycle/coverage identity only. PubSub: existing event-scoped post-refresh signal only; no new broadcast. Concurrency: preserve `Repo.transaction` → preparation → shared composition; shared kernel starts no transaction. Dimension behavior stays in `PeriodComparisonReader`. STOP: preparation removed/late, nested transaction, M5-04 change, copied query path, raw read, or unsafe extraction. |
 
 ## M5-05D micro-prompt — pre-reader performance gate
 
@@ -544,19 +682,31 @@ No phase authorizes a UI, new durable resource, migration, index, worker, schedu
 | Coherent transaction options and preparation both named and ordered | YES |
 | Shared kernel starts a transaction or a second transaction is permitted | NO |
 | Every phase requires later admission | YES |
-| M5-05B authorized; M5-05C+ unauthorized until B verified on main | YES |
+| M5-05B COMPLETE_PASS on main; M5-05C authorized; D+ blocked | YES |
+| M5-05C admission freezes transaction owner and dimension stay-out | YES |
 
 ~~~text
 PR_304_MERGED=YES
 PR_304_OWNER_SEMANTIC_LOCKS=NOT_DURABLY_PROVEN_HISTORICAL
 PR_308_MERGED=YES
 PR_308_MERGE_SHA=a4d87eba8128e921537f84285aaca6571621f1ed
+PR_306_MERGED=YES
+PR_306_MERGE_SHA=e7ea13be93b4fc235bf2085a73ebec036cd9e5fd
+PR_306_MERGE_TREE=0a967b95318c0487a597bd5dd8f8df8e5a59eef2
+PR_306_POST_MERGE_TREE_VERIFY=PASS
 OWNER_DECISION_REQUIRED=NO
 OWNER_AUTHORITY_RECORD=docs/evidence/m5-05-owner-product-authority.md
 M5_05B_AUTHORIZED=YES
 M5_05B_PR=306
-M5_05B_STATUS=IN_REVIEW
-M5_05C_AUTHORIZED=NO
-M5_05_IMPLEMENTATION_AUTHORIZED=M5_05B_ONLY
-IMPLEMENTATION_READY=M5_05B_YES
+M5_05B_STATUS=COMPLETE_PASS
+M5_05C_AUTHORIZED=YES
+M5_05C_STATUS=AUTHORIZED_NOT_STARTED
+M5_05D_AUTHORIZED=NO
+M5_05E_AUTHORIZED=NO
+M5_05F_AUTHORIZED=NO
+M5_05G_AUTHORIZED=NO
+M5_05_IMPLEMENTATION_AUTHORIZED=M5_05C_ONLY
+IMPLEMENTATION_READY=M5_05C_YES
+DIMENSION_EXTRACTION_IN_C=NO
+PROJECTION_PERIOD_READER_OWNS_TRANSACTION=NO
 ~~~
