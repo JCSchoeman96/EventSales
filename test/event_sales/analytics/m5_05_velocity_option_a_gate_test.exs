@@ -85,12 +85,12 @@ defmodule EventSales.Analytics.M5_05VelocityOptionAGateTest do
   end
 
   defp run_gate do
-    reject_existing_valid_evidence!()
+    prior_attempts = prior_invalid_attempts!()
     telemetry_table = :ets.new(:m5_05_d1_query_events, [:bag, :public])
     handler_id = {__MODULE__, make_ref()}
     attach_telemetry!(handler_id, telemetry_table)
 
-    report = initial_report()
+    report = Map.put(initial_report(), :prior_invalid_attempts, prior_attempts)
 
     result =
       try do
@@ -384,12 +384,12 @@ defmodule EventSales.Analytics.M5_05VelocityOptionAGateTest do
       FROM generate_series(1, $4::integer) AS g(n)
       """,
       [
-        Ecto.UUID.load!(event_id),
+        event_id,
         currency,
         hour,
         count,
-        Ecto.UUID.load!(ticket_id),
-        Ecto.UUID.load!(source_id),
+        ticket_id,
+        source_id,
         @coverage,
         now
       ]
@@ -1007,15 +1007,24 @@ defmodule EventSales.Analytics.M5_05VelocityOptionAGateTest do
     File.write!(@evidence_path, Jason.encode!(report, pretty: true) <> "\n")
   end
 
-  defp reject_existing_valid_evidence! do
+  defp prior_invalid_attempts! do
     if File.exists?(@evidence_path) do
-      case Jason.decode!(File.read!(@evidence_path)) do
-        %{"measurement_valid" => true} ->
-          raise("valid D1 evidence already exists; reruns are prohibited")
+      previous = Jason.decode!(File.read!(@evidence_path))
 
-        _ ->
-          :ok
-      end
+      if previous["measurement_valid"] == true,
+        do: raise("valid D1 evidence already exists; reruns are prohibited")
+
+      Map.get(previous, "prior_invalid_attempts", []) ++
+        [
+          %{
+            head_sha: previous["head_sha"],
+            head_tree: previous["head_tree"],
+            invalid_reason: previous["invalid_reason"],
+            measurement_rows: length(previous["measurement_rows"] || [])
+          }
+        ]
+    else
+      []
     end
   end
 
