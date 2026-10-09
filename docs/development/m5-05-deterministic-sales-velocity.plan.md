@@ -1,41 +1,54 @@
-# M5-05 deterministic sales velocity — authority repair
+# M5-05 deterministic sales velocity — canonical plan
 
 ~~~text
 PLAN_ID=m5-05-deterministic-sales-velocity
-PLAN_VERSION=v3
-BASE_SHA=dfe6687369f284e97e5ffcca4a5e79d4c1c8479e
-BASE_TREE=4f652702849493f6fd39b876d48120c2e4b68d42
+PLAN_VERSION=v4
+BASE_SHA=817599687543527436b5dfcff0bcdf5d4ced1410
+BASE_TREE=6c7799f6eecadb37e5ba2b1c8f8d4c6bf88e07b6
 
 M5_02_STATUS=COMPLETE_PASS
 M5_03_STATUS=COMPLETE_PASS
 M5_04_STATUS=COMPLETE_PASS
-M5_05A_STATUS=AUTHORITY_REPAIR_IN_REVIEW
-M5_05_IMPLEMENTATION_AUTHORIZED=NO
-IMPLEMENTATION_READY=NO
-OWNER_DECISION_REQUIRED=YES
+M5_05A_STATUS=COMPLETE
+M5_05_AUTHORITY_REPAIR_V3_MERGED=YES
+PR_307_MERGE_SHA=817599687543527436b5dfcff0bcdf5d4ced1410
+
+OWNER_DECISION_REQUIRED=NO
+OWNER_AUTHORITY_RECORD=docs/evidence/m5-05-owner-product-authority.md
+OWNER_AUTHORITY_ISSUE=JC-332
+OWNER_ACCEPTANCE_DATE=2026-10-09
+
+M5_05B_AUTHORIZED=YES
+M5_05B_STATUS=AWAITING_RECONCILED_MERGE
+M5_05C_AUTHORIZED=NO
+M5_05C_GATE=PENDING_M5_05B_MERGE_AND_POST_MERGE_VERIFY
+M5_05_IMPLEMENTATION_AUTHORIZED=M5_05B_ONLY
+IMPLEMENTATION_READY=M5_05B_YES
 
 PR_304_MERGED=YES
 PR_304_MERGE_SHA=dfe6687369f284e97e5ffcca4a5e79d4c1c8479e
 PR_304_INSTALLED_V2_PLAN=YES
-PR_304_OWNER_SEMANTIC_LOCKS=NOT_DURABLY_PROVEN
+PR_304_OWNER_SEMANTIC_LOCKS=NOT_DURABLY_PROVEN_HISTORICAL
 PR_305_CORRECTION_REFERENCE=a72d678134f88b286a36d20b2e95541454b133fc
 PR_305_CORRECTION_REVIEW=PASS
 
-VELOCITY_SEMANTIC_STATUS=OWNER_DECISION_REQUIRED
+VELOCITY_SEMANTIC_STATUS=OWNER_LOCKED
 WINDOW_STATUS=LOCKED_15M_30M_60M
-TREND_STATUS=OWNER_DECISION_REQUIRED
-VELOCITY_PRIMARY_METRIC=OWNER_DECISION_REQUIRED_RECOMMEND_GROSS_TICKET_QUANTITY_RATE
-VELOCITY_SUPPORTING_METRICS=OWNER_DECISION_REQUIRED_NET_QTY_RATE_AND_REFUND_QTY_RATE;MONETARY_RATES_OWNER_DECISION_REQUIRED
-VELOCITY_UNIT=OWNER_DECISION_REQUIRED_RECOMMEND_PER_HOUR
-RATE_NUMERIC_RULE=RECOMMEND_DECIMAL_NO_FLOAT_NO_INTERMEDIATE_ROUNDING
-DISPLAY_ROUNDING_RULE=OWNER_DECISION_REQUIRED
+TIME_RULES_API=velocity_windows/2
+TREND_STATUS=OWNER_LOCKED
+VELOCITY_PRIMARY_METRIC=GROSS_TICKET_QUANTITY_RATE
+VELOCITY_SUPPORTING_METRICS=REFUND_TICKET_QUANTITY_RATE;NET_TICKET_QUANTITY_RATE;GROSS_REFUND_NET_TICKET_VALUE_RATES
+VELOCITY_UNIT=TICKETS_PER_HOUR;CURRENCY_UNITS_PER_HOUR
+RATE_NUMERIC_RULE=DECIMAL_NO_FLOAT_NO_INTERMEDIATE_ROUNDING_IN_KERNEL
+DISPLAY_ROUNDING_RULE=DEFERRED_TO_PRESENTATION_CONTRACT
 WINDOWS=15M,30M,60M
-PREVIOUS_EQUIVALENT_RULE=OWNER_DECISION_REQUIRED_RECOMMEND_IMMEDIATELY_PRECEDING_EQUAL_DURATION
+PREVIOUS_EQUIVALENT_RULE=IMMEDIATELY_PRECEDING_EQUAL_DURATION
 REFUND_TREATMENT=SALE_GROSS_AT_SALE_EFFECTIVE_TIME;REFUND_AT_REFUND_EFFECTIVE_TIME
-TREND_RULE=OWNER_DECISION_REQUIRED_RECOMMEND_ABSOLUTE_RATE_DELTA_AND_DIRECTION;PERCENTAGE_OWNER_DECISION_REQUIRED
-ZERO_BASELINE_RULE=OWNER_DECISION_REQUIRED
-NEGATIVE_BASELINE_RULE=OWNER_DECISION_REQUIRED
-MULTI_CURRENCY_RULE=ONE_CURRENCY_PER_READ;NO_CROSS_CURRENCY_MONEY_SUM;QUANTITY_COMBINATION_OWNER_DECISION_REQUIRED
+TREND_RULE=ABSOLUTE_DELTA;PERCENTAGE_M5_04;DIRECTION_FASTER_FLAT_SLOWER
+ZERO_BASELINE_RULE=M5_04_PERCENTAGE_NIL
+NEGATIVE_BASELINE_RULE=M5_04_SIGNED_ARITHMETIC_NO_CLAMP
+TREND_THRESHOLD=NONE
+MULTI_CURRENCY_RULE=ONE_CURRENCY_PER_READ;NO_CROSS_CURRENCY_MONEY_SUM;NO_CROSS_CURRENCY_QTY_SUM_MVP
 RAW_SCAN_DECISION=FORBIDDEN
 RAW_TABLE_INTERACTIVE_READS=NONE
 HOT_STATE_CANONICAL_AUTHORITY=NO
@@ -51,11 +64,9 @@ PUBSUB_DECISION=NO_CHANGE
 NEW_RESOURCE_REQUIRED=NO
 NEW_INDEX_REQUIRED=NO
 M5_05D_OPTION_A_GATE=BEFORE_PUBLIC_READER;GO_OR_NO_GO
-IMPLEMENTATION_READY=NO
-M5_05_IMPLEMENTATION_AUTHORIZED=NO
 ~~~
 
-This version reconciles the merged PR #304 plan with JC-332 authority and the independently reviewed correction on PR #305. It is a planning and conformance artifact only. This change authorizes no production code, tests, migrations, resources, indexes, configuration, dependencies, cache behavior, Redis, PubSub behavior, workers, schedulers, or UI.
+**Active contract:** This file is the canonical M5-05 plan. Owner product semantics are durably recorded in `docs/evidence/m5-05-owner-product-authority.md` and [JC-332](https://linear.app/jc-dev/issue/JC-332/eventsales-m5-05a-deterministic-sales-velocity-planning-and). **This v4 amendment authorizes M5-05B only** (pure `TimeRules` / `VelocityRules` kernel and focused tests). It does not authorize M5-05C+, readers, migrations, resources, indexes, cache, Redis, PubSub, or UI. Peer implementation exists on open PR #306; reconcile that branch only after this authority merges to `main`.
 
 ## Authority history
 
@@ -63,7 +74,8 @@ This version reconciles the merged PR #304 plan with JC-332 authority and the in
 - PR #304 merged v2 into `main` and installed useful technical analysis, including the risk that sub-hour contribution-edge reads may be dense during flash sales. Its plan text also asserted that owner semantics were locked; that assertion is historical and superseded by v3.
 - PR #304 is merged repository history. The owner-lock assertion is not durable owner acceptance: the PR has no review or discussion comments, and JC-332 has no recorded acceptance of those product choices. Merge status does not create product authority.
 - PR #305's correction was independently reviewed clean, including its one-file scope and exact-head CI. It is retained as review evidence; it is not merged and is not the base for this repair.
-- This v3 preserves useful technical findings from both plans and marks every unsupported product choice as `OWNER_DECISION_REQUIRED`. M5-05 implementation remains unauthorized until decisions are explicitly recorded in an authoritative product or issue record and a later implementation phase is separately admitted.
+- v3 (PR #307) preserved technical findings and blocked implementation until durable owner acceptance.
+- **v4 (2026-10-09):** owner explicitly approved the semantic batch in JC-332 and `docs/evidence/m5-05-owner-product-authority.md`. `OWNER_DECISION_REQUIRED = NO`. **M5-05B is authorized**; M5-05C remains unauthorized until M5-05B merges and is post-merge verified on `main`.
 
 ## Ultimate outcome and backward plan
 
@@ -80,8 +92,8 @@ Management must receive a deterministic, bounded, decision-grade measure of rece
 
 Work backward from that outcome:
 
-1. Product owners decide what “sales velocity” and trend mean, including the numerator, supporting signals, unit, comparison baseline, output shape, visibility, and formatting.
-2. The supported current windows are 15m, 30m, and 60m from one captured UTC instant. Trend comparison operands remain conditional on owner approval.
+1. Product owners decided what “sales velocity” and trend mean (see owner authority record); v4 locks numerator, supporting signals, unit, comparison baseline, output shape, visibility, and kernel numeric rules.
+2. The supported current windows are 15m, 30m, and 60m from one captured UTC instant. Trend comparison uses the immediately preceding equal-duration interval (owner locked).
 3. Reuse `PeriodReadPlan` for half-open periods: complete UTC-hour buckets plus bounded sub-hour contribution edges.
 4. Reuse `EventPeriodAggregateSnapshot` for fixed buckets and `AnalyticsContributionFact` for exact edge contributions.
 5. Compose all approved operands under the M5-04 coherent-transaction law, fail closed on missing or stale coverage, and derive only owner-approved metrics.
@@ -107,18 +119,18 @@ These concepts belong under `EventSales.Analytics`. Derived request values have 
 
 | Concept | Owner and identity | Relationships and invariants | Durable or derived | Lifecycle |
 |---|---|---|---|---|
-| `VelocityRequest` | Analytics read boundary; event UUID, one currency, fixed current-window set, actor | Typed request only. Fixed supported current windows are 15m/30m/60m. Comparison operands require owner approval. | Request value | Stateless |
+| `VelocityRequest` | Analytics read boundary; event UUID, one currency, fixed current-window set, actor | Typed request only. Fixed supported current windows are 15m/30m/60m. Comparison operands use owner-locked immediately preceding equal duration. | Request value | Stateless |
 | `CapturedNow` | Analytics reader; one UTC instant per response | Shared end for all current windows. Do not use process execution time as the denominator. | Derived | Stateless |
 | `CurrentVelocityWindow` | `TimeRules`; duration and `[start,end)` bounds | For duration D and captured N: `[N-D,N)`. Elapsed UTC duration, not Johannesburg civil-day arithmetic. | Derived `Period` | Stateless |
-| `PreviousEquivalentVelocityWindow` | `TimeRules`; only if a comparison baseline is approved | Recommendation for duration D: `[N-2D,N-D)`. No implementation may assume this baseline before approval. | Derived `Period` | Stateless |
+| `PreviousEquivalentVelocityWindow` | `TimeRules.velocity_windows/2` | For duration D: `[N-2D,N-D)` (owner locked). Reuse `ComparisonWindows`; no separate `VelocityWindow` struct. | Derived `Period` | Stateless |
 | `PeriodReadPlan` | Existing planner; operand and exact bucket/edge bounds | Reuse existing decomposition and edge guard. A missing envelope is not zero. | Derived plan | Stateless |
 | `EventPeriodAggregateSnapshot` | Period projection owner; event, currency, bucket kind/start/end | Holds fixed-bucket Gross/Refund primitives plus semantic and coverage identity. Only compatible `current` coverage, including an explicit zero, proves coverage. | Durable projection | Existing: current, stale, refresh_pending, rebuilding, unavailable |
 | `AnalyticsContributionFact` | Period projection owner; contribution identity and event/currency/effective time | Sale uses sale-effective time; refund uses refund-effective time. Edge facts must match current envelope coverage and semantic version. | Durable projection | Existing projection replacement/rebuild lifecycle |
 | `VelocityPrimitives` | Pure analytics rules; one event/currency/window operand | Additive Gross/refund quantity and value; Net is canonical subtraction. Never clamp negative Net. | Derived | Stateless |
-| `VelocityRate` | Pure analytics rules; metric, unit, duration, and currency for money | Unit and display contract require owner approval. Keep rates derived; do not persist them. Decimal/no-float is the recommendation. | Derived | Stateless |
-| `VelocityTrend` | Pure analytics rules; metric and owner-approved operand pair | Baseline, delta, direction, percentage, tolerance, and zero/negative baseline behavior require owner decisions. | Derived | Stateless |
+| `VelocityRate` | `VelocityRules.rate_per_hour/2` | Owner locked: tickets/hour and currency units/hour; Decimal kernel without intermediate rounding. Keep rates derived; do not persist them. | Derived | Stateless |
+| `VelocityTrend` | `VelocityRules.compare_rates/2` + M5-04 deltas | Owner locked: absolute delta, M5-04 percentage, `:faster`/`:flat`/`:slower`; no tolerance. | Derived | Stateless |
 | `AnalyticsReadiness` | Existing readiness resolver; event | `ANALYTICS_READY` is required before projection reads and does not replace per-bucket coverage checks. | Derived from durable evidence | Existing resolver behavior |
-| `RevenueVisibility` | `Policies.can_view_revenue?/2`; actor and event | Governs every monetary value and derived monetary field. Ticket visibility under revenue redaction remains an owner decision. | Derived policy result | Stateless |
+| `RevenueVisibility` | `Policies.can_view_revenue?/2`; actor and event | Governs every monetary value and derived monetary field. Owner locked: quantity velocity remains visible when revenue is redacted; all monetary velocity fields are redacted. | Derived policy result | Stateless |
 | `ProjectionCoverage` | Projection rows; event, currency, bucket, semantic version, coverage identity | Every bucket and edge envelope must be current and compatible. Missing/stale coverage fails closed. | Durable metadata | Uses snapshot lifecycle above |
 | `OptionalHotMirror` | No M5-05 correctness owner | Not required or proposed now. A future mirror could only copy a completed canonical result under separate authority. | Absent | Conditional future model below |
 
@@ -137,41 +149,39 @@ No state falls back to raw tables. PubSub notification does not make a mirror cu
 
 ## Semantic matrix and owner-decision ledger
 
-M5 defines additive financial facts and their clocks. It does not yet define the product meaning of “sales velocity.” Every candidate below remains `OWNER_DECISION_REQUIRED`; recommendations are explicitly non-binding.
+M5 defines additive financial facts and their clocks. Owner product semantics for velocity presentation are locked in v4 (see owner authority record).
 
-| Candidate measure | Current classification | Recommendation only | Trade-off |
-|---|---|---|---|
-| Gross ticket quantity / time | OWNER_DECISION_REQUIRED | Proposed primary selling-pace rate. | Measures new sale activity; it does not show refunds or net movement by itself. |
-| Net ticket quantity / time | OWNER_DECISION_REQUIRED | Proposed supporting rate beside Gross. | Can be negative when refund quantity exceeds Gross in the window. |
-| Refund ticket quantity / time | OWNER_DECISION_REQUIRED | Proposed separate supporting rate. | Makes refund-effective activity visible and distinct from sale pace. |
-| Gross ticket value / time | OWNER_DECISION_REQUIRED | Consider only if monetary velocity is approved; always currency-labeled. | Tax-inclusive canonical Gross; obeys revenue visibility. |
-| Refund ticket value / time | OWNER_DECISION_REQUIRED | If monetary rates are approved, consider the explicit refund component. | Omitting it can conceal why Net money changed. |
-| Net ticket value / time | OWNER_DECISION_REQUIRED | If monetary rates are approved, consider as a separate signal. | May be negative; never collapse currencies or clamp it. |
+| Measure | Owner classification | Notes |
+|---|---|---|
+| Gross ticket quantity / time | PRIMARY | Selling-pace rate. |
+| Refund ticket quantity / time | SUPPORTING | Refund-effective activity, distinct from sale pace. |
+| Net ticket quantity / time | SUPPORTING | May be negative; not clamped. |
+| Gross / refund / net ticket value / time | MONETARY_FAMILY | Currency-scoped; complete family when revenue visible; redacted with revenue. |
+| Average ticket value / time | EXCLUDED | Not a velocity metric. |
 
-### Owner-decision ledger
+### Owner-decision ledger (locked 2026-10-09)
 
-No row below is accepted product authority. Before M5-05B, record the decisions in an authoritative product or issue record. Implementation phases may not infer approval from this plan, PR merge, or a recommendation.
+Decisions below are accepted product authority (JC-332 + `docs/evidence/m5-05-owner-product-authority.md`). Historical v1–v3 recommendations are superseded.
 
-| Decision | Current authority | Recommendation only | Alternatives | Trade-off | Owner status |
-|---|---|---|---|---|---|
-| Primary sales-velocity numerator | Canonical primitives exist; product numerator is undefined. | Gross ticket quantity rate. | Net quantity; monetary value; more than one primary measure. | Gross is new sale pace; Net includes refund-time movement; money adds price/mix and policy constraints. | OWNER_DECISION_REQUIRED |
-| Whether Net ticket quantity is displayed | Net derives from Gross less refund quantity. | Show separately as a supporting measure. | Omit; primary; support. | Showing it makes negative movement explicit; omitting it simplifies output but hides net movement. | OWNER_DECISION_REQUIRED |
-| Whether Refund ticket quantity is displayed | Refund quantity is canonical and refund-effective. | Show separately beside Gross/Net if those are approved. | Omit; show as support; primary. | A separate signal is honest about refunds; additional measures increase result and UI complexity. | OWNER_DECISION_REQUIRED |
-| Whether monetary velocity is included | Money is currency-safe and revenue-protected in M5. | Include Gross/Refund/Net value rates only as a complete, currency-labeled family when visible. | Exclude; Gross only; another explicitly selected subset; all three. | Monetary rates aid value pacing but invoke visibility, currency-label, and formatting requirements. | OWNER_DECISION_REQUIRED |
-| Canonical rate normalization unit | Programme names recent windows but does not choose a rate unit. | `tickets/hour` and `currency units/hour`. If accepted, 15m/30m/60m multipliers are exactly 4/2/1. | Per minute; raw window total only; another explicit unit. | Per-hour is comparable across supported durations; raw totals are intuitive but not normalized. | OWNER_DECISION_REQUIRED |
-| Whether raw window values are public output | Additive window primitives are available internally. | Return only if useful alongside approved rates. | Rates only; raw values only; both. | Raw values help interpret a rate but expand the public contract. | OWNER_DECISION_REQUIRED |
-| Previous/trend comparison baseline | No M5-05 baseline is accepted. | Immediately preceding equal-duration interval: current `[N-D,N)`, previous `[N-2D,N-D)`. | No comparison; another named baseline. | Adjacent intervals are easy to explain; other baselines answer different questions. | OWNER_DECISION_REQUIRED |
-| Whether absolute delta is part of trend | M5-04 has comparison math but does not select M5-05 trend output. | Current approved rate minus previous approved rate, in matching units. | No delta; another approved change metric. | Absolute change preserves units but can be hard to compare across scales. | OWNER_DECISION_REQUIRED |
-| Whether direction is part of trend | No M5-05 direction contract exists. | Derive direction from the sign of an approved delta. | No direction; direction only; delta plus direction. | Direction is compact but loses magnitude if shown alone. | OWNER_DECISION_REQUIRED |
-| Direction naming | No product wording is accepted. | Neutral `up/down/unchanged`. | `faster/slower/flat`; other owner language. | Neutral labels avoid implying good/bad; pace-specific terms may be clearer after metric selection. | OWNER_DECISION_REQUIRED |
-| Whether percentage trend is included | No percentage trend is accepted. | Omit until a safe, useful baseline contract is selected. | Include with explicit baseline states; omit. | Percentage aids relative comparison but is ambiguous around zero and negative values. | OWNER_DECISION_REQUIRED |
-| Zero-baseline percentage behavior | M5-04 comparison states exist, but M5-05 mapping is undecided. | Reuse an existing state only if its preconditions match; never synthesize infinity or 100%. | Explicit state; omit percentage; another approved definition. | A numeric sentinel would misstate an undefined ratio. | OWNER_DECISION_REQUIRED |
-| Negative-baseline percentage behavior | Negative Net can be mathematically correct; trend interpretation is undefined. | Preserve the signed baseline and use an explicit approved state or omit percentage. | Signed ratio; state/no percentage; another defined formula. | Signed ratios can be unintuitive when direction crosses zero. | OWNER_DECISION_REQUIRED |
-| Trend threshold/tolerance | No threshold is specified. | Exact comparison only if direction is approved; do not assume a tolerance. | No direction; exact sign; owner-set tolerance. | A tolerance dampens noise but adds an unsupported classification boundary. | OWNER_DECISION_REQUIRED |
-| Display precision and rounding | No M5-05 display contract exists. | Keep canonical Decimal unrounded; round only for display after a chosen policy. | Owner-selected precision/mode; expose full precision; raw units. | More decimals preserve detail but can make a dashboard noisy; rounding mode affects displayed values. | OWNER_DECISION_REQUIRED |
-| Combining ticket quantity across currencies | Projection reads partition by event and currency; no combined-quantity presentation is accepted. | Keep per-currency partitions in MVP. | Sum counts across currencies; require one currency; omit cross-currency combined value. | Tickets are countable, but a mixed-currency aggregate can conceal different event/catalog contexts. | OWNER_DECISION_REQUIRED |
-| Public three-window result shape | Programme names three windows; it does not prescribe one response envelope. | One event/currency result containing all three current windows. | One requested window per call; separate values; another typed shape. | One call avoids repeated `now` and transaction overhead; larger response may be unnecessary for some consumers. | OWNER_DECISION_REQUIRED |
-| Ticket visibility when revenue is redacted | Event access allows analytics reads; M5-05 visibility choice is unrecorded. | Keep approved quantity measures visible under event access while stripping all money. | Hide all velocity; expose quantities; other policy. | Quantity is not money, but its display may still be a product decision. | OWNER_DECISION_REQUIRED |
+| Decision | Owner status | Locked resolution |
+|---|---|---|
+| Primary sales-velocity numerator | LOCKED | Gross ticket quantity rate. |
+| Net ticket quantity velocity | LOCKED | Supporting measure. |
+| Refund ticket quantity velocity | LOCKED | Supporting measure. |
+| Monetary velocity | LOCKED | Gross, refund, and net ticket value rates as one currency-labeled family. |
+| Canonical rate normalization unit | LOCKED | `tickets_per_hour` and `currency_units_per_hour`; 15m/30m/60m multipliers 4/2/1. |
+| Raw window values in public output | LOCKED | May be exposed alongside rates. |
+| Previous/trend comparison baseline | LOCKED | Immediately preceding equal-duration interval. |
+| Absolute delta | LOCKED | `current_rate - previous_rate`. |
+| Direction | LOCKED | `:faster`, `:flat`, `:slower` from exact sign; no tolerance. |
+| Percentage trend | LOCKED | Reuse M5-04 semantics; `nil` when previous is zero. |
+| Zero-baseline percentage | LOCKED | M5-04 `nil`; no infinity or 100% sentinel. |
+| Negative-baseline percentage | LOCKED | Signed M5-04 arithmetic; no clamp (direction and percentage may diverge visually). |
+| Trend threshold | LOCKED | None. |
+| Display precision and rounding | LOCKED | Kernel unrounded Decimal; presentation rounding deferred. |
+| Cross-currency ticket quantity | LOCKED | No cross-currency quantity aggregation in MVP. |
+| Public three-window result shape | LOCKED | One event/currency result with 15m/30m/60m and one `now` (reader phase). |
+| Ticket visibility when revenue redacted | LOCKED | Quantities visible; all monetary velocity redacted. |
 
 ### Refund and Net invariants
 
@@ -182,47 +192,46 @@ These are canonical financial-time invariants, not product presentation choices:
 - A later refund never moves or rewrites historical Gross.
 - Net is derived by canonical subtraction and remains negative where mathematically correct; do not clamp or reinterpret it as zero.
 - A value-only refund changes refund value only; refund quantity remains zero under M5-03.
-- Whether Gross, Refund, or Net is presented as a velocity measure remains an owner decision.
+- Gross, refund, and net presentation as velocity measures is owner locked (see ledger).
 
 ## Window, denominator, and trend contract
 
 ### Current windows
 
-The programme explicitly supports 15m, 30m, and 60m as recent velocity windows. These current-window definitions are supported; the comparison baseline is not.
+The programme explicitly supports 15m, 30m, and 60m as recent velocity windows. Current and previous comparison operands are owner locked.
 
-| Window | `start_utc` | `end_utc` | `captured_now_utc` | Duration | Timezone semantics | Recommended previous start | Recommended previous end |
+| Window | `start_utc` | `end_utc` | `captured_now_utc` | Duration | Timezone semantics | Previous start | Previous end |
 |---|---|---|---|---:|---|---|---|
 | 15m | `N - 15 minutes` | `N` | `N` | 900 seconds | Elapsed UTC | `N - 30 minutes` | `N - 15 minutes` |
 | 30m | `N - 30 minutes` | `N` | `N` | 1,800 seconds | Elapsed UTC | `N - 60 minutes` | `N - 30 minutes` |
 | 60m | `N - 60 minutes` | `N` | `N` | 3,600 seconds | Elapsed UTC | `N - 120 minutes` | `N - 60 minutes` |
 
-All periods use half-open `[start,end)` boundaries. Capture one `N` for the complete set of current windows. Use UTC absolute duration, not Johannesburg civil-day arithmetic. Previous bounds are the recommended immediately preceding equal-duration comparison only; do not construct or read them before owner approval. Custom arbitrary current velocity windows are outside the MVP unless separately admitted.
+All periods use half-open `[start,end)` boundaries. Capture one `N` for the complete set of current windows. Use UTC absolute duration, not Johannesburg civil-day arithmetic. Previous bounds are the immediately preceding equal-duration comparison (owner locked). API: `TimeRules.velocity_windows/2` with `{:rolling_minutes, 15 | 30 | 60}`. Custom arbitrary current velocity windows are outside the MVP unless separately admitted.
 
 ### Rate unit and numeric rules
 
-Canonical unit remains `OWNER_DECISION_REQUIRED`. Recommendation only: tickets per hour and currency units per hour. If accepted, `X` over a fixed duration `D` minutes normalizes as `X × 60 / D`; the exact multipliers are 4, 2, and 1 for 15m, 30m, and 60m. This example is not accepted product contract until approved.
-
-Architectural recommendations: use Decimal arithmetic for rate values, avoid floating point, keep canonical values unrounded, and apply an owner-approved rounding/precision rule only at display. The fixed windows have positive duration. Never use BEAM execution time as a denominator. Do not round additive primitives or intermediate rate math.
+Owner locked: tickets per hour and currency units per hour. `X` over duration `D` seconds normalizes as `X × 3600 / D` (multipliers 4, 2, and 1 for 15m, 30m, and 60m). Use Decimal arithmetic; no floating point; no intermediate rounding in the kernel; presentation rounding deferred. Never use BEAM execution time as a denominator. Do not round additive primitives or intermediate rate math.
 
 ### Trend and zero/negative baselines
 
-Baseline, absolute delta, direction inclusion and naming, percentage inclusion, threshold/tolerance, and zero/negative baseline behavior are all `OWNER_DECISION_REQUIRED`. If selected by the owner, an absolute delta would be current approved rate minus previous approved rate using matching units; a numeric direction could follow its sign. These are recommendations, not implementation invariants.
+Owner locked: absolute delta, M5-04 percentage delta, and `:faster`/`:flat`/`:slower` direction from exact sign; `TREND_THRESHOLD = NONE`.
 
-`MetricRules` has explicit comparison states such as `flat_zero`, `new_activity`, `baseline_zero`, `current_missing`, `comparison_missing`, and `not_comparable`. Reuse a state only where its existing preconditions match and an owner decision selects that meaning. Never emit infinity, NaN, divide-by-zero, or a fabricated percentage. Negative Net remains signed regardless of presentation.
+`VelocityRules.compare_rates/2` reuses `MetricRules.classify_comparison_state/1` and `derive_comparison_deltas/3` without changing M5-04 primitive definitions. Never emit infinity, NaN, divide-by-zero, or a fabricated percentage. Negative net rates remain signed; direction uses exact sign of the rate delta and may diverge from intuitive percentage wording (accepted).
 
 ## REUSE / EXTEND / NEW decisions
 
 | Component | Decision | Reason |
 |---|---|---|
-| `TimeRules` | EXTEND | Reuse one captured UTC instant and half-open rules for the three current windows. Add comparison bounds only after baseline approval. |
+| `TimeRules` | EXTEND | `velocity_windows/2` for locked 15m/30m/60m UTC windows and owner-locked previous operands via `ComparisonWindows`. |
 | `PeriodReadPlan` | REUSE | Call the existing decomposition for each approved operand. Do not duplicate its full-hour plus bounded-edge algorithm. |
 | `EventPeriodAggregateSnapshot` | REUSE | Existing durable event/currency bucket primitives and coverage lifecycle suffice for the proposed read model. |
 | `AnalyticsContributionFact` | REUSE | Existing exact sale/refund effective-time contributions support bounded edges. |
 | `PeriodComparisonReader` | EXTRACT FROM | Move only shared event-level projection composition if M5-04 behavior remains unchanged. Keep its dimension-family behavior and public response. |
 | `ProjectionPeriodReader` | NEW internal seam | Own fixed-bucket fetch, bounded event edge aggregation, coverage-envelope validation, semantic-version/coverage-identity checks, and event-level operand primitive composition. |
 | `VelocityReader` | NEW | Later public analytics reader, after owner decisions, extraction, and pre-reader performance gate. |
-| `VelocityRules` | NEW | Pure approved Decimal rate/trend rules only. |
-| `MetricRules` | REUSE / narrowly extend | Reuse canonical primitives and compatible explicit comparison states; any new trend state needs owner approval. |
+| `VelocityRules` | NEW (M5-05B authorized) | Pure `rate_per_hour/2` and `compare_rates/2`; no I/O. |
+| `MetricRules` | REUSE | `VelocityRules` delegates comparison deltas; primitive definitions unchanged. |
+| `VelocityWindow` struct | NOT_REQUIRED | Reuse `ComparisonWindows`. |
 | `HotStateAggregator` | REUSE MECHANICS / NOT AUTHORITY | Legacy totals are not canonical. A later mirror may only accelerate an already-computed canonical result under separate authority. |
 | `DashboardCache` | NO_CHANGE | No measured M5-05 need or correctness role. |
 | Redis | NO_CHANGE | No measured need or selected structure. |
@@ -300,7 +309,7 @@ Preserve the public read order:
 5. Derive only owner-approved fields.
 6. Apply `Policies.can_view_revenue?/2` before returning money fields.
 
-No financial projection query may precede authorization/readiness. Every monetary primitive, rate, delta, percentage, and money-derived status obeys revenue visibility. Whether ticket quantity velocity remains visible when revenue is redacted is an owner decision; if approved, it still requires event access. Return no PII, source payloads, order identifiers, refund identifiers, or raw line identities.
+No financial projection query may precede authorization/readiness. Every monetary primitive, rate, delta, percentage, and money-derived status obeys revenue visibility. Owner locked: ticket quantity velocity remains visible when revenue is redacted; all monetary velocity fields are redacted. Return no PII, source payloads, order identifiers, refund identifiers, or raw line identities.
 
 `ANALYTICS_READY` does not replace per-bucket coverage checks. A current explicit zero can prove covered zero. Missing, stale, refresh-pending, rebuilding, unavailable, or mismatched semantic/coverage identity is not zero and fails closed.
 
@@ -365,16 +374,16 @@ Keep future code under `lib/event_sales/analytics/`. Candidate responsibilities 
 
 ## M5-05 serial phase design
 
-All phases below are future work and each requires its own later admission. M5-05B cannot start until all decisions needed by B are explicitly accepted. Recommendations in v3 do not satisfy that dependency.
+M5-05B is **authorized** (owner decisions recorded 2026-10-09). M5-05C and later phases each require separate admission after prior phase merge and verification. Open PR #306 implements the kernel peer; merge only after this v4 authority is on `main` and the branch is rebased/reconciled.
 
-### M5-05B — owner-approved pure windows and velocity rules
+### M5-05B — pure windows and velocity rules (AUTHORIZED)
 
-- **Objective:** implement only accepted current-window, numerator, unit, rate, and trend rules as pure calculations.
-- **Exact writable files:** `lib/event_sales/analytics/time_rules.ex`; new `lib/event_sales/analytics/velocity_rules.ex`; `test/event_sales/analytics/time_rules_test.exs`; new `test/event_sales/analytics/velocity_rules_test.exs`.
-- **Dependencies:** authoritative decisions for primary numerator; supporting quantity/refund measures; monetary-rate inclusion; canonical unit; whether raw window values are public; baseline; absolute-delta and direction inclusion/naming; percentage behavior for zero and negative baselines; tolerance; display precision/rounding; cross-currency ticket presentation; and public three-window result shape if B depends on it.
-- **Invariants:** one captured UTC `now`; current windows remain 15m/30m/60m and half-open; no previous baseline without approval; implement no recommendation as contract; Decimal/no-float and no intermediate rounding if accepted; preserve signed Net.
+- **Objective:** implement owner-locked current-window, numerator, unit, rate, and trend rules as pure calculations (`TimeRules.velocity_windows/2`, `VelocityRules`).
+- **Exact writable files:** `lib/event_sales/analytics/time_rules.ex`; `lib/event_sales/analytics/velocity_rules.ex`; `test/event_sales/analytics/time_rules_test.exs`; `test/event_sales/analytics/velocity_rules_test.exs`; `test/event_sales/analytics/period_read_plan_test.exs` (geometry proof; `PeriodReadPlan` behavior unchanged unless a RED test proves a gap).
+- **Dependencies:** satisfied via v4 owner authority record and JC-332 acceptance.
+- **Invariants:** one captured UTC `now`; windows 15m/30m/60m half-open; owner-locked previous baseline; Decimal kernel without intermediate rounding; preserve signed net; reuse `ComparisonWindows`; `MetricRules` unchanged.
 - **Performance review:** bounded pure CPU work; no DB, cache, Redis, PubSub, worker, scheduler, or index.
-- **STOP:** any B dependency is missing; arbitrary current windows are requested; code assumes an unapproved metric, unit, baseline, percentage, or display rule; M5 financial semantics would change.
+- **STOP:** arbitrary windows; changes to locked M5-04 comparison primitives; reader/SQL/cache/resource work in B.
 
 ### M5-05C — behavior-preserving shared projection extraction
 
@@ -430,8 +439,8 @@ No phase authorizes a UI, new durable resource, migration, index, worker, schedu
 |---|---|
 | Task | Plan the complete M5-05 programme from accepted owner decisions through measured acceleration review. |
 | Objective | Preserve serial order: owner decisions → M5-05B pure windows/rate/trend rules → M5-05C shared projection extraction → M5-05D pre-reader query-plan/load gate → M5-05E VelocityReader and existing facade → M5-05F conformance certification → M5-05G full-reader load and acceleration decision. |
-| Output | This v3 authority-repair plan only. Future B-G work each needs exact files, dependencies, tests, invariants, performance review, STOP conditions, and its own later admission. |
-| Note | THIS SCAFFOLD DOES NOT AUTHORIZE IMPLEMENTATION. Owner decisions precede B. Each serial phase requires separate admission. Indexes: existing only; no new index without selective BEFORE EXPLAIN. Cache: NO_CHANGE. TTL: none introduced. Redis structure: none selected. Invalidation: existing projection lifecycle and coverage identity only; no new mechanism. PubSub: existing event-scoped post-refresh signal only; no new broadcast. Concurrency: preserve the caller-owned coherent transaction law; preparation precedes projection SQL and the shared kernel starts no transaction. STOP: missing owner authority/admission; raw fallback; M5-04 semantic change; or unapproved resource, index, cache, Redis, PubSub, worker, scheduler, or UI scope. |
+| Output | This v4 canonical plan plus owner authority evidence. M5-05B authorized; C–G require later admission. |
+| Note | M5-05B authorized only. M5-05C+ blocked until B merges and is verified. Indexes: existing only. Cache/Redis/PubSub: NO_CHANGE. STOP: raw fallback; M5-04 semantic change; unapproved resource, index, cache, Redis, PubSub, worker, scheduler, or UI. |
 
 ## M5-05B micro-prompt — pure approved velocity rules
 
@@ -440,7 +449,7 @@ No phase authorizes a UI, new durable resource, migration, index, worker, schedu
 | Task | Implement one owner-approved pure time/rate/trend contract. |
 | Objective | Make accepted current windows and approved rate/trend arithmetic deterministic without persistence or I/O. |
 | Output | Modify `lib/event_sales/analytics/time_rules.ex`; add `lib/event_sales/analytics/velocity_rules.ex`; update `test/event_sales/analytics/time_rules_test.exs`; add `test/event_sales/analytics/velocity_rules_test.exs`. |
-| Note | Do not begin until primary numerator; supporting measures; monetary inclusion; canonical unit; raw-value output; comparison baseline; delta/direction/naming; percentage zero/negative rules; threshold; precision/rounding; cross-currency quantity and public three-window shape dependencies are authoritative. Current windows remain 15m/30m/60m. Indexes: existing only; no new index. Cache: NO_CHANGE. TTL: none introduced. Redis structure: none. Invalidation: none; pure rules. PubSub: existing signal only; no new behavior. Concurrency: pure deterministic computation, no shared state or DB transaction. STOP: any dependency unresolved or a recommendation is treated as accepted. |
+| Note | **Authorized** per v4 owner record. Current windows 15m/30m/60m; `velocity_windows/2`; reuse M5-04 percentage semantics. Pure rules only. STOP: reader/SQL/cache/resource scope; MetricRules primitive changes. |
 
 ## M5-05C micro-prompt — shared projection composition
 
@@ -497,6 +506,7 @@ No phase authorizes a UI, new durable resource, migration, index, worker, schedu
 - `docs/evidence/m5-02-ticket-product-variation-aggregates-certification.md`
 - `docs/evidence/m5-03-revenue-refund-dimensional-aggregates-certification.md`
 - `docs/evidence/m5-04-period-comparisons-certification.md`
+- `docs/evidence/m5-05-owner-product-authority.md`
 - `lib/event_sales/analytics/time_rules.ex`
 - `lib/event_sales/analytics/period_read_plan.ex`
 - `lib/event_sales/analytics/period_comparison_reader.ex`
@@ -514,7 +524,7 @@ No phase authorizes a UI, new durable resource, migration, index, worker, schedu
 | Check | Result |
 |---|---|
 | PR #304 history retained without treating merge as owner acceptance | YES |
-| Unresolved product choices remain recommendations only | YES |
+| Owner product choices recorded and locked in v4 | YES |
 | Gross, refund, and Net remain distinct; refund stays at refund-effective time | YES |
 | Negative Net is preserved | YES |
 | 15m/30m/60m current windows remain supported | YES |
@@ -528,12 +538,15 @@ No phase authorizes a UI, new durable resource, migration, index, worker, schedu
 | Coherent transaction options and preparation both named and ordered | YES |
 | Shared kernel starts a transaction or a second transaction is permitted | NO |
 | Every phase requires later admission | YES |
-| Implementation authorized with owner decisions outstanding | NO |
+| M5-05B authorized; M5-05C+ unauthorized until B verified on main | YES |
 
 ~~~text
 PR_304_MERGED=YES
-PR_304_OWNER_SEMANTIC_LOCKS=NOT_DURABLY_PROVEN
-OWNER_DECISION_REQUIRED=YES
-IMPLEMENTATION_READY=NO
-M5_05_IMPLEMENTATION_AUTHORIZED=NO
+PR_304_OWNER_SEMANTIC_LOCKS=NOT_DURABLY_PROVEN_HISTORICAL
+OWNER_DECISION_REQUIRED=NO
+OWNER_AUTHORITY_RECORD=docs/evidence/m5-05-owner-product-authority.md
+M5_05B_AUTHORIZED=YES
+M5_05C_AUTHORIZED=NO
+M5_05_IMPLEMENTATION_AUTHORIZED=M5_05B_ONLY
+IMPLEMENTATION_READY=M5_05B_YES
 ~~~
