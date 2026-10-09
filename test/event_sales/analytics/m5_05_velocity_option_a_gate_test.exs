@@ -460,7 +460,7 @@ defmodule EventSales.Analytics.M5_05VelocityOptionAGateTest do
   end
 
   defp database_identity! do
-    %{rows: [[role, port, version, superuser]]} =
+    %{rows: [[role, server_listener_port, version, superuser]]} =
       Repo.query!(
         """
         SELECT current_user, inet_server_port(), current_setting('server_version_num')::integer,
@@ -470,16 +470,28 @@ defmodule EventSales.Analytics.M5_05VelocityOptionAGateTest do
       )
 
     major = div(version, 10_000)
-    pool_size = Application.get_env(:event_sales, Repo)[:pool_size]
+    repo_config = Application.get_env(:event_sales, Repo)
+    client_host = repo_config[:hostname]
+    client_port = repo_config[:port]
+    pool_size = repo_config[:pool_size]
 
-    unless role == "eventsales_test" and port == 55_433 and major == 18 and superuser == false and
+    unless role == "eventsales_test" and client_host == "127.0.0.1" and
+             client_port == 55_433 and major == 18 and superuser == false and
              pool_size == @pool_size do
       raise(
-        "INVALID_ENVIRONMENT TEST identity mismatch: #{inspect(%{role: role, port: port, postgres_major: major, superuser: superuser, pool_size: pool_size})}"
+        "INVALID_ENVIRONMENT TEST identity mismatch: #{inspect(%{role: role, client_host: client_host, client_port: client_port, postgres_major: major, superuser: superuser, pool_size: pool_size})}"
       )
     end
 
-    %{role: role, port: port, postgres_major: major, superuser: superuser, pool_size: pool_size}
+    %{
+      role: role,
+      client_host: client_host,
+      port: client_port,
+      server_listener_port: server_listener_port,
+      postgres_major: major,
+      superuser: superuser,
+      pool_size: pool_size
+    }
   end
 
   defp verify_test_database! do
