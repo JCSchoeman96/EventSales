@@ -67,6 +67,28 @@ defmodule EventSales.Analytics.M5_05VelocityOptionAGateTest do
            }
   end
 
+  test "measured-call overlap follows call lifetime and is released on errors" do
+    counter = :atomics.new(2, signed: true)
+
+    assert :ok =
+             with_measured_call_counter(counter, fn ->
+               assert :atomics.get(counter, 1) == 1
+               assert :atomics.get(counter, 2) == 1
+               :ok
+             end)
+
+    assert :atomics.get(counter, 1) == 0
+
+    assert_raise RuntimeError, "call failed", fn ->
+      with_measured_call_counter(counter, fn ->
+        assert :atomics.get(counter, 1) == 1
+        raise "call failed"
+      end)
+    end
+
+    assert :atomics.get(counter, 1) == 0
+  end
+
   @tag :m5_05_d1_certification_load
   test "runs the explicit D1 Option-A measurement gate" do
     if explicit_invocation?(System.argv()) do
@@ -98,7 +120,16 @@ defmodule EventSales.Analytics.M5_05VelocityOptionAGateTest do
     handler_id = {__MODULE__, make_ref()}
     attach_telemetry!(handler_id, telemetry_table)
 
-    report = Map.put(initial_report(), :prior_invalid_attempts, prior_attempts)
+    report =
+      initial_report()
+      |> Map.put(:prior_invalid_attempts, prior_attempts)
+      |> Map.put(:review_invalidated_run, %{
+        head_sha: "1723e11084f47a889c7f4791879789a4dd58ebc0",
+        review_classification: "INVALID",
+        invalid_reason: "worker barrier lifetime was reported as measured-call overlap",
+        archived_evidence_path:
+          "tmp/m5_05_velocity_option_a_gate_evidence.invalid-overlap-1723e110.json"
+      })
 
     result =
       try do
@@ -631,7 +662,7 @@ defmodule EventSales.Analytics.M5_05VelocityOptionAGateTest do
   end
 
   defp measure_cohort!(fixture, plan, density, case_spec, cohort, telemetry_table) do
-    {atomics, max_overlap} = :atomics.new(2, signed: true) |> then(&{&1, &1})
+    measured_call_counters = :atomics.new(2, signed: true)
     parent = self()
     task_ref = make_ref()
     per_worker = div(@samples, cohort)
@@ -641,29 +672,38 @@ defmodule EventSales.Analytics.M5_05VelocityOptionAGateTest do
         Task.async(fn ->
           send(parent, {:d1_ready, task_ref, worker_index, self()})
           receive do: ({:d1_activate, ^task_ref} -> :ok)
-          active = :atomics.add_get(atomics, 1, 1)
-          update_max!(atomics, active)
-          send(parent, {:d1_active, task_ref, worker_index})
+          send(parent, {:d1_worker_activated, task_ref, worker_index})
           receive do: ({:d1_start, ^task_ref} -> :ok)
 
-          try do
-            Enum.map(1..per_worker, fn _ -> measured_call(fixture, plan) end)
-          after
-            :atomics.sub(atomics, 1, 1)
-          end
+          Enum.map(1..per_worker, fn _ ->
+            measured_call(fixture, plan, measured_call_counters)
+          end)
         end)
       end
 
     Enum.each(1..cohort, fn _ -> receive_message!({:d1_ready, task_ref, :_, :_}, 30_000) end)
+    actual_worker_count = length(tasks)
+
+    if actual_worker_count != cohort,
+      do: raise("INVALID_MEASUREMENT_SETUP workers=#{actual_worker_count} requested=#{cohort}")
+
     Enum.each(tasks, &send(&1.pid, {:d1_activate, task_ref}))
-    Enum.each(1..cohort, fn _ -> receive_message!({:d1_active, task_ref, :_}, 30_000) end)
+
+    Enum.each(1..cohort, fn _ ->
+      receive_message!({:d1_worker_activated, task_ref, :_}, 30_000)
+    end)
+
     Enum.each(tasks, &send(&1.pid, {:d1_start, task_ref}))
 
     results = Enum.flat_map(tasks, &Task.await(&1, 120_000))
-    observed_max = :atomics.get(max_overlap, 2)
+    observed_max_measured_calls = :atomics.get(measured_call_counters, 2)
 
-    if observed_max != cohort,
-      do: raise("INVALID_MEASUREMENT_SETUP requested=#{cohort} observed=#{observed_max}")
+    if observed_max_measured_calls != cohort,
+      do:
+        raise(
+          "INVALID_MEASUREMENT_SETUP requested=#{cohort} " <>
+            "max_measured_call_overlap=#{observed_max_measured_calls}"
+        )
 
     if length(results) != @samples,
       do: raise("INVALID_MEASUREMENT_SETUP sample count #{length(results)} != #{@samples}")
@@ -691,8 +731,8 @@ defmodule EventSales.Analytics.M5_05VelocityOptionAGateTest do
       density: density,
       case: case_spec.id,
       requested_concurrency: cohort,
-      actual_worker_count: cohort,
-      max_simultaneous_callers_observed: observed_max,
+      actual_worker_count: actual_worker_count,
+      max_simultaneous_measured_calls_observed: observed_max_measured_calls,
       db_pool_size: @pool_size,
       sample_count: length(results),
       errors: errors,
@@ -713,50 +753,63 @@ defmodule EventSales.Analytics.M5_05VelocityOptionAGateTest do
     }
   end
 
-  defp measured_call(fixture, plan) do
-    call_ref = make_ref()
-    started = System.monotonic_time(:microsecond)
+  defp measured_call(fixture, plan, measured_call_counters) do
+    with_measured_call_counter(measured_call_counters, fn ->
+      call_ref = make_ref()
+      started = System.monotonic_time(:microsecond)
 
-    outcome =
-      try do
-        result =
-          UnboxedPostgres.with_connection(fn ->
-            checkout_wait = System.monotonic_time(:microsecond) - started
-            Process.put(:m5_05_d1_call_ref, call_ref)
+      outcome =
+        try do
+          result =
+            UnboxedPostgres.with_connection(fn ->
+              checkout_wait = System.monotonic_time(:microsecond) - started
+              Process.put(:m5_05_d1_call_ref, call_ref)
 
-            try do
-              read_transaction(fixture, plan)
-            after
-              Process.delete(:m5_05_d1_call_ref)
-            end
-            |> then(&{&1, checkout_wait})
-          end)
+              try do
+                read_transaction(fixture, plan)
+              after
+                Process.delete(:m5_05_d1_call_ref)
+              end
+              |> then(&{&1, checkout_wait})
+            end)
 
-        {result, nil}
-      rescue
-        error ->
-          if pool_timeout?(error),
-            do: {{:pool_timeout, Exception.message(error)}, nil},
-            else: {{:unexpected, Exception.message(error)}, nil}
-      end
+          {result, nil}
+        rescue
+          error ->
+            if pool_timeout?(error),
+              do: {{:pool_timeout, Exception.message(error)}, nil},
+              else: {{:unexpected, Exception.message(error)}, nil}
+        end
 
-    duration = System.monotonic_time(:microsecond) - started
+      duration = System.monotonic_time(:microsecond) - started
 
-    {result, checkout_wait} =
-      case outcome do
-        {{value, wait}, nil} -> {value, wait}
-        {{:pool_timeout, reason}, nil} -> {{:pool_timeout, reason}, duration}
-        {{:unexpected, reason}, nil} -> {{:unexpected, reason}, duration}
-      end
+      {result, checkout_wait} =
+        case outcome do
+          {{value, wait}, nil} -> {value, wait}
+          {{:pool_timeout, reason}, nil} -> {{:pool_timeout, reason}, duration}
+          {{:unexpected, reason}, nil} -> {{:unexpected, reason}, duration}
+        end
 
-    %{
-      call_ref: call_ref,
-      duration_us: duration,
-      checkout_wait_us: checkout_wait,
-      result: result,
-      classification: classify_result(result),
-      edge_result_cardinality: edge_cardinality(result)
-    }
+      %{
+        call_ref: call_ref,
+        duration_us: duration,
+        checkout_wait_us: checkout_wait,
+        result: result,
+        classification: classify_result(result),
+        edge_result_cardinality: edge_cardinality(result)
+      }
+    end)
+  end
+
+  defp with_measured_call_counter(counters, fun) do
+    active = :atomics.add_get(counters, 1, 1)
+    update_max!(counters, active)
+
+    try do
+      fun.()
+    after
+      :atomics.sub(counters, 1, 1)
+    end
   end
 
   defp sample_query_contract(sample, telemetry_table, case_spec) do
@@ -976,7 +1029,7 @@ defmodule EventSales.Analytics.M5_05VelocityOptionAGateTest do
         Enum.all?(
           rows,
           &(&1.sample_count == @samples and &1.actual_worker_count == &1.requested_concurrency and
-              &1.max_simultaneous_callers_observed == &1.requested_concurrency)
+              &1.max_simultaneous_measured_calls_observed == &1.requested_concurrency)
         )
 
     normal_pass =
@@ -1064,6 +1117,16 @@ defmodule EventSales.Analytics.M5_05VelocityOptionAGateTest do
     IO.puts("MEASUREMENT_VALID=#{if report.measurement_valid, do: "YES", else: "NO"}")
     IO.puts("DB_POOL_SIZE=#{@pool_size}")
     IO.puts("CONCURRENCY_COHORTS=1,20,50")
+
+    Enum.each(@cohorts, fn cohort ->
+      row = Enum.find(report.measurement_rows, &(&1.requested_concurrency == cohort))
+      IO.puts("ACTUAL_WORKERS_C#{cohort}=#{row && row.actual_worker_count}")
+
+      IO.puts(
+        "MAX_MEASURED_CALL_OVERLAP_C#{cohort}=#{row && row.max_simultaneous_measured_calls_observed}"
+      )
+    end)
+
     IO.puts("MEASUREMENT_ROWS=#{length(report.measurement_rows)}")
     IO.puts("EXPLAIN_ROWS=#{length(report.explain_rows)}")
     IO.puts("QUERY_SHAPE_PASS=#{Map.get(report, :query_shape_pass, false)}")
