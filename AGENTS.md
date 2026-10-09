@@ -148,6 +148,43 @@ Use `rg` for broad text search.
 
 Use `ast-grep run` or `ast-grep scan` when structural code discovery is materially better than text search.
 
+### Worktree Dev Core activation
+
+The tracked `.devcore/` files define the EventSales allocation. The canonical
+passwords live in `~/.config/dev-core/project-db.env`; `.env.local` is a
+generated, ignored copy with mode `0600`.
+
+After creating a worktree or changing this infrastructure contract, run:
+
+```bash
+devcore-project plan
+devcore-project activate
+```
+
+`devcore-project activate` provisions only EventSales PostgreSQL roles and
+databases, renders local environment files, and checks both PostgreSQL clusters
+and Redis namespaces. It never starts, stops, recreates, or deletes the shared
+`dev-core` services. It does not run EventSales migrations.
+
+Run application commands through the local script or the matching bootstrap
+profile:
+
+```bash
+bash scripts/dev_local.sh
+devcore-project run dev -- <development command>
+devcore-project run test -- <test command>
+```
+
+Redis namespaces are key prefixes. DEV uses `eventsales:dev`; TEST uses
+`eventsales:test`. Shared Redis code must never use `FLUSHDB` or `FLUSHALL`,
+and cleanup must remain scoped to EventSales keys. Tests must use a per-run
+TEST namespace nonce if they access shared Redis concurrently. Current tests
+use in-memory Redis adapters; bootstrap probes write only short-lived keys
+inside the EventSales prefixes.
+
+If `devcore-project doctor` fails, stop and report the dependency failure.
+Do not start a project-local replacement for shared PostgreSQL or Redis.
+
 ---
 
 ## Local-first development environment
