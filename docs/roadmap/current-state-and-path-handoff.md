@@ -8,7 +8,7 @@
 | Authority | This document wins for current program priority and Path 2 resume procedure |
 | Durable Phase 5D evidence | `docs/phase-5d/native-v3-e2e-run-report.md` |
 | Historical Phase 5D certification commit | `c286fd0e647199a261b6ef2ec3791617dacb5834` |
-| Handoff version | `v26` |
+| Handoff version | `v27` |
 | Last updated | 2026-10-09 |
 | Path 1 repository truth | `docs/path-1/m1-01-current-repo-truth.md` |
 | Path 1 execution roadmap | `docs/path-1/path-1-phase-breakdown.md` |
@@ -49,6 +49,7 @@
 - `v24` — PRE-M5-TIME COMPLETE (PASS); TIME-G1 PR #264 merged as `c1fc8cd02b1809d3fd97e379b16dfec29d65b870` with exact merge-SHA CI #695 / 36525412734 6/6 PASS; `GAP-PRE-M5-TIME` CLOSED; all PRE-M5 gates CLOSED; M5 AUTHORIZED; next = M5-01 Base Event Aggregates.
 - `v25` — M5-01 COMPLETE (PASS); M5-01B PR #268; M5-01C certification PR #269 merged `42d830343c3baa714cec2eda8568d00ddb981abe` (tree `cbf5b19ddbdaabc6cf8ba86b177aeccefb4e8b96`); B01–B23 certified; next = M5-02 — Ticket/Product/Variation Aggregates.
 - `v26` — M5-02, M5-03 and M5-04 COMPLETE (PASS); M5-05 owner semantics durably locked via PR #308; M5-05B pure deterministic velocity kernel COMPLETE (PASS) via PR #306 / merge `e7ea13be93b4fc235bf2085a73ebec036cd9e5fd` / tree `0a967b95318c0487a597bd5dd8f8df8e5a59eef2`; next authorized task is M5-05C shared projection extraction; M5-05D+ remain unauthorized.
+- `v27` — M5-05C COMPLETE_PASS via PR #312 (reviewed head `593081c05f34b5c2e51e617d32a7f5c79295a372`, head/merge tree `06d7f07d97be7cb7a31c361c44fb0a1c51a18e43`, exact-head CI run `37929322765` 7/7 PASS; merge `353546800740679d35607de6fd7104818de64c86`). Next is authorized M5-05D1 Option-A measurement. D2 awaits review; E remains blocked pending a canonical D2 GO and separate admission. PR #313 is the Dev Core baseline only.
 
 ### Conflict rule
 
@@ -129,7 +130,7 @@ Status: ESTABLISHED
 
 PATH 1 — MANAGEMENT ANALYTICS
 Status: ACTIVE
-Next milestone: M5-05C — Behavior-Preserving Shared Projection Extraction
+Next milestone: M5-05D1 — Option-A pre-reader query-plan/load measurement
 M5: ACTIVE
 M5 COMPLETE: NO
 M5 authorization: AUTHORIZED
@@ -139,8 +140,14 @@ M5-03: COMPLETE
 M5-04: COMPLETE
 M5-05A: COMPLETE
 M5-05B: COMPLETE_PASS
-M5-05C: AUTHORIZED_NOT_STARTED
-NEXT: M5-05C
+M5-05C: COMPLETE_PASS
+M5-05D: ACTIVE
+M5-05D1: AUTHORIZED_NOT_STARTED
+M5-05D2: BLOCKED_PENDING_D1_REVIEW
+M5-05E: BLOCKED_PENDING_D2_OPTION_A_GO
+M5-05F: BLOCKED
+M5-05G: BLOCKED
+NEXT: M5-05D1
 P1-00: COMPLETE
 M1-01: COMPLETE (PASS)
 M1-01A: COMPLETE (PASS)
@@ -216,7 +223,7 @@ M5-01 B01–B23: CERTIFIED
 M5-01 implementation: PR #268
 M5-01 certification: PR #269
 M5-01 merge authority: 42d830343c3baa714cec2eda8568d00ddb981abe
-Current Path 1 task: M5-05C — Behavior-Preserving Shared Projection Extraction
+Current Path 1 task: M5-05D1 — Option-A pre-reader query-plan/load measurement
 GAP-PRE-M5-METRICS: CLOSED
 GAP-PRE-M5-TIME: CLOSED
 GAP-PRE-M5-READY-IX: CLOSED
@@ -228,8 +235,14 @@ M5-03: COMPLETE
 M5-04: COMPLETE
 M5-05A: COMPLETE
 M5-05B: COMPLETE_PASS
-M5-05C: AUTHORIZED_NOT_STARTED
-NEXT: M5-05C
+M5-05C: COMPLETE_PASS
+M5-05D: ACTIVE
+M5-05D1: AUTHORIZED_NOT_STARTED
+M5-05D2: BLOCKED_PENDING_D1_REVIEW
+M5-05E: BLOCKED_PENDING_D2_OPTION_A_GO
+M5-05F: BLOCKED
+M5-05G: BLOCKED
+NEXT: M5-05D1
 
 PATH 2 — AUTOMATIC SYNC / CATALOGUE AUTOMATION
 Status: PAUSED AT CERTIFIED CHECKPOINT
@@ -620,7 +633,7 @@ M7 — Production Certification / Pilot
 
 ```text
 CURRENT NEXT STEP:
-M5-05C — Behavior-Preserving Shared Projection Extraction
+M5-05D1 — Option-A pre-reader query-plan/load measurement
 
 M5:
 ACTIVE (PRE-M5-TIME COMPLETE; all PRE-M5 gates CLOSED)
@@ -806,7 +819,7 @@ GAP-PRE-M5-READY-IX:
 CLOSED
 
 NEXT:
-M5-05C
+M5-05D1
 
 M5 AUTHORIZATION:
 AUTHORIZED
@@ -833,7 +846,19 @@ M5-05B:
 COMPLETE_PASS
 
 M5-05C:
+COMPLETE_PASS
+
+M5-05D:
+ACTIVE
+
+M5-05D1:
 AUTHORIZED_NOT_STARTED
+
+M5-05D2:
+BLOCKED_PENDING_D1_REVIEW
+
+M5-05E:
+BLOCKED_PENDING_D2_OPTION_A_GO
 
 TAX-INCLUSIVE REVENUE CONTRACT:
 IMPLEMENTED / CERTIFIED BY PRE-M5-02F (MG2)
@@ -974,7 +999,7 @@ PATH 1 — TRUSTED MANAGEMENT ANALYTICS
 ACTIVE
 
 Current Path 1 task:
-M5-05C — Behavior-Preserving Shared Projection Extraction
+M5-05D1 — Option-A pre-reader query-plan/load measurement
 
 M5:
 ACTIVE
@@ -1001,7 +1026,19 @@ M5-05B:
 COMPLETE_PASS
 
 M5-05C:
+COMPLETE_PASS
+
+M5-05D:
+ACTIVE
+
+M5-05D1:
 AUTHORIZED_NOT_STARTED
+
+M5-05D2:
+BLOCKED_PENDING_D1_REVIEW
+
+M5-05E:
+BLOCKED_PENDING_D2_OPTION_A_GO
 
 M5-01 B01–B23:
 CERTIFIED
@@ -1061,7 +1098,7 @@ GAP-PRE-M5-READY-IX:
 CLOSED (UNCHANGED)
 
 NEXT:
-M5-05C
+M5-05D1
 
 P1-00:
 COMPLETE
