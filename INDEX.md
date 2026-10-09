@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-434
+435
 
 ## Files
 
@@ -56,6 +56,7 @@ Project root: `.`
 - `lib/event_sales/analytics/period_projection_invalidator.ex`
 - `lib/event_sales/analytics/period_projection_refresh.ex`
 - `lib/event_sales/analytics/period_read_plan.ex`
+- `lib/event_sales/analytics/projection_period_reader.ex`
 - `lib/event_sales/analytics/refund_processed_notifier.ex`
 - `lib/event_sales/analytics/resources/analytics_contribution_fact.ex`
 - `lib/event_sales/analytics/resources/daily_sales_aggregate_snapshot.ex`
@@ -688,6 +689,12 @@ Project root: `.`
   - specs?: true
   - docs_count: 2
   - public_funs: `build/1`, `decompose_period/2`
+  - uses: _none_
+- `EventSales.Analytics.ProjectionPeriodReader` - `lib/event_sales/analytics/projection_period_reader.ex`
+  - moduledoc?: true
+  - specs?: false
+  - docs_count: 1
+  - public_funs: `read/3`
   - uses: _none_
 - `EventSales.Analytics.RefundProcessedNotifier` - `lib/event_sales/analytics/refund_processed_notifier.ex`
   - moduledoc?: true

@@ -12,13 +12,11 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
   alias EventSales.Accounts.Resources.User
   alias EventSales.Analytics.MetricRules
   alias EventSales.Analytics.PeriodReadPlan
+  alias EventSales.Analytics.ProjectionPeriodReader
   alias EventSales.Analytics.TimeRules
   alias EventSales.Analytics.TimeRules.ComparisonWindows
 
-  alias EventSales.Analytics.Resources.{
-    EventDimensionPeriodAggregateSnapshot,
-    EventPeriodAggregateSnapshot
-  }
+  alias EventSales.Analytics.Resources.EventDimensionPeriodAggregateSnapshot
 
   alias EventSales.Analytics.EventSnapshotRefreshFence
   alias EventSales.Ingestion.AnalyticsReadinessResolver
@@ -200,25 +198,31 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
   end
 
   defp load_projection_operands(event_id, currency, plan) do
-    fixed_buckets = Enum.flat_map(plan.operands, & &1.fixed_buckets)
     edge_fragments = Enum.flat_map(plan.operands, & &1.edge_fragments)
     coverage_specs = coverage_bucket_specs_for_plan(plan)
-    snapshot_specs = required_event_snapshot_specs(fixed_buckets, edge_fragments)
 
-    with {:ok, event_rows} <- fetch_event_snapshot_rows(event_id, currency, snapshot_specs),
-         {:ok, event_edges} <-
-           aggregate_event_edges(event_id, currency, edge_fragments, event_rows),
+    with {:ok, event_projection} <- ProjectionPeriodReader.read(event_id, currency, plan),
          {:ok, dim_coverage_rows} <-
            fetch_dimension_coverage_rows(event_id, currency, coverage_specs),
          {:ok, dim_interior_rows} <-
-           fetch_dimension_interior_rows(event_id, currency, fixed_buckets),
+           fetch_dimension_interior_rows(
+             event_id,
+             currency,
+             Enum.flat_map(plan.operands, & &1.fixed_buckets)
+           ),
          {:ok, dim_edges} <-
-           aggregate_dimension_edges(event_id, currency, edge_fragments, event_rows) do
+           aggregate_dimension_edges(
+             event_id,
+             currency,
+             edge_fragments,
+             event_projection.event_rows
+           ) do
       {:ok,
        %{
          plan: plan,
-         event_rows: event_rows,
-         event_edges: event_edges,
+         event_rows: event_projection.event_rows,
+         event_edges: event_projection.event_edges,
+         event_projection: event_projection,
          dim_coverage_rows: dim_coverage_rows,
          dim_interior_rows: dim_interior_rows,
          dim_edges: dim_edges
@@ -252,38 +256,6 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
     end)
   end
 
-  defp required_event_snapshot_specs(fixed_buckets, edge_fragments) do
-    envelope_specs =
-      Enum.map(edge_fragments, fn fragment ->
-        hour_start = fragment.envelope_hour_start_utc
-
-        %{
-          bucket_kind: :utc_hour,
-          bucket_start_utc: hour_start,
-          bucket_end_utc: DateTime.add(hour_start, 1, :hour)
-        }
-      end)
-
-    (fixed_buckets ++ envelope_specs)
-    |> Enum.uniq_by(fn spec ->
-      {spec.bucket_kind, spec.bucket_start_utc, spec.bucket_end_utc}
-    end)
-  end
-
-  defp fetch_event_snapshot_rows(_event_id, _currency, []), do: {:ok, []}
-
-  defp fetch_event_snapshot_rows(event_id, currency, snapshot_specs) do
-    bucket_filter = bucket_specs_dynamic(snapshot_specs)
-
-    query =
-      from(row in EventPeriodAggregateSnapshot,
-        where: row.event_id == ^event_id and row.currency == ^currency,
-        where: ^bucket_filter
-      )
-
-    {:ok, Repo.all(query)}
-  end
-
   defp bucket_specs_dynamic(specs) do
     Enum.reduce(specs, dynamic(false), fn spec, dyn ->
       dynamic(
@@ -296,60 +268,10 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
     end)
   end
 
-  defp current_compatible_row?(row) do
-    row.projection_state == :current and row.semantic_version >= 1 and
-      is_binary(row.coverage_identity) and byte_size(row.coverage_identity) > 0
-  end
-
-  defp aggregate_event_edges(_event_id, _currency, [], _event_rows), do: {:ok, %{}}
-
-  defp aggregate_event_edges(event_id, currency, edge_fragments, event_rows) do
-    {coverage_by_hour, semantic_by_hour} = envelope_hour_metadata_maps(event_rows)
-
-    if envelope_metadata_complete?(edge_fragments, coverage_by_hour, semantic_by_hour) do
-      aggregate_event_edges_with_metadata(
-        event_id,
-        currency,
-        edge_fragments,
-        coverage_by_hour,
-        semantic_by_hour
-      )
-    else
-      {:ok, zero_event_edges(edge_fragments)}
-    end
-  end
-
-  defp aggregate_event_edges_with_metadata(
-         event_id,
-         currency,
-         edge_fragments,
-         coverage_by_hour,
-         semantic_by_hour
-       ) do
-    with {:ok, rows} <-
-           query_edge_aggregates(
-             event_id,
-             currency,
-             edge_fragments,
-             coverage_by_hour,
-             semantic_by_hour,
-             nil
-           ) do
-      indexed = index_event_edge_rows(rows, edge_fragments)
-      {:ok, finalize_event_edges(indexed, edge_fragments)}
-    end
-  end
-
   defp envelope_metadata_complete?(edge_fragments, coverage_by_hour, semantic_by_hour) do
     Enum.all?(edge_fragments, fn fragment ->
       hour = fragment.envelope_hour_start_utc
       Map.has_key?(coverage_by_hour, hour) and Map.has_key?(semantic_by_hour, hour)
-    end)
-  end
-
-  defp zero_event_edges(edge_fragments) do
-    Map.new(edge_fragments, fn fragment ->
-      {edge_map_key(fragment), %{primitives: zero_primitives(), metadata_mismatch_count: 0}}
     end)
   end
 
@@ -591,8 +513,6 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
     end
   end
 
-  defp edge_select_and_group(nil), do: {"", ""}
-
   defp edge_select_and_group(:ticket_type),
     do: {"f.ticket_type_id AS ticket_type_id,", ", f.ticket_type_id"}
 
@@ -619,19 +539,6 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
     }
   end
 
-  defp edge_metadata_mismatch_count(row) do
-    count =
-      Map.get(row, :metadata_mismatch_count) || row_value(row, "metadata_mismatch_count") || 0
-
-    case count do
-      n when is_integer(n) -> n
-      n when is_float(n) -> trunc(n)
-      %Decimal{} = d -> Decimal.to_integer(d)
-      n when is_binary(n) -> String.to_integer(n)
-      _ -> 0
-    end
-  end
-
   defp decode_edge_rows(%{columns: columns, rows: rows}, kind) do
     rows
     |> Enum.map(fn row ->
@@ -656,9 +563,6 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
     }
 
     case kind do
-      nil ->
-        base
-
       :ticket_type ->
         Map.put(base, :ticket_type_id, uuid_dump!(row["ticket_type_id"]))
 
@@ -675,112 +579,13 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
     end
   end
 
-  defp index_event_edge_rows(rows, edge_fragments) do
-    indexed =
-      rows
-      |> Enum.reject(&is_nil/1)
-      |> Map.new(fn row ->
-        fragment = find_edge_fragment!(edge_fragments, row)
-        key = {fragment.operand, fragment.edge_start_utc, fragment.edge_end_utc}
-
-        {key,
-         %{
-           primitives: edge_primitive_map(row),
-           metadata_mismatch_count: edge_metadata_mismatch_count(row)
-         }}
-      end)
-
-    Enum.reduce(edge_fragments, indexed, fn fragment, acc ->
-      key = {fragment.operand, fragment.edge_start_utc, fragment.edge_end_utc}
-
-      Map.update(acc, key, %{primitives: zero_primitives(), metadata_mismatch_count: 0}, fn
-        existing -> existing
-      end)
-    end)
-  end
-
-  defp find_edge_fragment!(fragments, row) do
-    Enum.find(fragments, fn fragment ->
-      Atom.to_string(fragment.operand) == row.operand and
-        datetime_equal?(fragment.edge_start_utc, row.edge_start_utc) and
-        datetime_equal?(fragment.edge_end_utc, row.edge_end_utc)
-    end) || raise "missing edge fragment for #{inspect(row)}"
-  end
-
-  defp datetime_equal?(left, right) do
-    DateTime.compare(to_datetime!(left), to_datetime!(right)) == :eq
-  end
-
-  defp to_datetime!(value) do
-    case Ecto.Type.cast(:utc_datetime_usec, value) do
-      {:ok, %DateTime{} = dt} -> dt
-      _ -> raise ArgumentError, "unsupported datetime: #{inspect(value)}"
-    end
-  end
-
   defp assess_operand_readiness(operand_plan, payload) do
-    if operand_projection_ready?(operand_plan, payload), do: :ready, else: :not_ready
-  end
+    event_operand = event_projection_operand(operand_plan, payload)
 
-  defp operand_projection_ready?(operand_plan, payload) do
-    event_index = index_event_rows(payload.event_rows)
-
-    fixed_ready? =
-      Enum.all?(operand_plan.fixed_buckets, fn bucket ->
-        bucket_ready?(Map.get(event_index, bucket_key(bucket)))
-      end)
-
-    envelope_ready? =
-      Enum.all?(operand_plan.edge_fragments, fn fragment ->
-        hour_start = fragment.envelope_hour_start_utc
-
-        bucket_ready?(
-          Map.get(event_index, {:utc_hour, hour_start, DateTime.add(hour_start, 1, :hour)})
-        )
-      end)
-
-    metadata_ready? = operand_metadata_coherent?(operand_plan, payload)
-    dimension_ready? = operand_dimension_coverage_ready?(operand_plan, payload)
-    edge_metadata_ready? = operand_edge_metadata_ready?(operand_plan, payload)
-
-    fixed_ready? and envelope_ready? and metadata_ready? and dimension_ready? and
-      edge_metadata_ready?
-  end
-
-  defp bucket_ready?(nil), do: false
-  defp bucket_ready?(row), do: current_compatible_row?(row)
-
-  defp operand_metadata_coherent?(operand_plan, payload) do
-    rows = operand_event_rows(operand_plan, payload)
-
-    if rows == [] do
-      false
-    else
-      semantics = Enum.map(rows, & &1.semantic_version) |> Enum.uniq()
-      coverages = Enum.map(rows, & &1.coverage_identity) |> Enum.uniq()
-
-      length(semantics) == 1 and length(coverages) == 1 and
-        Enum.all?(rows, &current_compatible_row?/1)
-    end
-  end
-
-  defp operand_event_rows(operand_plan, payload) do
-    indexed = index_event_rows(payload.event_rows)
-
-    fixed_rows =
-      Enum.map(operand_plan.fixed_buckets, fn bucket ->
-        Map.get(indexed, bucket_key(bucket))
-      end)
-
-    envelope_rows =
-      Enum.map(operand_plan.edge_fragments, fn fragment ->
-        hour_start = fragment.envelope_hour_start_utc
-        Map.get(indexed, {:utc_hour, hour_start, DateTime.add(hour_start, 1, :hour)})
-      end)
-
-    (fixed_rows ++ envelope_rows)
-    |> Enum.reject(&is_nil/1)
-    |> Enum.uniq_by(& &1.id)
+    if event_operand.readiness == :ready and
+         operand_dimension_coverage_ready?(operand_plan, payload),
+       do: :ready,
+       else: :not_ready
   end
 
   defp operand_dimension_coverage_ready?(operand_plan, payload) do
@@ -822,53 +627,6 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
       {:error, _} ->
         false
     end
-  end
-
-  defp operand_edge_metadata_ready?(operand_plan, payload) do
-    Enum.all?(operand_plan.edge_fragments, fn fragment ->
-      case find_event_edge_payload(payload.event_edges, fragment) do
-        %{metadata_mismatch_count: count} when count == 0 -> true
-        %{metadata_mismatch_count: _count} -> false
-        _ -> false
-      end
-    end)
-  end
-
-  defp finalize_event_edges(indexed, edge_fragments) do
-    Map.new(edge_fragments, fn fragment ->
-      key = edge_map_key(fragment)
-
-      entry =
-        find_event_edge_payload(indexed, fragment) ||
-          %{primitives: zero_primitives(), metadata_mismatch_count: 0}
-
-      {key, entry}
-    end)
-  end
-
-  defp find_event_edge_payload(edges, fragment) when is_map(edges) do
-    Enum.find_value(edges, fn {key, entry} ->
-      if edge_map_key_matches?(key, fragment), do: entry
-    end)
-  end
-
-  defp edge_map_key(fragment) do
-    {fragment.operand, fragment.edge_start_utc, fragment.edge_end_utc}
-  end
-
-  defp edge_map_key_matches?({operand, edge_start, edge_end}, fragment) do
-    operand == fragment.operand and datetime_equal?(edge_start, fragment.edge_start_utc) and
-      datetime_equal?(edge_end, fragment.edge_end_utc)
-  end
-
-  defp operand_scope_metadata(operand_plan, payload) do
-    rows = operand_event_rows(operand_plan, payload)
-    row = hd(rows)
-
-    %{
-      semantic_version: row.semantic_version,
-      coverage_identity: row.coverage_identity
-    }
   end
 
   defp event_bucket_zero?(row) do
@@ -986,32 +744,26 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
   end
 
   defp compose_operand(operand_plan, payload, :ready) do
-    indexed_rows = index_event_rows(payload.event_rows)
-
-    fixed_rows =
-      Enum.map(operand_plan.fixed_buckets, fn bucket ->
-        Map.fetch!(indexed_rows, bucket_key(bucket))
-      end)
-
-    primitives = sum_event_rows(fixed_rows)
-
-    edge_primitives =
-      sum_edge_primitives(operand_plan.edge_fragments, payload.event_edges)
-
-    merged = merge_primitives(primitives, edge_primitives)
+    event_operand = event_projection_operand(operand_plan, payload)
 
     metrics =
-      case MetricRules.derive_financial_metrics(merged) do
+      case MetricRules.derive_financial_metrics(event_operand.primitives) do
         {:ok, metrics} -> metrics
         {:error, _} -> nil
       end
 
     %{
-      scope: operand_scope_metadata(operand_plan, payload),
-      primitives: merged,
+      scope: event_operand.scope,
+      primitives: event_operand.primitives,
       metrics: metrics
     }
   end
+
+  defp event_projection_operand(%{operand: :current}, payload),
+    do: payload.event_projection.current_operand
+
+  defp event_projection_operand(%{operand: :previous}, payload),
+    do: payload.event_projection.previous_operand
 
   defp projection_scope(envelope, %{scope: nil}) do
     %{
@@ -1364,15 +1116,6 @@ defmodule EventSales.Analytics.PeriodComparisonReader do
 
   defp sum_dimension_rows(rows) do
     sum_event_rows(rows)
-  end
-
-  defp sum_edge_primitives(fragments, edges) do
-    Enum.reduce(fragments, zero_primitives(), fn fragment, acc ->
-      edge_entry =
-        find_event_edge_payload(edges, fragment) || %{primitives: zero_primitives()}
-
-      merge_primitives(acc, edge_entry.primitives)
-    end)
   end
 
   defp sum_edge_group_rows(rows) do

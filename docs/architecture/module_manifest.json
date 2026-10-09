@@ -44,6 +44,7 @@
     "lib/event_sales/analytics/period_projection_invalidator.ex",
     "lib/event_sales/analytics/period_projection_refresh.ex",
     "lib/event_sales/analytics/period_read_plan.ex",
+    "lib/event_sales/analytics/projection_period_reader.ex",
     "lib/event_sales/analytics/refund_processed_notifier.ex",
     "lib/event_sales/analytics/resources/analytics_contribution_fact.ex",
     "lib/event_sales/analytics/resources/daily_sales_aggregate_snapshot.ex",
@@ -1328,6 +1329,21 @@
         }
       ],
       "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 1,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.ProjectionPeriodReader",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/projection_period_reader.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "read"
+        }
+      ],
+      "specs?": false,
       "uses": []
     },
     {
