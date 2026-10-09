@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-433
+434
 
 ## Files
 
@@ -80,6 +80,7 @@ Project root: `.`
 - `lib/event_sales/analytics/validations/validate_dimension_source_event.ex`
 - `lib/event_sales/analytics/validations/validate_dimension_ticket_type_event.ex`
 - `lib/event_sales/analytics/validations/validate_period_bucket_contract.ex`
+- `lib/event_sales/analytics/velocity_rules.ex`
 - `lib/event_sales/analytics/workers/period_coverage_maintenance_worker.ex`
 - `lib/event_sales/analytics/workers/rebuild_hot_state_worker.ex`
 - `lib/event_sales/analytics/workers/refresh_snapshot_worker.ex`
@@ -793,8 +794,8 @@ Project root: `.`
 - `EventSales.Analytics.TimeRules` - `lib/event_sales/analytics/time_rules.ex`
   - moduledoc?: true
   - specs?: true
-  - docs_count: 14
-  - public_funs: `sale_effective_at/1`, `refund_effective_at/1`, `business_date/2`, `today_bounds/2`, `yesterday_bounds/2`, `rolling_bounds/2`, `last_7_days_bounds/1`, `last_30_days_bounds/1`, `comparison_windows/3`, `custom_civil_bounds/3`, `period_contains?/2`, `source_age_microseconds/2`, `classify_source_freshness/2`, `freshness_classification/2`
+  - docs_count: 15
+  - public_funs: `sale_effective_at/1`, `refund_effective_at/1`, `business_date/2`, `today_bounds/2`, `yesterday_bounds/2`, `rolling_bounds/2`, `last_7_days_bounds/1`, `last_30_days_bounds/1`, `comparison_windows/3`, `velocity_windows/2`, `custom_civil_bounds/3`, `period_contains?/2`, `source_age_microseconds/2`, `classify_source_freshness/2`, `freshness_classification/2`
   - uses: _none_
 - `Freshness` - `lib/event_sales/analytics/time_rules.ex`
   - moduledoc?: true
@@ -850,6 +851,12 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `init/1`, `validate/3`
   - uses: `Ash.Resource.Validation`
+- `EventSales.Analytics.VelocityRules` - `lib/event_sales/analytics/velocity_rules.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 2
+  - public_funs: `rate_per_hour/2`, `compare_rates/2`
+  - uses: _none_
 - `EventSales.Analytics.Workers.PeriodCoverageMaintenanceWorker` - `lib/event_sales/analytics/workers/period_coverage_maintenance_worker.ex`
   - moduledoc?: true
   - specs?: true

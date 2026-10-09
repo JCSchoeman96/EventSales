@@ -68,6 +68,7 @@
     "lib/event_sales/analytics/validations/validate_dimension_source_event.ex",
     "lib/event_sales/analytics/validations/validate_dimension_ticket_type_event.ex",
     "lib/event_sales/analytics/validations/validate_period_bucket_contract.ex",
+    "lib/event_sales/analytics/velocity_rules.ex",
     "lib/event_sales/analytics/workers/period_coverage_maintenance_worker.ex",
     "lib/event_sales/analytics/workers/rebuild_hot_state_worker.ex",
     "lib/event_sales/analytics/workers/refresh_snapshot_worker.ex",
@@ -1602,7 +1603,7 @@
       "uses": []
     },
     {
-      "docs_count": 14,
+      "docs_count": 15,
       "moduledoc?": true,
       "name": "EventSales.Analytics.TimeRules",
       "parse_error": null,
@@ -1643,6 +1644,10 @@
         {
           "arity": 3,
           "name": "comparison_windows"
+        },
+        {
+          "arity": 2,
+          "name": "velocity_windows"
         },
         {
           "arity": 3,
@@ -1834,6 +1839,25 @@
       "uses": [
         "Ash.Resource.Validation"
       ]
+    },
+    {
+      "docs_count": 2,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.VelocityRules",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/velocity_rules.ex",
+      "public_funs": [
+        {
+          "arity": 2,
+          "name": "rate_per_hour"
+        },
+        {
+          "arity": 2,
+          "name": "compare_rates"
+        }
+      ],
+      "specs?": true,
+      "uses": []
     },
     {
       "docs_count": 2,

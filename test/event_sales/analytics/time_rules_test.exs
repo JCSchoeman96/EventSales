@@ -293,6 +293,66 @@ defmodule EventSales.Analytics.TimeRulesTest do
     end
   end
 
+  describe "velocity_windows/2" do
+    @minutes_us 60 * 1_000_000
+
+    for minutes <- [15, 30, 60] do
+      test "rolling #{minutes}m windows use exact UTC duration, adjacency, and half-open bounds" do
+        minutes = unquote(minutes)
+        now = ~U[2026-06-01 12:34:56.789012Z]
+        request = {:rolling_minutes, minutes}
+
+        assert {:ok, %ComparisonWindows{} = windows} = TimeRules.velocity_windows(now, request)
+
+        duration_us = minutes * @minutes_us
+
+        assert windows.captured_now_utc == now
+        assert windows.request == request
+        assert windows.timezone == nil
+        assert windows.current.end_utc == now
+        assert windows.previous.end_utc == windows.current.start_utc
+
+        assert DateTime.diff(windows.current.end_utc, windows.current.start_utc, :microsecond) ==
+                 duration_us
+
+        assert DateTime.diff(windows.previous.end_utc, windows.previous.start_utc, :microsecond) ==
+                 duration_us
+
+        assert windows.current.kind == {:rolling_minutes, minutes}
+        assert windows.previous.kind == {:rolling_minutes, minutes}
+
+        refute TimeRules.period_contains?(windows.current, windows.current.end_utc)
+        assert TimeRules.period_contains?(windows.current, windows.current.start_utc)
+        assert windows.captured_now_utc.microsecond == {789_012, 6}
+      end
+    end
+
+    test "non-UTC input instant normalizes to the same UTC windows as an equivalent UTC now" do
+      utc_now = ~U[2026-06-01 12:00:00.000000Z]
+
+      johannesburg_now =
+        utc_now
+        |> DateTime.shift_zone!("Africa/Johannesburg")
+        |> Map.put(:time_zone, "Africa/Johannesburg")
+
+      assert {:ok, from_utc} = TimeRules.velocity_windows(utc_now, {:rolling_minutes, 30})
+
+      assert {:ok, from_local} =
+               TimeRules.velocity_windows(johannesburg_now, {:rolling_minutes, 30})
+
+      assert from_utc == from_local
+    end
+
+    test "rejects unsupported minute windows" do
+      now = ~U[2026-06-01 12:00:00.000000Z]
+
+      for unsupported <- [5, 45, 120] do
+        assert TimeRules.velocity_windows(now, {:rolling_minutes, unsupported}) ==
+                 {:error, :unsupported_velocity_window}
+      end
+    end
+  end
+
   describe "custom_civil_bounds/3" do
     test "converts Johannesburg local civil bounds to UTC half-open period" do
       start_local = ~N[2026-05-17 00:00:00]

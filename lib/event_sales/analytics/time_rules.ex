@@ -25,6 +25,7 @@ defmodule EventSales.Analytics.TimeRules do
             | :yesterday
             | :custom
             | {:rolling_days, pos_integer()}
+            | {:rolling_minutes, 15 | 30 | 60}
             | {:comparison, :today | :yesterday}
 
     @type t :: %__MODULE__{
@@ -47,8 +48,13 @@ defmodule EventSales.Analytics.TimeRules do
     defstruct [:captured_now_utc, :request, :current, :previous, :timezone]
 
     @type rolling_comparison_days :: 7 | 30
+    @type rolling_velocity_minutes :: 15 | 30 | 60
 
-    @type request :: :today | :yesterday | {:rolling_days, rolling_comparison_days()}
+    @type request ::
+            :today
+            | :yesterday
+            | {:rolling_days, rolling_comparison_days()}
+            | {:rolling_minutes, rolling_velocity_minutes()}
 
     @type t :: %__MODULE__{
             captured_now_utc: DateTime.t(),
@@ -250,6 +256,53 @@ defmodule EventSales.Analytics.TimeRules do
 
   def comparison_windows(_timezone, _now, _request),
     do: {:error, :unsupported_comparison_period}
+
+  @doc """
+  Derives current and previous-equivalent velocity windows from one captured `now`.
+
+  Supported requests: `{:rolling_minutes, 15}`, `{:rolling_minutes, 30}`, and
+  `{:rolling_minutes, 60}`. Windows are absolute UTC durations; no timezone argument is
+  required. The supplied anchor is authoritative; this function never reads the system clock.
+  """
+  @spec velocity_windows(
+          DateTime.t(),
+          {:rolling_minutes, ComparisonWindows.rolling_velocity_minutes()}
+        ) ::
+          {:ok, ComparisonWindows.t()} | {:error, :unsupported_velocity_window}
+  def velocity_windows(%DateTime{} = now, {:rolling_minutes, minutes})
+      when minutes in [15, 30, 60] do
+    captured_now_utc = to_utc(now)
+    duration_seconds = minutes * 60
+
+    current_start = DateTime.add(captured_now_utc, -duration_seconds, :second)
+    previous_end = current_start
+    previous_start = DateTime.add(previous_end, -duration_seconds, :second)
+
+    current = %Period{
+      start_utc: to_utc(current_start),
+      end_utc: captured_now_utc,
+      kind: {:rolling_minutes, minutes},
+      timezone: nil
+    }
+
+    previous = %Period{
+      start_utc: to_utc(previous_start),
+      end_utc: to_utc(previous_end),
+      kind: {:rolling_minutes, minutes},
+      timezone: nil
+    }
+
+    {:ok,
+     %ComparisonWindows{
+       captured_now_utc: captured_now_utc,
+       request: {:rolling_minutes, minutes},
+       current: current,
+       previous: previous,
+       timezone: nil
+     }}
+  end
+
+  def velocity_windows(_now, _request), do: {:error, :unsupported_velocity_window}
 
   @doc """
   Converts inclusive-local start and exclusive-local end civil instants to UTC `[start, end)`.
