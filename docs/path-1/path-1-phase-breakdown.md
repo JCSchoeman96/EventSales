@@ -4,7 +4,7 @@
 | --- | --- |
 | Document | Canonical Path 1 execution roadmap |
 | Plan ID | `path-1-phase-breakdown` |
-| Plan version | `v26` |
+| Plan version | `v27` |
 | Status | ACTIVE — repository-native execution contract |
 | Scope | Path 1 M1–M7 gated implementation sequence |
 | Authority | This file wins for Path 1 task sequencing and physical ownership assumptions |
@@ -21,8 +21,8 @@
 | Historical planning source | Supplied `EVENTSALES_PATH_1_UPDATED_PHASE_BREAKDOWN.md` (v1 conceptual plan; superseded for physical assumptions) |
 | Path 2 / Phase 5E | PAUSED |
 | Prepared | 2026-08-09 |
-| Last updated | 2026-10-08 |
-| Audit base HEAD | `a90f4a6d991510684dde80a538c0847635de2ee9` |
+| Last updated | 2026-10-09 |
+| Audit base HEAD | `1852a171027e5083cbb3ccd0ef3cdc45789e8ed6` |
 
 ### Revision log
 
@@ -52,6 +52,7 @@
 - `v24` — PRE-M5-TIME COMPLETE (PASS); TIME-G1 PR #264 merged (`c1fc8cd...` / approved head `c23053a...`); exact merge-SHA CI #695 passed 6/6; `GAP-PRE-M5-TIME` CLOSED; all PRE-M5 gates CLOSED; M5 AUTHORIZED; next M5-01 Base Event Aggregates.
 - `v25` — M5-01 COMPLETE (PASS); M5-01B PR #268 merged (`f420437`); M5-01C certification PR #269 merged (`42d830343c3baa714cec2eda8568d00ddb981abe` / tree `cbf5b19ddbdaabc6cf8ba86b177aeccefb4e8b96`); B01–B23 certified; next M5-02 — Ticket/Product/Variation Aggregates.
 - `v26` — M5-02 COMPLETE (PASS; PR #276); M5-03 COMPLETE (PASS; PR #282); M5-04 COMPLETE (PASS; PR #300); next M5-05 — Deterministic Sales Velocity.
+- `v27` — M5-05A owner authority COMPLETE; M5-05B COMPLETE (PASS) via PR #306, merge `e7ea13be93b4fc235bf2085a73ebec036cd9e5fd`, tree `0a967b95318c0487a597bd5dd8f8df8e5a59eef2`; M5-05C behavior-preserving shared projection extraction authorized; M5-05D+ remain blocked.
 
 ### Conflict rule
 
@@ -207,12 +208,16 @@ M5-04 merge: 9ed4a65a10ddd876773cc4be9bff0efd41f1412a
 M5-04 merge tree: 6c0d5a27606c337649357f410bd1c8a7ff3c4a02
 M5-04 certification: docs/evidence/m5-04-period-comparisons-certification.md
 M5 COMPLETE: NO
-Current Path 1 task: M5-05 — Deterministic Sales Velocity
+M5-05 — Deterministic Sales Velocity: ACTIVE
+M5-05A — COMPLETE
+M5-05B — COMPLETE (PASS)
+M5-05C — NEXT / AUTHORIZED
+Current Path 1 task: M5-05C — Behavior-Preserving Shared Projection Extraction
 M5 AUTHORIZATION: AUTHORIZED
 GAP-PRE-M5-METRICS: CLOSED
 GAP-PRE-M5-TIME: CLOSED
 GAP-PRE-M5-READY-IX: CLOSED
-NEXT: M5-05 — Deterministic Sales Velocity
+NEXT: M5-05C — Behavior-Preserving Shared Projection Extraction
 ```
 
 ---
@@ -850,7 +855,7 @@ Trusted bounded projections for management — **reuse current Analytics infrast
 | M5-02 Ticket/Product/Variation Aggregates | EXTEND | OrderItem event/ticket fields; ProductMapping IDs | Dimension aggregates without Product resources | TBD | TBD | Bounded cardinality |
 | M5-03 Revenue / Refund Aggregates | EXTEND | MetricRules completed revenue; refund model per M1-05 | Include authorized refund adjustments | TBD | TBD | Decimal only |
 | M5-04 Period Comparisons | EXTEND | DailySalesAggregateSnapshot; business timezone | Johannesburg periods per M1-07 | TBD | TBD | Pre-aggregated |
-| M5-05 Deterministic Sales Velocity | NEW / EXTEND | Hot summaries | Velocity metrics from aggregates/hot state | TBD | TBD | No raw scans |
+| M5-05 Deterministic Sales Velocity | REUSE / EXTEND | TimeRules; PeriodReadPlan; EventPeriodAggregateSnapshot; AnalyticsContributionFact; MetricRules; PeriodComparisonReader | Deterministic sales velocity from certified projection buckets plus bounded contribution edges and pure VelocityRules. Legacy HotStateAggregator is not semantic authority. | TBD | TBD | No raw scans; bounded projection reads; pre-reader Option A gate before VelocityReader |
 | M5-06 Capacity / Occupancy | NEW / EXTEND | Event capacity fields if present | Occupancy from sold vs capacity | TBD | TBD | Event-scoped |
 | M5-07 Freshness and Data-Quality Projection | EXTEND | HotStateAggregator lifecycle; stale banner | Conform to **M1-07** (`>10m` source STALE; separate read-model age; HotStateAggregator 5m marks read-model degradation/rebuild-age only) | NO | TBD | PubSub |
 | M5-08 Hot/Warm/Cold Caching | REUSE / EXTEND / REMOVE_AS_ALREADY_PRESENT | **ETS DashboardCache + Redis warm + Postgres cold**; RebuildHotStateWorker; single-flight; OrderProcessedNotifier; DashboardPubSub | Extend TTLs/keys as needed; **do not add Cachex** | NO | NO | Preserve stampede protection |
@@ -1106,7 +1111,10 @@ P1-00 COMPLETE
 → M5-02 — Ticket/Product/Variation Aggregates COMPLETE (PASS)
 → M5-03 — Revenue / Refund Aggregates COMPLETE (PASS)
 → M5-04 — Period Comparisons COMPLETE (PASS)
-→ M5-05 — Deterministic Sales Velocity NEXT
+→ M5-05 — Deterministic Sales Velocity ACTIVE
+→ M5-05A — COMPLETE
+→ M5-05B — COMPLETE (PASS)
+→ M5-05C — NEXT / AUTHORIZED
 → M5-06 — Capacity / Occupancy
 → M5-07 — Freshness and Data-Quality Projection
 → M5-08 — Hot/Warm/Cold Caching
@@ -1208,7 +1216,19 @@ FINANCIAL RECONCILIATION CONTRACT:
 LOCKED (concept C; exact Decimal; ticket-scoped)
 
 Current Path 1 task:
-M5-05 — Deterministic Sales Velocity
+M5-05C — Behavior-Preserving Shared Projection Extraction
+
+M5-05 — Deterministic Sales Velocity:
+ACTIVE
+
+M5-05A:
+COMPLETE
+
+M5-05B:
+COMPLETE (PASS)
+
+M5-05C:
+NEXT / AUTHORIZED
 
 M5-01:
 COMPLETE (PASS)
@@ -1289,7 +1309,7 @@ GAP-PRE-M5-READY-IX:
 CLOSED
 
 NEXT:
-M5-05 — Deterministic Sales Velocity
+M5-05C — Behavior-Preserving Shared Projection Extraction
 
 M5-02:
 COMPLETE (PASS)
@@ -1444,8 +1464,12 @@ M5-02 = COMPLETE (PASS).
 M5-03 = COMPLETE (PASS).
 M5-04 = COMPLETE (PASS).
 M5 COMPLETE = NO.
-NEXT = M5-05 — Deterministic Sales Velocity.
+M5-05 — Deterministic Sales Velocity = ACTIVE.
+M5-05A = COMPLETE.
+M5-05B = COMPLETE (PASS).
+M5-05C = NEXT / AUTHORIZED.
+NEXT = M5-05C — Behavior-Preserving Shared Projection Extraction.
 M5: AUTHORIZED.
 DO NOT REOPEN M2-07 SCOPE.
-M5-05 is the next authorized programme task after M5-04 G2 merge (PR #300).
+M5-05D+ remain unauthorized until M5-05C completes and separate admission.
 ```
