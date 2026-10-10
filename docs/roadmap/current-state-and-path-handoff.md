@@ -8,7 +8,7 @@
 | Authority | This document wins for current program priority and Path 2 resume procedure |
 | Durable Phase 5D evidence | `docs/phase-5d/native-v3-e2e-run-report.md` |
 | Historical Phase 5D certification commit | `c286fd0e647199a261b6ef2ec3791617dacb5834` |
-| Handoff version | `v28` |
+| Handoff version | `v29` |
 | Last updated | 2026-10-09 |
 | Path 1 repository truth | `docs/path-1/m1-01-current-repo-truth.md` |
 | Path 1 execution roadmap | `docs/path-1/path-1-phase-breakdown.md` |
@@ -51,6 +51,7 @@
 - `v26` — M5-02, M5-03 and M5-04 COMPLETE (PASS); M5-05 owner semantics durably locked via PR #308; M5-05B pure deterministic velocity kernel COMPLETE (PASS) via PR #306 / merge `e7ea13be93b4fc235bf2085a73ebec036cd9e5fd` / tree `0a967b95318c0487a597bd5dd8f8df8e5a59eef2`; next authorized task is M5-05C shared projection extraction; M5-05D+ remain unauthorized.
 - `v27` — M5-05C COMPLETE_PASS via PR #312 (reviewed head `593081c05f34b5c2e51e617d32a7f5c79295a372`, head/merge tree `06d7f07d97be7cb7a31c361c44fb0a1c51a18e43`, exact-head CI run `37929322765` 7/7 PASS; merge `353546800740679d35607de6fd7104818de64c86`). At that revision, M5-05D1 was next, D2 awaited review, and E/F/G were blocked. PR #313 was the Dev Core baseline only.
 - `v28` — records PR #315 D1 COMPLETE_VALID, D2 COMPLETE_NO_GO, and `OPTION_A=NO_GO`. Reviewed head/tree ``70dd18176360e93624fe2a58d7975df18d69ff1d`` / ``ffc0b83c12deb3d4f2091176017b1ca522f5b54d`` passed exact-head CI run `37959876953` (`pull_request`, attempt 1, 7/7); merge ``0f76f792e76379bba7c341ecc5cfc23ecfa7f612`` / tree ``ffc0b83c12deb3d4f2091176017b1ca522f5b54d`` equals the reviewed tree and its GitHub signature is verified. Canonical evidence contains 24 measurement rows and six EXPLAIN summaries. D3 remediation-design admission is the next milestone and remains unauthorized. E is blocked by Option-A NO_GO; F/G remain blocked. Path 2 remains paused.
+- `v29` — records PR #316 D2 closeout merge `363247e697bab361c31bc6b9d94e457fb7b25f35` / tree `ed05c89dd056931bb9d70e8008764772285056fe`, with reviewed-tree equality and GitHub-verified signature. M5-05D3 split-cause remediation design is owner-authorized and `DESIGN_IN_REVIEW`. It recommends one topology-attribution diagnostic experiment; D4 remains unauthorized pending D3 owner review. `OPTION_A=NO_GO`, D remains `COMPLETE_NO_GO`, E/F/G remain unauthorized, and implementation authorization is `NONE`. Path 2 remains paused.
 
 ### Conflict rule
 
@@ -131,7 +132,7 @@ Status: ESTABLISHED
 
 PATH 1 — MANAGEMENT ANALYTICS
 Status: ACTIVE
-Next milestone: M5-05D3 — Option-A NO_GO remediation-design admission
+Next milestone: M5-05D3 owner review of split-cause remediation design
 M5: ACTIVE
 M5 COMPLETE: NO
 M5 authorization: AUTHORIZED
@@ -145,12 +146,15 @@ M5-05C: COMPLETE_PASS
 M5-05D: COMPLETE_NO_GO
 M5-05D1: COMPLETE_VALID
 M5-05D2: COMPLETE_NO_GO
-M5-05D3: BLOCKED_PENDING_SEPARATE_ADMISSION
+M5-05D3: DESIGN_IN_REVIEW
+M5-05D3_AUTHORIZED: YES
+M5-05D3_APPROACH: SPLIT_CAUSE
+M5-05D4: BLOCKED_PENDING_D3_OWNER_REVIEW
 OPTION_A: NO_GO
 M5-05E: BLOCKED_BY_OPTION_A_NO_GO
 M5-05F: BLOCKED
 M5-05G: BLOCKED
-NEXT: M5-05D3 — Option-A NO_GO remediation-design admission
+NEXT: M5-05D3 owner review; D4 remains unauthorized
 P1-00: COMPLETE
 M1-01: COMPLETE (PASS)
 M1-01A: COMPLETE (PASS)
@@ -226,7 +230,7 @@ M5-01 B01–B23: CERTIFIED
 M5-01 implementation: PR #268
 M5-01 certification: PR #269
 M5-01 merge authority: 42d830343c3baa714cec2eda8568d00ddb981abe
-Current Path 1 task: M5-05D3 — Option-A NO_GO remediation-design admission
+Current Path 1 task: M5-05D3 split-cause remediation design, owner review pending
 GAP-PRE-M5-METRICS: CLOSED
 GAP-PRE-M5-TIME: CLOSED
 GAP-PRE-M5-READY-IX: CLOSED
@@ -242,12 +246,15 @@ M5-05C: COMPLETE_PASS
 M5-05D: COMPLETE_NO_GO
 M5-05D1: COMPLETE_VALID
 M5-05D2: COMPLETE_NO_GO
-M5-05D3: BLOCKED_PENDING_SEPARATE_ADMISSION
+M5-05D3: DESIGN_IN_REVIEW
+M5-05D3_AUTHORIZED: YES
+M5-05D3_APPROACH: SPLIT_CAUSE
+M5-05D4: BLOCKED_PENDING_D3_OWNER_REVIEW
 OPTION_A: NO_GO
 M5-05E: BLOCKED_BY_OPTION_A_NO_GO
 M5-05F: BLOCKED
 M5-05G: BLOCKED
-NEXT: M5-05D3 — Option-A NO_GO remediation-design admission
+NEXT: M5-05D3 owner review; D4 remains unauthorized
 
 PATH 2 — AUTOMATIC SYNC / CATALOGUE AUTOMATION
 Status: PAUSED AT CERTIFIED CHECKPOINT
@@ -638,7 +645,7 @@ M7 — Production Certification / Pilot
 
 ```text
 CURRENT NEXT STEP:
-M5-05D3 — Option-A NO_GO remediation-design admission
+M5-05D3 owner review of split-cause design; D4 remains unauthorized
 
 M5:
 ACTIVE (PRE-M5-TIME COMPLETE; all PRE-M5 gates CLOSED)
@@ -863,7 +870,13 @@ M5-05D2:
 COMPLETE_NO_GO
 
 M5-05D3:
-BLOCKED_PENDING_SEPARATE_ADMISSION
+DESIGN_IN_REVIEW
+
+M5-05D3_AUTHORIZED:
+YES
+
+M5-05D4:
+BLOCKED_PENDING_D3_OWNER_REVIEW
 
 OPTION_A:
 NO_GO
@@ -1016,7 +1029,7 @@ PATH 1 — TRUSTED MANAGEMENT ANALYTICS
 ACTIVE
 
 Current Path 1 task:
-M5-05D3 — Option-A NO_GO remediation-design admission
+M5-05D3 split-cause remediation design, owner review pending
 
 M5:
 ACTIVE
@@ -1055,7 +1068,13 @@ M5-05D2:
 COMPLETE_NO_GO
 
 M5-05D3:
-BLOCKED_PENDING_SEPARATE_ADMISSION
+DESIGN_IN_REVIEW
+
+M5-05D3_AUTHORIZED:
+YES
+
+M5-05D4:
+BLOCKED_PENDING_D3_OWNER_REVIEW
 
 OPTION_A:
 NO_GO
