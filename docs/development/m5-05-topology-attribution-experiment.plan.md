@@ -2,6 +2,7 @@
 
 ~~~text
 D4_PLAN_VERSION=v1
+D4_PLAN_AMENDMENT=RUNTIME_REPO_POOL_BOUNDARY_PROOF_REQUIRED
 D4_NAME=C_TOPOLOGY_ATTRIBUTION_REPLAY
 D4_AUTHORIZED=YES
 D4_STATUS=AUTHORIZED_NOT_STARTED
@@ -225,6 +226,9 @@ TOPOLOGY_VERIFIED=YES
 REPRESENTATIVE_NON_PROD_ROUTE=YES
 DB_CONNECTION_BUDGET_VERIFIED=YES
 APP_POOL_CONFIG_VERIFIED=YES
+REPO_STARTED_WITHOUT_APPLICATION=YES
+REPRESENTATIVE_REPO_POOL_REQUIRED=YES
+REPO_POOL_IS_SQL_SANDBOX=NO
 FULL_24_ROW_MATRIX=YES
 ACTUAL_WORKERS_MATCH_REQUESTED=YES
 MAX_OVERLAP_MATCHES_REQUESTED=YES
@@ -241,13 +245,45 @@ QUEUE_CONFIG_UNCHANGED_DURING_RUN=YES
 
 If any mandatory gate fails, set `D4_CANONICAL_EVIDENCE=NO`. Do not interpret the run as remediation evidence.
 
-## 9. Execution file, opt-in, and canonical run
+## 9. Runtime Repo pool proof and canonical run
 
-Expected tracked execution file:
+The canonical measurement must call the existing `ProjectionPeriodReader` through an explicitly started `EventSales.Repo` using the verified representative runtime pool implementation and fixed pool configuration. It must not measure the TEST `Ecto.Adapters.SQL.Sandbox` pool and label that evidence as representative runtime checkout or topology attribution.
 
 ~~~text
-test/event_sales/analytics/m5_05_velocity_topology_attribution_test.exs
+D4_MUST_NOT_MEASURE_SQL_SANDBOX_POOL=YES
+REPRESENTATIVE_REPO_POOL_REQUIRED=YES
+REPRESENTATIVE_RUNTIME_REPO_POOL_REQUIRED=YES
+D4_SQL_SANDBOX_CANONICAL_MEASUREMENT=NO
+CANONICAL_D4_COMMAND_STATUS=DEFERRED_UNTIL_RUNTIME_POOL_HARNESS_PROOF
+CANONICAL_COMMAND=NOT_FROZEN_UNTIL_RUNTIME_POOL_MECHANISM_IS_PROVEN
+EXPECTED_EXECUTION_ARTIFACT=TO_BE_FROZEN_AFTER_RUNTIME_POOL_HARNESS_PROOF
+PREVIOUS_MIX_TEST_INVOCATION=INVALID_FOR_CANONICAL_TOPOLOGY_ATTRIBUTION
 ~~~
+
+The existing TEST configuration fixes the database endpoint and role and sets `EventSales.Repo` to `Ecto.Adapters.SQL.Sandbox`. `test/test_helper.exs` places the Repo in Sandbox manual mode. Existing unboxed helpers still call `Sandbox.checkout(Repo, sandbox: false)`. Therefore the earlier `mix test ... --only m5_05d4` proposal cannot establish runtime Repo pool behavior, even if its database endpoint were redirected. Do not use that invocation for canonical D4 measurement.
+
+Before implementation freezes an execution artifact or canonical command, it must prove that a single self-contained runner can:
+
+1. Load EventSales code without starting the normal TEST application or its Sandbox Repo.
+2. Start `EventSales.Repo` explicitly against the verified isolated non-production target.
+3. Use the same pool implementation and fixed pool configuration as the verified representative runtime topology.
+4. Run the existing `ProjectionPeriodReader` unchanged.
+5. Keep connection secrets in secret-managed environment variables and emit only sanitized topology evidence.
+
+The implementation admission must verify and record:
+
+~~~text
+REPO_STARTED_WITHOUT_APPLICATION=YES
+REPO_POOL_MODULE=<verified representative runtime pool implementation>
+REPO_POOL_IS_SQL_SANDBOX=NO
+REPO_TARGET_ROUTE=<verified DIRECT_POSTGRES or PGBOUNCER_SESSION>
+REPO_POOL_SIZE=<verified representative value>
+SECRET_URI_PRINTED=NO
+~~~
+
+`MIX_ENV=test mix run --no-start ...` is only a candidate for investigation. Do not canonize it unless implementation proves that explicit `EventSales.Repo.start_link/1` overrides the TEST Sandbox pool and connection options correctly. Do not infer this from the command name or from a successful database connection.
+
+If the mechanism cannot be proven with a single self-contained runner without production, configuration, or support-module changes, stop and return for scope review. Do not add `config/d4.exs`, `test/support/**`, `scripts/**`, or production code as an unreviewed workaround.
 
 Expected ignored evidence output:
 
@@ -255,15 +291,7 @@ Expected ignored evidence output:
 tmp/m5_05_velocity_topology_attribution_evidence.json
 ~~~
 
-Use one self-contained explicit harness. Do not modify the frozen D1 gate test, production source, `test/test_helper.exs`, application configuration, scripts, or support modules. The harness must refuse execution without its explicit guard and a verified isolated database target. If the harness requires a production, configuration, script, or support-module change, stop and return for scope review.
-
-The exact narrow invocation is:
-
-~~~bash
-M5_05D4_EXPLICIT=1 mix test test/event_sales/analytics/m5_05_velocity_topology_attribution_test.exs --only m5_05d4
-~~~
-
-The execution environment must supply the isolated non-production database connection through a secret-managed environment. Do not put connection strings in the command, shell history, output, or evidence. The explicit guard is mandatory and the harness must refuse ordinary-suite execution.
+The execution artifact and exact command remain unfrozen until runtime Repo pool proof passes. Do not modify the frozen D1 gate test, `test/test_helper.exs`, application configuration, scripts, or support modules to make a proposed command work. The eventual runner must require explicit opt-in, verify the isolated target, and keep secrets out of the command, shell history, output, and evidence.
 
 Before canonical measurement, only non-load harness contract checks, instrumentation self-tests, fixture-count validation, and topology preflight are allowed. Once the harness and topology pass:
 
@@ -325,4 +353,4 @@ M5_08_EARLY_CANONICAL_CACHE_READER=NO
 
 ## 12. Future D4 implementation scope
 
-The later execution change is limited to the explicit test and ignored evidence output named above. SQL, indexes, application configuration, pool and queue settings, PgBouncer, production source, and the ordinary D1 gate remain unchanged. D4 must remain a diagnostic of the existing cold reader and must not choose or implement remediation.
+The later execution change is limited to the single self-contained runner and ignored evidence output named above, after the runtime Repo pool mechanism has been proven and the artifact/command have been frozen by implementation admission. SQL, indexes, application configuration, pool and queue settings, PgBouncer, production source, and the ordinary D1 gate remain unchanged. D4 must remain a diagnostic of the existing cold reader and must not choose or implement remediation.
