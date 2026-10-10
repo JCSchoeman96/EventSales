@@ -4,7 +4,7 @@
 | --- | --- |
 | Document | Canonical Path 1 execution roadmap |
 | Plan ID | `path-1-phase-breakdown` |
-| Plan version | `v29` |
+| Plan version | `v30` |
 | Status | ACTIVE — repository-native execution contract |
 | Scope | Path 1 M1–M7 gated implementation sequence |
 | Authority | This file wins for Path 1 task sequencing and physical ownership assumptions |
@@ -55,6 +55,7 @@
 - `v27` — M5-05A owner authority COMPLETE; M5-05B COMPLETE (PASS) via PR #306, merge `e7ea13be93b4fc235bf2085a73ebec036cd9e5fd`, tree `0a967b95318c0487a597bd5dd8f8df8e5a59eef2`; M5-05C behavior-preserving shared projection extraction authorized; M5-05D+ remain blocked.
 - `v28` — M5-05C COMPLETE_PASS via PR #312 (reviewed head `593081c05f34b5c2e51e617d32a7f5c79295a372`, head/merge tree `06d7f07d97be7cb7a31c361c44fb0a1c51a18e43`, exact-head CI run `37929322765` 7/7 PASS; merge `353546800740679d35607de6fd7104818de64c86`); authorized M5-05D1 Option-A measurement only. D2 awaited review; E/F/G remained blocked. PR #313 is the Dev Core baseline only and is not an M5-05 phase implementation.
 - `v29` — PR #315 D1 COMPLETE_VALID and D2 COMPLETE_NO_GO. Reviewed head/tree ``70dd18176360e93624fe2a58d7975df18d69ff1d`` / ``ffc0b83c12deb3d4f2091176017b1ca522f5b54d``, exact-head CI run `37959876953` (`pull_request`, attempt 1, 7/7 PASS), merge ``0f76f792e76379bba7c341ecc5cfc23ecfa7f612`` / tree ``ffc0b83c12deb3d4f2091176017b1ca522f5b54d`` with tree equality and verified GitHub signature. Canonical evidence records 24 measurement rows and six EXPLAIN plans. `OPTION_A=NO_GO`; D3 remediation-design admission is blocked pending separate admission; E/F/G remain blocked. Path-1 audit base is ``0f76f792e76379bba7c341ecc5cfc23ecfa7f612``.
+- `v30` — PR #316 D2 closeout merge `363247e697bab361c31bc6b9d94e457fb7b25f35` / tree `ed05c89dd056931bb9d70e8008764772285056fe`; GitHub signature verified. Owner-approved M5-05D3 split-cause design is authorized and `DESIGN_IN_REVIEW`. The design recommends one topology-attribution experiment, which remains unauthorized pending owner review. D4 and E/F/G remain unauthorized; `OPTION_A=NO_GO`, D remains `COMPLETE_NO_GO`, and implementation authorization is `NONE`.
 
 ### Conflict rule
 
@@ -217,16 +218,20 @@ M5-05C — COMPLETE_PASS
 M5-05D — COMPLETE_NO_GO
 M5-05D1 — COMPLETE_VALID
 M5-05D2 — COMPLETE_NO_GO
-M5-05D3 — BLOCKED_PENDING_SEPARATE_ADMISSION
+M5-05D3 — DESIGN_IN_REVIEW
+M5-05D3_AUTHORIZED=YES
+M5-05D3_APPROACH=SPLIT_CAUSE
+M5-05D4_AUTHORIZED=NO
+M5-05D4_STATUS=BLOCKED_PENDING_D3_OWNER_REVIEW
 OPTION_A — NO_GO
 M5-05E — BLOCKED_BY_OPTION_A_NO_GO
 M5-05F/G — BLOCKED
-Current Path 1 task: M5-05D3 — Option-A NO_GO remediation-design admission
+Current Path 1 task: M5-05D3 — split-cause remediation design, owner review pending
 M5 AUTHORIZATION: AUTHORIZED
 GAP-PRE-M5-METRICS: CLOSED
 GAP-PRE-M5-TIME: CLOSED
 GAP-PRE-M5-READY-IX: CLOSED
-NEXT: M5-05D3 — Option-A NO_GO remediation-design admission
+NEXT: M5-05D3 owner review of split-cause design; D4 remains unauthorized
 ```
 
 ---
@@ -1127,7 +1132,8 @@ P1-00 COMPLETE
 → M5-05D — COMPLETE_NO_GO
 → M5-05D1 — COMPLETE_VALID
 → M5-05D2 — COMPLETE_NO_GO
-→ M5-05D3 — BLOCKED_PENDING_SEPARATE_ADMISSION
+→ M5-05D3 — DESIGN_IN_REVIEW
+→ M5-05D4 — BLOCKED_PENDING_D3_OWNER_REVIEW
 → OPTION_A — NO_GO
 → M5-05E — BLOCKED_BY_OPTION_A_NO_GO
 → M5-05F/G — BLOCKED
@@ -1232,7 +1238,7 @@ FINANCIAL RECONCILIATION CONTRACT:
 LOCKED (concept C; exact Decimal; ticket-scoped)
 
 Current Path 1 task:
-M5-05D3 — Option-A NO_GO remediation-design admission
+M5-05D3 — split-cause remediation design, owner review pending
 
 M5-05 — Deterministic Sales Velocity:
 ACTIVE
@@ -1256,7 +1262,13 @@ M5-05D2:
 COMPLETE_NO_GO
 
 M5-05D3:
-BLOCKED_PENDING_SEPARATE_ADMISSION
+DESIGN_IN_REVIEW
+
+M5-05D3_AUTHORIZED:
+YES
+
+M5-05D4:
+BLOCKED_PENDING_D3_OWNER_REVIEW
 
 OPTION_A:
 NO_GO
@@ -1349,7 +1361,7 @@ GAP-PRE-M5-READY-IX:
 CLOSED
 
 NEXT:
-M5-05D3 — Option-A NO_GO remediation-design admission
+M5-05D3 owner review of split-cause remediation design; D4 remains unauthorized
 
 M5-02:
 COMPLETE (PASS)
@@ -1512,11 +1524,13 @@ M5-05D1 = COMPLETE_VALID.
 M5-05D2 = COMPLETE_NO_GO.
 M5-05D = COMPLETE_NO_GO.
 OPTION_A = NO_GO.
-M5-05D3 = BLOCKED_PENDING_SEPARATE_ADMISSION.
+M5-05D3 = DESIGN_IN_REVIEW.
+M5-05D3_AUTHORIZED = YES.
+M5-05D4 = BLOCKED_PENDING_D3_OWNER_REVIEW.
 M5-05E = BLOCKED_BY_OPTION_A_NO_GO.
 M5-05F = BLOCKED.
 M5-05G = BLOCKED.
-NEXT = M5-05D3 — Option-A NO_GO remediation-design admission.
+NEXT = M5-05D3 owner review; D4 remains unauthorized.
 M5: ACTIVE / NOT COMPLETE.
 M5-05 implementation authorization = NONE.
 DO NOT REOPEN M2-07 SCOPE.
