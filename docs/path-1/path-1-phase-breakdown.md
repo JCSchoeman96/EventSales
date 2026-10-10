@@ -4,7 +4,7 @@
 | --- | --- |
 | Document | Canonical Path 1 execution roadmap |
 | Plan ID | `path-1-phase-breakdown` |
-| Plan version | `v30` |
+| Plan version | `v31` |
 | Status | ACTIVE — repository-native execution contract |
 | Scope | Path 1 M1–M7 gated implementation sequence |
 | Authority | This file wins for Path 1 task sequencing and physical ownership assumptions |
@@ -21,8 +21,8 @@
 | Historical planning source | Supplied `EVENTSALES_PATH_1_UPDATED_PHASE_BREAKDOWN.md` (v1 conceptual plan; superseded for physical assumptions) |
 | Path 2 / Phase 5E | PAUSED |
 | Prepared | 2026-08-09 |
-| Last updated | 2026-10-09 |
-| Audit base HEAD | `0f76f792e76379bba7c341ecc5cfc23ecfa7f612` |
+| Last updated | 2026-10-10 |
+| Audit base HEAD | `84cf6af8bca1c5af2a99ddad8c570bf14870bf4d` |
 
 ### Revision log
 
@@ -56,6 +56,7 @@
 - `v28` — M5-05C COMPLETE_PASS via PR #312 (reviewed head `593081c05f34b5c2e51e617d32a7f5c79295a372`, head/merge tree `06d7f07d97be7cb7a31c361c44fb0a1c51a18e43`, exact-head CI run `37929322765` 7/7 PASS; merge `353546800740679d35607de6fd7104818de64c86`); authorized M5-05D1 Option-A measurement only. D2 awaited review; E/F/G remained blocked. PR #313 is the Dev Core baseline only and is not an M5-05 phase implementation.
 - `v29` — PR #315 D1 COMPLETE_VALID and D2 COMPLETE_NO_GO. Reviewed head/tree ``70dd18176360e93624fe2a58d7975df18d69ff1d`` / ``ffc0b83c12deb3d4f2091176017b1ca522f5b54d``, exact-head CI run `37959876953` (`pull_request`, attempt 1, 7/7 PASS), merge ``0f76f792e76379bba7c341ecc5cfc23ecfa7f612`` / tree ``ffc0b83c12deb3d4f2091176017b1ca522f5b54d`` with tree equality and verified GitHub signature. Canonical evidence records 24 measurement rows and six EXPLAIN plans. `OPTION_A=NO_GO`; D3 remediation-design admission is blocked pending separate admission; E/F/G remain blocked. Path-1 audit base is ``0f76f792e76379bba7c341ecc5cfc23ecfa7f612``.
 - `v30` — PR #316 D2 closeout merge `363247e697bab361c31bc6b9d94e457fb7b25f35` / tree `ed05c89dd056931bb9d70e8008764772285056fe`; GitHub signature verified. Owner-approved M5-05D3 split-cause design is authorized and `DESIGN_IN_REVIEW`. The design recommends one topology-attribution experiment, which remains unauthorized pending owner review. D4 and E/F/G remain unauthorized; `OPTION_A=NO_GO`, D remains `COMPLETE_NO_GO`, and implementation authorization is `NONE`.
+- `v31` — PR #317 post-merge closeout verified at merge `84cf6af8bca1c5af2a99ddad8c570bf14870bf4d`, tree `d82a473db35722a7253108211a1004592c7c04bc`, equal to reviewed head `3cb089423acee459e211e5fa781b94658e970cae` tree `d82a473db35722a7253108211a1004592c7c04bc`; signature valid and exact-head CI run `38028629489` passed 7/7. D3 is `COMPLETE_DESIGN_APPROVED`; Q1–Q4 are approved. D4 admits `C_TOPOLOGY_ATTRIBUTION_REPLAY` as `AUTHORIZED_NOT_STARTED`. Actual runtime route, PgBouncer mode, and database connection budget remain unverified pending D4 execution preflight. D5/E/F/G remain unauthorized, `OPTION_A=NO_GO`, and M5-05D remains `COMPLETE_NO_GO`.
 
 ### Conflict rule
 
@@ -218,20 +219,28 @@ M5-05C — COMPLETE_PASS
 M5-05D — COMPLETE_NO_GO
 M5-05D1 — COMPLETE_VALID
 M5-05D2 — COMPLETE_NO_GO
-M5-05D3 — DESIGN_IN_REVIEW
+M5-05D3 — COMPLETE_DESIGN_APPROVED
 M5-05D3_AUTHORIZED=YES
 M5-05D3_APPROACH=SPLIT_CAUSE
-M5-05D4_AUTHORIZED=NO
-M5-05D4_STATUS=BLOCKED_PENDING_D3_OWNER_REVIEW
+M5-05D3_OWNER_REVIEW=PASS
+M5-05D3_Q1_APPROVED=YES
+M5-05D3_Q2_APPROVED=YES
+M5-05D3_Q3_APPROVED=YES
+M5-05D3_Q4_APPROVED=YES
+M5-05D4_NAME=C_TOPOLOGY_ATTRIBUTION_REPLAY
+M5-05D4_AUTHORIZED=YES
+M5-05D4_STATUS=AUTHORIZED_NOT_STARTED
+M5-05D5_AUTHORIZED=NO
+M5-05D5_STATUS=BLOCKED_PENDING_D4_EVIDENCE_REVIEW
 OPTION_A — NO_GO
 M5-05E — BLOCKED_BY_OPTION_A_NO_GO
 M5-05F/G — BLOCKED
-Current Path 1 task: M5-05D3 — split-cause remediation design, owner review pending
+Current Path 1 task: M5-05D4 — C_TOPOLOGY_ATTRIBUTION_REPLAY, authorized but not started
 M5 AUTHORIZATION: AUTHORIZED
 GAP-PRE-M5-METRICS: CLOSED
 GAP-PRE-M5-TIME: CLOSED
 GAP-PRE-M5-READY-IX: CLOSED
-NEXT: M5-05D3 owner review of split-cause design; D4 remains unauthorized
+NEXT: M5-05D4 topology verification and experiment-plan execution after PR #317 admission merges
 ```
 
 ---
@@ -1132,8 +1141,9 @@ P1-00 COMPLETE
 → M5-05D — COMPLETE_NO_GO
 → M5-05D1 — COMPLETE_VALID
 → M5-05D2 — COMPLETE_NO_GO
-→ M5-05D3 — DESIGN_IN_REVIEW
-→ M5-05D4 — BLOCKED_PENDING_D3_OWNER_REVIEW
+→ M5-05D3 — COMPLETE_DESIGN_APPROVED
+→ M5-05D4 — AUTHORIZED_NOT_STARTED (C_TOPOLOGY_ATTRIBUTION_REPLAY)
+→ M5-05D5 — BLOCKED_PENDING_D4_EVIDENCE_REVIEW
 → OPTION_A — NO_GO
 → M5-05E — BLOCKED_BY_OPTION_A_NO_GO
 → M5-05F/G — BLOCKED
@@ -1238,7 +1248,7 @@ FINANCIAL RECONCILIATION CONTRACT:
 LOCKED (concept C; exact Decimal; ticket-scoped)
 
 Current Path 1 task:
-M5-05D3 — split-cause remediation design, owner review pending
+M5-05D4 — C_TOPOLOGY_ATTRIBUTION_REPLAY, authorized but not started
 
 M5-05 — Deterministic Sales Velocity:
 ACTIVE
@@ -1262,13 +1272,17 @@ M5-05D2:
 COMPLETE_NO_GO
 
 M5-05D3:
-DESIGN_IN_REVIEW
+COMPLETE_DESIGN_APPROVED
 
 M5-05D3_AUTHORIZED:
 YES
 
 M5-05D4:
-BLOCKED_PENDING_D3_OWNER_REVIEW
+AUTHORIZED_NOT_STARTED
+M5-05D4_NAME:
+C_TOPOLOGY_ATTRIBUTION_REPLAY
+M5-05D5:
+BLOCKED_PENDING_D4_EVIDENCE_REVIEW
 
 OPTION_A:
 NO_GO
@@ -1361,7 +1375,7 @@ GAP-PRE-M5-READY-IX:
 CLOSED
 
 NEXT:
-M5-05D3 owner review of split-cause remediation design; D4 remains unauthorized
+M5-05D4 topology verification and the separately frozen experiment
 
 M5-02:
 COMPLETE (PASS)
@@ -1524,14 +1538,16 @@ M5-05D1 = COMPLETE_VALID.
 M5-05D2 = COMPLETE_NO_GO.
 M5-05D = COMPLETE_NO_GO.
 OPTION_A = NO_GO.
-M5-05D3 = DESIGN_IN_REVIEW.
+M5-05D3 = COMPLETE_DESIGN_APPROVED.
 M5-05D3_AUTHORIZED = YES.
-M5-05D4 = BLOCKED_PENDING_D3_OWNER_REVIEW.
+M5-05D4 = AUTHORIZED_NOT_STARTED.
+M5-05D4_NAME = C_TOPOLOGY_ATTRIBUTION_REPLAY.
+M5-05D5 = BLOCKED_PENDING_D4_EVIDENCE_REVIEW.
 M5-05E = BLOCKED_BY_OPTION_A_NO_GO.
 M5-05F = BLOCKED.
 M5-05G = BLOCKED.
-NEXT = M5-05D3 owner review; D4 remains unauthorized.
+NEXT = M5-05D4 topology verification and its frozen diagnostic experiment.
 M5: ACTIVE / NOT COMPLETE.
-M5-05 implementation authorization = NONE.
+M5-05 implementation authorization = D4_DIAGNOSTIC_ONLY.
 DO NOT REOPEN M2-07 SCOPE.
 ```

@@ -1,21 +1,38 @@
-# M5-05D3 split-cause remediation design
+# M5-05D3 split-cause design and D4 admission
 
 ~~~text
 D3_APPROACH=SPLIT_CAUSE
-D3_STATUS=DESIGN_IN_REVIEW
-BASE_SHA=363247e697bab361c31bc6b9d94e457fb7b25f35
-BASE_TREE=ed05c89dd056931bb9d70e8008764772285056fe
+D3_STATUS=COMPLETE_DESIGN_APPROVED
+D3_OWNER_REVIEW=PASS
+D3_Q1_APPROVED=YES
+D3_Q2_APPROVED=YES
+D3_Q3_APPROVED=YES
+D3_Q4_APPROVED=YES
+D4_NAME=C_TOPOLOGY_ATTRIBUTION_REPLAY
+D4_AUTHORIZED=YES
+D4_STATUS=AUTHORIZED_NOT_STARTED
+BASE_SHA=84cf6af8bca1c5af2a99ddad8c570bf14870bf4d
+BASE_TREE=d82a473db35722a7253108211a1004592c7c04bc
+PR_317_REVIEWED_HEAD=3cb089423acee459e211e5fa781b94658e970cae
+PR_317_REVIEWED_TREE=d82a473db35722a7253108211a1004592c7c04bc
+PR_317_MERGE_SHA=84cf6af8bca1c5af2a99ddad8c570bf14870bf4d
+PR_317_MERGE_TREE=d82a473db35722a7253108211a1004592c7c04bc
+PR_317_MERGE_TREE_EQUALS_REVIEWED_TREE=YES
+PR_317_MERGE_SIGNATURE=VALID
+PR_317_POST_MERGE_VERIFY=PASS
 D2_CLOSEOUT_PROVENANCE=PR_316
 D1_RERUN=NO
 D2_EVIDENCE_CHANGED=NO
-IMPLEMENTATION_AUTHORIZED=NONE
+M5_05D4_EXECUTED=NO
+M5_05_IMPLEMENTATION_AUTHORIZED=M5_05D4_DIAGNOSTIC_ONLY
+REMEDIATION_SELECTED=NO
 ~~~
 
 ## 1. Authority and scope
 
-This document records the owner-approved M5-05D3 architectural design after D2 recorded `OPTION_A=NO_GO`. It analyzes planner policy (P), connection and topology contention (C), cold query and data shape (Q), finer durable buckets (B), and earlier hot/warm acceleration (H). It recommends one diagnostic experiment for later owner review.
+This document records the owner-approved M5-05D3 architectural design after D2 recorded `OPTION_A=NO_GO`. It analyzes planner policy (P), connection and topology contention (C), cold query and data shape (Q), finer durable buckets (B), and earlier hot/warm acceleration (H). Owner review accepted the C experiment and Q1–Q4 decisions.
 
-The admission authorizes this design only. It authorizes no D4 experiment, code, test, configuration, schema, index, pool, PgBouncer, cache, Redis, reader, threshold, runtime, or infrastructure change. D1 evidence stays frozen. D4 and E/F/G remain unauthorized. Nothing here changes D1's valid NO_GO under its then-frozen criteria.
+PR #317 closed D3 as `COMPLETE_DESIGN_APPROVED`. A separate D4 plan freezes one diagnostic experiment and authorizes that experiment only after this admission merges. It does not authorize remediation, production access, or changes to application code, configuration, schema, indexes, pools, PgBouncer, cache, Redis, reader, runtime, or infrastructure. D1 evidence remains frozen. D5 and E/F/G remain unauthorized. Nothing here changes D1's valid NO_GO under its then-frozen criteria.
 
 The reviewed base is `363247e697bab361c31bc6b9d94e457fb7b25f35` with tree `ed05c89dd056931bb9d70e8008764772285056fe`. PR #316 closed D2. Its merged tree equals the reviewed head tree, and GitHub reports its merge signature as valid.
 
@@ -107,9 +124,10 @@ BLOCKED_PENDING_SEPARATE_ADMISSION
   → CANDIDATES_COMPARED
   → NEXT_EXPERIMENT_RECOMMENDED
   → DESIGN_IN_REVIEW
+  → COMPLETE_DESIGN_APPROVED
 ```
 
-This PR ends at `DESIGN_IN_REVIEW`. It does not set `D3_COMPLETE`. The only terminal outcomes for this design review are `DESIGN_IN_REVIEW` and `INSUFFICIENT_EVIDENCE`. Owner review decides whether to accept the design and separately admit D4. E, F, and G remain blocked. Implementation authorization remains `NONE`.
+PR #317 records owner acceptance: `M5_05D3_STATUS=COMPLETE_DESIGN_APPROVED`. The D4 plan records the separately admitted experiment. D4 remains `AUTHORIZED_NOT_STARTED`; E, F, and G remain blocked. Implementation authorization is limited to the D4 diagnostic experiment.
 
 ## 8. Track P: planner and acceptance policy
 
@@ -117,7 +135,7 @@ D1 made index selection a mandatory gate, so the three normal-density sequential
 
 PostgreSQL may choose a sequential scan when scanning a small relation costs less than index lookup plus heap access. Requiring the index name for every table size can reject a valid plan. Conversely, latency alone can hide unbounded work when fixture size is small.
 
-**Proposed for owner review:** Future plan acceptance should judge bounded query shape, bounded examined rows/buffers under representative cardinality, latency, and absence of pathological full-source scans. Require an index-backed plan when selectivity and measured plan cost make it materially appropriate. Do not force a planner choice. This proposal does not retroactively pass D1 or change any frozen threshold.
+**Accepted Q2 policy:** Future plan acceptance uses `BOUNDED_APPROPRIATE_PLANNER_BEHAVIOR`, not a named index mandatory at all relation sizes. Judge bounded query shape and examined rows/buffers under representative cardinality, latency, and absence of pathological full-source scans. Require an index-backed plan when selectivity and measured plan cost make it materially appropriate. Do not force a planner choice. This does not retroactively pass D1 or change a frozen threshold.
 
 ## 9. Track C: connection and topology contention
 
@@ -126,11 +144,15 @@ The failed local dense 60m C50 p99 decomposes into 146488 us pool checkout and 3
 The repository sets runtime `POOL_SIZE` to 10 by default. The deployment design docs select PgBouncer session pooling for normal runtime traffic and a direct URL for migrations/session-sensitive tasks. The repository also records that live Railway PgBouncer use is unverified. No authoritative runtime database connection budget was found.
 
 ```text
-PRODUCTION_PGBOUNCER_TOPOLOGY=PARTIALLY_PROVEN
-PRODUCTION_DB_CONNECTION_BUDGET=NOT_PROVEN
+TOPOLOGY_DOC_CONFLICT=YES
+ARCHITECTURE_TARGET=DATABASE_URL through PgBouncer session pooling
+HISTORICAL_DEPLOYMENT_STATE=PgBouncer not deployed for Slice 24; DATABASE_URL and DIRECT_DATABASE_URL used direct PostgreSQL
+ACTUAL_CURRENT_PRODUCTION_RUNTIME_ROUTE=UNVERIFIED
+ACTUAL_CURRENT_PRODUCTION_PGBOUNCER_MODE=UNVERIFIED
+ACTUAL_CURRENT_DB_CONNECTION_BUDGET=UNVERIFIED
 ```
 
-`PARTIALLY_PROVEN` means intended session-pooling behavior is documented, but the actual production route is not verified. No claim is made that production is using PgBouncer. The source records no pooler/backend connection allocation budget; no numeric budget is inferred.
+These statements describe different states. Neither establishes the current runtime route. Do not resolve the conflict by document precedence, assume PgBouncer is live, or infer a connection budget. D4 execution must prove the route from safe read-only evidence before measuring.
 
 **Proposed next diagnostic:** Replay the frozen reader workload through one verified, non-production representative runtime topology. Hold velocity semantics, window geometry, fixture cardinality, sample count, caller cohorts, SQL, indexes, and threshold history fixed. Keep pool configuration fixed within each explicitly defined topology case; do not sweep pool sizes or queue settings. Report caller wait, application connection checkout, PgBouncer/proxy wait when present, PostgreSQL execution, and end-to-end latency as separate distributions. Do not compare a direct route with an invented pooler setup and call it production evidence. If the actual target topology/budget cannot be verified, stop the experiment as insufficient evidence.
 
@@ -203,7 +225,7 @@ No D3 mitigation is authorized. Candidate-specific controls belong in a later ex
 SELECTED_NEXT_EXPERIMENT=C_TOPOLOGY_ATTRIBUTION_REPLAY
 ```
 
-Replay the frozen deterministic reader workload on an isolated non-production database/runtime that matches a verified deployment connection path and documented connection budget. Hold velocity semantics, window geometry, fixture cardinality, sample count, caller cohorts, SQL, indexes, and threshold history fixed. Keep pool configuration fixed within each explicitly defined topology case; do not sweep pool sizes or queue settings. Collect separate distributions for caller wait, application connection checkout, PgBouncer/proxy wait where present, PostgreSQL execution, end-to-end latency, pool timeouts, errors, and query shape. This is a new D4 diagnostic experiment if separately admitted; it is not a D1 rerun and must not write D1 evidence.
+Replay the frozen deterministic reader workload on an isolated non-production database/runtime that matches a verified current runtime connection path and verified connection budget. Hold velocity semantics, window geometry, fixture cardinality, sample count, caller cohorts, SQL, indexes, and threshold history fixed. Keep the verified application pool configuration fixed; do not sweep pool sizes or queue settings. Collect separate distributions for caller delay, application queue/checkout, PgBouncer/proxy evidence where present, PostgreSQL query execution, end-to-end latency, pool timeouts, errors, and query shape. The D4 plan admits this diagnostic experiment. It is not a D1 rerun and must not write D1 evidence.
 
 `WHY_THIS_FIRST=` It targets the largest observed component of the failed local C50 latency without changing pool settings, SQL, indexes, projection grain, or cache architecture. It also tests whether local checkout attribution survives a representative topology.
 
@@ -215,13 +237,13 @@ Replay the frozen deterministic reader workload on an isolated non-production da
 
 `WHAT_RESULT_WOULD_REJECT_IT=` The experiment is rejected as inconclusive if the actual connection path or connection budget cannot be verified, topology differs from the documented target path, instrumentation cannot separate caller wait, application checkout, proxy wait, and SQL execution, or correctness/query-shape gates fail. It is rejected as support for a checkout-focused remediation if checkout is not a material component in the representative run.
 
-`WHAT_RESULT_WOULD_ADVANCE_IT=` Owner review may advance a later C remediation investigation only if repeated valid runs show checkout or a named connection-topology wait remains the dominant material component, all correctness and query-shape gates pass, and the experiment records the verified topology and budget. This result still authorizes no tuning or implementation.
+`WHAT_RESULT_WOULD_ADVANCE_IT=` D5 may consider a later C remediation investigation if the valid D4 run shows checkout or an observable connection-topology wait as a material component, correctness and query-shape gates pass, and the evidence records the verified topology and budget. Any further experiment or change requires separate admission.
 
-The experiment recommendation does not authorize D4. D4 requires separate owner review and admission. If the production-equivalent topology cannot be established without contacting production, the experiment must remain unrun and the outcome is `INSUFFICIENT_EVIDENCE`.
+The experiment recommendation alone did not authorize D4. PR #317 accepted the design and the separate D4 plan records the admission. D4 remains unrun until its execution preflight verifies a representative isolated non-production route. If that route or its connection budget cannot be verified safely, stop with `INSUFFICIENT_EVIDENCE`.
 
-## 17. Draft acceptance criteria for a future experiment
+## 17. Accepted D4 criteria
 
-These criteria are proposed for owner review. They do not authorize D4 or alter D1's historical gates.
+The D4 plan freezes the accepted experiment criteria. They do not alter D1's historical gates.
 
 ### A. Correctness gates
 
@@ -229,7 +251,7 @@ Always require the same deterministic windows, existing Decimal semantics, stric
 
 ### B. Query-shape gates
 
-Require the existing bounded read shape, no N+1, no unbounded in-memory fact loading, no extra raw-source reads, and bounded examined rows/buffers at representative fixture cardinalities. `INDEX_NAME_MUST_APPEAR=NO` as a universal rule is proposed: require an index-backed plan when the plan is selective/materially beneficial, and permit a sequential scan when planner cost is appropriate for the measured relation size and bounded work. Query shape, examined work, and latency remain separate checks. This policy proposal does not pass D1's frozen `INDEX_SELECTIVITY=FAIL`.
+Require the existing bounded read shape, no N+1, no unbounded in-memory fact loading, no extra raw-source reads, and bounded examined rows/buffers at representative fixture cardinalities. `INDEX_NAME_MUST_APPEAR_AT_ALL_RELATION_SIZES=NO`. Require an index-backed plan when the plan is selective and materially beneficial; permit a sequential scan when planner cost is appropriate for measured relation size and bounded work. Query shape, examined work, and latency remain separate checks. This accepted policy does not pass D1's frozen `INDEX_SELECTIVITY=FAIL`.
 
 ### C. Performance gates
 
@@ -270,33 +292,47 @@ State caller concurrency, application node count, Ecto pool size and queue setti
 | Prepared-statement compatibility | Do not infer compatibility with transaction pooling or unnamed statements without separate proof. |
 | Measurement topology differs from production | The live path is unverified; a local direct connection cannot certify a pooler path. |
 
-These are risks to evaluate in a future admitted experiment or design. They do not authorize mitigations.
+The D4 plan covers these risks. It does not authorize mitigations.
 
-## 20. Owner-review questions
+## 20. Owner-review questions (closed)
 
-1. Is `C_TOPOLOGY_ATTRIBUTION_REPLAY` accepted as the single next experiment, subject to separate D4 admission and a verified non-production topology?
-2. Should future query-plan certification require a specific index, or require bounded and appropriate planner behavior instead?
-3. Must the next concurrency experiment model the actual production PgBouncer topology before a remediation implementation is selected?
-4. May M5-08 acceleration move earlier only after cold-reader correctness is accepted, or can a cache-backed path itself become the canonical M5-05 reader architecture?
+1. `C_TOPOLOGY_ATTRIBUTION_REPLAY` is approved as the single next experiment, subject to the D4 plan and a verified representative non-production topology.
+2. Future query-plan certification uses bounded appropriate planner behavior, not a named index at every relation size.
+3. D4 requires a verified representative topology before measurement.
+4. Cold-reader acceptance is required before M5-08 cache work. An early canonical cache reader is not approved.
 
-No owner-policy question is answered by assumption in this design.
+The owner approved all four decisions. The experiment plan records their exact values.
 
 ## 21. Explicit non-authorization
 
 ~~~text
 M5_05D3_AUTHORIZED=YES
-M5_05D3_STATUS=DESIGN_IN_REVIEW
-M5_05D4_AUTHORIZED=NO
-M5_05D4_STATUS=BLOCKED_PENDING_D3_OWNER_REVIEW
+M5_05D3_STATUS=COMPLETE_DESIGN_APPROVED
+M5_05D3_OWNER_REVIEW=PASS
+M5_05D3_Q1_APPROVED=YES
+M5_05D3_Q2_APPROVED=YES
+M5_05D3_Q3_APPROVED=YES
+M5_05D3_Q4_APPROVED=YES
+M5_05D4_NAME=C_TOPOLOGY_ATTRIBUTION_REPLAY
+M5_05D4_AUTHORIZED=YES
+M5_05D4_STATUS=AUTHORIZED_NOT_STARTED
+M5_05D5_AUTHORIZED=NO
+M5_05D5_STATUS=BLOCKED_PENDING_D4_EVIDENCE_REVIEW
 M5_05E_AUTHORIZED=NO
 M5_05F_AUTHORIZED=NO
 M5_05G_AUTHORIZED=NO
-M5_05_IMPLEMENTATION_AUTHORIZED=NONE
-IMPLEMENTATION_READY=NO
+M5_05_IMPLEMENTATION_AUTHORIZED=M5_05D4_DIAGNOSTIC_ONLY
+IMPLEMENTATION_READY=D4_DIAGNOSTIC_ONLY
 OPTION_A_DECISION=NO_GO
 M5_05D_STATUS=COMPLETE_NO_GO
+TOPOLOGY_DOC_CONFLICT=YES
+ACTUAL_CURRENT_PRODUCTION_RUNTIME_ROUTE=UNVERIFIED
+ACTUAL_CURRENT_PRODUCTION_PGBOUNCER_MODE=UNVERIFIED
+ACTUAL_CURRENT_DB_CONNECTION_BUDGET=UNVERIFIED
 D1_RERUN=NO
 D2_EVIDENCE_CHANGED=NO
+M5_05D4_EXECUTED=NO
+REMEDIATION_SELECTED=NO
 POOL_OR_QUEUE_CHANGE=NONE
 INDEX_OR_SCHEMA_CHANGE=NONE
 CACHE_OR_REDIS_CHANGE=NONE

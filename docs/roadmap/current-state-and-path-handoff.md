@@ -8,8 +8,8 @@
 | Authority | This document wins for current program priority and Path 2 resume procedure |
 | Durable Phase 5D evidence | `docs/phase-5d/native-v3-e2e-run-report.md` |
 | Historical Phase 5D certification commit | `c286fd0e647199a261b6ef2ec3791617dacb5834` |
-| Handoff version | `v29` |
-| Last updated | 2026-10-09 |
+| Handoff version | `v30` |
+| Last updated | 2026-10-10 |
 | Path 1 repository truth | `docs/path-1/m1-01-current-repo-truth.md` |
 | Path 1 execution roadmap | `docs/path-1/path-1-phase-breakdown.md` |
 | Path 1 identity contract | `docs/path-1/m1-02-source-scoped-external-identity-contract.md` |
@@ -52,6 +52,7 @@
 - `v27` — M5-05C COMPLETE_PASS via PR #312 (reviewed head `593081c05f34b5c2e51e617d32a7f5c79295a372`, head/merge tree `06d7f07d97be7cb7a31c361c44fb0a1c51a18e43`, exact-head CI run `37929322765` 7/7 PASS; merge `353546800740679d35607de6fd7104818de64c86`). At that revision, M5-05D1 was next, D2 awaited review, and E/F/G were blocked. PR #313 was the Dev Core baseline only.
 - `v28` — records PR #315 D1 COMPLETE_VALID, D2 COMPLETE_NO_GO, and `OPTION_A=NO_GO`. Reviewed head/tree ``70dd18176360e93624fe2a58d7975df18d69ff1d`` / ``ffc0b83c12deb3d4f2091176017b1ca522f5b54d`` passed exact-head CI run `37959876953` (`pull_request`, attempt 1, 7/7); merge ``0f76f792e76379bba7c341ecc5cfc23ecfa7f612`` / tree ``ffc0b83c12deb3d4f2091176017b1ca522f5b54d`` equals the reviewed tree and its GitHub signature is verified. Canonical evidence contains 24 measurement rows and six EXPLAIN summaries. D3 remediation-design admission is the next milestone and remains unauthorized. E is blocked by Option-A NO_GO; F/G remain blocked. Path 2 remains paused.
 - `v29` — records PR #316 D2 closeout merge `363247e697bab361c31bc6b9d94e457fb7b25f35` / tree `ed05c89dd056931bb9d70e8008764772285056fe`, with reviewed-tree equality and GitHub-verified signature. M5-05D3 split-cause remediation design is owner-authorized and `DESIGN_IN_REVIEW`. It recommends one topology-attribution diagnostic experiment; D4 remains unauthorized pending D3 owner review. `OPTION_A=NO_GO`, D remains `COMPLETE_NO_GO`, E/F/G remain unauthorized, and implementation authorization is `NONE`. Path 2 remains paused.
+- `v30` — PR #317 post-merge closeout verified at merge `84cf6af8bca1c5af2a99ddad8c570bf14870bf4d`, tree `d82a473db35722a7253108211a1004592c7c04bc`, equal to reviewed head `3cb089423acee459e211e5fa781b94658e970cae` tree `d82a473db35722a7253108211a1004592c7c04bc`; signature valid and exact-head CI run `38028629489` passed 7/7. D3 is `COMPLETE_DESIGN_APPROVED`; Q1–Q4 are approved. D4 admits `C_TOPOLOGY_ATTRIBUTION_REPLAY` as `AUTHORIZED_NOT_STARTED`. Actual runtime route, PgBouncer mode, and database connection budget remain unverified pending the D4 topology gate. D5/E/F/G remain unauthorized; `OPTION_A=NO_GO` and M5-05D remains `COMPLETE_NO_GO`. Path 2 remains paused.
 
 ### Conflict rule
 
@@ -132,7 +133,7 @@ Status: ESTABLISHED
 
 PATH 1 — MANAGEMENT ANALYTICS
 Status: ACTIVE
-Next milestone: M5-05D3 owner review of split-cause remediation design
+Next milestone: M5-05D4 topology verification and the frozen diagnostic experiment
 M5: ACTIVE
 M5 COMPLETE: NO
 M5 authorization: AUTHORIZED
@@ -146,15 +147,28 @@ M5-05C: COMPLETE_PASS
 M5-05D: COMPLETE_NO_GO
 M5-05D1: COMPLETE_VALID
 M5-05D2: COMPLETE_NO_GO
-M5-05D3: DESIGN_IN_REVIEW
+M5-05D3: COMPLETE_DESIGN_APPROVED
 M5-05D3_AUTHORIZED: YES
 M5-05D3_APPROACH: SPLIT_CAUSE
-M5-05D4: BLOCKED_PENDING_D3_OWNER_REVIEW
+M5-05D3_OWNER_REVIEW: PASS
+M5-05D3_Q1_APPROVED: YES
+M5-05D3_Q2_APPROVED: YES
+M5-05D3_Q3_APPROVED: YES
+M5-05D3_Q4_APPROVED: YES
+M5-05D4_NAME: C_TOPOLOGY_ATTRIBUTION_REPLAY
+M5-05D4_AUTHORIZED: YES
+M5-05D4: AUTHORIZED_NOT_STARTED
+M5-05D5: BLOCKED_PENDING_D4_EVIDENCE_REVIEW
+TOPOLOGY_DOC_CONFLICT: YES
+ACTUAL_CURRENT_PRODUCTION_RUNTIME_ROUTE: UNVERIFIED
+ACTUAL_CURRENT_PRODUCTION_PGBOUNCER_MODE: UNVERIFIED
+ACTUAL_CURRENT_DB_CONNECTION_BUDGET: UNVERIFIED
+M5-05_IMPLEMENTATION_AUTHORIZED: M5_05D4_DIAGNOSTIC_ONLY
 OPTION_A: NO_GO
 M5-05E: BLOCKED_BY_OPTION_A_NO_GO
 M5-05F: BLOCKED
 M5-05G: BLOCKED
-NEXT: M5-05D3 owner review; D4 remains unauthorized
+NEXT: M5-05D4 topology verification and diagnostic experiment; topology remains unverified
 P1-00: COMPLETE
 M1-01: COMPLETE (PASS)
 M1-01A: COMPLETE (PASS)
@@ -230,7 +244,7 @@ M5-01 B01–B23: CERTIFIED
 M5-01 implementation: PR #268
 M5-01 certification: PR #269
 M5-01 merge authority: 42d830343c3baa714cec2eda8568d00ddb981abe
-Current Path 1 task: M5-05D3 split-cause remediation design, owner review pending
+Current Path 1 task: M5-05D4 C_TOPOLOGY_ATTRIBUTION_REPLAY, authorized but not started
 GAP-PRE-M5-METRICS: CLOSED
 GAP-PRE-M5-TIME: CLOSED
 GAP-PRE-M5-READY-IX: CLOSED
@@ -246,15 +260,23 @@ M5-05C: COMPLETE_PASS
 M5-05D: COMPLETE_NO_GO
 M5-05D1: COMPLETE_VALID
 M5-05D2: COMPLETE_NO_GO
-M5-05D3: DESIGN_IN_REVIEW
+M5-05D3: COMPLETE_DESIGN_APPROVED
 M5-05D3_AUTHORIZED: YES
 M5-05D3_APPROACH: SPLIT_CAUSE
-M5-05D4: BLOCKED_PENDING_D3_OWNER_REVIEW
+M5-05D3_OWNER_REVIEW: PASS
+M5-05D3_Q1_APPROVED: YES
+M5-05D3_Q2_APPROVED: YES
+M5-05D3_Q3_APPROVED: YES
+M5-05D3_Q4_APPROVED: YES
+M5-05D4_NAME: C_TOPOLOGY_ATTRIBUTION_REPLAY
+M5-05D4_AUTHORIZED: YES
+M5-05D4: AUTHORIZED_NOT_STARTED
+M5-05D5: BLOCKED_PENDING_D4_EVIDENCE_REVIEW
 OPTION_A: NO_GO
 M5-05E: BLOCKED_BY_OPTION_A_NO_GO
 M5-05F: BLOCKED
 M5-05G: BLOCKED
-NEXT: M5-05D3 owner review; D4 remains unauthorized
+NEXT: M5-05D4 topology verification and diagnostic experiment; topology remains unverified
 
 PATH 2 — AUTOMATIC SYNC / CATALOGUE AUTOMATION
 Status: PAUSED AT CERTIFIED CHECKPOINT
@@ -645,7 +667,7 @@ M7 — Production Certification / Pilot
 
 ```text
 CURRENT NEXT STEP:
-M5-05D3 owner review of split-cause design; D4 remains unauthorized
+M5-05D4 topology verification and the frozen diagnostic experiment
 
 M5:
 ACTIVE (PRE-M5-TIME COMPLETE; all PRE-M5 gates CLOSED)
@@ -870,13 +892,13 @@ M5-05D2:
 COMPLETE_NO_GO
 
 M5-05D3:
-DESIGN_IN_REVIEW
+COMPLETE_DESIGN_APPROVED
 
 M5-05D3_AUTHORIZED:
 YES
 
 M5-05D4:
-BLOCKED_PENDING_D3_OWNER_REVIEW
+AUTHORIZED_NOT_STARTED
 
 OPTION_A:
 NO_GO
@@ -1029,7 +1051,7 @@ PATH 1 — TRUSTED MANAGEMENT ANALYTICS
 ACTIVE
 
 Current Path 1 task:
-M5-05D3 split-cause remediation design, owner review pending
+M5-05D4 C_TOPOLOGY_ATTRIBUTION_REPLAY, authorized but not started
 
 M5:
 ACTIVE
@@ -1068,13 +1090,16 @@ M5-05D2:
 COMPLETE_NO_GO
 
 M5-05D3:
-DESIGN_IN_REVIEW
+COMPLETE_DESIGN_APPROVED
 
 M5-05D3_AUTHORIZED:
 YES
 
 M5-05D4:
-BLOCKED_PENDING_D3_OWNER_REVIEW
+AUTHORIZED_NOT_STARTED
+
+M5-05D5:
+BLOCKED_PENDING_D4_EVIDENCE_REVIEW
 
 OPTION_A:
 NO_GO
