@@ -11,7 +11,12 @@ defmodule EventSales.Catalog.MissingCatalogResolver do
 
   require Ash.Query
 
-  alias EventSales.Analytics.PeriodProjectionInvalidator
+  alias EventSales.Analytics.{
+    EventSnapshotAffectedEvents,
+    EventSnapshotRefreshFence,
+    PeriodProjectionInvalidator
+  }
+
   alias EventSales.Analytics.Workers.RefreshSnapshotWorker
   alias EventSales.Ingestion.HistoricalCoverageInvalidator
   alias EventSales.Ingestion.HistoricalOrderCoverageCandidateResolver
@@ -92,8 +97,11 @@ defmodule EventSales.Catalog.MissingCatalogResolver do
            {:ok, before_snapshot} <- capture_order(order, opts),
            {:ok, result} <- recover_items(items),
            {:ok, after_snapshot} <- capture_order(order, opts),
+           {:ok, mutation} <-
+             changed_order_coverage_candidates(order, before_snapshot, after_snapshot, opts),
+           :ok <- lock_affected_events(before_snapshot, after_snapshot, mutation.changed?),
            {:ok, candidate_event_ids} <-
-             invalidate_changed_order(order, before_snapshot, after_snapshot, opts),
+             invalidate_resolved_candidates(order, mutation.candidate_event_ids, opts),
            :ok <-
              PeriodProjectionInvalidator.invalidate_order_change(before_snapshot, after_snapshot),
            :ok <- enqueue_mapped_recovery_refreshes(result, candidate_event_ids, opts) do
@@ -214,22 +222,31 @@ defmodule EventSales.Catalog.MissingCatalogResolver do
     detector.capture(order)
   end
 
-  defp invalidate_changed_order(order, before_snapshot, after_snapshot, opts) do
+  defp changed_order_coverage_candidates(order, before_snapshot, after_snapshot, opts) do
     detector =
       Keyword.get(opts, :historical_order_mutation_detector, HistoricalOrderMutationDetector)
 
     case detector.compare(before_snapshot, after_snapshot) do
       %{changed?: false} ->
-        {:ok, []}
+        {:ok, %{changed?: false, candidate_event_ids: []}}
 
       %{changed?: true} ->
         with {:ok, candidate_event_ids} <-
                resolve_coverage_candidates(order, before_snapshot, after_snapshot, opts) do
-          invalidate_resolved_candidates(order, candidate_event_ids, opts)
+          {:ok, %{changed?: true, candidate_event_ids: candidate_event_ids}}
         end
 
       _other ->
         {:error, :invalid_historical_order_mutation_comparison}
+    end
+  end
+
+  defp lock_affected_events(_before_snapshot, _after_snapshot, false), do: :ok
+
+  defp lock_affected_events(before_snapshot, after_snapshot, true) do
+    with {:ok, affected_event_ids} <-
+           EventSnapshotAffectedEvents.resolve(before_snapshot, after_snapshot) do
+      EventSnapshotRefreshFence.lock_events_in_transaction(affected_event_ids)
     end
   end
 

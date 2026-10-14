@@ -27,6 +27,7 @@
     "lib/event_sales/analytics/dimension_snapshot_reader.ex",
     "lib/event_sales/analytics/event_detail.ex",
     "lib/event_sales/analytics/event_scoped_dashboard.ex",
+    "lib/event_sales/analytics/event_snapshot_affected_events.ex",
     "lib/event_sales/analytics/event_snapshot_refresh_fence.ex",
     "lib/event_sales/analytics/historical_catchup_freshness_notifier.ex",
     "lib/event_sales/analytics/historical_catchup_period_coverage_notifier.ex",
@@ -875,6 +876,21 @@
         {
           "arity": 2,
           "name": "summary"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Analytics.EventSnapshotAffectedEvents",
+      "parse_error": null,
+      "path": "lib/event_sales/analytics/event_snapshot_affected_events.ex",
+      "public_funs": [
+        {
+          "arity": 3,
+          "name": "resolve"
         }
       ],
       "specs?": true,
