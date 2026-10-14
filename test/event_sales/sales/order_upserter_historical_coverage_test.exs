@@ -942,7 +942,7 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
     assert Ash.get!(TicketType, ticket.id, domain: Catalog).name == "Renamed Ticket"
   end
 
-  test "identical replay and updated_at_source-only advancement do not invalidate", %{
+  test "identical replay stays a no-op and watermark-only advancement refreshes the event", %{
     source: source,
     event: event
   } do
@@ -985,7 +985,8 @@ defmodule EventSales.Sales.OrderUpserterHistoricalCoverageTest do
 
     assert advanced.id == order.id
     refute_receive :unexpected_candidate_resolver_call
-    refute_receive {:snapshot_refresh_requested, _event_ids}
+    assert_receive {:snapshot_refresh_requested, [event_id]}, 5_000
+    assert event_id == event.id
 
     assert {:ok, current} = HistoricalCoverageResolver.resolve_current(event.id)
     assert current.id == run.id

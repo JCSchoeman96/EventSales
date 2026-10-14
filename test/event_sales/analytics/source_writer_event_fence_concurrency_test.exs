@@ -20,6 +20,7 @@ defmodule EventSales.Analytics.SourceWriterEventFenceConcurrencyTest do
   alias EventSales.Audit.Resources.AuditLog
   alias EventSales.Catalog
   alias EventSales.Catalog.Resources.{Event, ProductMapping, SourceSystem, TicketType}
+  alias EventSales.Catalog.Workers.MappingChangedWorker
   alias EventSales.Ingestion
   alias EventSales.Ingestion.Csv.ApplyImport
   alias EventSales.Ingestion.Resources.{CsvImportBatch, CsvImportRow}
@@ -103,6 +104,166 @@ defmodule EventSales.Analytics.SourceWriterEventFenceConcurrencyTest do
     assert order_status!(order.id) == :processing
   end
 
+  test "a source-watermark-only order update waits for its event fence and refreshes only that event" do
+    fixture = create_mapped_fixture!() |> register_fixture_cleanup!()
+    payload = non_recognized_payload(fixture)
+
+    assert {:ok, order} =
+             UnboxedPostgres.with_connection(fn ->
+               OrderUpserter.upsert_order(fixture.source.id, payload,
+                 snapshot_refresh_scheduler: fn _event_ids -> :ok end
+               )
+             end)
+
+    updated_payload =
+      payload
+      |> Map.put("date_modified_gmt", next_source_version(order.updated_at_source))
+
+    parent = self()
+    holder = start_session_fence(parent, fixture.event.id)
+
+    writer =
+      Task.async(fn ->
+        UnboxedPostgres.with_connection(fn ->
+          backend_pid = EventSnapshotRefreshFence.connection_backend_pid()
+          send(parent, {:watermark_writer_backend, backend_pid})
+
+          OrderUpserter.upsert_order(fixture.source.id, updated_payload,
+            historical_coverage_invalidator: fn _order, _event_ids ->
+              send(parent, :watermark_historical_coverage_invalidated)
+              {:ok, :unexpected}
+            end,
+            period_projection_invalidator: fn _before_snapshot, _after_snapshot ->
+              send(parent, :watermark_period_projection_invalidated)
+              :ok
+            end,
+            snapshot_refresh_scheduler: fn event_ids ->
+              send(parent, {:watermark_refresh_enqueued, event_ids})
+              :ok
+            end
+          )
+        end)
+      end)
+
+    try do
+      assert_receive {:watermark_writer_backend, writer_backend}, 5_000
+      EventSnapshotRefreshTestSupport.wait_for_advisory_lock_wait!(writer_backend)
+      assert order_updated_at_source!(order.id) == order.updated_at_source
+
+      send(holder.task.pid, :release_refresh_fence)
+      assert :ok = Task.await(holder.task, 15_000)
+      assert {:ok, %Order{}} = Task.await(writer, 15_000)
+
+      assert_receive {:watermark_refresh_enqueued, [event_id]}, 5_000
+      assert event_id == fixture.event.id
+      assert order_updated_at_source!(order.id) > order.updated_at_source
+      refute_received :watermark_historical_coverage_invalidated
+      refute_received :watermark_period_projection_invalidated
+    after
+      send(holder.task.pid, :release_refresh_fence)
+      Task.yield(holder.task, 1_000) || Task.shutdown(holder.task)
+      Task.yield(writer, 1_000) || Task.shutdown(writer)
+    end
+  end
+
+  test "an unattributed source-watermark update does not invent an event refresh" do
+    fixture = create_mapped_fixture!() |> register_fixture_cleanup!()
+
+    payload =
+      non_recognized_payload(fixture)
+      |> put_in(["line_items", Access.at(0), "product_id"], 999_999)
+      |> put_in(["line_items", Access.at(0), "variation_id"], 0)
+
+    assert {:ok, order} =
+             UnboxedPostgres.with_connection(fn ->
+               OrderUpserter.upsert_order(fixture.source.id, payload,
+                 snapshot_refresh_scheduler: fn _event_ids -> :ok end
+               )
+             end)
+
+    updated_payload =
+      Map.put(payload, "date_modified_gmt", next_source_version(order.updated_at_source))
+
+    parent = self()
+    holder = start_session_fence(self(), fixture.event.id)
+
+    try do
+      task =
+        Task.async(fn ->
+          UnboxedPostgres.with_connection(fn ->
+            OrderUpserter.upsert_order(fixture.source.id, updated_payload,
+              snapshot_refresh_scheduler: fn event_ids ->
+                send(parent, {:unexpected_unattributed_refresh, event_ids})
+                :ok
+              end
+            )
+          end)
+        end)
+
+      assert {:ok, %Order{}} = Task.await(task, 5_000)
+      assert order_updated_at_source!(order.id) > order.updated_at_source
+
+      assert [%OrderItem{event_id: nil}] =
+               UnboxedPostgres.with_connection(fn -> order_items!(order.id) end)
+
+      refute_received {:unexpected_unattributed_refresh, _event_ids}
+    after
+      send(holder.task.pid, :release_refresh_fence)
+      assert :ok = Task.await(holder.task, 15_000)
+    end
+  end
+
+  test "equal and stale source replays do not enqueue watermark refreshes" do
+    fixture = create_mapped_fixture!() |> register_fixture_cleanup!()
+    payload = non_recognized_payload(fixture)
+
+    assert {:ok, order} =
+             UnboxedPostgres.with_connection(fn ->
+               OrderUpserter.upsert_order(fixture.source.id, payload,
+                 snapshot_refresh_scheduler: fn _event_ids -> :ok end
+               )
+             end)
+
+    stale_payload =
+      payload
+      |> Map.put("status", "processing")
+      |> Map.put("date_modified_gmt", previous_source_version(order.updated_at_source))
+
+    expected_source_version = order.updated_at_source
+    holder = start_session_fence(self(), fixture.event.id)
+
+    try do
+      equal_result =
+        UnboxedPostgres.with_connection(fn ->
+          OrderUpserter.upsert_order(fixture.source.id, payload,
+            snapshot_refresh_scheduler: fn event_ids ->
+              send(self(), {:unexpected_equal_refresh, event_ids})
+              :ok
+            end
+          )
+        end)
+
+      stale_result =
+        UnboxedPostgres.with_connection(fn ->
+          OrderUpserter.upsert_order(fixture.source.id, stale_payload,
+            snapshot_refresh_scheduler: fn event_ids ->
+              send(self(), {:unexpected_stale_refresh, event_ids})
+              :ok
+            end
+          )
+        end)
+
+      assert {:ok, %Order{updated_at_source: ^expected_source_version}} = equal_result
+      assert {:ok, :stale_noop} = stale_result
+      assert order_status!(order.id) == :pending
+      refute_received {:unexpected_equal_refresh, _event_ids}
+      refute_received {:unexpected_stale_refresh, _event_ids}
+    after
+      send(holder.task.pid, :release_refresh_fence)
+      assert :ok = Task.await(holder.task, 15_000)
+    end
+  end
+
   test "missing catalog mapping on a non-recognized order waits for the mapped event fence" do
     fixture = create_pending_mapping_fixture!() |> register_fixture_cleanup!()
 
@@ -178,6 +339,7 @@ defmodule EventSales.Analytics.SourceWriterEventFenceConcurrencyTest do
 
     assert_receive {:attribution_writer_backend, writer_backend}, 5_000
     [first_holder, second_holder] = holders
+
     EventSnapshotRefreshTestSupport.wait_for_advisory_lock_wait!(writer_backend)
 
     send(first_holder.task.pid, :release_refresh_fence)
@@ -339,7 +501,7 @@ defmodule EventSales.Analytics.SourceWriterEventFenceConcurrencyTest do
         SalesHelpers.create_order_item_from_line!(
           order,
           %{
-            "id" => 113_834_01,
+            "id" => 11_383_401,
             "product_id" => 109_132,
             "variation_id" => 109_167,
             "name" => "Target ticket",
@@ -356,7 +518,7 @@ defmodule EventSales.Analytics.SourceWriterEventFenceConcurrencyTest do
           }
         )
 
-      admin = create_admin!()
+      {admin, admin_role_id, admin_role_created?} = create_admin!()
 
       %{
         source: source,
@@ -364,7 +526,9 @@ defmodule EventSales.Analytics.SourceWriterEventFenceConcurrencyTest do
         order_item: item,
         old_event: old_event,
         new_event: new_event,
-        admin: admin
+        admin: admin,
+        admin_role_id: admin_role_id,
+        admin_role_created?: admin_role_created?
       }
     end)
   end
@@ -383,13 +547,13 @@ defmodule EventSales.Analytics.SourceWriterEventFenceConcurrencyTest do
         domain: Accounts
       )
 
-    role =
-      Role
-      |> Ash.Query.filter(name == :admin)
-      |> Ash.read_one!(domain: Accounts)
-      |> case do
-        nil -> Ash.create!(Role, %{name: :admin}, action: :create, domain: Accounts)
-        role -> role
+    {role, role_created?} =
+      case Role |> Ash.Query.filter(name == :admin) |> Ash.read_one!(domain: Accounts) do
+        nil ->
+          {Ash.create!(Role, %{name: :admin}, action: :create, domain: Accounts), true}
+
+        role ->
+          {role, false}
       end
 
     Ash.create!(UserRole, %{user_id: user.id, role_id: role.id},
@@ -397,7 +561,7 @@ defmodule EventSales.Analytics.SourceWriterEventFenceConcurrencyTest do
       domain: Accounts
     )
 
-    user
+    {user, role.id, role_created?}
   end
 
   defp register_fixture_cleanup!(fixture) do
@@ -409,7 +573,9 @@ defmodule EventSales.Analytics.SourceWriterEventFenceConcurrencyTest do
     UnboxedPostgres.with_exclusive_setup(fn ->
       source_id = fixture.source.id
       event_ids = fixture_event_ids(fixture)
-      user_id = Map.get(fixture, :admin, Map.get(fixture, :user)) |> then(&if(&1, do: &1.id))
+      user_id = fixture_user_id(fixture)
+
+      delete_mapping_jobs(event_ids)
 
       order_ids =
         Repo.all(
@@ -500,9 +666,36 @@ defmodule EventSales.Analytics.SourceWriterEventFenceConcurrencyTest do
         Repo.delete_all(from(user in User, where: user.id == ^user_id))
       end
 
+      delete_created_admin_role(fixture)
+
       Repo.delete_all(from(source in SourceSystem, where: source.id == ^source_id))
     end)
   end
+
+  defp fixture_user_id(fixture) do
+    fixture
+    |> Map.get(:admin, Map.get(fixture, :user))
+    |> then(&if(&1, do: &1.id))
+  end
+
+  defp delete_mapping_jobs(event_ids) do
+    worker = Oban.Worker.to_string(MappingChangedWorker)
+
+    Enum.each(event_ids, fn event_id ->
+      Repo.delete_all(
+        from(job in Oban.Job,
+          where: job.worker == ^worker,
+          where: fragment("?->>'event_id' = ?", job.args, ^event_id)
+        )
+      )
+    end)
+  end
+
+  defp delete_created_admin_role(%{admin_role_created?: true, admin_role_id: role_id}) do
+    Repo.delete_all(from(role in Role, where: role.id == ^role_id))
+  end
+
+  defp delete_created_admin_role(_fixture), do: :ok
 
   defp fixture_event_ids(fixture) do
     [
@@ -625,27 +818,32 @@ defmodule EventSales.Analytics.SourceWriterEventFenceConcurrencyTest do
   end
 
   defp start_session_fence(parent, event_id) do
-    task =
-      Task.async(fn ->
-        UnboxedPostgres.with_connection(fn ->
-          EventSnapshotRefreshFence.with_serial_event_refresh(event_id, fn ->
-            send(
-              parent,
-              {:held_event_fence, event_id, self(),
-               EventSnapshotRefreshFence.connection_backend_pid()}
-            )
-
-            receive do
-              :release_refresh_fence -> :ok
-            after
-              15_000 -> :timeout
-            end
-          end)
-        end)
-      end)
+    task = Task.async(fn -> hold_session_fence(parent, event_id) end)
 
     assert_receive {:held_event_fence, ^event_id, _holder_pid, backend_pid}, 5_000
     %{task: task, backend_pid: backend_pid, event_id: event_id}
+  end
+
+  defp hold_session_fence(parent, event_id) do
+    UnboxedPostgres.with_connection(fn ->
+      EventSnapshotRefreshFence.with_serial_event_refresh(event_id, fn ->
+        send(
+          parent,
+          {:held_event_fence, event_id, self(),
+           EventSnapshotRefreshFence.connection_backend_pid()}
+        )
+
+        await_refresh_fence_release()
+      end)
+    end)
+  end
+
+  defp await_refresh_fence_release do
+    receive do
+      :release_refresh_fence -> :ok
+    after
+      15_000 -> :timeout
+    end
   end
 
   defp wait_for_blocking_pid!(waiter_backend, blocker_backend, timeout_ms \\ 5_000) do
@@ -687,43 +885,24 @@ defmodule EventSales.Analytics.SourceWriterEventFenceConcurrencyTest do
          pre_commit_value
        ) do
     parent = self()
-
-    holder =
-      Task.async(fn ->
-        UnboxedPostgres.with_connection(fn ->
-          EventSnapshotRefreshFence.with_serial_event_refresh(event_id, fn ->
-            send(
-              parent,
-              {:refresh_fence_held, EventSnapshotRefreshFence.connection_backend_pid()}
-            )
-
-            receive do
-              :release_refresh_fence -> :ok
-            after
-              15_000 -> :timeout
-            end
-          end)
-        end)
-      end)
-
-    assert_receive {:refresh_fence_held, _holder_backend}, 5_000
-
-    task =
-      Task.async(fn ->
-        UnboxedPostgres.with_connection(fn ->
-          backend_pid = EventSnapshotRefreshFence.connection_backend_pid()
-          send(parent, {:writer_backend, backend_pid})
-          writer.()
-        end)
-      end)
+    holder = start_session_fence(parent, event_id)
+    task = Task.async(fn -> run_writer(parent, writer) end)
 
     assert_receive {:writer_backend, writer_backend}, 5_000
     EventSnapshotRefreshTestSupport.wait_for_advisory_lock_wait!(writer_backend)
     assert pre_commit_value.() == expected_pre_commit_value
 
-    send(holder.pid, :release_refresh_fence)
+    send(holder.task.pid, :release_refresh_fence)
     assert {:ok, _result} = Task.await(task, 15_000)
-    assert :ok = Task.await(holder, 15_000)
+    assert :ok = Task.await(holder.task, 15_000)
+  end
+
+  defp run_writer(parent, writer) do
+    UnboxedPostgres.with_connection(fn ->
+      backend_pid = EventSnapshotRefreshFence.connection_backend_pid()
+      send(parent, {:writer_backend, backend_pid})
+      writer.()
+    end)
   end
 
   defp order_count!(source_id, woo_order_id) do
@@ -743,6 +922,29 @@ defmodule EventSales.Analytics.SourceWriterEventFenceConcurrencyTest do
         {:ok, %Order{status: status}} -> status
         other -> other
       end
+    end)
+  end
+
+  defp next_source_version(%DateTime{} = updated_at_source) do
+    source_version(updated_at_source, 1)
+  end
+
+  defp previous_source_version(%DateTime{} = updated_at_source) do
+    source_version(updated_at_source, -1)
+  end
+
+  defp source_version(updated_at_source, seconds) do
+    updated_at_source
+    |> DateTime.add(seconds, :second)
+    |> DateTime.to_naive()
+    |> NaiveDateTime.to_iso8601()
+  end
+
+  defp order_updated_at_source!(order_id) do
+    UnboxedPostgres.with_connection(fn ->
+      Repo.one!(
+        from(order in Order, where: order.id == ^order_id, select: order.updated_at_source)
+      )
     end)
   end
 
