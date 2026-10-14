@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-435
+436
 
 ## Files
 
@@ -39,6 +39,7 @@ Project root: `.`
 - `lib/event_sales/analytics/dimension_snapshot_reader.ex`
 - `lib/event_sales/analytics/event_detail.ex`
 - `lib/event_sales/analytics/event_scoped_dashboard.ex`
+- `lib/event_sales/analytics/event_snapshot_affected_events.ex`
 - `lib/event_sales/analytics/event_snapshot_refresh_fence.ex`
 - `lib/event_sales/analytics/historical_catchup_freshness_notifier.ex`
 - `lib/event_sales/analytics/historical_catchup_period_coverage_notifier.ex`
@@ -581,6 +582,12 @@ Project root: `.`
   - specs?: true
   - docs_count: 1
   - public_funs: `summary/2`
+  - uses: _none_
+- `EventSales.Analytics.EventSnapshotAffectedEvents` - `lib/event_sales/analytics/event_snapshot_affected_events.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `resolve/3`
   - uses: _none_
 - `EventSales.Analytics.EventSnapshotRefreshFence` - `lib/event_sales/analytics/event_snapshot_refresh_fence.ex`
   - moduledoc?: true
