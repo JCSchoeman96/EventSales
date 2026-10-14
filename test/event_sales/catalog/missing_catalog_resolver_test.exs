@@ -68,7 +68,7 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
     assert %DateTime{} = invalidated.coverage_invalidated_at
   end
 
-  test "order upsert and catalog recovery acquire historical then period fences" do
+  test "order upsert and catalog recovery serialize on the event fence before invalidation" do
     UnboxedPostgres.with_connection(fn ->
       source = SalesHelpers.create_source_system!()
       event = SalesHelpers.create_event!(source, %{name: "Cross-namespace lock event"})
@@ -112,6 +112,9 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
         recovery_task =
           Task.async(fn ->
             UnboxedPostgres.with_connection(fn ->
+              recovery_backend_pid = backend_pid!()
+              send(test_pid, {:recovery_writer_backend, recovery_backend_pid})
+
               MissingCatalogResolver.recover_product(source.id, 501, 601,
                 historical_coverage_invalidator: fn order, event_ids ->
                   backend_pid = backend_pid!()
@@ -124,11 +127,12 @@ defmodule EventSales.Catalog.MissingCatalogResolverTest do
             end)
           end)
 
-        assert_receive {:recovery_historical_lock_attempted, recovery_backend_pid}, 5_000
+        assert_receive {:recovery_writer_backend, recovery_backend_pid}, 5_000
         wait_for_advisory_wait!(recovery_backend_pid)
         send(upsert_task.pid, :continue_upsert)
 
         assert {:ok, %Order{}} = Task.await(upsert_task, 10_000)
+        assert_receive {:recovery_historical_lock_attempted, _recovery_backend_pid}, 5_000
 
         assert {:ok, %{mapped: 1, marked_unmapped: 0, unchanged: 0}} =
                  Task.await(recovery_task, 10_000)

@@ -6,6 +6,8 @@ defmodule EventSales.Sales.OrderUpserter do
   require Ash.Query
 
   alias EventSales.Analytics.PeriodProjectionInvalidator
+  alias EventSales.Analytics.EventSnapshotAffectedEvents
+  alias EventSales.Analytics.EventSnapshotRefreshFence
   alias EventSales.Analytics.Workers.RefreshSnapshotWorker
   alias EventSales.Ingestion.HistoricalCoverageInvalidator
   alias EventSales.Ingestion.HistoricalOrderCoverageCandidateResolver
@@ -205,6 +207,7 @@ defmodule EventSales.Sales.OrderUpserter do
        ) do
     with {:ok, candidates} <-
            resolve_coverage_candidates(order, nil, after_snapshot, reconciliation_event_id, opts),
+         :ok <- lock_affected_events(nil, after_snapshot, reconciliation_event_id),
          :ok <- invalidate_new_order(order, candidates, opts),
          :ok <- invalidate_period_projection(nil, after_snapshot, opts),
          :ok <- enqueue_snapshot_refreshes(candidates, opts) do
@@ -234,6 +237,7 @@ defmodule EventSales.Sales.OrderUpserter do
                  reconciliation_event_id,
                  opts
                ),
+             :ok <- lock_affected_events(before_snapshot, after_snapshot, reconciliation_event_id),
              :ok <-
                invalidate_existing_order(
                  before_order,
@@ -246,6 +250,23 @@ defmodule EventSales.Sales.OrderUpserter do
              :ok <- enqueue_snapshot_refreshes(candidates, opts) do
           {:ok, order}
         end
+    end
+  end
+
+  defp lock_affected_events(before_snapshot, after_snapshot, reconciliation_event_id) do
+    explicit_event_ids =
+      case reconciliation_event_id do
+        nil -> []
+        event_id -> [event_id]
+      end
+
+    with {:ok, affected_event_ids} <-
+           EventSnapshotAffectedEvents.resolve(
+             before_snapshot,
+             after_snapshot,
+             explicit_event_ids
+           ) do
+      EventSnapshotRefreshFence.lock_events_in_transaction(affected_event_ids)
     end
   end
 
