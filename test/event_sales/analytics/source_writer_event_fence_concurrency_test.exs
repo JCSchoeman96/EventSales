@@ -6,6 +6,7 @@ defmodule EventSales.Analytics.SourceWriterEventFenceConcurrencyTest do
 
   alias EventSales.Analytics.EventSnapshotAffectedEvents
   alias EventSales.Analytics.EventSnapshotRefreshFence
+  alias EventSales.Analytics.Workers.RefreshSnapshotWorker
 
   alias EventSales.Analytics.Resources.{
     AnalyticsContributionFact,
@@ -575,7 +576,7 @@ defmodule EventSales.Analytics.SourceWriterEventFenceConcurrencyTest do
       event_ids = fixture_event_ids(fixture)
       user_id = fixture_user_id(fixture)
 
-      delete_mapping_jobs(event_ids)
+      delete_fixture_jobs(event_ids)
 
       order_ids =
         Repo.all(
@@ -678,8 +679,13 @@ defmodule EventSales.Analytics.SourceWriterEventFenceConcurrencyTest do
     |> then(&if(&1, do: &1.id))
   end
 
-  defp delete_mapping_jobs(event_ids) do
-    worker = Oban.Worker.to_string(MappingChangedWorker)
+  defp delete_fixture_jobs(event_ids) do
+    delete_jobs_for_events(MappingChangedWorker, event_ids)
+    delete_jobs_for_events(RefreshSnapshotWorker, event_ids)
+  end
+
+  defp delete_jobs_for_events(worker_module, event_ids) do
+    worker = Oban.Worker.to_string(worker_module)
 
     Enum.each(event_ids, fn event_id ->
       Repo.delete_all(
