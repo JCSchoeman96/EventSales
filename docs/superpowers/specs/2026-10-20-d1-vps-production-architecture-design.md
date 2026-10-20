@@ -117,6 +117,7 @@ eventsales-prod_eventsales_edge
 - PgBouncer: `eventsales_data` only.
 - Redis: `eventsales_data` only.
 - EventSales app: `eventsales_data` + `eventsales_edge`.
+- The EventSales app has the production network alias `eventsales-app` for DNSCluster discovery.
 - No data service publishes a host port.
 - App publishes no host port during private proof.
 - After private acceptance, app may publish `127.0.0.1:4100:4000` under a separate ingress authority.
@@ -193,7 +194,17 @@ Owns OpenLiteSpeed upstream configuration, proxy headers, WebSocket upgrade beha
 
 ## 6. PostgreSQL Production Contract
 
-### 6.1 Database
+### 6.1 Image and storage
+
+Production initially uses the exact PostgreSQL image already proven by D0:
+
+```text
+dhi.io/postgres:18.6-alpine3.24@sha256:d33bd884995daddfb515d0ce9aec23b74d20d72e03ca42b72c4abf617c76bb19
+```
+
+The production data volume is named by Compose from the logical volume `postgres_data`; it belongs only to the `eventsales-prod` project and is never shared with D0.
+
+### 6.2 Database
 
 ```text
 event_sales_prod
@@ -201,7 +212,7 @@ event_sales_prod
 
 The production database is new. `eventsales_proof` is never upgraded into production.
 
-### 6.2 Roles
+### 6.3 Roles
 
 Fresh production credentials are generated for:
 
@@ -219,7 +230,7 @@ eventsales_backup   = 2
 eventsales_runtime  = 20
 ```
 
-### 6.3 Ownership and privileges
+### 6.4 Ownership and privileges
 
 `eventsales_migrator` owns `event_sales_prod` and application-created schema objects.
 
@@ -236,11 +247,11 @@ Production bootstrap must establish before migrations:
 
 The default-privilege contract is mandatory so future migrations do not require manual grant repair.
 
-### 6.4 Extensions/functions
+### 6.5 Extensions/functions
 
 The repository declares `citext` and Ash helper functions through `EventSales.Repo.installed_extensions/0`. Production migration proof must demonstrate the migrator can install/create every required extension/function on an empty production database before application deployment is authorized.
 
-### 6.5 Initial container envelope
+### 6.6 Initial container envelope
 
 Initial PostgreSQL container limits:
 
@@ -267,6 +278,12 @@ Indexes required by application migrations remain migration-owned. No peak path 
 
 ## 7. PgBouncer Production Contract
 
+Production initially uses the exact PgBouncer image proven by D0:
+
+```text
+dhi.io/pgbouncer:1.26.1-debian13@sha256:78fe21ad5b7c1ab497e9828eea9b951f9d6a58eb638946ddc61ef1f99737f1b1
+```
+
 PgBouncer remains in **transaction mode**.
 
 Initial production configuration:
@@ -279,6 +296,13 @@ reserve_pool_size = 4
 max_db_connections = 16
 max_user_connections = 16
 max_prepared_statements = 200
+```
+
+Initial container envelope:
+
+```text
+CPU:    0.5
+Memory: 128 MiB
 ```
 
 The production runtime role may have up to 20 client connections from the app, while PgBouncer bounds active PostgreSQL backends to 16.
@@ -294,12 +318,12 @@ If that proof fails, D1 stops. The remediation must be reviewed from evidence be
 PgBouncer:
 
 - pinned image digest;
-- non-root runtime;
+- runtime UID/GID `65532:65532`;
 - read-only root filesystem;
 - no host port;
 - internal data network only;
 - `no-new-privileges`;
-- all Linux capabilities dropped unless a demonstrated runtime need exists;
+- all Linux capabilities dropped;
 - bounded memory/CPU;
 - SCRAM credentials;
 - separate client and PostgreSQL server passwords for the runtime role.
@@ -323,18 +347,22 @@ Oban notifications
   -> Erlang process groups across connected EventSales nodes
 ```
 
-The repository already supervises `DNSCluster`; D1 must use that existing clustering boundary rather than introduce a second cluster mechanism.
+The repository already supervises `DNSCluster`; D1 uses that existing clustering boundary rather than introducing a second cluster mechanism.
 
 ### First-node requirements
 
-The first production EventSales node must run as a distributed Erlang node from day one, with:
+The first production EventSales node runs as a distributed Erlang node from day one.
 
-- explicit release node identity;
-- a production release cookie stored only in the protected deployment environment;
-- DNSCluster query configured so future nodes can join without changing the notifier architecture;
-- single-node behavior proven before horizontal scaling.
+Implementation adds `rel/env.sh.eex` to derive a unique release node name from the container hostname while setting:
 
-Multi-node topology is not part of the first deployment, but the first node must not create a notifier architecture that has to be replaced to scale.
+```text
+RELEASE_DISTRIBUTION=name
+DNS_CLUSTER_QUERY=eventsales-app
+```
+
+The application service exposes the `eventsales-app` network alias on the edge network so DNSCluster can discover present/future application instances. `RELEASE_COOKIE` is a fresh production secret delivered through the protected runtime environment and is never committed or printed.
+
+Single-node clustering/PG-notifier behavior must pass before horizontal scaling is considered.
 
 ### Oban peer/leadership
 
@@ -343,6 +371,12 @@ Database-backed Oban leadership remains database-backed unless implementation ev
 ---
 
 ## 9. Redis Production Contract
+
+Production initially uses the exact Redis image proven by D0:
+
+```text
+dhi.io/redis:8.10.2-debian13@sha256:953ca2c2ab4ff7a93f8abac31339ba4d913ec0914861453ab4faa29d154115a0
+```
 
 Production Redis is a new service with fresh credentials and production-only keys.
 
@@ -354,9 +388,9 @@ eventsales:prod:*
 
 The D0 ACL `eventsales:proof:*` is not extended or reused.
 
-### Initial runtime command family
+### Runtime command family
 
-The production runtime ACL must permit only commands required by enabled production code:
+The production runtime ACL permits only commands required by enabled production code:
 
 ```text
 PING
@@ -382,7 +416,7 @@ This supports the current shared webhook rate limiter and hot-state snapshot ada
 
 ### Stats identity
 
-A separate statistics identity may read operational information but may not write application data. Its command set remains narrowly scoped to required inspection commands such as `PING`, `INFO`, and `CONFIG GET`.
+A separate statistics identity **must** exist. It may read operational information but may not write application data. Its command set is restricted to `PING`, `INFO`, and `CONFIG GET` unless later evidence requires another read-only command.
 
 ### Webhook degraded buffer
 
@@ -402,6 +436,7 @@ Production hot-state snapshots use the existing Redis adapter with bounded resto
 Initial Redis envelope:
 
 ```text
+Runtime UID/GID:       65532:65532
 CPU:                  0.5
 Container memory:     512 MiB
 Redis maxmemory:      384 MiB
@@ -417,13 +452,7 @@ Cache invalidation follows existing domain events and application ownership. D1 
 
 ### 10.1 Immutable image
 
-Production runs only an immutable image digest:
-
-```text
-ghcr.io/jcschoeman96/eventsales@sha256:<approved-digest>
-```
-
-No production `build:` directive is permitted.
+Production runs only an immutable GHCR image reference composed from the repository path plus a reviewed 64-hex-character image digest. No production `build:` directive is permitted.
 
 ### 10.2 Initial application envelope
 
@@ -431,19 +460,21 @@ No production `build:` directive is permitted.
 CPU:        4
 Memory:     2 GiB
 PIDs limit: 512
+Restart:    unless-stopped
 ```
 
 The app:
 
 - runs as the non-root image user;
 - uses a read-only root filesystem;
-- receives writable `tmpfs` only where proven necessary;
+- receives writable `tmpfs` only at `/tmp`, bounded in size and mounted `noexec,nosuid`;
 - drops all Linux capabilities;
 - uses `no-new-privileges`;
 - logs to stdout/stderr;
 - stores no durable state in its container filesystem;
 - uses `init: true`;
-- uses an explicit restart policy that returns after host reboot but does not hide crash evidence from health/monitoring.
+- is expected to return after host/Docker restart through `restart: unless-stopped`;
+- treats any unexpected restart count above zero during an acceptance gate as a blocker requiring review.
 
 Production disables runtime tzdata auto-update so timezone database changes arrive through a reviewed image rebuild rather than filesystem mutation.
 
@@ -469,7 +500,9 @@ The repository already has:
 - `/health` for liveness;
 - `/ready` backed by `EventSales.Health.DatabaseReadiness` for database readiness.
 
-Container liveness may use release-process health (`bin/event_sales pid`) without adding an HTTP client package to the runtime image. Private deployment readiness is verified from the running node and/or an isolated probe. Once loopback ingress exists, `/health` and `/ready` must also be proven over HTTP.
+Docker container health uses `bin/event_sales pid`; it does not add curl/wget to the runtime image and does not query PostgreSQL.
+
+Private readiness is verified with release RPC against `EventSales.Health.DatabaseReadiness.status/0` and with a network-isolated HTTP probe before ingress authority. Once loopback ingress exists, `/health` and `/ready` are also proven over HTTP through `127.0.0.1:4100`.
 
 No readiness endpoint may perform one database query per HTTP request; the existing ETS snapshot design is retained.
 
@@ -479,21 +512,29 @@ No readiness endpoint may perform one database query per HTTP request; the exist
 
 Production credentials are freshly generated. No R16/D0 proof password is copied into production.
 
-Host deployment material lives under a production root-owned directory such as:
+The production host authority root is exactly:
 
 ```text
 /root/eventsales-prod/
-├── data-plane/
-├── app/
-├── env/
-└── secrets/
 ```
 
-Directories containing secrets are `root:root` mode `0700`; protected files are `0400` unless a service-specific UID/GID requires a stricter explicit ownership contract.
+Top-level deployment directories containing sensitive material are `root:root` mode `0700`.
+
+Service-file ownership follows the already-proven image UIDs:
+
+```text
+PostgreSQL bootstrap secret   70:0       0440
+PgBouncer config/auth files   65532:65532 0400
+Redis password/ACL files      65532:65532 0400
+App runtime env files         0:0         0400
+Migration/bootstrap env files 0:0         0400
+```
+
+Other production DB role password source files remain root-owned `0400` and are copied/rendered only into service-specific config by bounded root-authorized staging steps.
 
 ### Runtime environment
 
-The final long-running app environment contains only runtime-required values, including runtime DB/Redis credentials, Phoenix secrets, public host/origin configuration, feature flags, and clustering values.
+The final long-running app environment contains only runtime-required values, including runtime DB/Redis credentials, Phoenix secrets, public host/origin configuration, feature flags, release cookie, and clustering values.
 
 ### Migration environment
 
@@ -501,7 +542,7 @@ The migration environment additionally contains `DIRECT_DATABASE_URL` using `eve
 
 ### Bootstrap environment
 
-Bootstrap admin credentials exist only for the bootstrap lifecycle. The initial private app may temporarily receive bootstrap variables, bootstrap is explicitly invoked after readiness, then the app is recreated from the same image without bootstrap credentials. The final runtime container must not retain the bootstrap admin password.
+Bootstrap admin credentials exist only for the bootstrap lifecycle. The initial private app temporarily receives bootstrap variables, bootstrap is explicitly invoked after readiness, then the app is recreated from the same image without bootstrap credentials. The final runtime container must not retain the bootstrap admin password.
 
 ### Exposure rule
 
@@ -571,7 +612,7 @@ accepted commit
   -> deployment consumes digest only
 ```
 
-The Dockerfile builder and runner base images must be digest-pinned for reproducibility. The final image must preserve the non-root EventSales user and normal `bin/event_sales start` command.
+The Dockerfile builder and runner base images must be digest-pinned for reproducibility. The exact digests are recorded by the implementation plan from registry evidence before the Dockerfile change is accepted. The final image preserves the non-root EventSales user and normal `bin/event_sales start` command.
 
 The existing source/test CI remains authoritative for code quality; the image workflow adds production artifact verification rather than replacing test/format/security gates.
 
@@ -586,7 +627,7 @@ The first production app container joins both production networks but publishes 
 Private acceptance must prove:
 
 - process liveness;
-- `/ready` semantics via the running node/probe;
+- release-RPC and network HTTP readiness;
 - real Ecto/Ash queries through PgBouncer transaction mode;
 - prepared statement behavior;
 - Oban insert/execute/retry behavior with `Oban.Notifiers.PG`;
@@ -623,7 +664,7 @@ OpenLiteSpeed remains a separate authority after loopback proof.
 
 Public cutover requirements:
 
-- one approved public `PHX_HOST`;
+- one concrete approved public `PHX_HOST` before D1-J begins;
 - upstream `127.0.0.1:4100`;
 - correct `Host`, `X-Forwarded-For`, and `X-Forwarded-Proto=https` behavior;
 - WebSocket upgrade support for LiveView;
@@ -847,7 +888,7 @@ If future EventSales tenancy becomes multi-tenant, database row isolation and Re
 
 ## 21. Recommended Repository Structure
 
-D1 implementation should converge on the following boundaries:
+D1 implementation converges on the following boundaries:
 
 ```text
 .github/workflows/
@@ -857,6 +898,9 @@ config/
 ├── config.exs                        # Oban notifier default/production-safe config
 ├── prod.exs
 └── runtime.exs                       # pool/runtime/clustering production config
+
+rel/
+└── env.sh.eex                        # distributed release node identity
 
 lib/event_sales/
 ├── application.ex                    # existing DNSCluster/PubSub supervision
@@ -889,6 +933,8 @@ Naming rules:
 - Compose project: `eventsales-app` for application.
 - Database: `event_sales_prod`.
 - Runtime Redis namespace: `eventsales:prod:*`.
+- App DNS/network alias: `eventsales-app`.
+- DNSCluster query: `eventsales-app`.
 - Host app ingress: `127.0.0.1:4100`.
 - Container app port: `4000`.
 - Do not use `proof`, `test`, or `d0` in permanent production resource names.
@@ -931,7 +977,7 @@ Publish and prove `127.0.0.1:4100:4000` only.
 
 ### D1-J — OpenLiteSpeed upstream proof
 
-Stage proxy behavior without assuming public acceptance.
+Stage proxy behavior only after one concrete public `PHX_HOST` is approved.
 
 ### D1-K — Public cutover
 
@@ -947,9 +993,10 @@ Implementation must include automated repository tests plus bounded production-l
 
 Minimum repository tests:
 
-- runtime config selects `Oban.Notifiers.PG` in production target;
+- runtime config selects `Oban.Notifiers.PG` in the production target;
 - production config keeps `DATABASE_URL` and `DIRECT_DATABASE_URL` responsibilities separate;
 - app pool size parses/uses the production setting;
+- distributed release node configuration derives a unique node name and uses the production release cookie;
 - Redis rate limiter commands are represented in ACL tests;
 - hot-state Redis commands are represented in ACL tests;
 - degraded webhook buffer remains off by default;
@@ -1024,6 +1071,9 @@ PRODUCTION_DATABASE=event_sales_prod
 PRODUCTION_SECRETS=FRESH
 D0_SECRET_REUSE=NO
 
+POSTGRES_CPU=2
+POSTGRES_MEMORY=3GiB
+
 PGBOUNCER_POOL_MODE=transaction
 PGBOUNCER_MAX_CLIENT_CONN=64
 PGBOUNCER_DEFAULT_POOL_SIZE=12
@@ -1032,9 +1082,13 @@ PGBOUNCER_MAX_DB_CONNECTIONS=16
 PGBOUNCER_MAX_USER_CONNECTIONS=16
 PGBOUNCER_MAX_PREPARED_STATEMENTS=200
 
+APP_CPU=4
+APP_MEMORY=2GiB
+APP_PIDS_LIMIT=512
 APP_DB_POOL_SIZE=20
+APP_RESTART_POLICY=unless-stopped
 OBAN_NOTIFIER=Oban.Notifiers.PG
-DNS_CLUSTER=EXISTING_APPLICATION_BOUNDARY
+DNS_CLUSTER_QUERY=eventsales-app
 
 REDIS_NAMESPACE=eventsales:prod:*
 WEBHOOK_REDIS_BUFFER_ENABLED=false
