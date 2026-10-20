@@ -9,8 +9,10 @@ defmodule EventSales.ObanTopologyTest do
   test "oban notifier and queues are explicit" do
     oban_config = Application.fetch_env!(:event_sales, Oban)
 
-    assert Keyword.fetch!(oban_config, :notifier) == Oban.Notifiers.Postgres
+    assert Keyword.fetch!(oban_config, :notifier) == Oban.Notifiers.PG
     assert Keyword.fetch!(oban_config, :plugins) == []
+    refute Keyword.has_key?(oban_config, :engine)
+    refute Keyword.has_key?(oban_config, :peer)
     assert Keyword.fetch!(oban_config, :queues)[:default] == 10
     assert Keyword.fetch!(oban_config, :queues)[:webhooks] == 10
     assert Keyword.fetch!(oban_config, :queues)[:reconciliation] == 1

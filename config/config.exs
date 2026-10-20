@@ -36,7 +36,7 @@ config :event_sales, :staff_customer_pii_visibility, :masked
 
 config :event_sales, Oban,
   repo: EventSales.Repo,
-  notifier: Oban.Notifiers.Postgres,
+  notifier: Oban.Notifiers.PG,
   plugins: [],
   queues: [
     default: 10,
