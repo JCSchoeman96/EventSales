@@ -32,9 +32,21 @@ D1 production uses Erlang long names. The node basename is `event_sales`; each n
 
 For the single-node MVP, R4 will choose `EVENTSALES_NODE_IP` only after a read-only VPS Docker-network collision audit. The app's internal network `ipv4_address` must equal that value. Do not derive the node identity from Docker `HOSTNAME`, invent a DNS suffix, use short names, or hard-code an IP or cookie.
 
-The `eventsales-app` alias belongs only to `eventsales-prod_eventsales_data`, the internal EventSales data network. Erlang distribution stays on that network. The app's edge attachment is not a clustering boundary, and no Erlang distribution port is published to the host. A separate gate must prove the expected peer set before adding another node.
+The deployment contract places the `eventsales-app` alias only on `eventsales-prod_eventsales_data`, the internal EventSales data network. When `EVENTSALES_NODE_IP` is set, `rel/env.sh.eex` configures EPMD with that address and configures the Erlang distribution listener with `inet_dist_use_interface` for the same address on `start*` and `daemon*` commands. This configures the intended bind address; it does not prove the runtime socket state. The deployment contract must not publish an Erlang distribution port to the host.
 
 R1 configures this release contract. It does not create production networking or prove production or multi-node clustering.
+
+## Required private runtime proof
+
+Before production or multi-node clustering is accepted, the private runtime proof must verify:
+
+- The BEAM distribution listener is bound to `EVENTSALES_NODE_IP`.
+- EPMD is bound to `EVENTSALES_NODE_IP`, with any unavoidable loopback listener recorded.
+- No distribution listener is bound to the app's `eventsales_edge` IP.
+- No Erlang distribution port is published to the host.
+- `eventsales-app` resolves to the expected data-network peer IP set.
+
+The actual production subnet and IP, Docker interface assignment, BEAM and EPMD socket addresses, production peer discovery, and multi-node clustering remain unproven until that gate passes.
 
 ## Bandit security follow-up
 
