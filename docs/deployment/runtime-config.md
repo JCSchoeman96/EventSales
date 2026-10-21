@@ -35,6 +35,14 @@ EVENTSALES_BOOTSTRAP_SOURCE_NAME
 EVENTSALES_BOOTSTRAP_SOURCE_BASE_URL
 ```
 
+## D1 release contract
+
+The D1 production deployment contract will set `DNS_CLUSTER_QUERY=eventsales-app`, provide an approved `EVENTSALES_NODE_IP` on the internal EventSales data network, and provide `RELEASE_COOKIE` through the protected secret mechanism. `rel/env.sh.eex` sets `RELEASE_DISTRIBUTION=name` and `RELEASE_NODE=event_sales@${EVENTSALES_NODE_IP}` only when the node IP is supplied; it fails safely if the IP is set without a cookie. Other release environments that omit the node IP are not forced into VPS distribution settings.
+
+The node IP is not selected in R1. R4 will choose it after a read-only VPS Docker-network collision audit and use the same value for the app attachment's `ipv4_address`. The `eventsales-app` alias and Erlang distribution stay on the internal data network. Production and multi-node clustering have not been runtime-proven.
+
+`EventSales.Repo` defaults to `POOL_SIZE=20` in the production runtime configuration. A deployment may override it with `POOL_SIZE`; the default and override behavior are covered by a focused test. This is a client-pool setting, not a PgBouncer server-pool setting.
+
 `WOOCOMMERCE_REST_BASE_URL`, `WOOCOMMERCE_CONSUMER_KEY`, and `WOOCOMMERCE_CONSUMER_SECRET` must be set before live ingestion, reconciliation, or metadata recovery is enabled. WooCommerce REST concurrency remains fixed at `2` in runtime configuration.
 
 Live cutover controls:

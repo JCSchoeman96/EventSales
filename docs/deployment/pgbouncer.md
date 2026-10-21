@@ -10,4 +10,6 @@ The D1 production target uses PgBouncer transaction pooling for normal `DATABASE
 
 The target configuration sets `max_prepared_statements=200`. Keep Postgrex's named prepared statements enabled until the later private runtime proof establishes whether any adjustment is needed. Do not claim that the production PgBouncer has been deployed or that transaction-pooling compatibility has been runtime-proven.
 
+For D1 clustering, the app's `eventsales-app` DNS alias belongs on the internal EventSales data network, not the edge network. The production release uses the long node name `event_sales@${EVENTSALES_NODE_IP}` and an externally supplied cookie. The approved internal IP is selected later after a read-only VPS network collision audit; no Erlang distribution port is published to the host. This release contract is configured in R1 but is not runtime-proven.
+
 The previous direct/session-pooling topology remains historical evidence. It does not authorize changing D1's selected transaction-pooling model.

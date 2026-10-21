@@ -30,6 +30,14 @@ appended for partitioned runs.
 - Keep Postgrex named preparation enabled unless a later transaction-pooling proof demonstrates a concrete incompatibility and a separate review approves a change.
 - Older Slice `5.7` and Railway records describe the historical direct/session-pooling topology. They do not define the D1 production target.
 
+## Distributed Runtime Boundary
+
+- D1 production releases use Erlang long names with the stable basename `event_sales` and the node's internal IPv4: `RELEASE_DISTRIBUTION=name` and `RELEASE_NODE=event_sales@${EVENTSALES_NODE_IP}`.
+- `EVENTSALES_NODE_IP` will be selected only after a read-only VPS Docker-network collision audit. The later app network's `ipv4_address` and this variable must use the same approved value.
+- `DNS_CLUSTER_QUERY=eventsales-app` is supplied by the production deployment contract. The locked `dns_cluster` 0.2.0 resolves that query to IPs and forms peer names from the current node basename and each returned IP.
+- The `eventsales-app` alias belongs only on the internal EventSales data network. Erlang distribution remains on that network; it is not attached to the edge network, and no distribution port is published to the host.
+- `RELEASE_COOKIE` is an externally supplied production secret. R1 configures the release contract but does not prove production or multi-node clustering.
+
 ## Verification Boundary
 
 - Slice `0.2` proves the local/test baseline: repo startup, direct migration URL selection, and minimal Oban execution in test.
