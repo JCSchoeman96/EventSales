@@ -19,11 +19,20 @@ EVENTSALES_NODE_IP_SOURCE=
 
 MULTI_NODE_RUNTIME_PROOF=NOT_YET_PERFORMED
 
-SEC01_BANDIT_UPGRADE_REQUIRED=YES
-CURRENT_BANDIT=1.12.5
-TARGET_BANDIT=1.13.1
-SEC01_EXECUTION=AFTER_R1_BEFORE_R2
-SEC01=REQUIRED_NOT_YET_AUTHORIZED_FOR_EXECUTION
+SEC01_BANDIT_UPGRADE=ACCEPTED
+SEC01_ACCEPTED_HEAD=ffcbf5ecf3904811931cfdd50393c9b380f0d52e
+SEC01_ACCEPTED_TREE=e21204dcd2f4587389e2dc32d5ef2f4d5cce59b2
+CURRENT_BANDIT=1.13.1
+THOUSAND_ISLAND=1.6.0
+CVE_2026_105659_REMEDIATED=YES
+CVE_2026_105660_REMEDIATED=YES
+DEPENDENCY_AUDIT=PASS
+HEX_AUDIT=PASS
+QUALITY_FAST=PASS
+FULL_TEST_SUITE=3050 tests, 0 failures, 1 excluded
+GITHUB_CONTENT_REVIEW=PASS
+GITHUB_SIGNATURE=PASS
+GITHUB_CI_STATUS=NOT_RUN_ON_THIS_HEAD
 ```
 
 ## Node identity and network boundary
@@ -48,6 +57,6 @@ Before production or multi-node clustering is accepted, the private runtime proo
 
 The actual production subnet and IP, Docker interface assignment, BEAM and EPMD socket addresses, production peer discovery, and multi-node clustering remain unproven until that gate passes.
 
-## Bandit security follow-up
+## Bandit security status
 
-The locked Bandit 1.12.5 release is not accepted for production while the reviewed security advisories remain unresolved. SEC-01 is a separate required task targeting Bandit 1.13.1 after R1 and before R2. This ruling records the queued requirement only; it does not authorize or perform the dependency upgrade. R1 does not modify `mix.exs` or `mix.lock` for SEC-01.
+Bandit 1.12.5 was the vulnerable version that prompted SEC-01. The accepted SEC-01 commit updates the requirement and lock to Bandit 1.13.1, with Thousand Island 1.6.0. The dependency audit, Hex audit, quality gate, and full test suite passed. GitHub content and signature review passed. GitHub CI did not run on this head. Existing Ash notification and catalog post-commit cache/PubSub test warnings were not addressed by SEC-01 and are not recorded as resolved here.
