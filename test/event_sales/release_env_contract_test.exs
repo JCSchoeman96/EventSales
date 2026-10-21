@@ -56,29 +56,59 @@ defmodule EventSales.ReleaseEnvContractTest do
     refute output =~ "release-cookie-test-only"
   end
 
-  test "rpc keeps the node identity but does not add a listener option" do
-    {output, status} =
-      System.cmd(
-        "sh",
-        [
-          "-c",
-          ". \"$1\"; printf '%s\\n%s\\n%s\\n%s\\n' \"$RELEASE_DISTRIBUTION\" \"$RELEASE_NODE\" \"$ERL_EPMD_ADDRESS\" \"${ELIXIR_ERL_OPTIONS:-}\"",
+  test "distributed helper commands configure the data interface" do
+    for release_command <- ["rpc", "remote", "restart", "stop", "pid"] do
+      {output, status} =
+        System.cmd(
           "sh",
-          @env_template_path
-        ],
-        env: [
-          {"EVENTSALES_NODE_IP", "10.250.0.10"},
-          {"RELEASE_COOKIE", "release-cookie-test-only"},
-          {"RELEASE_COMMAND", "rpc"},
-          {"ELIXIR_ERL_OPTIONS", ""}
-        ],
-        stderr_to_stdout: true
-      )
+          [
+            "-c",
+            ". \"$1\"; printf '%s\\n' \"${ELIXIR_ERL_OPTIONS:-}\"",
+            "sh",
+            @env_template_path
+          ],
+          env: [
+            {"EVENTSALES_NODE_IP", "10.250.0.10"},
+            {"RELEASE_COOKIE", "release-cookie-test-only"},
+            {"RELEASE_COMMAND", release_command},
+            {"ELIXIR_ERL_OPTIONS", ""}
+          ],
+          stderr_to_stdout: true
+        )
 
-    assert status == 0
-    assert output =~ "name\nevent_sales@10.250.0.10\n10.250.0.10\n"
-    refute output =~ "inet_dist_use_interface"
-    refute output =~ "release-cookie-test-only"
+      assert status == 0
+
+      assert output =~ "-kernel inet_dist_use_interface {10,250,0,10}",
+             "expected #{release_command} to configure the distribution interface"
+
+      refute output =~ "release-cookie-test-only"
+    end
+  end
+
+  test "eval and version do not configure a distribution listener" do
+    for release_command <- ["eval", "version"] do
+      {output, status} =
+        System.cmd(
+          "sh",
+          [
+            "-c",
+            ". \"$1\"; printf '%s\\n' \"${ELIXIR_ERL_OPTIONS:-}\"",
+            "sh",
+            @env_template_path
+          ],
+          env: [
+            {"EVENTSALES_NODE_IP", "10.250.0.10"},
+            {"RELEASE_COOKIE", "release-cookie-test-only"},
+            {"RELEASE_COMMAND", release_command},
+            {"ELIXIR_ERL_OPTIONS", ""}
+          ],
+          stderr_to_stdout: true
+        )
+
+      assert status == 0
+      refute output =~ "inet_dist_use_interface"
+      refute output =~ "release-cookie-test-only"
+    end
   end
 
   test "without a node IP the template does not force VPS distribution settings" do

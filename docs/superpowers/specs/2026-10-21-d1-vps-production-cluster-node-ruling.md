@@ -32,7 +32,7 @@ D1 production uses Erlang long names. The node basename is `event_sales`; each n
 
 For the single-node MVP, R4 will choose `EVENTSALES_NODE_IP` only after a read-only VPS Docker-network collision audit. The app's internal network `ipv4_address` must equal that value. Do not derive the node identity from Docker `HOSTNAME`, invent a DNS suffix, use short names, or hard-code an IP or cookie.
 
-The deployment contract places the `eventsales-app` alias only on `eventsales-prod_eventsales_data`, the internal EventSales data network. When `EVENTSALES_NODE_IP` is set, `rel/env.sh.eex` configures EPMD with that address and configures the Erlang distribution listener with `inet_dist_use_interface` for the same address on `start*` and `daemon*` commands. This configures the intended bind address; it does not prove the runtime socket state. The deployment contract must not publish an Erlang distribution port to the host.
+The deployment contract places the `eventsales-app` alias only on `eventsales-prod_eventsales_data`, the internal EventSales data network. When `EVENTSALES_NODE_IP` is set, `rel/env.sh.eex` configures EPMD with that address and configures long-running release nodes and distributed helper nodes to use it with `inet_dist_use_interface`. This configures the intended bind address; it does not prove the runtime socket state. The deployment contract must not publish an Erlang distribution port to the host.
 
 R1 configures this release contract. It does not create production networking or prove production or multi-node clustering.
 
