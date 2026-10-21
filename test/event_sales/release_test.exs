@@ -169,4 +169,47 @@ defmodule EventSales.ReleaseTest do
       end
     end
   end
+
+  describe "bootstrap/1" do
+    test "does not migrate, bootstraps admin then source, and emits only safe completion output" do
+      caller = self()
+
+      assert :ok =
+               Release.bootstrap(
+                 env: %{},
+                 migrate: fn -> flunk("bootstrap must not run migrations") end,
+                 start_app: fn ->
+                   send(caller, :started)
+                   :ok
+                 end,
+                 admin_bootstrap: fn ->
+                   assert_received :started
+                   send(caller, :admin_bootstrapped)
+                   %{user_status: :created, password: "must not be printed"}
+                 end,
+                 source_bootstrap: fn ->
+                   assert_received :admin_bootstrapped
+                   send(caller, :source_bootstrapped)
+                   %{name: "Production WooCommerce", secret: "must not be printed"}
+                 end,
+                 output: fn line -> send(caller, {:output, line}) end
+               )
+
+      assert_received :source_bootstrapped
+      assert_received {:output, "production bootstrap: complete"}
+      refute_received {:output, _line}
+    end
+
+    test "admin bootstrap failure prevents source bootstrap and success output" do
+      assert_raise RuntimeError, "admin bootstrap failed", fn ->
+        Release.bootstrap(
+          env: %{},
+          start_app: fn -> :ok end,
+          admin_bootstrap: fn -> raise "admin bootstrap failed" end,
+          source_bootstrap: fn -> flunk("source bootstrap must not run") end,
+          output: fn _line -> flunk("success output must not run") end
+        )
+      end
+    end
+  end
 end

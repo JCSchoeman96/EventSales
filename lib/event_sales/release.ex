@@ -14,25 +14,36 @@ defmodule EventSales.Release do
              (module(), (module() -> term()) -> {:ok, term(), [atom()]} | {:error, term()})}
           | {:migrator_run, (module(), :up | :down, keyword() -> term())}
 
-  @spec migrate_and_bootstrap(keyword()) :: :ok
-  def migrate_and_bootstrap(opts \\ []) do
-    migrate_fun = Keyword.get(opts, :migrate, &migrate/0)
+  @spec bootstrap(keyword()) :: :ok
+  def bootstrap(opts \\ []) do
+    env = Keyword.get(opts, :env, System.get_env())
     start_app = Keyword.get(opts, :start_app, &start_app!/0)
 
     admin_bootstrap =
-      Keyword.get(opts, :admin_bootstrap, &EventSales.Maintenance.AdminBootstrap.run!/0)
+      Keyword.get(opts, :admin_bootstrap, fn ->
+        EventSales.Maintenance.AdminBootstrap.run!(env)
+      end)
 
     source_bootstrap =
-      Keyword.get(opts, :source_bootstrap, &EventSales.Maintenance.SourceSystemBootstrap.run!/0)
+      Keyword.get(opts, :source_bootstrap, fn ->
+        EventSales.Maintenance.SourceSystemBootstrap.run!(env)
+      end)
 
     output = Keyword.get(opts, :output, &IO.puts/1)
 
-    migrate_fun.()
     start_app.()
     admin_bootstrap.()
     source_bootstrap.()
     output.("production bootstrap: complete")
     :ok
+  end
+
+  @spec migrate_and_bootstrap(keyword()) :: :ok
+  def migrate_and_bootstrap(opts \\ []) do
+    migrate_fun = Keyword.get(opts, :migrate, &migrate/0)
+
+    migrate_fun.()
+    bootstrap(opts)
   end
 
   @spec migrate([release_option()]) :: [term()]
