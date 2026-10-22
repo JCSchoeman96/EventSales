@@ -5,6 +5,7 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 REPO_ROOT=$(cd -- "$SCRIPT_DIR/../../../../" && pwd -P)
 IMAGE_DIR="$REPO_ROOT/deploy/vps/data-plane/pgbouncer-image"
 RUST_BUILDER='rust:1-alpine3.24@sha256:3ea887915f261f273d6a24efdfdb92665dee12199923e57870453644fe4ae5c9'
+BASE_IMAGE_REFERENCE='dhi.io/pgbouncer:1.26.1-debian13@sha256:78fe21ad5b7c1ab497e9828eea9b951f9d6a58eb638946ddc61ef1f99737f1b1'
 LOCAL_IMAGE_TAG='eventsales-pgbouncer:r3-4-local'
 SOURCE_URL='https://github.com/JCSchoeman96/EventSales'
 PROBE_PATH='/usr/local/bin/eventsales-pgbouncer-healthcheck'
@@ -13,12 +14,16 @@ RUN_DIR=''
 RUN_ID=''
 TMP_ROOT=''
 UNIT_CONTAINER_ID=''
+BASE_CONTAINER_ID=''
 CANDIDATE_CONTAINER_ID=''
 HELPER_CONTAINER_ID=''
 HELPER_BUILD_CONTAINER_NAME=''
+TASK4_HELPER_CONTAINER_NAME=''
+TASK4_HELPER_SEQUENCE=0
 NETWORK_ID=''
 NETWORK_NAME=''
 CANDIDATE_IMAGE_ID=''
+BASE_IMAGE_ID=''
 
 usage() {
   printf 'Usage: bash %s <unit|build|static|integration|self-test|all> [image-reference]\n' "${BASH_SOURCE[0]}" >&2
@@ -53,6 +58,9 @@ cleanup() {
   if [[ -n "$UNIT_CONTAINER_ID" ]]; then
     docker rm -f "$UNIT_CONTAINER_ID" >/dev/null 2>&1 || cleanup_failed=1
   fi
+  if [[ -n "$BASE_CONTAINER_ID" ]]; then
+    docker rm -f "$BASE_CONTAINER_ID" >/dev/null 2>&1 || cleanup_failed=1
+  fi
   if [[ -n "$CANDIDATE_CONTAINER_ID" ]]; then
     docker rm -f "$CANDIDATE_CONTAINER_ID" >/dev/null 2>&1 || cleanup_failed=1
   fi
@@ -77,6 +85,29 @@ cleanup() {
       fi
     elif ! docker info >/dev/null 2>&1; then
       printf 'Unable to inspect helper-build container during cleanup: %s\n' "$HELPER_BUILD_CONTAINER_NAME" >&2
+      cleanup_failed=1
+    fi
+  fi
+  if [[ -n "$TASK4_HELPER_CONTAINER_NAME" ]]; then
+    if [[ "$TASK4_HELPER_CONTAINER_NAME" =~ ^eventsales-r3-4-${RUN_ID}-task4-[0-9]+$ ]]; then
+      if helper_build_id=$(docker container inspect --format '{{.Id}}' "$TASK4_HELPER_CONTAINER_NAME" 2>/dev/null); then
+        helper_build_run_id=$(docker container inspect --format '{{index .Config.Labels "eventsales.r3-4.proof-run"}}' "$helper_build_id" 2>/dev/null) || helper_build_run_id=''
+        if [[ "$helper_build_run_id" == "$RUN_ID" ]]; then
+          if ! docker rm -f "$helper_build_id" >/dev/null 2>&1; then
+            if docker container inspect "$helper_build_id" >/dev/null 2>&1; then
+              cleanup_failed=1
+            fi
+          fi
+        else
+          printf 'Refusing to remove Task-4 helper without this run label: %s\n' "$TASK4_HELPER_CONTAINER_NAME" >&2
+          cleanup_failed=1
+        fi
+      elif ! docker info >/dev/null 2>&1; then
+        printf 'Unable to inspect Task-4 helper during cleanup: %s\n' "$TASK4_HELPER_CONTAINER_NAME" >&2
+        cleanup_failed=1
+      fi
+    else
+      printf 'Refusing to remove unexpected Task-4 helper name: %s\n' "$TASK4_HELPER_CONTAINER_NAME" >&2
       cleanup_failed=1
     fi
   fi
@@ -137,6 +168,511 @@ run_build() {
     "$IMAGE_DIR"
   built_image_id=$(docker image inspect --format '{{.Id}}' "$LOCAL_IMAGE_TAG")
   printf 'BUILD_MODE=PASS\nBUILT_IMAGE_TAG=%s\nBUILT_IMAGE_ID=%s\n' "$LOCAL_IMAGE_TAG" "$built_image_id"
+}
+
+run_task4_helper() {
+  local helper_mode=$1
+  TASK4_HELPER_SEQUENCE=$((TASK4_HELPER_SEQUENCE + 1))
+  TASK4_HELPER_CONTAINER_NAME="eventsales-r3-4-${RUN_ID}-task4-${TASK4_HELPER_SEQUENCE}"
+  timeout --signal=KILL 120s docker run --rm -i \
+    --name "$TASK4_HELPER_CONTAINER_NAME" \
+    --label "eventsales.r3-4.proof-run=$RUN_ID" \
+    --platform linux/amd64 \
+    --network none \
+    --mount "type=bind,src=$RUN_DIR,dst=/work" \
+    "$RUST_BUILDER" \
+    /bin/sh -s "$helper_mode" <<'TASK4_HELPER'
+#!/bin/sh
+set -eu
+LC_ALL=C
+export LC_ALL
+PROBE_PATH='/usr/local/bin/eventsales-pgbouncer-healthcheck'
+
+manifest() {
+  root=$1
+  output=$2
+  raw_output="${output}.raw"
+  [ -d "$root" ] || { printf 'manifest root is missing: %s\n' "$root" >&2; return 1; }
+  find "$root" -mindepth 1 -exec sh -c '
+    root=$1
+    object=$2
+    relative=${object#"$root"/}
+    path_hex=$(printf "%s" "$relative" | od -An -tx1 | tr -d " \n")
+    kind=$(stat -c "%F" "$object")
+    mode=$(stat -c "%a" "$object")
+    uid=$(stat -c "%u" "$object")
+    gid=$(stat -c "%g" "$object")
+    size=-
+    extra=-
+    case "$kind" in
+      "regular file")
+        size=$(stat -c "%s" "$object")
+        digest=$(sha256sum < "$object")
+        set -- $digest
+        extra=$1
+        ;;
+      "symbolic link")
+        extra=$(readlink -n "$object" | od -An -tx1 | tr -d " \n")
+        ;;
+    esac
+    printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "$path_hex" "$kind" "$mode" "$uid" "$gid" "$size" "$extra"
+  ' task4-manifest "$root" {} \; > "$raw_output"
+  sort "$raw_output" > "$output"
+}
+
+verify_elf() {
+  candidate=$1
+  if [ ! -f "$candidate" ] || [ ! -x "$candidate" ]; then
+    printf 'ELF verifier: missing or non-executable file\n' >&2
+    return 1
+  fi
+  size_output=$(wc -c < "$candidate") || { printf 'ELF verifier: cannot measure file\n' >&2; return 1; }
+  set -- $size_output
+  size=${1-}
+  case "$size" in ""|*[!0-9]*) printf 'ELF verifier: invalid size\n' >&2; return 1 ;; esac
+  if [ "$size" -gt 2097152 ]; then
+    printf 'ELF verifier: file exceeds 2097152 bytes\n' >&2
+    return 1
+  fi
+  header=$(readelf -hW "$candidate") || { printf 'ELF verifier: invalid ELF header\n' >&2; return 1; }
+  case "$header" in *"Machine:"*"Advanced Micro Devices X86-64"*) ;; *) printf 'ELF verifier: architecture is not x86-64\n' >&2; return 1 ;; esac
+  program_headers=$(readelf -lW "$candidate") || { printf 'ELF verifier: cannot read program headers\n' >&2; return 1; }
+  case "$program_headers" in *INTERP*) printf 'ELF verifier: PT_INTERP is present\n' >&2; return 1 ;; esac
+  dynamic_section=$(readelf -dW "$candidate" 2>&1) || { printf 'ELF verifier: cannot read dynamic section\n' >&2; return 1; }
+  case "$dynamic_section" in *NEEDED*) printf 'ELF verifier: DT_NEEDED is present\n' >&2; return 1 ;; esac
+  printf 'PROBE_SIZE_BYTES=%s\nPROBE_X86_64=YES\nPROBE_PT_INTERP=NONE\nPROBE_DT_NEEDED=NONE\n' "$size"
+}
+
+extract_manifest() {
+  archive=$1
+  root=$2
+  output=$3
+  mkdir -p "$root"
+  tar -xpf "$archive" -C "$root"
+  manifest "$root" "$output"
+}
+
+static_proof() {
+  extract_manifest /work/base-rootfs.tar /work/base-rootfs /work/base.manifest
+  extract_manifest /work/candidate-rootfs.tar /work/candidate-rootfs /work/candidate.manifest
+  verify_elf "/work/candidate-rootfs${PROBE_PATH}"
+  rm -rf /work/base-rootfs /work/candidate-rootfs
+}
+
+self_test() {
+  chown 1234:2345 /work/self-test/changed-owner/etc/pgbouncer.ini
+  chown -h 3456:4567 /work/self-test/changed-link-owner/etc/current
+  for fixture in base allowed removed replaced extra changed-mode changed-owner changed-link changed-link-owner replaced-type; do
+    manifest "/work/self-test/$fixture" "/work/self-test/$fixture.manifest"
+  done
+
+  cat > /work/self-test/elf-fixture.rs <<'RUST'
+fn main() {}
+RUST
+  rustc --edition=2021 --target x86_64-unknown-linux-musl -C opt-level=3 -C strip=symbols \
+    /work/self-test/elf-fixture.rs -o /work/self-test/static-elf
+  verify_elf /work/self-test/static-elf > /work/self-test/static-elf.report 2>&1
+
+  cp -L /usr/bin/readelf /work/self-test/dynamic-elf
+  chmod 0755 /work/self-test/dynamic-elf
+  dynamic_size_output=$(wc -c < /work/self-test/dynamic-elf)
+  set -- $dynamic_size_output
+  dynamic_size=$1
+  [ "$dynamic_size" -le 2097152 ] || { printf 'dynamic fixture exceeds size ceiling\n' >&2; return 1; }
+  dynamic_header=$(readelf -hW /work/self-test/dynamic-elf)
+  case "$dynamic_header" in *"Machine:"*"Advanced Micro Devices X86-64"*) ;; *) printf 'dynamic fixture is not x86-64\n' >&2; return 1 ;; esac
+  dynamic_program_headers=$(readelf -lW /work/self-test/dynamic-elf)
+  case "$dynamic_program_headers" in *INTERP*) ;; *) printf 'dynamic fixture lacks PT_INTERP\n' >&2; return 1 ;; esac
+  dynamic_section=$(readelf -dW /work/self-test/dynamic-elf 2>&1)
+  case "$dynamic_section" in *NEEDED*) ;; *) printf 'dynamic fixture lacks DT_NEEDED\n' >&2; return 1 ;; esac
+  if verify_elf /work/self-test/dynamic-elf > /work/self-test/dynamic-elf.report 2>&1; then
+    printf 'ELF verifier accepted dynamic fixture\n' >&2
+    return 1
+  fi
+
+  cp -p /work/self-test/static-elf /work/self-test/oversize-elf
+  printf '%02100000d' 0 >> /work/self-test/oversize-elf
+  [ -x /work/self-test/oversize-elf ] || { printf 'oversize fixture is not executable\n' >&2; return 1; }
+  oversize_header=$(readelf -hW /work/self-test/oversize-elf)
+  case "$oversize_header" in *"Machine:"*"Advanced Micro Devices X86-64"*) ;; *) printf 'oversize fixture is not x86-64\n' >&2; return 1 ;; esac
+  oversize_size_output=$(wc -c < /work/self-test/oversize-elf)
+  set -- $oversize_size_output
+  oversize_size=$1
+  [ "$oversize_size" -gt 2097152 ] || { printf 'oversize fixture is below size ceiling\n' >&2; return 1; }
+  if verify_elf /work/self-test/oversize-elf > /work/self-test/oversize-elf.report 2>&1; then
+    printf 'ELF verifier accepted oversize fixture\n' >&2
+    return 1
+  fi
+  printf 'SELF_TEST_STATIC_ELF=PASS\nSELF_TEST_DYNAMIC_ELF_REJECTED=YES\nSELF_TEST_OVERSIZE_REJECTED=YES\n'
+}
+
+case "${1-}" in
+  static) static_proof ;;
+  self-test) self_test ;;
+  *) printf 'unknown helper mode\n' >&2; exit 2 ;;
+esac
+TASK4_HELPER
+}
+
+write_filesystem_fixture() {
+  local root=$1
+  local variant=$2
+  local link_target=pgbouncer.ini
+  mkdir -p "$root/etc" "$root/lib" "$root/usr/local/bin"
+  [[ "$variant" == changed-link ]] && link_target=other.ini
+  case "$variant" in
+    removed) ;;
+    replaced) printf 'synthetic configuratioN\n' > "$root/etc/pgbouncer.ini" ;;
+    replaced-type) mkdir -p "$root/etc/pgbouncer.ini" ;;
+    *) printf 'synthetic configuration\n' > "$root/etc/pgbouncer.ini" ;;
+  esac
+  [[ "$variant" == changed-mode ]] && chmod 0600 "$root/etc/pgbouncer.ini"
+  ln -s "$link_target" "$root/etc/current"
+  printf 'synthetic base library\n' > "$root/lib/libfixture.so"
+  if [[ "$variant" == extra ]]; then
+    printf 'unapproved library\n' > "$root/lib/libextra.so"
+  fi
+  if [[ "$variant" == allowed ]]; then
+    printf 'synthetic executable fixture\n' > "$root${PROBE_PATH}"
+    chmod 0755 "$root${PROBE_PATH}"
+  fi
+}
+
+write_config_fixture() {
+  local path=$1
+  local user=$2
+  local entrypoint=$3
+  local cmd=$4
+  local config_hash=$5
+  local label_hash=$6
+  local source_valid=$7
+  local revision_valid=$8
+  printf 'linux\namd64\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+    "$user" "$entrypoint" "$cmd" "$config_hash" "$label_hash" "$source_valid" "$revision_valid" > "$path"
+}
+
+manifest_delta_check() {
+  local base_manifest=$1
+  local candidate_manifest=$2
+  local allowed_path=${PROBE_PATH#/}
+  local allowed_path_hex
+  local path record kind mode uid gid size extra
+  local removed=0
+  local modified=0
+  local added=0
+  local added_path=''
+  local added_record=''
+  local added_kind=''
+  local added_mode=''
+  local added_uid=''
+  local added_gid=''
+  local added_size=''
+  local added_extra=''
+  local -A base_entries=()
+  local -A candidate_entries=()
+
+  [[ -r "$base_manifest" && -r "$candidate_manifest" ]] || return 1
+  allowed_path_hex=$(printf '%s' "$allowed_path" | od -An -tx1 | tr -d ' \n')
+  while IFS=$'\t' read -r path kind mode uid gid size extra; do
+    [[ -n "$path" ]] || continue
+    base_entries["$path"]="$kind|$mode|$uid|$gid|$size|$extra"
+  done < "$base_manifest"
+  while IFS=$'\t' read -r path kind mode uid gid size extra; do
+    [[ -n "$path" ]] || continue
+    candidate_entries["$path"]="$kind|$mode|$uid|$gid|$size|$extra"
+  done < "$candidate_manifest"
+
+  for path in "${!base_entries[@]}"; do
+    if [[ ${candidate_entries[$path]+present} != present ]]; then
+      removed=$((removed + 1))
+    elif [[ "${base_entries[$path]}" != "${candidate_entries[$path]}" ]]; then
+      modified=$((modified + 1))
+    fi
+  done
+  for path in "${!candidate_entries[@]}"; do
+    if [[ ${base_entries[$path]+present} != present ]]; then
+      added=$((added + 1))
+      added_path=$path
+      added_record=${candidate_entries[$path]}
+    fi
+  done
+
+  FS_BASE_ENTRY_COUNT=${#base_entries[@]}
+  FS_CANDIDATE_ENTRY_COUNT=${#candidate_entries[@]}
+  FS_REMOVED_BASE_ENTRIES=$removed
+  FS_MODIFIED_BASE_ENTRIES=$modified
+  FS_ADDED_ENTRIES=$added
+  ONLY_APPROVED_PROBE_ADDED=NO
+
+  if ((removed == 0 && modified == 0 && added == 1)) && [[ "$added_path" == "$allowed_path_hex" ]]; then
+    IFS='|' read -r added_kind added_mode added_uid added_gid added_size added_extra <<< "$added_record"
+    if [[ "$added_kind" == 'regular file' && "$added_mode" == 755 ]]; then
+      ONLY_APPROVED_PROBE_ADDED=YES
+      return 0
+    fi
+  fi
+  return 1
+}
+
+image_config_contract() {
+  local base_snapshot=$1
+  local candidate_snapshot=$2
+  local -a base_fields=()
+  local -a candidate_fields=()
+  mapfile -t base_fields < "$base_snapshot"
+  mapfile -t candidate_fields < "$candidate_snapshot"
+  [[ ${#base_fields[@]} -eq 9 && ${#candidate_fields[@]} -eq 9 ]] || return 1
+  [[ "${base_fields[0]}" == linux && "${candidate_fields[0]}" == linux ]] || return 1
+  [[ "${base_fields[1]}" == amd64 && "${candidate_fields[1]}" == amd64 ]] || return 1
+  [[ "${base_fields[2]}" == '"65532"' && "${candidate_fields[2]}" == '"65532"' ]] || return 1
+  [[ "${base_fields[3]}" == '["pgbouncer"]' && "${candidate_fields[3]}" == '["pgbouncer"]' ]] || return 1
+  [[ "${base_fields[4]}" == '["/etc/pgbouncer/pgbouncer.ini"]' && "${candidate_fields[4]}" == '["/etc/pgbouncer/pgbouncer.ini"]' ]] || return 1
+  [[ "${base_fields[5]}" == "${candidate_fields[5]}" ]] || return 1
+  [[ "${base_fields[6]}" == "${candidate_fields[6]}" ]] || return 1
+  [[ "${candidate_fields[7]}" == YES && "${candidate_fields[8]}" == YES ]] || return 1
+  return 0
+}
+
+capture_image_config_snapshot() {
+  local image_id=$1
+  local destination=$2
+  local field_template
+  local config_template
+  local label_template
+  local fields_path="${destination}.fields"
+  local config_hash_line
+  local labels_hash_line
+  local config_hash
+  local labels_hash
+  local source_label
+  local revision_label
+  local source_valid=NO
+  local revision_valid=NO
+  local -a image_fields=()
+
+  field_template='{{.Os}}
+{{.Architecture}}
+{{json .Config.User}}
+{{json .Config.Entrypoint}}
+{{json .Config.Cmd}}'
+  config_template='{{json .Author}}
+{{json .OsVersion}}
+{{json .Variant}}
+{{json .Config.User}}
+{{json .Config.ExposedPorts}}
+{{json .Config.Env}}
+{{json .Config.Entrypoint}}
+{{json .Config.Cmd}}
+{{json .Config.Volumes}}
+{{json .Config.WorkingDir}}
+{{json .Config.StopSignal}}
+{{json .Config.ArgsEscaped}}
+{{json .Config.OnBuild}}
+{{json .Config.Healthcheck}}
+{{json .Config.Shell}}'
+  label_template='{{range $key, $value := .Config.Labels}}{{if and (ne $key "org.opencontainers.image.source") (ne $key "org.opencontainers.image.revision")}}{{printf "%q=%s\n" $key (json $value)}}{{end}}{{end}}'
+
+  docker image inspect --format "$field_template" "$image_id" > "$fields_path"
+  mapfile -t image_fields < "$fields_path"
+  [[ ${#image_fields[@]} -eq 5 ]] || return 1
+
+  config_hash_line=$(docker image inspect --format "$config_template" "$image_id" | sha256sum)
+  labels_hash_line=$(docker image inspect --format "$label_template" "$image_id" | sha256sum)
+  config_hash=${config_hash_line%% *}
+  labels_hash=${labels_hash_line%% *}
+  source_label=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.source"}}' "$image_id")
+  revision_label=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image_id")
+  [[ "$source_label" == "$SOURCE_URL" ]] && source_valid=YES
+  [[ "$revision_label" =~ ^[0-9a-f]{40}$ ]] && revision_valid=YES
+
+  printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+    "${image_fields[0]}" "${image_fields[1]}" "${image_fields[2]}" \
+    "${image_fields[3]}" "${image_fields[4]}" "$config_hash" "$labels_hash" \
+    "$source_valid" "$revision_valid" > "$destination"
+}
+
+expect_config_rejected() {
+  local fixture_name=$1
+  local fixture_path=$2
+  if image_config_contract "$RUN_DIR/self-test/base.config" "$fixture_path"; then
+    fail "self-test configuration checker accepted $fixture_name"
+  fi
+}
+
+run_self_test() {
+  local root
+  local allowed_user='"65532"'
+  local allowed_entrypoint='["pgbouncer"]'
+  local allowed_cmd='["/etc/pgbouncer/pgbouncer.ini"]'
+  local manifest_helper_output
+
+  create_run_context self-test
+  root="$RUN_DIR/self-test"
+  command -v timeout >/dev/null 2>&1 || fail 'timeout utility is required for bounded proof helpers'
+  mkdir -p "$root"
+  write_filesystem_fixture "$root/base" base
+  write_filesystem_fixture "$root/allowed" allowed
+  write_filesystem_fixture "$root/removed" removed
+  write_filesystem_fixture "$root/replaced" replaced
+  write_filesystem_fixture "$root/extra" extra
+  write_filesystem_fixture "$root/changed-mode" changed-mode
+  write_filesystem_fixture "$root/changed-owner" changed-owner
+  write_filesystem_fixture "$root/changed-link" changed-link
+  write_filesystem_fixture "$root/changed-link-owner" changed-link-owner
+  write_filesystem_fixture "$root/replaced-type" replaced-type
+  manifest_helper_output=$(run_task4_helper self-test)
+  [[ "$manifest_helper_output" == *'SELF_TEST_STATIC_ELF=PASS'* ]] || fail 'self-test did not accept a valid static ELF fixture'
+  [[ "$manifest_helper_output" == *'SELF_TEST_DYNAMIC_ELF_REJECTED=YES'* ]] || fail 'self-test did not reject a dynamic ELF fixture'
+  [[ "$manifest_helper_output" == *'SELF_TEST_OVERSIZE_REJECTED=YES'* ]] || fail 'self-test did not reject an oversize executable fixture'
+  printf 'SELF_TEST_DYNAMIC_ELF_REJECTED=YES\nSELF_TEST_OVERSIZE_REJECTED=YES\n'
+
+  if manifest_delta_check "$root/base.manifest" "$root/allowed.manifest"; then
+    printf 'SELF_TEST_ALLOWED_DELTA=PASS\n'
+  else
+    fail 'self-test rejected the permitted one-probe filesystem delta'
+  fi
+  if manifest_delta_check "$root/base.manifest" "$root/removed.manifest"; then
+    fail 'self-test filesystem checker accepted a removed base file'
+  fi
+  printf 'SELF_TEST_REMOVED_FILE_REJECTED=YES\n'
+  if manifest_delta_check "$root/base.manifest" "$root/replaced.manifest"; then
+    fail 'self-test filesystem checker accepted a replaced base file'
+  fi
+  printf 'SELF_TEST_REPLACED_FILE_REJECTED=YES\n'
+  if manifest_delta_check "$root/base.manifest" "$root/extra.manifest"; then
+    fail 'self-test filesystem checker accepted an extra file'
+  fi
+  printf 'SELF_TEST_EXTRA_FILE_REJECTED=YES\n'
+  if manifest_delta_check "$root/base.manifest" "$root/changed-mode.manifest"; then
+    fail 'self-test filesystem checker accepted a base file mode change'
+  fi
+  printf 'SELF_TEST_MODE_CHANGE_REJECTED=YES\n'
+  if manifest_delta_check "$root/base.manifest" "$root/changed-owner.manifest"; then
+    fail 'self-test filesystem checker accepted a base file ownership change'
+  fi
+  printf 'SELF_TEST_UID_GID_CHANGE_REJECTED=YES\n'
+  if manifest_delta_check "$root/base.manifest" "$root/changed-link.manifest"; then
+    fail 'self-test filesystem checker accepted a symlink target change'
+  fi
+  printf 'SELF_TEST_SYMLINK_TARGET_CHANGE_REJECTED=YES\n'
+  if manifest_delta_check "$root/base.manifest" "$root/changed-link-owner.manifest"; then
+    fail 'self-test filesystem checker accepted symlink ownership change'
+  fi
+  printf 'SELF_TEST_SYMLINK_OWNERSHIP_CHANGE_REJECTED=YES\n'
+  if manifest_delta_check "$root/base.manifest" "$root/replaced-type.manifest"; then
+    fail 'self-test filesystem checker accepted an object type change'
+  fi
+  printf 'SELF_TEST_OBJECT_TYPE_CHANGE_REJECTED=YES\n'
+
+  write_config_fixture "$root/base.config" "$allowed_user" "$allowed_entrypoint" "$allowed_cmd" config-fingerprint labels-fingerprint NO NO
+  write_config_fixture "$root/allowed.config" "$allowed_user" "$allowed_entrypoint" "$allowed_cmd" config-fingerprint labels-fingerprint YES YES
+  if image_config_contract "$root/base.config" "$root/allowed.config"; then
+    printf 'SELF_TEST_ALLOWED_CONFIG=PASS\n'
+  else
+    fail 'self-test rejected the permitted OCI label delta'
+  fi
+  write_config_fixture "$root/wrong-user.config" '"1000"' "$allowed_entrypoint" "$allowed_cmd" config-fingerprint labels-fingerprint YES YES
+  expect_config_rejected 'wrong USER' "$root/wrong-user.config"
+  printf 'SELF_TEST_WRONG_USER_REJECTED=YES\n'
+  write_config_fixture "$root/wrong-entrypoint.config" "$allowed_user" '["/bin/sh"]' "$allowed_cmd" config-fingerprint labels-fingerprint YES YES
+  expect_config_rejected 'wrong ENTRYPOINT' "$root/wrong-entrypoint.config"
+  printf 'SELF_TEST_WRONG_ENTRYPOINT_REJECTED=YES\n'
+  write_config_fixture "$root/wrong-cmd.config" "$allowed_user" "$allowed_entrypoint" '["/tmp/wrong.ini"]' config-fingerprint labels-fingerprint YES YES
+  expect_config_rejected 'wrong CMD' "$root/wrong-cmd.config"
+  printf 'SELF_TEST_WRONG_CMD_REJECTED=YES\n'
+  write_config_fixture "$root/changed-env.config" "$allowed_user" "$allowed_entrypoint" "$allowed_cmd" config-fingerprint-with-env-change labels-fingerprint YES YES
+  expect_config_rejected 'unexpected ENV/config change' "$root/changed-env.config"
+  printf 'SELF_TEST_UNEXPECTED_ENV_REJECTED=YES\n'
+  write_config_fixture "$root/changed-label.config" "$allowed_user" "$allowed_entrypoint" "$allowed_cmd" config-fingerprint changed-labels-fingerprint YES YES
+  expect_config_rejected 'unexpected label change' "$root/changed-label.config"
+  printf 'SELF_TEST_UNEXPECTED_LABEL_REJECTED=YES\n'
+  write_config_fixture "$root/missing-source-label.config" "$allowed_user" "$allowed_entrypoint" "$allowed_cmd" config-fingerprint labels-fingerprint NO YES
+  expect_config_rejected 'missing approved source label' "$root/missing-source-label.config"
+  printf 'SELF_TEST_APPROVED_LABELS_REQUIRED=YES\nSELF_TEST=PASS\n'
+}
+
+run_static() {
+  local image_reference=$1
+  local base_name
+  local candidate_name
+  local base_platform
+  local candidate_platform
+  local helper_output
+  local -a elf_report=()
+
+  create_run_context static
+  command -v timeout >/dev/null 2>&1 || fail 'timeout utility is required for bounded proof helpers'
+  BASE_IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$BASE_IMAGE_REFERENCE")
+  [[ -n "$BASE_IMAGE_ID" ]] || fail 'frozen base image did not resolve locally'
+  CANDIDATE_IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$image_reference")
+  [[ -n "$CANDIDATE_IMAGE_ID" ]] || fail "candidate image reference did not resolve: $image_reference"
+  base_platform=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$BASE_IMAGE_ID")
+  candidate_platform=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$CANDIDATE_IMAGE_ID")
+  [[ "$base_platform" == linux/amd64 ]] || fail "frozen base platform must be linux/amd64, got: $base_platform"
+  [[ "$candidate_platform" == linux/amd64 ]] || fail "candidate platform must be linux/amd64, got: $candidate_platform"
+
+  capture_image_config_snapshot "$BASE_IMAGE_ID" "$RUN_DIR/base.config"
+  capture_image_config_snapshot "$CANDIDATE_IMAGE_ID" "$RUN_DIR/candidate.config"
+  if ! image_config_contract "$RUN_DIR/base.config" "$RUN_DIR/candidate.config"; then
+    fail 'candidate image config differs from the frozen base contract'
+  fi
+
+  printf 'BASE_IMAGE_REFERENCE=%s\nBASE_IMAGE_ID=%s\n' "$BASE_IMAGE_REFERENCE" "$BASE_IMAGE_ID"
+  printf 'CANDIDATE_REFERENCE=%s\nCANDIDATE_IMAGE_ID=%s\nCANDIDATE_PLATFORM=linux/amd64\n' "$image_reference" "$CANDIDATE_IMAGE_ID"
+  printf 'FINAL_USER=65532\nFINAL_ENTRYPOINT=["pgbouncer"]\nFINAL_CMD=["/etc/pgbouncer/pgbouncer.ini"]\nUNEXPECTED_CONFIG_DELTA=NO\n'
+
+  base_name="eventsales-r3-4-${RUN_ID}-base-static"
+  candidate_name="eventsales-r3-4-${RUN_ID}-candidate-static"
+  BASE_CONTAINER_ID=$(docker create --name "$base_name" --platform linux/amd64 "$BASE_IMAGE_ID")
+  CANDIDATE_CONTAINER_ID=$(docker create --name "$candidate_name" --platform linux/amd64 "$CANDIDATE_IMAGE_ID")
+  docker export --output "$RUN_DIR/base-rootfs.tar" "$BASE_CONTAINER_ID"
+  docker export --output "$RUN_DIR/candidate-rootfs.tar" "$CANDIDATE_CONTAINER_ID"
+
+  helper_output=$(run_task4_helper static)
+  printf '%s\n' "$helper_output" > "$RUN_DIR/elf-report"
+  mapfile -t elf_report < "$RUN_DIR/elf-report"
+  [[ ${#elf_report[@]} -eq 4 ]] || fail 'ELF verifier returned an incomplete report'
+  [[ "${elf_report[0]}" == PROBE_SIZE_BYTES=* ]] || fail 'ELF verifier did not report probe size'
+  [[ "${elf_report[1]}" == PROBE_X86_64=YES ]] || fail 'probe is not x86-64'
+  [[ "${elf_report[2]}" == PROBE_PT_INTERP=NONE ]] || fail 'probe has PT_INTERP'
+  [[ "${elf_report[3]}" == PROBE_DT_NEEDED=NONE ]] || fail 'probe has DT_NEEDED'
+
+  if ! manifest_delta_check "$RUN_DIR/base.manifest" "$RUN_DIR/candidate.manifest"; then
+    printf 'BASE_FILESYSTEM_ENTRIES=%s\nCANDIDATE_FILESYSTEM_ENTRIES=%s\nREMOVED_BASE_ENTRIES=%s\nMODIFIED_BASE_ENTRIES=%s\nADDED_ENTRIES=%s\n' \
+      "$FS_BASE_ENTRY_COUNT" "$FS_CANDIDATE_ENTRY_COUNT" "$FS_REMOVED_BASE_ENTRIES" "$FS_MODIFIED_BASE_ENTRIES" "$FS_ADDED_ENTRIES"
+    fail 'candidate filesystem delta violates the one-probe contract'
+  fi
+
+  printf '%s\n' "BASE_FILESYSTEM_ENTRIES=$FS_BASE_ENTRY_COUNT" \
+    "CANDIDATE_FILESYSTEM_ENTRIES=$FS_CANDIDATE_ENTRY_COUNT" \
+    "REMOVED_BASE_ENTRIES=$FS_REMOVED_BASE_ENTRIES" \
+    "MODIFIED_BASE_ENTRIES=$FS_MODIFIED_BASE_ENTRIES" \
+    "ADDED_ENTRIES=$FS_ADDED_ENTRIES" \
+    "ONLY_APPROVED_PROBE_ADDED=$ONLY_APPROVED_PROBE_ADDED" \
+    "${elf_report[0]}" "${elf_report[1]}" "${elf_report[2]}" "${elf_report[3]}" \
+    'STATIC_PROOF=PASS'
+}
+
+run_all() {
+  local script_path="$SCRIPT_DIR/prove-image.sh"
+  local build_log
+  local line
+  local built_image_id=''
+
+  create_run_context all
+  build_log="$RUN_DIR/build.log"
+  bash "$script_path" self-test
+  bash "$script_path" unit
+  bash "$script_path" build | tee "$build_log"
+  while IFS= read -r line; do
+    case "$line" in
+      BUILT_IMAGE_ID=*) built_image_id=${line#BUILT_IMAGE_ID=} ;;
+    esac
+  done < "$build_log"
+  [[ -n "$built_image_id" ]] || fail 'build mode did not return an immutable image ID'
+  bash "$script_path" static "$built_image_id"
+  bash "$script_path" integration "$built_image_id"
+  printf 'ALL_MODE=PASS\n'
 }
 
 inspect_candidate_hardening() {
@@ -393,18 +929,16 @@ case "$mode" in
     ;;
   static)
     (($# == 1)) || usage
-    printf 'NOT_IMPLEMENTED: static mode is reserved for Task 4\n' >&2
-    exit 3
+    [[ -n "$1" ]] || usage
+    run_static "$1"
     ;;
   self-test)
     (($# == 0)) || usage
-    printf 'NOT_IMPLEMENTED: self-test mode is reserved for Task 4\n' >&2
-    exit 3
+    run_self_test
     ;;
   all)
     (($# == 0)) || usage
-    printf 'NOT_IMPLEMENTED: all requires Task 4 static and self-test modes\n' >&2
-    exit 3
+    run_all
     ;;
   *)
     printf 'unknown mode: %s\n' "$mode" >&2
