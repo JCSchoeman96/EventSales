@@ -72,9 +72,11 @@ defmodule EventSales.ReleaseTest do
       assert Application.fetch_env!(:event_sales, Repo) == original_config
     end
 
-    test "redacts credentials when repo startup fails" do
+    test "redacts URL and standalone credentials when repo startup returns an error" do
+      password = "migration-password-synthetic-8f31"
+
       env = %{
-        "DIRECT_DATABASE_URL" => "ecto://direct-user:super-secret@db.internal/event_sales"
+        "DIRECT_DATABASE_URL" => "ecto://direct-user:#{password}@db.internal/event_sales"
       }
 
       exception =
@@ -85,14 +87,62 @@ defmodule EventSales.ReleaseTest do
             with_repo: fn _repo, _fun ->
               {:error,
                RuntimeError.exception(
-                 "failed to connect to ecto://direct-user:super-secret@db.internal/event_sales"
+                 "database startup diagnostic: failed to connect to " <>
+                   "ecto://direct-user:#{password}@db.internal/event_sales; " <>
+                   "authentication rejected password=#{password}"
                )}
             end
           )
         end
 
+      assert exception.message =~ "database startup diagnostic"
+      assert exception.message =~ "authentication rejected"
       assert exception.message =~ "ecto://[REDACTED]@db.internal/event_sales"
-      refute exception.message =~ "direct-user:super-secret"
+      refute exception.message =~ password
+      refute exception.message =~ "direct-user"
+    end
+
+    test "redacts credentials when repo startup raises" do
+      password = "repo-start-password-synthetic-2a7c"
+      env = %{"DIRECT_DATABASE_URL" => "ecto://direct-user:#{password}@db.internal/event_sales"}
+
+      exception =
+        assert_raise RuntimeError, fn ->
+          Release.migrate(
+            env: env,
+            repos: [Repo],
+            with_repo: fn _repo, _fun ->
+              raise "repo startup diagnostic: authentication failed for #{password}"
+            end
+          )
+        end
+
+      assert exception.message =~ "repo startup diagnostic"
+      assert exception.message =~ "authentication failed"
+      refute exception.message =~ password
+      refute exception.message =~ "direct-user"
+    end
+
+    test "redacts credentials when a migration callback raises" do
+      password = "migrator-password-synthetic-d441"
+      env = %{"DIRECT_DATABASE_URL" => "ecto://direct-user:#{password}@db.internal/event_sales"}
+
+      exception =
+        assert_raise RuntimeError, fn ->
+          Release.migrate(
+            env: env,
+            repos: [Repo],
+            with_repo: fn repo, fun -> {:ok, fun.(repo), []} end,
+            migrator_run: fn _repo, _direction, _opts ->
+              raise "migration diagnostic: rejected password #{password}"
+            end
+          )
+        end
+
+      assert exception.message =~ "migration diagnostic"
+      assert exception.message =~ "rejected password"
+      refute exception.message =~ password
+      refute exception.message =~ "direct-user"
     end
   end
 
@@ -126,6 +176,28 @@ defmodule EventSales.ReleaseTest do
 
       assert_received {:rollback_run, Repo, :down, [to: 20_260_513_122_000]}
       assert Application.fetch_env!(:event_sales, Repo) == original_config
+    end
+
+    test "redacts credentials when a rollback callback raises" do
+      password = "rollback-password-synthetic-9c11"
+      env = %{"DIRECT_DATABASE_URL" => "ecto://direct-user:#{password}@db.internal/event_sales"}
+
+      exception =
+        assert_raise RuntimeError, fn ->
+          Release.rollback(
+            Repo,
+            20_260_513_122_000,
+            env: env,
+            with_repo: fn repo, fun -> {:ok, fun.(repo), []} end,
+            migrator_run: fn _repo, _direction, _opts ->
+              raise "rollback diagnostic: rejected password #{password}"
+            end
+          )
+        end
+
+      assert exception.message =~ "rollback diagnostic"
+      refute exception.message =~ password
+      refute exception.message =~ "direct-user"
     end
   end
 
@@ -210,6 +282,77 @@ defmodule EventSales.ReleaseTest do
           output: fn _line -> flunk("success output must not run") end
         )
       end
+    end
+
+    test "redacts credentials from application startup failures" do
+      password = "bootstrap-password-synthetic-c25d"
+      cookie = "release-cookie-synthetic-19af"
+
+      env = %{
+        "EVENTSALES_BOOTSTRAP_ADMIN_PASSWORD" => password,
+        "RELEASE_COOKIE" => cookie,
+        "REDIS_URL" => "redis://redis-user:redis-password-synthetic-40a2@redis.internal/0"
+      }
+
+      exception =
+        assert_raise RuntimeError, fn ->
+          Release.bootstrap(
+            env: env,
+            start_app: fn ->
+              raise "application startup diagnostic: password=#{password} cookie=#{cookie} " <>
+                      "redis password=redis-password-synthetic-40a2 url=#{env["REDIS_URL"]}"
+            end,
+            admin_bootstrap: fn -> flunk("admin bootstrap must not run") end,
+            source_bootstrap: fn -> flunk("source bootstrap must not run") end
+          )
+        end
+
+      assert exception.message =~ "application startup diagnostic"
+      assert exception.message =~ "redis://[REDACTED]@redis.internal/0"
+      refute exception.message =~ password
+      refute exception.message =~ cookie
+      refute exception.message =~ "redis-user"
+      refute exception.message =~ "redis-password-synthetic-40a2"
+    end
+
+    test "redacts credentials from admin bootstrap failures" do
+      password = "bootstrap-password-synthetic-4f26"
+      env = %{"EVENTSALES_BOOTSTRAP_ADMIN_PASSWORD" => password}
+
+      exception =
+        assert_raise RuntimeError, fn ->
+          Release.bootstrap(
+            env: env,
+            start_app: fn -> :ok end,
+            admin_bootstrap: fn -> raise "admin bootstrap diagnostic: password=#{password}" end,
+            source_bootstrap: fn -> flunk("source bootstrap must not run") end,
+            output: fn _line -> flunk("success output must not run") end
+          )
+        end
+
+      assert exception.message =~ "admin bootstrap diagnostic"
+      refute exception.message =~ password
+    end
+
+    test "redacts source bootstrap failures and prevents success output" do
+      password = "bootstrap-password-synthetic-f5aa"
+      env = %{"EVENTSALES_BOOTSTRAP_ADMIN_PASSWORD" => password}
+      caller = self()
+
+      exception =
+        assert_raise RuntimeError, fn ->
+          Release.bootstrap(
+            env: env,
+            start_app: fn -> :ok end,
+            admin_bootstrap: fn -> send(caller, :admin_bootstrap_completed) end,
+            source_bootstrap: fn -> raise "source bootstrap diagnostic: password=#{password}" end,
+            output: fn _line -> flunk("success output must not run") end
+          )
+        end
+
+      assert_received :admin_bootstrap_completed
+      assert exception.message =~ "source bootstrap diagnostic"
+      refute exception.message =~ password
     end
   end
 end

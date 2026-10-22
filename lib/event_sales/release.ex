@@ -5,6 +5,13 @@ defmodule EventSales.Release do
   """
 
   @app :event_sales
+  @credential_env_key_pattern ~r/(?:password|passwd|secret|token|cookie|(?:^|[_-])key(?:[_-]|$))/i
+  @credential_url_env_keys [
+    "DATABASE_URL",
+    "DIRECT_DATABASE_URL",
+    "REDIS_URL",
+    "WEBHOOK_RATE_LIMIT_REDIS_URL"
+  ]
 
   @type env_map :: %{optional(String.t()) => String.t() | nil}
   @type release_option ::
@@ -31,11 +38,13 @@ defmodule EventSales.Release do
 
     output = Keyword.get(opts, :output, &IO.puts/1)
 
-    start_app.()
-    admin_bootstrap.()
-    source_bootstrap.()
-    output.("production bootstrap: complete")
-    :ok
+    with_sanitized_errors(env, fn ->
+      start_app.()
+      admin_bootstrap.()
+      source_bootstrap.()
+      output.("production bootstrap: complete")
+      :ok
+    end)
   end
 
   @spec migrate_and_bootstrap(keyword()) :: :ok
@@ -48,27 +57,35 @@ defmodule EventSales.Release do
 
   @spec migrate([release_option()]) :: [term()]
   def migrate(opts \\ []) do
-    load_app()
-    url = fetch_migration_database_url!(Keyword.get(opts, :env, System.get_env()))
-    with_repo = Keyword.get(opts, :with_repo, &Ecto.Migrator.with_repo/2)
-    migrator_run = Keyword.get(opts, :migrator_run, &Ecto.Migrator.run/3)
+    env = Keyword.get(opts, :env, System.get_env())
 
-    for repo <- Keyword.get(opts, :repos, repos()) do
-      with_migration_repo(repo, url, with_repo, fn started_repo ->
-        migrator_run.(started_repo, :up, all: true)
-      end)
-    end
+    with_sanitized_errors(env, fn ->
+      load_app()
+      url = fetch_migration_database_url!(env)
+      with_repo = Keyword.get(opts, :with_repo, &Ecto.Migrator.with_repo/2)
+      migrator_run = Keyword.get(opts, :migrator_run, &Ecto.Migrator.run/3)
+
+      for repo <- Keyword.get(opts, :repos, repos()) do
+        with_migration_repo(repo, url, with_repo, fn started_repo ->
+          migrator_run.(started_repo, :up, all: true)
+        end)
+      end
+    end)
   end
 
   @spec rollback(module(), pos_integer(), [release_option()]) :: term()
   def rollback(repo, version, opts \\ []) do
-    load_app()
-    url = fetch_migration_database_url!(Keyword.get(opts, :env, System.get_env()))
-    with_repo = Keyword.get(opts, :with_repo, &Ecto.Migrator.with_repo/2)
-    migrator_run = Keyword.get(opts, :migrator_run, &Ecto.Migrator.run/3)
+    env = Keyword.get(opts, :env, System.get_env())
 
-    with_migration_repo(repo, url, with_repo, fn started_repo ->
-      migrator_run.(started_repo, :down, to: version)
+    with_sanitized_errors(env, fn ->
+      load_app()
+      url = fetch_migration_database_url!(env)
+      with_repo = Keyword.get(opts, :with_repo, &Ecto.Migrator.with_repo/2)
+      migrator_run = Keyword.get(opts, :migrator_run, &Ecto.Migrator.run/3)
+
+      with_migration_repo(repo, url, with_repo, fn started_repo ->
+        migrator_run.(started_repo, :down, to: version)
+      end)
     end)
   end
 
@@ -117,7 +134,7 @@ defmodule EventSales.Release do
         {:error, reason} ->
           raise """
           failed to start #{inspect(repo)} for release migrations.
-          #{sanitize_message(Exception.format_banner(:error, reason))}
+          #{Exception.format_banner(:error, reason)}
           """
       end
     after
@@ -141,9 +158,92 @@ defmodule EventSales.Release do
 
   defp present?(value), do: is_binary(value) and String.trim(value) != ""
 
-  defp sanitize_message(message) do
-    Regex.replace(~r{((?:ecto|postgres(?:ql)?)://)[^@]+@}i, message, fn _, scheme ->
+  defp with_sanitized_errors(env, fun) do
+    fun.()
+  rescue
+    exception ->
+      message =
+        exception
+        |> Exception.message()
+        |> sanitize_message(env)
+
+      reraise RuntimeError.exception(message), __STACKTRACE__
+  end
+
+  defp sanitize_message(message, env) do
+    message =
+      Enum.reduce(credential_values(env), message, fn credential, sanitized ->
+        String.replace(sanitized, credential, "[REDACTED]")
+      end)
+
+    Regex.replace(~r{((?:ecto|postgres(?:ql)?|redis(?:s)?)://)[^/?#\s]*@}i, message, fn _,
+                                                                                        scheme ->
       "#{scheme}[REDACTED]@"
     end)
   end
+
+  defp credential_values(env) do
+    env
+    |> environment_entries()
+    |> Enum.flat_map(fn {name, value} ->
+      if credential_env_key?(name), do: [value], else: []
+    end)
+    |> Kernel.++(url_userinfo_values(env))
+    |> Enum.flat_map(&nonempty_values/1)
+    |> Enum.uniq()
+    |> Enum.sort_by(&byte_size/1, :desc)
+  end
+
+  defp credential_env_key?(name) do
+    name = env_name(name)
+
+    name != "EVENTSALES_BOOTSTRAP_ADMIN_ROTATE_PASSWORD" and
+      Regex.match?(@credential_env_key_pattern, name)
+  end
+
+  defp url_userinfo_values(env) do
+    env
+    |> environment_entries()
+    |> Enum.filter(fn {name, _value} -> env_name(name) in @credential_url_env_keys end)
+    |> Enum.flat_map(fn {_name, value} -> uri_userinfo_values(value) end)
+  end
+
+  defp uri_userinfo_values(value) when is_binary(value) do
+    case URI.parse(value) do
+      %URI{userinfo: userinfo} when is_binary(userinfo) and userinfo != "" ->
+        parts = [userinfo | String.split(userinfo, ":", parts: 2)]
+
+        Enum.flat_map(parts, fn part -> [part, decode_uri_component(part)] end)
+
+      _ ->
+        []
+    end
+  rescue
+    _exception -> []
+  end
+
+  defp uri_userinfo_values(_value), do: []
+
+  defp decode_uri_component(value) do
+    URI.decode(value)
+  rescue
+    _exception -> value
+  end
+
+  defp nonempty_values(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> []
+      trimmed -> [value, trimmed]
+    end
+  end
+
+  defp nonempty_values(_value), do: []
+
+  defp environment_entries(env) when is_map(env), do: Map.to_list(env)
+  defp environment_entries(env) when is_list(env), do: env
+  defp environment_entries(_env), do: []
+
+  defp env_name(name) when is_atom(name), do: Atom.to_string(name)
+  defp env_name(name) when is_binary(name), do: name
+  defp env_name(_name), do: ""
 end
