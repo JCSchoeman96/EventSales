@@ -43,10 +43,21 @@ jobs:
             exit 1
           fi
 
+          tag="${tag,,}"
+          if [[ "$tag" == "latest" ]]; then
+            echo "The latest tag is reserved and cannot be supplied manually." >&2
+            exit 1
+          fi
+
+          if [[ "$tag" =~ ^sha-[0-9a-f]{40}$ ]]; then
+            echo "The sha-<40-hex> tag namespace is reserved for generated commit tags." >&2
+            exit 1
+          fi
+
           printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
 
       - name: Check out source
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Log in to GHCR
         uses: docker/login-action@v4
