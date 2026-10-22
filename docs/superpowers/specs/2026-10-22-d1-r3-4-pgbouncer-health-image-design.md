@@ -134,7 +134,11 @@ Connection and I/O waits must be bounded. The frame length limit is 4096 bytes. 
 
 Do not create a dedicated PgBouncer health user. Use the already-required client-facing PgBouncer identity `eventsales_runtime`.
 
-This identity already necessarily exists in `pgbouncer_users.txt`. The probe needs no password and adds no credential lifecycle. Health therefore proves that PgBouncer loaded enough of its auth configuration to issue the expected SCRAM challenge for the actual runtime client identity, subject to the required unknown-user negative proof in Section 12.
+The production probe uses `eventsales_runtime` because it is the already-required production-shaped client username and therefore adds no health-only identity or credential lifecycle. The probe needs no password.
+
+The pre-authentication challenge does not prove that this username exists in `auth_file`. PgBouncer may deliberately perform mock authentication for unknown users to avoid user enumeration.
+
+Existence and successful authentication of `eventsales_runtime` are proved later by R4.4, not by the container healthcheck.
 
 The distinct `eventsales_runtime_client_password` and `eventsales_runtime_server_password` contract remains unchanged. The probe uses neither password.
 
@@ -142,12 +146,26 @@ The distinct `eventsales_runtime_client_password` and `eventsales_runtime_server
 
 The container healthcheck proves only that PgBouncer:
 
-- Listens on its configured PostgreSQL endpoint.
-- Parses a valid PostgreSQL startup packet.
-- Recognizes the production runtime client identity.
-- Advertises SCRAM-SHA-256 authentication.
+- listens on its configured PostgreSQL endpoint;
+- parses a valid PostgreSQL v3 StartupMessage;
+- reaches its configured SCRAM client-authentication path; and
+- advertises SCRAM-SHA-256.
 
-It does not prove password correctness, successful authentication, backend PostgreSQL availability, database existence, pool acquisition, transaction pooling correctness, prepared statements, backend role identity, or SQL execution. These remain R4.4/integration proof responsibilities.
+It does not prove:
+
+- existence of the supplied username in `auth_file`;
+- correctness/completeness of `pgbouncer_users.txt`;
+- password correctness;
+- successful authentication;
+- backend PostgreSQL availability;
+- database existence;
+- pool acquisition;
+- transaction pooling correctness;
+- prepared statements;
+- backend role identity; or
+- SQL execution.
+
+These remain R4.4/integration proof responsibilities. R4.4 must prove that `eventsales_runtime` exists as a valid PgBouncer client identity, client SCRAM authentication succeeds, the client password is correct, the backend identity is `eventsales_runtime`, transaction pooling works, and prepared statements work. No authentication responsibility moves into the container healthcheck.
 
 The accepted signal is the pre-authentication `AuthenticationSASL` challenge. Authentication rejection is not a required signal.
 
@@ -220,12 +238,13 @@ Against the exact final derived image and a temporary synthetic PgBouncer config
 
 ```text
 KNOWN_AUTH_FILE_USER=R/10/SCRAM-SHA-256 -> exit 0
-UNKNOWN_USER=must not produce accepted health result
 LISTENER_DOWN=exit non-zero
 NON_POSTGRES_LISTENER=exit non-zero
 ```
 
-No backend PostgreSQL may be started for these tests. Use synthetic fixture identities and credentials only. The unknown-user test specifically closes the HC1C evidence gap. HC1C did not establish unknown-user behavior. If an unknown user receives an accepted challenge, this design cannot claim identity recognition and implementation must stop for review. Do not silently broaden the accepted response or create a dedicated health identity.
+No backend PostgreSQL may be started for these tests. Use synthetic fixture identities and credentials only.
+
+An optional unknown-user test may record diagnostic evidence only, with no required PASS/FAIL semantic. The unknown-user result is not a health invariant and must not be used to infer username existence or non-existence. Do not change the probe implementation based on the unknown-user result.
 
 ## 13. Final image hardening
 
