@@ -33,6 +33,12 @@ RUN mix release
 
 FROM debian:${DEBIAN_VERSION} AS runner
 
+ARG SOURCE_URL
+ARG VCS_REF
+
+LABEL org.opencontainers.image.source="${SOURCE_URL}" \
+      org.opencontainers.image.revision="${VCS_REF}"
+
 RUN apt-get update \
   && apt-get install --yes --no-install-recommends ca-certificates libstdc++6 libncurses6 openssl \
   && rm -rf /var/lib/apt/lists/* \
