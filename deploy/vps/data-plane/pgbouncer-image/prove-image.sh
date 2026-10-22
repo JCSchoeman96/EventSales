@@ -15,6 +15,7 @@ TMP_ROOT=''
 UNIT_CONTAINER_ID=''
 CANDIDATE_CONTAINER_ID=''
 HELPER_CONTAINER_ID=''
+HELPER_BUILD_CONTAINER_NAME=''
 NETWORK_ID=''
 NETWORK_NAME=''
 CANDIDATE_IMAGE_ID=''
@@ -45,6 +46,8 @@ create_run_context() {
 cleanup() {
   local original_status=$?
   local cleanup_failed=0
+  local helper_build_id=''
+  local helper_build_run_id=''
   trap - EXIT INT TERM
 
   if [[ -n "$UNIT_CONTAINER_ID" ]]; then
@@ -56,13 +59,36 @@ cleanup() {
   if [[ -n "$HELPER_CONTAINER_ID" ]]; then
     docker rm -f "$HELPER_CONTAINER_ID" >/dev/null 2>&1 || cleanup_failed=1
   fi
+  if [[ -n "$HELPER_BUILD_CONTAINER_NAME" ]]; then
+    if [[ "$HELPER_BUILD_CONTAINER_NAME" != "eventsales-r3-4-${RUN_ID}-http-build" ]]; then
+      printf 'Refusing to remove unexpected helper-build container name: %s\n' "$HELPER_BUILD_CONTAINER_NAME" >&2
+      cleanup_failed=1
+    elif helper_build_id=$(docker container inspect --format '{{.Id}}' "$HELPER_BUILD_CONTAINER_NAME" 2>/dev/null); then
+      helper_build_run_id=$(docker container inspect --format '{{index .Config.Labels "eventsales.r3-4.proof-run"}}' "$helper_build_id" 2>/dev/null) || helper_build_run_id=''
+      if [[ "$helper_build_run_id" == "$RUN_ID" ]]; then
+        if ! docker rm -f "$helper_build_id" >/dev/null 2>&1; then
+          if docker container inspect "$helper_build_id" >/dev/null 2>&1; then
+            cleanup_failed=1
+          fi
+        fi
+      else
+        printf 'Refusing to remove helper-build container without this run label: %s\n' "$HELPER_BUILD_CONTAINER_NAME" >&2
+        cleanup_failed=1
+      fi
+    elif ! docker info >/dev/null 2>&1; then
+      printf 'Unable to inspect helper-build container during cleanup: %s\n' "$HELPER_BUILD_CONTAINER_NAME" >&2
+      cleanup_failed=1
+    fi
+  fi
   if [[ -n "$NETWORK_ID" ]]; then
     docker network rm "$NETWORK_ID" >/dev/null 2>&1 || cleanup_failed=1
   fi
   if [[ -n "$RUN_DIR" && -d "$RUN_DIR" ]]; then
     case "$RUN_DIR" in
       "$TMP_ROOT"/eventsales-r3-4-proof.*)
-        rm -rf -- "$RUN_DIR" || cleanup_failed=1
+        if ((original_status == 0 && cleanup_failed == 0)); then
+          rm -rf -- "$RUN_DIR" || cleanup_failed=1
+        fi
         ;;
       *)
         printf 'Refusing to remove unexpected temporary path: %s\n' "$RUN_DIR" >&2
@@ -76,6 +102,9 @@ cleanup() {
     if ((original_status == 0)); then
       original_status=1
     fi
+  fi
+  if ((original_status != 0)) && [[ -n "$RUN_DIR" && -d "$RUN_DIR" ]]; then
+    printf 'FAILURE_EVIDENCE_DIR=%s\n' "$RUN_DIR"
   fi
   exit "$original_status"
 }
@@ -191,7 +220,11 @@ run_integration() {
 
   CANDIDATE_IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$image_reference")
   [[ -n "$CANDIDATE_IMAGE_ID" ]] || fail "image reference did not resolve: $image_reference"
+  local candidate_platform
+  candidate_platform=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$CANDIDATE_IMAGE_ID")
+  [[ "$candidate_platform" == 'linux/amd64' ]] || fail "candidate platform must be linux/amd64, got: $candidate_platform"
   printf 'CANDIDATE_IMAGE_ID=%s\n' "$CANDIDATE_IMAGE_ID"
+  printf 'CANDIDATE_PLATFORM=linux/amd64\n'
 
   NETWORK_NAME="eventsales-r3-4-$RUN_ID"
   candidate_name="eventsales-r3-4-$RUN_ID-candidate"
@@ -257,13 +290,21 @@ fn main() {
 }
 RUST
 
-  docker run --rm \
-    --name "$helper_compile_name" \
+  HELPER_BUILD_CONTAINER_NAME=$helper_compile_name
+  local helper_build_status=0
+  timeout --signal=KILL 30s docker run --rm \
+    --name "$HELPER_BUILD_CONTAINER_NAME" \
+    --label "eventsales.r3-4.proof-run=$RUN_ID" \
     --platform linux/amd64 \
     --network none \
     --mount "type=bind,src=$RUN_DIR,dst=/work" \
     "$RUST_BUILDER" \
-    rustc --edition=2021 --target x86_64-unknown-linux-musl /work/http-listener.rs -o /work/http-listener
+    rustc --edition=2021 --target x86_64-unknown-linux-musl /work/http-listener.rs -o /work/http-listener \
+    > "$RUN_DIR/helper-build.log" 2>&1 || helper_build_status=$?
+  if ((helper_build_status != 0)); then
+    cat "$RUN_DIR/helper-build.log" >&2
+    fail "HTTP helper compilation failed or exceeded 30 seconds (exit $helper_build_status)"
+  fi
 
   helper_name="eventsales-r3-4-$RUN_ID-http"
   HELPER_CONTAINER_ID=$(docker create \
