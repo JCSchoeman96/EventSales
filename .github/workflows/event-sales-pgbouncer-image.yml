@@ -1,0 +1,332 @@
+name: EventSales PgBouncer image
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Optional human-readable image tag
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: eventsales-pgbouncer-image-publication
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish EventSales PgBouncer image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Guard publication ref and tags
+        id: guard
+        shell: bash
+        env:
+          DISPATCH_TAG: ${{ inputs.tag }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "Refusing image publication outside refs/heads/main." >&2
+            exit 1
+          fi
+
+          if [[ ! "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "The source commit SHA is missing or invalid." >&2
+            exit 1
+          fi
+
+          human_tag="$DISPATCH_TAG"
+          if [[ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]]; then
+            human_tag=""
+          fi
+
+          if [[ -n "$human_tag" && ! "$human_tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "The optional image tag is invalid." >&2
+            exit 1
+          fi
+
+          human_tag="${human_tag,,}"
+          if [[ "$human_tag" == "latest" ]]; then
+            echo "The latest tag is reserved and cannot be supplied manually." >&2
+            exit 1
+          fi
+
+          if [[ "$human_tag" =~ ^sha-[0-9a-f]{40}$ ]]; then
+            echo "The sha-<40-hex> tag namespace is reserved for generated commit tags." >&2
+            exit 1
+          fi
+
+          image="ghcr.io/jcschoeman96/eventsales-pgbouncer"
+          immutable_tag="sha-$SOURCE_SHA"
+          {
+            printf 'source_sha=%s\n' "$SOURCE_SHA"
+            printf 'image=%s\n' "$image"
+            printf 'immutable_tag=%s\n' "$immutable_tag"
+            printf 'human_tag=%s\n' "$human_tag"
+            printf 'tags<<EVENTSALES_TAGS\n%s:%s\n' "$image" "$immutable_tag"
+            if [[ -n "$human_tag" ]]; then
+              printf '%s:%s\n' "$image" "$human_tag"
+            fi
+            printf 'EVENTSALES_TAGS\n'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Verify checked-out source SHA
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ steps.guard.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          checked_out_sha="$(git rev-parse HEAD)"
+          if [[ "$checked_out_sha" != "$SOURCE_SHA" ]]; then
+            echo "The checked-out source does not match the guarded source SHA." >&2
+            exit 1
+          fi
+
+      - name: Check DHI credential boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow_file="$GITHUB_WORKSPACE/.github/workflows/event-sales-pgbouncer-image.yml"
+
+          awk '
+            /^      - name: Check DHI credential boundary$/ { skip = 1; next }
+            skip && /^      - name:/ { skip = 0 }
+            skip { next }
+            /^      - name:/ { step = "" }
+            /^        id: dhi-preflight$/ { step = "preflight" }
+            /^        id: dhi-login$/ { step = "login" }
+            step == "login" && $0 == "        uses: docker/login-action@v4" { login_action++ }
+            step == "login" && $0 == "          registry: dhi.io" { login_registry++ }
+            index($0, "DHI_USERNAME") || index($0, "DHI_PAT") {
+              if (step == "preflight" && $0 == "          DHI_USERNAME: ${{ vars.DHI_USERNAME }}") { preflight_username++; next }
+              if (step == "preflight" && $0 == "          DHI_PAT: ${{ secrets.DHI_PAT }}") { preflight_pat++; next }
+              if (step == "preflight" && $0 == "          if [[ -z \"$DHI_USERNAME\" ]]; then") { check_username++; next }
+              if (step == "preflight" && $0 == "          if [[ -z \"$DHI_PAT\" ]]; then") { check_pat++; next }
+              if (step == "login" && $0 == "          username: ${{ vars.DHI_USERNAME }}") { login_username++; next }
+              if (step == "login" && $0 == "          password: ${{ secrets.DHI_PAT }}") { login_pat++; next }
+              print "DHI credential reference appears outside its authorized preflight or dhi.io login location." > "/dev/stderr"
+              invalid = 1
+            }
+            END {
+              if (preflight_username != 1 || preflight_pat != 1 || check_username != 1 || check_pat != 1 || login_username != 1 || login_pat != 1 || login_action != 1 || login_registry != 1) {
+                print "DHI credential boundary is incomplete or duplicated." > "/dev/stderr"
+                invalid = 1
+              }
+              if (invalid) exit 1
+            }
+          ' "$workflow_file"
+
+          if grep -Eq 'DHI_USERNAME|DHI_PAT|providers\.env' deploy/vps/data-plane/pgbouncer-image/Dockerfile; then
+            echo "The image Dockerfile contains a forbidden DHI credential input." >&2
+            exit 1
+          fi
+
+          echo "DHI_SECRET_PROPAGATION_CHECK=PASS"
+
+      - name: Check DHI credential configuration
+        id: dhi-preflight
+        shell: bash
+        env:
+          DHI_USERNAME: ${{ vars.DHI_USERNAME }}
+          DHI_PAT: ${{ secrets.DHI_PAT }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$DHI_USERNAME" ]]; then
+            echo "The DHI registry username is required before image build." >&2
+            exit 1
+          fi
+
+          if [[ -z "$DHI_PAT" ]]; then
+            echo "The DHI registry credential is required before image build." >&2
+            exit 1
+          fi
+
+          echo "DHI_CREDENTIALS_CONFIGURED=YES"
+
+      - name: Log in to DHI
+        id: dhi-login
+        uses: docker/login-action@v4
+        with:
+          registry: dhi.io
+          username: ${{ vars.DHI_USERNAME }}
+          password: ${{ secrets.DHI_PAT }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check registry tag collisions
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_SHA: ${{ steps.guard.outputs.source_sha }}
+          IMMUTABLE_TAG: ${{ steps.guard.outputs.immutable_tag }}
+          HUMAN_TAG: ${{ steps.guard.outputs.human_tag }}
+        run: |
+          set -euo pipefail
+
+          image_path='jcschoeman96/eventsales-pgbouncer'
+          token_json="$(
+            printf 'user = "%s:%s"\n' "$GITHUB_ACTOR" "$GHCR_TOKEN" |
+              curl --config - --silent --show-error --fail \
+                --connect-timeout 10 --max-time 30 \
+                --get \
+                --data-urlencode 'service=ghcr.io' \
+                --data-urlencode "scope=repository:${image_path}:pull" \
+                https://ghcr.io/token
+          )"
+          registry_token="$(jq -er '(.token // .access_token) | strings | select(length > 0)' <<< "$token_json")"
+          unset token_json
+
+          require_tag_absent() {
+            local tag=$1
+            local status
+
+            status="$(
+              {
+                printf 'header = "Authorization: Bearer %s"\n' "$registry_token"
+                printf 'header = "Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json"\n'
+              } | curl --config - --silent --show-error \
+                --connect-timeout 10 --max-time 30 \
+                --head --output /dev/null --write-out '%{http_code}' \
+                "https://ghcr.io/v2/${image_path}/manifests/${tag}"
+            )" || {
+              echo "Unable to verify whether a GHCR tag already exists." >&2
+              return 1
+            }
+
+            case "$status" in
+              404) ;;
+              200)
+                echo "A requested GHCR tag already exists; refusing to overwrite it." >&2
+                return 1
+                ;;
+              *)
+                echo "GHCR tag collision check returned an unexpected HTTP status." >&2
+                return 1
+                ;;
+            esac
+          }
+
+          require_tag_absent "$IMMUTABLE_TAG"
+          if [[ -n "$HUMAN_TAG" ]]; then
+            require_tag_absent "$HUMAN_TAG"
+          fi
+
+          unset registry_token GHCR_TOKEN
+          echo "SHA_TAG_COLLISION_GUARD=PASS"
+          echo "HUMAN_TAG_COLLISION_GUARD=PASS"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Run complete pre-publication proof
+        shell: bash
+        run: bash deploy/vps/data-plane/pgbouncer-image/prove-image.sh all
+
+      - name: Build and publish image
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: ./deploy/vps/data-plane/pgbouncer-image
+          file: ./deploy/vps/data-plane/pgbouncer-image/Dockerfile
+          platforms: linux/amd64
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: ${{ steps.guard.outputs.tags }}
+          build-args: |
+            SOURCE_URL=https://github.com/JCSchoeman96/EventSales
+            VCS_REF=${{ steps.guard.outputs.source_sha }}
+
+      - name: Validate digest and write metadata
+        id: metadata
+        shell: bash
+        env:
+          IMAGE: ${{ steps.guard.outputs.image }}
+          SOURCE_SHA: ${{ steps.guard.outputs.source_sha }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          METADATA_FILE: ${{ runner.temp }}/eventsales-pgbouncer-image-metadata.txt
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "The source commit SHA is missing or invalid." >&2
+            exit 1
+          fi
+
+          if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "The published image digest is missing or invalid." >&2
+            exit 1
+          fi
+
+          reference="${IMAGE}@${DIGEST}"
+          {
+            printf 'source_sha=%s\n' "$SOURCE_SHA"
+            printf 'image=%s\n' "$IMAGE"
+            printf 'digest=%s\n' "$DIGEST"
+            printf 'reference=%s\n' "$reference"
+          } > "$METADATA_FILE"
+
+          {
+            printf 'digest=%s\n' "$DIGEST"
+            printf 'reference=%s\n' "$reference"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Pull published digest
+        shell: bash
+        env:
+          IMAGE_REFERENCE: ${{ steps.metadata.outputs.reference }}
+        run: docker pull --platform linux/amd64 "$IMAGE_REFERENCE"
+
+      - name: Verify published digest static contract
+        shell: bash
+        env:
+          IMAGE_REFERENCE: ${{ steps.metadata.outputs.reference }}
+        run: bash deploy/vps/data-plane/pgbouncer-image/prove-image.sh static "$IMAGE_REFERENCE"
+
+      - name: Verify published digest integration
+        shell: bash
+        env:
+          IMAGE_REFERENCE: ${{ steps.metadata.outputs.reference }}
+        run: bash deploy/vps/data-plane/pgbouncer-image/prove-image.sh integration "$IMAGE_REFERENCE"
+
+      - name: Write publication summary
+        shell: bash
+        env:
+          IMAGE: ${{ steps.guard.outputs.image }}
+          SOURCE_SHA: ${{ steps.guard.outputs.source_sha }}
+          DIGEST: ${{ steps.metadata.outputs.digest }}
+          IMAGE_REFERENCE: ${{ steps.metadata.outputs.reference }}
+        run: |
+          set -euo pipefail
+          {
+            printf '## Published PgBouncer image\n\n'
+            printf -- "- source_sha: \`%s\`\n" "$SOURCE_SHA"
+            printf -- "- image: \`%s\`\n" "$IMAGE"
+            printf -- "- digest: \`%s\`\n" "$DIGEST"
+            printf -- "- reference: \`%s\`\n" "$IMAGE_REFERENCE"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload image digest metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: eventsales-pgbouncer-image-metadata
+          path: ${{ runner.temp }}/eventsales-pgbouncer-image-metadata.txt
+          if-no-files-found: error
+          retention-days: 14
