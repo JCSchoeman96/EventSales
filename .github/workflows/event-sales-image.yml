@@ -1,0 +1,144 @@
+name: EventSales image
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Optional human-readable image tag
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Publish EventSales image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Guard publication ref and manual tag
+        id: guard
+        shell: bash
+        env:
+          DISPATCH_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "Refusing image publication outside refs/heads/main." >&2
+            exit 1
+          fi
+
+          tag="${DISPATCH_TAG:-}"
+          if [[ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]]; then
+            tag=""
+          fi
+
+          if [[ -n "$tag" && ! "$tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "The optional image tag is invalid." >&2
+            exit 1
+          fi
+
+          tag="${tag,,}"
+          if [[ "$tag" == "latest" ]]; then
+            echo "The latest tag is reserved and cannot be supplied manually." >&2
+            exit 1
+          fi
+
+          if [[ "$tag" =~ ^sha-[0-9a-f]{40}$ ]]; then
+            echo "The sha-<40-hex> tag namespace is reserved for generated commit tags." >&2
+            exit 1
+          fi
+
+          printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Prepare image metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/jcschoeman96/eventsales
+          tags: |
+            type=sha,format=long,prefix=sha-
+            type=raw,value=${{ steps.guard.outputs.tag }},enable=${{ steps.guard.outputs.tag != '' }}
+          flavor: |
+            latest=false
+
+      - name: Build and push image
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            SOURCE_URL=https://github.com/JCSchoeman96/EventSales
+            VCS_REF=${{ github.sha }}
+
+      - name: Write image digest metadata
+        shell: bash
+        env:
+          IMAGE: ghcr.io/jcschoeman96/eventsales
+          SOURCE_SHA: ${{ github.sha }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "The source commit SHA is missing or invalid." >&2
+            exit 1
+          fi
+
+          if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "The image digest is missing or invalid." >&2
+            exit 1
+          fi
+
+          reference="${IMAGE}@${DIGEST}"
+          {
+            printf 'source_sha=%s\n' "$SOURCE_SHA"
+            printf 'image=%s\n' "$IMAGE"
+            printf 'digest=%s\n' "$DIGEST"
+            printf 'reference=%s\n' "$reference"
+          } > image-metadata.txt
+
+          {
+            printf 'digest=%s\n' "$DIGEST"
+            printf 'reference=%s\n' "$reference"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            printf '## Published image\n\n'
+            printf -- '- source_sha: `%s`\n' "$SOURCE_SHA"
+            printf -- '- image: `%s`\n' "$IMAGE"
+            printf -- '- digest: `%s`\n' "$DIGEST"
+            printf -- '- reference: `%s`\n' "$reference"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload image digest metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: eventsales-image-metadata
+          path: image-metadata.txt
+          if-no-files-found: error
+          retention-days: 14
