@@ -1,20 +1,22 @@
 # Oban and PgBouncer
 
-## Selected Topology
+## Approved D1 target topology
 
-- Oban shares the normal `DATABASE_URL` runtime path.
-- That runtime path is PgBouncer **session pooling**, not transaction pooling.
-- `DIRECT_DATABASE_URL` is reserved for migrations, release tasks, and session-sensitive maintenance.
-- Oban is explicitly configured with `notifier: Oban.Notifiers.Postgres`.
-- Queue config is `default: 10` and `webhooks: 10`.
+- Oban SQL shares the normal `DATABASE_URL` runtime path through PgBouncer **transaction pooling**.
+- Migrations use direct PostgreSQL through `DIRECT_DATABASE_URL`; R2 will define their separate entrypoints.
+- Oban notifications use `Oban.Notifiers.PG`, while queue rows and job durability remain in PostgreSQL.
+- Queue config keeps `default: 10` and `webhooks: 10`.
+- This is the approved repository target and has not yet been deployed to production.
 
 ## Notifier Decision
 
-`Oban.Notifiers.Postgres` uses PostgreSQL notifications and is the selected notifier for the current session-pooling topology. The notifier is explicit in config so smoke-test output can report the selected strategy instead of relying on hidden Oban defaults.
+`Oban.Notifiers.PG` publishes notifications through Erlang process groups. This avoids PostgreSQL session-level `LISTEN/NOTIFY` through the transaction pool. The notifier is explicit in config so tests and later runtime evidence can identify the selected strategy.
 
-PgBouncer transaction pooling can break PostgreSQL `LISTEN/NOTIFY` semantics. EventSales does not rely on transaction pooling for Oban, and it does not claim transaction-pooling compatibility.
+The existing `DNSCluster` supervisor remains the node-discovery boundary. D1 production releases use `RELEASE_DISTRIBUTION=name` and `RELEASE_NODE=event_sales@${EVENTSALES_NODE_IP}`, with a shared externally supplied `RELEASE_COOKIE`. `DNS_CLUSTER_QUERY=eventsales-app` is intended to resolve the data-network peer IPs; the locked `dns_cluster` 0.2.0 uses the local node basename for discovered peer names. The alias belongs on the internal EventSales data network. When `EVENTSALES_NODE_IP` is set, `rel/env.sh.eex` configures EPMD with that address and configures long-running release nodes and distributed helper nodes to use it with `inet_dist_use_interface`. R4 must verify the Docker address assignments, actual BEAM and EPMD listening sockets, expected DNS peer IP set, and absence of a host-published distribution port. R1 configures this contract but does not prove production or multi-node clustering.
 
-`Oban.Notifiers.PG` is not selected in Slice `5.7` because it requires a functional Distributed Erlang cluster to broadcast notifications across nodes. EventSales has not introduced clustering in this slice.
+The earlier Railway and Slice `5.7` topology used `Oban.Notifiers.Postgres` with direct or session-pooled PostgreSQL. That is historical context, not the approved D1 production target.
+
+The later private runtime proof must exercise prepared Ecto/Ash queries through PgBouncer with named prepared statements enabled and `max_prepared_statements=200`. Do not add `prepare: :unnamed` without a failed proof and separate approval.
 
 ## Slice 5.7 Smoke Scope
 
@@ -25,11 +27,6 @@ PgBouncer transaction pooling can break PostgreSQL `LISTEN/NOTIFY` semantics. Ev
 - The fail-once job must persist an error, retry, and finish `completed` with `attempt > 1`.
 - The output reports runtime DB source, migration DB source, notifier, queue config, timeout, poll interval, job IDs, final states, attempt count, and error count.
 
-## Out Of Scope
+## Historical Slice 5.7 boundary
 
-- PgBouncer transaction pooling.
-- `prepare: :unnamed`.
-- `Oban.Notifiers.PG`.
-- Distributed Erlang clustering.
-- Alternative Oban engines.
-- Oban Web.
+Slice `5.7` preceded the D1 decision and did not prove transaction-pooling compatibility, the PG notifier, or distributed clustering. Alternative Oban engines and Oban Web remain out of scope.

@@ -1,20 +1,15 @@
 # PgBouncer Strategy
 
-## Slice 24.0 production topology
+## Historical Railway topology
 
-PgBouncer is intentionally not deployed in Slice 24.0. EventSales, release migrations, and Oban connect directly to Railway’s private managed PostgreSQL endpoint.
+Slice 24.0 connected EventSales, release migrations, and Oban directly to Railway's private managed PostgreSQL endpoint. That record describes the earlier deployment and does not define the approved D1 target.
 
-This topology preserves PostgreSQL session behavior and `LISTEN/NOTIFY`, allowing the existing `Oban.Notifiers.Postgres` configuration to be tested without transaction-pooling ambiguity. `DATABASE_URL` and `DIRECT_DATABASE_URL` therefore reference the same direct private URL for this slice.
+## Approved D1 target
 
-## Deferred flash-sale topology
+The D1 production target uses PgBouncer transaction pooling for normal `DATABASE_URL` runtime traffic. Oban uses `Oban.Notifiers.PG` so notifications do not depend on PostgreSQL session-level `LISTEN/NOTIFY`. Migrations use direct PostgreSQL through `DIRECT_DATABASE_URL`; R2 will define their separate entrypoints.
 
-Direct PostgreSQL is sufficient to prove deployment and production behavior, but it is not final flash-sale certification. Before introducing PgBouncer:
+The target configuration sets `max_prepared_statements=200`. Keep Postgrex's named prepared statements enabled until the later private runtime proof establishes whether any adjustment is needed. Do not claim that the production PgBouncer has been deployed or that transaction-pooling compatibility has been runtime-proven.
 
-- Choose session or transaction pooling explicitly.
-- Keep a direct migration/session-sensitive URL.
-- Validate Ecto prepared statements and connection settings.
-- Re-run the real Oban success/retry smoke under the selected notifier topology.
-- Measure pool saturation and connection demand rather than assuming a pooler is required.
-- Document rollback to the direct topology.
+For D1 clustering, the deployment contract places the app's `eventsales-app` DNS alias on the internal EventSales data network, not the edge network. The production release uses the long node name `event_sales@${EVENTSALES_NODE_IP}` and an externally supplied cookie. The approved internal IP is selected later after a read-only VPS network collision audit. When configured, `rel/env.sh.eex` sets `ERL_EPMD_ADDRESS` to that IP and configures long-running release nodes and distributed helper nodes to use it with `inet_dist_use_interface`. R4 must verify the actual BEAM and EPMD listening sockets, confirm that the edge IP has no distribution listener, and confirm that no distribution port is published to the host. This release contract is configured in R1 but is not runtime-proven.
 
-Do not add `prepare: :unnamed`, polling notifiers, or transaction-pooling settings without a verified compatibility requirement and tests.
+The previous direct/session-pooling topology remains historical evidence. It does not authorize changing D1's selected transaction-pooling model.

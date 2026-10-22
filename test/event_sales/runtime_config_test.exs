@@ -9,6 +9,7 @@ defmodule EventSales.RuntimeConfigTest do
     "EVENTSALES_DEFAULT_CURRENCY",
     "PHX_SERVER",
     "PHX_HOST",
+    "POOL_SIZE",
     "SECRET_KEY_BASE",
     "WEBHOOK_PATH_TOKEN",
     "WOOCOMMERCE_WEBHOOK_SECRET",
@@ -94,6 +95,26 @@ defmodule EventSales.RuntimeConfigTest do
 
     assert Keyword.get(webhook_intake, :path_token) == "prod-webhook-token"
     assert Keyword.get(webhook_intake, :secret) == "prod-webhook-secret"
+  end
+
+  test "prod runtime config defaults the repo pool to twenty and preserves the override" do
+    put_required_prod_env()
+
+    app_config =
+      @runtime_config_path
+      |> Config.Reader.read!(env: :prod)
+      |> Keyword.get(:event_sales, [])
+
+    assert Keyword.fetch!(Keyword.fetch!(app_config, EventSales.Repo), :pool_size) == 20
+
+    System.put_env("POOL_SIZE", "7")
+
+    app_config =
+      @runtime_config_path
+      |> Config.Reader.read!(env: :prod)
+      |> Keyword.get(:event_sales, [])
+
+    assert Keyword.fetch!(Keyword.fetch!(app_config, EventSales.Repo), :pool_size) == 7
   end
 
   test "prod runtime config enables hot-state Redis from the managed REDIS_URL" do
