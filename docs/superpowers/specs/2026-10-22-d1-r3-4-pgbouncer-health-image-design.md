@@ -1,18 +1,18 @@
 # EventSales D1 R3.4-D0: PgBouncer health-enabled image design authority
 
-Status: DESIGN_DRAFTED. Human review and approval remain pending.
+Status: DESIGN_APPROVED. Approved at commit `640f47c316337dfdc91fa28e6fb62ba8178e2bdc`, tree `db55993a31a986a652a620075c9a6c3c5e7ddb26`. Implementation plan authoring is authorized; implementation is not.
 
 Base commit: `d96089d71a9cd7f2f4f8cd46d36b626ee390d6e0`.
 Base tree: `d682e2726434b2ac5fa1de09ab3c5696ab0baf36`.
 
-This document records the accepted HC1A, HC1B, and HC1C evidence and defines the proposed production image contract. It authorizes no implementation, publication, deployment, or R4.1 resumption.
+This document records the accepted HC1A, HC1B, and HC1C evidence and defines the approved production image contract. It authorizes no implementation, publication, deployment, or R4.1 resumption.
 
-Once approved, this amendment supersedes only:
+This approved amendment supersedes only:
 
 1. The D1 PgBouncer final production-image identity in Section 7 of [the architecture design](2026-10-20-d1-vps-production-architecture-design.md).
 2. R4.1's requirement in [the implementation plan](../plans/2026-10-20-d1-vps-production-implementation.md) that PgBouncer directly use the raw DHI digest.
 
-Every other D1 architecture decision remains unchanged. The existing canonical design and implementation plan are unchanged by this draft. Approval selects the derived-image design; it does not supply a deployable digest or permit R4.1 to continue before the gates in Section 15.
+Every other D1 architecture decision remains unchanged. The existing canonical design and implementation plan are unchanged by this amendment. Approval selects the derived-image design; it does not supply a deployable digest or permit R4.1 to continue before the gates in Section 15.
 
 ## 1. Problem statement and accepted evidence
 
@@ -34,7 +34,7 @@ TARGET=linux/amd64
 REGISTRY=ghcr.io/jcschoeman96/eventsales-pgbouncer
 ```
 
-The DHI digest is the immutable base input, not the final production-image identity. Deployment authority is the independently verified published derived-image digest only. Never deploy from a mutable tag. R3.4 publication must establish that digest; this draft does not invent one.
+The DHI digest is the immutable base input, not the final production-image identity. Deployment authority is the independently verified published derived-image digest only. Never deploy from a mutable tag. R3.4 publication must establish that digest; this amendment does not invent one.
 
 ## 3. Runtime delta invariant
 
@@ -342,7 +342,9 @@ HC1A=ACCEPTED
 HC1B=ACCEPTED_FALLBACK_FEASIBILITY
 HC1C=ACCEPTED_SELECTED_FEASIBILITY
 R3_4_D0_DESIGN_AUTHORING=AUTHORIZED
-R3_4_DESIGN_ACCEPTED=NO
+R3_4_DESIGN_ACCEPTED=YES
+R3_4_IMPLEMENTATION_PLAN_AUTHORING=AUTHORIZED
+R3_4_IMPLEMENTATION_PLAN_ACCEPTED=NO
 R3_4_IMPLEMENTATION_PLAN_AUTHORIZED=NO
 R3_4_IMPLEMENTATION_AUTHORIZED=NO
 R4_1_RESUME_AUTHORIZED=NO
@@ -350,7 +352,7 @@ R4_2_AUTHORIZED=NO
 VPS_MUTATION_AUTHORIZED=NO
 ```
 
-Do not write the implementation plan or begin Rust, Dockerfile, or workflow implementation at this gate.
+Implementation plan authoring is authorized at this gate. Do not begin Rust, Dockerfile, or workflow implementation.
 
 ## 17. Rejected alternatives
 
