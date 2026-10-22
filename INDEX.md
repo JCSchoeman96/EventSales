@@ -8,7 +8,7 @@ Project root: `.`
 
 ## File Count
 
-436
+438
 
 ## Files
 
@@ -295,6 +295,7 @@ Project root: `.`
 - `lib/event_sales/maintenance/local_catalog_dry_run.ex`
 - `lib/event_sales/maintenance/oban_queue_snapshot_worker.ex`
 - `lib/event_sales/maintenance/oban_topology_smoke_worker.ex`
+- `lib/event_sales/maintenance/private_runtime_smoke.ex`
 - `lib/event_sales/maintenance/production_smoke.ex`
 - `lib/event_sales/maintenance/production_smoke/http.ex`
 - `lib/event_sales/maintenance/purge_raw_payloads_worker.ex`
@@ -413,6 +414,7 @@ Project root: `.`
 - `lib/project_index/render_json.ex`
 - `lib/project_index/render_markdown.ex`
 - `lib/project_index/scanner.ex`
+- `rel/env.sh.eex`
 - `rel/overlays/.gitkeep`
 - `test/support/analytics/error_event_aggregator.ex`
 - `test/support/analytics/event_aggregator_query_plan_fixture.ex`
@@ -2167,6 +2169,18 @@ Project root: `.`
   - docs_count: 0
   - public_funs: `perform/1`, `backoff/1`
   - uses: `Oban.Worker`
+- `Error` - `lib/event_sales/maintenance/private_runtime_smoke.ex`
+  - moduledoc?: false
+  - specs?: false
+  - docs_count: 0
+  - public_funs: _none_
+  - uses: _none_
+- `EventSales.Maintenance.PrivateRuntimeSmoke` - `lib/event_sales/maintenance/private_runtime_smoke.ex`
+  - moduledoc?: true
+  - specs?: true
+  - docs_count: 0
+  - public_funs: `config!/1`, `run!/1`
+  - uses: _none_
 - `Error` - `lib/event_sales/maintenance/production_smoke.ex`
   - moduledoc?: true
   - specs?: false
@@ -2213,7 +2227,7 @@ Project root: `.`
   - moduledoc?: true
   - specs?: true
   - docs_count: 0
-  - public_funs: `migrate_and_bootstrap/1`, `migrate/1`, `rollback/3`, `migration_database_url/1`
+  - public_funs: `bootstrap/1`, `migrate_and_bootstrap/1`, `migrate/1`, `rollback/3`, `migration_database_url/1`
   - uses: _none_
 - `EventSales.Repo` - `lib/event_sales/repo.ex`
   - moduledoc?: false
