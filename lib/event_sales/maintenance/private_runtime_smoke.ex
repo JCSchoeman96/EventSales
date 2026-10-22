@@ -236,7 +236,7 @@ defmodule EventSales.Maintenance.PrivateRuntimeSmoke do
   end
 
   defp check_safe_config(config) do
-    if config |> Map.keys() |> MapSet.new() == @safe_config_keys do
+    if config |> Map.keys() |> MapSet.new() |> MapSet.equal?(@safe_config_keys) do
       :ok
     else
       :error
