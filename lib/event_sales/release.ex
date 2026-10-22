@@ -59,18 +59,7 @@ defmodule EventSales.Release do
   def migrate(opts \\ []) do
     env = Keyword.get(opts, :env, System.get_env())
 
-    with_sanitized_errors(env, fn ->
-      load_app()
-      url = fetch_migration_database_url!(env)
-      with_repo = Keyword.get(opts, :with_repo, &Ecto.Migrator.with_repo/2)
-      migrator_run = Keyword.get(opts, :migrator_run, &Ecto.Migrator.run/3)
-
-      for repo <- Keyword.get(opts, :repos, repos()) do
-        with_migration_repo(repo, url, with_repo, fn started_repo ->
-          migrator_run.(started_repo, :up, all: true)
-        end)
-      end
-    end)
+    with_sanitized_errors(env, fn -> run_migrations(opts, env) end)
   end
 
   @spec rollback(module(), pos_integer(), [release_option()]) :: term()
@@ -117,6 +106,28 @@ defmodule EventSales.Release do
       {:ok, url} -> url
       {:error, message} -> raise message
     end
+  end
+
+  defp run_migrations(opts, env) do
+    load_app()
+    url = fetch_migration_database_url!(env)
+    with_repo = Keyword.get(opts, :with_repo, &Ecto.Migrator.with_repo/2)
+    migrator_run = Keyword.get(opts, :migrator_run, &Ecto.Migrator.run/3)
+    migration_repos = Keyword.get(opts, :repos, repos())
+
+    run_migrations_for_repos(migration_repos, url, with_repo, migrator_run)
+  end
+
+  defp run_migrations_for_repos(repos, url, with_repo, migrator_run) do
+    Enum.map(repos, fn repo ->
+      run_migrations_for_repo(repo, url, with_repo, migrator_run)
+    end)
+  end
+
+  defp run_migrations_for_repo(repo, url, with_repo, migrator_run) do
+    with_migration_repo(repo, url, with_repo, fn started_repo ->
+      migrator_run.(started_repo, :up, all: true)
+    end)
   end
 
   defp with_migration_repo(repo, url, with_repo, fun) do

@@ -293,60 +293,84 @@ defmodule EventSales.Maintenance.PrivateRuntimeSmoke do
   end
 
   defp runtime_contract! do
-    redis_namespace = Application.get_env(:event_sales, :redis_namespace)
-    oban_config = Application.get_env(:event_sales, Oban, [])
-    rate_limit_config = Application.get_env(:event_sales, :webhook_intake_rate_limit, [])
-    buffer_config = Application.get_env(:event_sales, :redis_webhook_buffer, [])
-    hot_state_config = Application.get_env(:event_sales, :hot_state_aggregator, [])
+    require_redis_namespace!()
+    require_oban_notifier!()
+    require_rate_limiter!()
+    require_webhook_buffer_disabled!()
 
-    unless redis_namespace == @runtime_redis_namespace,
+    %{hot_state_redis_enabled?: require_hot_state_contract!()}
+  end
+
+  defp require_redis_namespace! do
+    unless Application.get_env(:event_sales, :redis_namespace) == @runtime_redis_namespace,
       do: raise(Error, "private runtime requires the D1 Redis namespace")
+  end
 
-    unless Keyword.get(oban_config, :notifier) == Oban.Notifiers.PG,
+  defp require_oban_notifier! do
+    notifier = :event_sales |> Application.get_env(Oban, []) |> Keyword.get(:notifier)
+
+    unless notifier == Oban.Notifiers.PG,
       do: raise(Error, "private runtime requires the Oban PG notifier")
+  end
+
+  defp require_rate_limiter! do
+    rate_limit_config = Application.get_env(:event_sales, :webhook_intake_rate_limit, [])
 
     unless Keyword.get(rate_limit_config, :enabled) == true and
              Keyword.get(rate_limit_config, :adapter) == RateLimitRedixAdapter and
              Keyword.get(rate_limit_config, :key_prefix) == @rate_limit_key_prefix do
       raise Error, "private runtime requires the production Redis rate limiter"
     end
+  end
+
+  defp require_webhook_buffer_disabled! do
+    buffer_config = Application.get_env(:event_sales, :redis_webhook_buffer, [])
 
     unless Keyword.get(buffer_config, :enabled) == false and
              Keyword.get(buffer_config, :durability_accepted) == false do
       raise Error, "private runtime requires webhook buffering to remain disabled"
     end
+  end
 
-    hot_state_redis_enabled? = Keyword.get(hot_state_config, :redis_enabled)
+  defp require_hot_state_contract! do
+    hot_state_config = Application.get_env(:event_sales, :hot_state_aggregator, [])
+    redis_enabled? = Keyword.get(hot_state_config, :redis_enabled)
     snapshot_adapter = Keyword.get(hot_state_config, :snapshot_adapter)
 
-    unless is_boolean(hot_state_redis_enabled?) and
-             (if hot_state_redis_enabled? do
-                snapshot_adapter == RedixAdapter
-              else
-                snapshot_adapter == EventSales.Analytics.SnapshotStore.NoopAdapter
-              end) do
-      raise Error, "private runtime hot-state Redis configuration is invalid"
-    end
+    valid? =
+      is_boolean(redis_enabled?) and
+        if redis_enabled? do
+          snapshot_adapter == RedixAdapter
+        else
+          snapshot_adapter == EventSales.Analytics.SnapshotStore.NoopAdapter
+        end
 
-    %{hot_state_redis_enabled?: hot_state_redis_enabled?}
+    unless valid?,
+      do: raise(Error, "private runtime hot-state Redis configuration is invalid")
+
+    redis_enabled?
   end
 
   defp database_target!(database_url) when is_binary(database_url) do
-    uri = URI.parse(database_url)
+    case URI.new(database_url) do
+      {:ok, uri} ->
+        if uri.scheme in ["ecto", "postgres", "postgresql"] and
+             uri.host == @runtime_database_host and uri.port == @runtime_database_port and
+             uri.path == "/#{@runtime_database_name}" do
+          %{host: uri.host, port: uri.port, database: @runtime_database_name}
+        else
+          invalid_database_target!()
+        end
 
-    if uri.scheme in ["ecto", "postgres", "postgresql"] and
-         uri.host == @runtime_database_host and uri.port == @runtime_database_port and
-         uri.path == "/#{@runtime_database_name}" do
-      %{host: uri.host, port: uri.port, database: @runtime_database_name}
-    else
-      raise Error, "DATABASE_URL must target the D1 PgBouncer database"
+      {:error, _reason} ->
+        invalid_database_target!()
     end
-  rescue
-    _error in [ArgumentError, URI.Error] ->
-      raise Error, "DATABASE_URL must target the D1 PgBouncer database"
   end
 
   defp database_target!(_database_url),
+    do: invalid_database_target!()
+
+  defp invalid_database_target!,
     do: raise(Error, "DATABASE_URL must target the D1 PgBouncer database")
 
   defp reject_forbidden_environment!(env) do
