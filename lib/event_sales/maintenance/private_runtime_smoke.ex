@@ -6,7 +6,7 @@ defmodule EventSales.Maintenance.PrivateRuntimeSmoke do
   adapters. It does not start the application or run migrations.
   """
 
-  alias EventSales.Analytics.{CacheKeys, SnapshotStore.RedixAdapter}
+  alias EventSales.Analytics.{CacheKeys, SnapshotCodec, SnapshotStore.RedixAdapter}
   alias EventSales.Catalog
   alias EventSales.Catalog.Resources.SourceSystem
   alias EventSales.Health.DatabaseReadiness
@@ -203,9 +203,10 @@ defmodule EventSales.Maintenance.PrivateRuntimeSmoke do
     }
 
     with :ok <- RedixAdapter.put(key, summary, ttl_ms: @snapshot_ttl_ms),
-         {:ok, restored} <-
-           RedixAdapter.list_event_summaries(scan_count: 100, max_snapshots: 1_000),
-         true <- Enum.any?(restored, &(&1.event_id == event_id and &1.summary == summary)) do
+         {:ok, encoded} when is_binary(encoded) <-
+           Redix.command(RedixAdapter.redix_name(), ["GET", key]),
+         {:ok, restored} <- SnapshotCodec.decode(encoded),
+         true <- restored == summary do
       :ok
     else
       _other -> :error
