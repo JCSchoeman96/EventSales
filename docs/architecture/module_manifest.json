@@ -283,6 +283,7 @@
     "lib/event_sales/maintenance/local_catalog_dry_run.ex",
     "lib/event_sales/maintenance/oban_queue_snapshot_worker.ex",
     "lib/event_sales/maintenance/oban_topology_smoke_worker.ex",
+    "lib/event_sales/maintenance/private_runtime_smoke.ex",
     "lib/event_sales/maintenance/production_smoke.ex",
     "lib/event_sales/maintenance/production_smoke/http.ex",
     "lib/event_sales/maintenance/purge_raw_payloads_worker.ex",
@@ -401,6 +402,7 @@
     "lib/project_index/render_json.ex",
     "lib/project_index/render_markdown.ex",
     "lib/project_index/scanner.ex",
+    "rel/env.sh.eex",
     "rel/overlays/.gitkeep",
     "test/support/analytics/error_event_aggregator.ex",
     "test/support/analytics/event_aggregator_query_plan_fixture.ex",
@@ -6654,6 +6656,35 @@
     },
     {
       "docs_count": 0,
+      "moduledoc?": false,
+      "name": "Error",
+      "parse_error": null,
+      "path": "lib/event_sales/maintenance/private_runtime_smoke.ex",
+      "public_funs": [],
+      "specs?": false,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
+      "moduledoc?": true,
+      "name": "EventSales.Maintenance.PrivateRuntimeSmoke",
+      "parse_error": null,
+      "path": "lib/event_sales/maintenance/private_runtime_smoke.ex",
+      "public_funs": [
+        {
+          "arity": 1,
+          "name": "config!"
+        },
+        {
+          "arity": 1,
+          "name": "run!"
+        }
+      ],
+      "specs?": true,
+      "uses": []
+    },
+    {
+      "docs_count": 0,
       "moduledoc?": true,
       "name": "Error",
       "parse_error": null,
@@ -6779,6 +6810,10 @@
       "parse_error": null,
       "path": "lib/event_sales/release.ex",
       "public_funs": [
+        {
+          "arity": 1,
+          "name": "bootstrap"
+        },
         {
           "arity": 1,
           "name": "migrate_and_bootstrap"
