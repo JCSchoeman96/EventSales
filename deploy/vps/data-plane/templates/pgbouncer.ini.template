@@ -1,0 +1,22 @@
+; EventSales production PgBouncer configuration template.
+; Render this into a protected runtime file. The rendered file contains a server password.
+
+[databases]
+event_sales_prod = host=postgres port=5432 dbname=event_sales_prod user=eventsales_runtime password=__EVENTSALES_RUNTIME_SERVER_PASSWORD__
+
+[pgbouncer]
+listen_addr = 0.0.0.0
+listen_port = 6432
+unix_socket_dir = /tmp
+pidfile = /tmp/pgbouncer.pid
+
+auth_type = scram-sha-256
+auth_file = /run/secrets/pgbouncer_users.txt
+
+pool_mode = transaction
+max_client_conn = 64
+default_pool_size = 12
+reserve_pool_size = 4
+max_db_connections = 16
+max_user_connections = 16
+max_prepared_statements = 200

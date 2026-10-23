@@ -89,6 +89,7 @@
 | `scripts/check_vps_deploy_contract.sh` | Static fail-closed repository gate for production Compose/image/runtime invariants. |
 | `deploy/vps/data-plane/compose.yaml` | Production PostgreSQL/PgBouncer/Redis Compose definition only. |
 | `deploy/vps/data-plane/README.md` | Production data-plane staging, secret, lifecycle and STOP rules. |
+| `deploy/vps/data-plane/scripts/provision-networks.sh` | Create absent exact-name shared production networks and validate existing network driver/internal flags without repair or deletion. |
 | `deploy/vps/data-plane/templates/pgbouncer.ini.template` | Non-secret structural PgBouncer template with exact approved pool values; secret fields are rendered outside Git. |
 | `deploy/vps/data-plane/templates/redis-users.acl.template` | Structural ACL template defining users/prefix/command families without real password values. |
 | `deploy/vps/data-plane/scripts/generate-secrets.sh` | Root-only fresh production secret generation and safe file-mode setup; prints metadata only, never values/hashes. |
@@ -326,25 +327,37 @@ Implementation is intentionally split into five repository slices before any VPS
 - Create: `deploy/vps/data-plane/README.md`
 - Create: `deploy/vps/data-plane/templates/pgbouncer.ini.template`
 - Create: `deploy/vps/data-plane/templates/redis-users.acl.template`
+- Create: `deploy/vps/data-plane/scripts/provision-networks.sh`
 
 **Compose contract:**
 - Logical services: `postgres`, `pgbouncer`, `redis` only.
-- Logical networks: `eventsales_data` with `internal: true`; `eventsales_edge` with `internal: false` even though data services do not join it yet.
-- Logical volume: `postgres_data`.
-- Exact pinned images from the approved spec.
+- The data-plane lifecycle provisions two shared bridge networks before either Compose project starts: `eventsales-prod_eventsales_data` with `internal: true`, and `eventsales-prod_eventsales_edge` with `internal: false`.
+- `provision-networks.sh` creates each network only when absent, validates the exact name/driver/internal flag when present, and stops on a mismatch without deleting, recreating, disconnecting, or altering it. Network deletion is outside R4.1 authority.
+- Network creation has no rollback: if data creation succeeds and edge creation fails, the script stops and leaves data in place; the next invocation validates data and attempts only the missing edge network.
+- Data-plane Compose consumes only logical `eventsales_data` as external network `eventsales-prod_eventsales_data`. No data service joins edge. The later app Compose consumes both exact networks externally. Neither Compose project's routine `down` removes these shared networks.
+- Logical volume: `postgres_data`, mounted at `/var/lib/postgresql` and owned only by the data-plane project. Compose may create it when initially absent and later data-plane lifecycles may reuse the accepted volume. An unexpected volume before first provision is a STOP; deletion requires separate destructive authority. Never use `docker compose down -v`, `docker compose down --volumes`, `docker volume rm eventsales-prod_postgres_data`, or `docker volume prune` against production.
+- PostgreSQL initializes only the `postgres` maintenance database. R4.3 owns creation of `event_sales_prod` and assigns it to `eventsales_migrator` before migrations.
+- PostgreSQL command arguments apply the approved container-local tuning: `max_connections=100`, `shared_buffers=768MB`, `effective_cache_size=2GB`, `work_mem=8MB`, and `maintenance_work_mem=256MB`.
+- Exact pinned images:
+  - PostgreSQL: `dhi.io/postgres:18.6-alpine3.24@sha256:d33bd884995daddfb515d0ce9aec23b74d20d72e03ca42b72c4abf617c76bb19`.
+  - PgBouncer: `ghcr.io/jcschoeman96/eventsales-pgbouncer@sha256:965b0223f1096666471e11595f4f6dc5d32dfacbc688418b8ae2385946c41e3b` (accepted R3.4 digest; never deploy the DHI build base or a mutable tag).
+  - Redis: `dhi.io/redis:8.10.2-debian13@sha256:953ca2c2ab4ff7a93f8abac31339ba4d913ec0914861453ab4faa29d154115a0`.
 - No `container_name` unless an operational proof establishes a need.
 - No data-service `ports:` entries.
 - PostgreSQL only data network, 2 CPUs / 3 GiB.
 - PgBouncer only data network, UID/GID `65532:65532`, read-only rootfs, 0.5 CPU / 128 MiB, all capabilities dropped, no-new-privileges.
 - Redis only data network, UID/GID `65532:65532`, read-only rootfs, 0.5 CPU / 512 MiB, maxmemory 384 MiB, `noeviction`, persistence disabled, all capabilities dropped, no-new-privileges.
-- Healthchecks must use commands available in each pinned image and must not require adding packages at runtime.
+- Redis uses `protected-mode=no` so named authenticated clients can connect over the internal Docker bridge. The internal network and Redis ACLs define access; no Redis host port is published. The passwordless default identity remains PING-only with no key patterns.
+- Healthchecks must use commands available in each pinned image and must not require adding packages at runtime. PostgreSQL uses `pg_isready -h 127.0.0.1 -p 5432`; PgBouncer uses `/usr/local/bin/eventsales-pgbouncer-healthcheck 127.0.0.1 6432 eventsales_runtime`; Redis uses `redis-cli -h 127.0.0.1 ping` under the default ACL's PING-only allowance.
 - Secret-bearing files are mounted read-only from protected host paths or Compose secret file references; no literal secrets in YAML.
 
-- [ ] **Step 1: Create the structural Compose and templates with placeholders only.**
-- [ ] **Step 2: Document exact project name `eventsales-prod` and expected final data-plane boundary `3/2/1`.**
-- [ ] **Step 3: Document that D0 networks/volume are never external dependencies of production.**
-- [ ] **Step 4: Validate with `docker compose --project-name eventsales-prod --env-file /dev/null -f deploy/vps/data-plane/compose.yaml config` using only safe fixture paths/values.**
-- [ ] **Step 5: Commit.**
+- [ ] **Step 1: Create the network provisioner and verify its absent, valid-existing, and conflicting-existing behavior with isolated command fakes. Do not create Docker networks during repository implementation.**
+- [ ] **Step 2: Create the structural Compose and templates with placeholders only; mark only `eventsales_data` external.**
+- [ ] **Step 3: Document the exact project name `eventsales-prod`, the expected `3/2/1` production boundary, and the future order of network preflight/provisioning, secret/config preparation, data-plane Compose, then app Compose.**
+- [ ] **Step 4: Document that the D0 networks/volume are never production dependencies and that shared production networks are not removed by either Compose project.**
+- [ ] **Step 5: Validate Compose rendering with safe fixture paths/values and inspect the rendered service, network, port, and image contracts.**
+- [ ] **Step 6: Run `bash -n deploy/vps/data-plane/scripts/provision-networks.sh`, repository static checks, and `mix quality.fast`; do not create production/VPS resources.**
+- [ ] **Step 7: Commit.**
 
 ### Task R4.2: Add safe production secret/config preparation scripts
 
@@ -381,7 +394,7 @@ Implementation is intentionally split into five repository slices before any VPS
 - Create: `deploy/vps/data-plane/scripts/bootstrap-postgres.sh`
 - Create: `deploy/vps/data-plane/scripts/probe-postgres.sh`
 
-**Bootstrap state transition:** `ABSENT -> BOOTSTRAPPED`; one-shot only.
+**Bootstrap state transition:** `ABSENT -> BOOTSTRAPPED`; one-shot only. R4.1 creates only the normal `postgres` maintenance database; this R4.3 bootstrap creates `event_sales_prod`, assigns it to `eventsales_migrator`, and establishes the role/privilege invariants before migrations.
 
 **Bootstrap invariants:**
 - database `event_sales_prod`;
@@ -423,7 +436,7 @@ Implementation is intentionally split into five repository slices before any VPS
 - `SCAN` bounded to production prefix works;
 - unrelated dangerous/admin/write commands denied to runtime as appropriate;
 - stats identity reads only allowed operational commands and cannot write;
-- unauthenticated/default access denied;
+- the unauthenticated default Redis identity can run `PING` only for health and is denied all key access and every other command;
 - maxmemory 384 MiB, `noeviction`, persistence disabled.
 
 - [ ] **Step 1: Write probes with bounded timeouts and secret-safe output.**

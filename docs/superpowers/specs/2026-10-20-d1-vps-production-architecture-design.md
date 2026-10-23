@@ -111,6 +111,8 @@ eventsales-prod_eventsales_data
 eventsales-prod_eventsales_edge
 ```
 
+The data-plane lifecycle provisions these as shared Docker networks before either Compose project starts. Their creation and deletion are outside both Compose project lifecycles. The data network uses the bridge driver with `internal: true`; the edge network uses the bridge driver with `internal: false`. `deploy/vps/data-plane/scripts/provision-networks.sh` creates an absent exact-name network and validates one that already exists. A mismatched existing network is a terminal STOP. The script never deletes, recreates, or disconnects an existing network.
+
 ### Network membership
 
 - PostgreSQL: `eventsales_data` only.
@@ -118,6 +120,9 @@ eventsales-prod_eventsales_edge
 - Redis: `eventsales_data` only.
 - EventSales app: `eventsales_data` + `eventsales_edge`.
 - The EventSales app has the production network alias `eventsales-app` for DNSCluster discovery.
+- The data-plane Compose project consumes only `eventsales_data` as an external network named `eventsales-prod_eventsales_data`; it does not declare or consume `eventsales_edge`.
+- The later app Compose project consumes both exact production network names as external networks.
+- Routine `docker compose down` operations remove neither shared network.
 - No data service publishes a host port.
 - App publishes no host port during private proof.
 - After private acceptance, app may publish `127.0.0.1:4100:4000` under a separate ingress authority.
@@ -133,8 +138,9 @@ Owns:
 - production PostgreSQL container and volume;
 - production PgBouncer container and config;
 - production Redis container and ACL;
-- production internal/edge networks;
 - data-plane secrets.
+
+The data-plane lifecycle provisions and validates the shared production networks before Compose starts. Neither the data-plane Compose project nor the app Compose project owns network creation or deletion.
 
 Does not own:
 
@@ -202,7 +208,9 @@ Production initially uses the exact PostgreSQL image already proven by D0:
 dhi.io/postgres:18.6-alpine3.24@sha256:d33bd884995daddfb515d0ce9aec23b74d20d72e03ca42b72c4abf617c76bb19
 ```
 
-The production data volume is named by Compose from the logical volume `postgres_data`; it belongs only to the `eventsales-prod` project and is never shared with D0.
+The production data volume is named by Compose from the logical volume `postgres_data`; it belongs only to the `eventsales-prod` project and is never shared with D0. Mount it at `/var/lib/postgresql` so the image can keep version-specific data directories below the mount point.
+
+The volume lifecycle is `INITIAL_ABSENT` (Compose may create the named volume), `EXPECTED_PRESENT` (a later approved data-plane lifecycle may reuse it), and `UNEXPECTED_PREEXISTING_BEFORE_FIRST_PROVISION` (STOP for review). Deletion requires separate destructive authority. Routine operations must not use `docker compose down -v`, `docker compose down --volumes`, `docker volume rm eventsales-prod_postgres_data`, or `docker volume prune` against production.
 
 ### 6.2 Database
 
@@ -211,6 +219,8 @@ event_sales_prod
 ```
 
 The production database is new. `eventsales_proof` is never upgraded into production.
+
+R4.1 initializes only the normal `postgres` maintenance database. R4.3 owns the one-shot creation of `event_sales_prod` and must assign ownership to `eventsales_migrator` before migrations.
 
 ### 6.3 Roles
 
@@ -272,17 +282,27 @@ maintenance_work_mem  = 256MB
 
 These values are container-local and must not alter host PostgreSQL/MariaDB settings.
 
+The R4.1 PostgreSQL service applies these five values as explicit server command arguments. They do not change host PostgreSQL or MariaDB configuration.
+
 Indexes required by application migrations remain migration-owned. No peak path may depend on a large table scan; analytics/dashboard scaling later adds read replicas and cached/materialized aggregates before flash-sale-scale readiness is claimed.
 
 ---
 
 ## 7. PgBouncer Production Contract
 
-Production initially uses the exact PgBouncer image proven by D0:
+Production uses the accepted R3.4 EventSales-owned PgBouncer image by immutable digest:
+
+```text
+ghcr.io/jcschoeman96/eventsales-pgbouncer@sha256:965b0223f1096666471e11595f4f6dc5d32dfacbc688418b8ae2385946c41e3b
+```
+
+The accepted image was built from the exact PgBouncer DHI base below; that base is a build input and is not the production deployment reference:
 
 ```text
 dhi.io/pgbouncer:1.26.1-debian13@sha256:78fe21ad5b7c1ab497e9828eea9b951f9d6a58eb638946ddc61ef1f99737f1b1
 ```
+
+The PgBouncer container healthcheck invokes the one static probe added by R3.4 with `127.0.0.1 6432 eventsales_runtime`. Exit status zero proves listener, PostgreSQL startup parsing, and SCRAM-SHA-256 auth-path availability only. It does not prove username existence, password validity, backend availability, or SQL execution; those remain R4.4 proof responsibilities.
 
 PgBouncer remains in **transaction mode**.
 
@@ -417,6 +437,10 @@ This supports the current shared webhook rate limiter and hot-state snapshot ada
 ### Stats identity
 
 A separate statistics identity **must** exist. It may read operational information but may not write application data. Its command set is restricted to `PING`, `INFO`, and `CONFIG GET` unless later evidence requires another read-only command.
+
+The Redis default ACL identity remains enabled without a password only for the container healthcheck's `PING`. It has no key patterns and no other permitted commands. Application access requires the named runtime identity and its fresh password; the statistics identity also requires its own password.
+
+Redis uses `protected-mode=no` so named authenticated clients can connect across the internal Docker bridge. Network isolation and Redis ACLs define the production access boundary. Redis has no host port, and the passwordless default identity remains limited to `PING` with no key access.
 
 ### Webhook degraded buffer
 

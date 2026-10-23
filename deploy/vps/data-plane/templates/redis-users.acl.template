@@ -1,0 +1,7 @@
+# EventSales production Redis ACL template. Render placeholders before use.
+# The default identity exists only for the unauthenticated PING healthcheck.
+user default on nopass resetkeys resetchannels -@all +ping
+
+# Replace each password placeholder with the SHA-256 hex digest of its fresh generated password.
+user eventsales_runtime on #__EVENTSALES_REDIS_RUNTIME_PASSWORD_SHA256_64HEX__ resetkeys resetchannels -@all ~eventsales:prod:* +ping +get +set +del +exists +expire +pexpire +ttl +pttl +multi +exec +discard +zadd +zrem +zcard +zremrangebyscore +scan
+user eventsales_stats on #__EVENTSALES_REDIS_STATS_PASSWORD_SHA256_64HEX__ resetkeys resetchannels -@all +ping +info +config|get

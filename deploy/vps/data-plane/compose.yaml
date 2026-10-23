@@ -1,0 +1,135 @@
+name: eventsales-prod
+
+services:
+  postgres:
+    image: dhi.io/postgres:18.6-alpine3.24@sha256:d33bd884995daddfb515d0ce9aec23b74d20d72e03ca42b72c4abf617c76bb19
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_bootstrap_password
+    secrets:
+      - source: postgres_bootstrap_password
+        target: postgres_bootstrap_password
+    volumes:
+      - type: volume
+        source: postgres_data
+        target: /var/lib/postgresql
+    networks:
+      - eventsales_data
+    expose:
+      - "5432"
+    cpus: 2.0
+    mem_limit: 3g
+    command:
+      - postgres
+      - -c
+      - max_connections=100
+      - -c
+      - shared_buffers=768MB
+      - -c
+      - effective_cache_size=2GB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=256MB
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-p", "5432", "-U", "postgres"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
+  pgbouncer:
+    image: ghcr.io/jcschoeman96/eventsales-pgbouncer@sha256:965b0223f1096666471e11595f4f6dc5d32dfacbc688418b8ae2385946c41e3b
+    restart: unless-stopped
+    user: "65532:65532"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m,mode=1777
+    secrets:
+      - source: pgbouncer_ini
+        target: /etc/pgbouncer/pgbouncer.ini
+      - source: pgbouncer_users
+        target: /run/secrets/pgbouncer_users.txt
+    networks:
+      - eventsales_data
+    expose:
+      - "6432"
+    cpus: 0.5
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/eventsales-pgbouncer-healthcheck", "127.0.0.1", "6432", "eventsales_runtime"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: dhi.io/redis:8.10.2-debian13@sha256:953ca2c2ab4ff7a93f8abac31339ba4d913ec0914861453ab4faa29d154115a0
+    restart: unless-stopped
+    user: "65532:65532"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    command:
+      - redis-server
+      - /etc/redis/redis.conf
+      - --bind
+      - 0.0.0.0
+      - --protected-mode
+      - "no"
+      - --aclfile
+      - /run/secrets/redis-users.acl
+      - --maxmemory
+      - 384mb
+      - --maxmemory-policy
+      - noeviction
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      - --dir
+      - /tmp
+      - --logfile
+      - ""
+    secrets:
+      - source: redis_acl
+        target: /run/secrets/redis-users.acl
+    networks:
+      - eventsales_data
+    expose:
+      - "6379"
+    cpus: 0.5
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+networks:
+  eventsales_data:
+    external: true
+    name: eventsales-prod_eventsales_data
+
+volumes:
+  postgres_data:
+    name: eventsales-prod_postgres_data
+
+secrets:
+  postgres_bootstrap_password:
+    file: ${EVENTSALES_SECRET_DIR:?EVENTSALES_SECRET_DIR_must_be_set}/postgres_bootstrap_password
+  pgbouncer_ini:
+    file: ${EVENTSALES_SECRET_DIR:?EVENTSALES_SECRET_DIR_must_be_set}/pgbouncer.ini
+  pgbouncer_users:
+    file: ${EVENTSALES_SECRET_DIR:?EVENTSALES_SECRET_DIR_must_be_set}/pgbouncer_users.txt
+  redis_acl:
+    file: ${EVENTSALES_SECRET_DIR:?EVENTSALES_SECRET_DIR_must_be_set}/redis-users.acl
