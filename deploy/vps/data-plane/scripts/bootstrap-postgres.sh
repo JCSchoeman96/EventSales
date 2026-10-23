@@ -60,9 +60,15 @@ if [[ -L "$secret_dir" || ! -d "$secret_dir" ]]; then
   stop_preflight SECRET_DIRECTORY_INVALID
 fi
 
+directory_metadata=$(stat -c '%u:%g:%a' -- "$secret_dir" 2>/dev/null) || stop_preflight SECRET_DIRECTORY_METADATA_UNAVAILABLE
+if [[ "$directory_metadata" != 0:0:700 ]]; then
+  stop_preflight SECRET_DIRECTORY_METADATA_MISMATCH
+fi
+
 validate_secret_file() {
   local name=$1
   local path="$secret_dir/$name"
+  local file_metadata
 
   if [[ -L "$path" || ! -f "$path" ]]; then
     stop_preflight "SECRET_FILE_INVALID file=$name"
@@ -72,6 +78,11 @@ validate_secret_file() {
   byte_count=$(stat -c '%s' -- "$path" 2>/dev/null) || stop_preflight "SECRET_SIZE_UNAVAILABLE file=$name"
   if [[ "$byte_count" != 64 ]] || ! LC_ALL=C grep -Eq '^[0-9a-f]{64}$' "$path" 2>/dev/null; then
     stop_preflight "SECRET_FORMAT_INVALID file=$name"
+  fi
+
+  file_metadata=$(stat -c '%u:%g:%a' -- "$path" 2>/dev/null) || stop_preflight "SECRET_METADATA_UNAVAILABLE file=$name"
+  if [[ "$file_metadata" != 0:0:400 ]]; then
+    stop_preflight "SECRET_METADATA_MISMATCH file=$name"
   fi
 }
 
@@ -199,8 +210,8 @@ ALTER DEFAULT PRIVILEGES FOR ROLE eventsales_migrator IN SCHEMA public
 ALTER DEFAULT PRIVILEGES FOR ROLE eventsales_migrator IN SCHEMA public
   GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO eventsales_runtime;
 
-ALTER DEFAULT PRIVILEGES FOR ROLE eventsales_migrator IN SCHEMA public
-  REVOKE ALL ON FUNCTIONS FROM PUBLIC;
+ALTER DEFAULT PRIVILEGES FOR ROLE eventsales_migrator
+  REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 ALTER DEFAULT PRIVILEGES FOR ROLE eventsales_migrator IN SCHEMA public
   GRANT EXECUTE ON FUNCTIONS TO eventsales_runtime;
 
@@ -213,7 +224,9 @@ fi
 printf 'POSTGRES_BOOTSTRAP_PHASE=PHASE_4_PROBE\n'
 probe_output_file=$(mktemp)
 probe_status=0
-if ! "$PROBE_SCRIPT" >"$probe_output_file" 2>&1; then
+if "$PROBE_SCRIPT" >"$probe_output_file" 2>&1; then
+  probe_status=0
+else
   probe_status=$?
 fi
 if ((probe_status != 0)) || ! grep -qx 'POSTGRES_PROBE=PASS' "$probe_output_file"; then
