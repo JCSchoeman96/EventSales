@@ -148,7 +148,7 @@ expect_false() {
   fi
 }
 
-expect_exact_privilege_tuples() {
+expect_exact_effective_privilege_tuples() {
   local check_id=$1
   local grantee_role=$2
   local object_type=$3
@@ -164,13 +164,13 @@ expect_exact_privilege_tuples() {
       SELECT DISTINCT acl.privilege_type, acl.is_grantable
       FROM pg_default_acl d
       JOIN pg_roles default_role ON default_role.oid = d.defaclrole
-      JOIN pg_namespace n ON n.oid = d.defaclnamespace
+      LEFT JOIN pg_namespace n ON n.oid = d.defaclnamespace
       JOIN pg_roles grantee ON grantee.rolname = '${grantee_role}'
       JOIN LATERAL aclexplode(d.defaclacl) AS acl ON true
       JOIN pg_roles exploded_grantor ON exploded_grantor.oid = acl.grantor
       WHERE default_role.rolname = 'eventsales_migrator'
         AND exploded_grantor.rolname = 'eventsales_migrator'
-        AND n.nspname = 'public'
+        AND (d.defaclnamespace = 0 OR n.nspname = 'public')
         AND d.defaclobjtype = '${object_type}'
         AND acl.grantee = grantee.oid
     )
@@ -189,7 +189,7 @@ expect_exact_privilege_tuples() {
   expect_true "$check_id" "$(query_scalar prod "$sql")"
 }
 
-expect_no_grant_option_on_role_defaults() {
+expect_no_effective_privileges_for_grantee() {
   local check_id=$1
   local grantee_role=$2
   local object_type=$3
@@ -200,13 +200,38 @@ expect_no_grant_option_on_role_defaults() {
       SELECT 1
       FROM pg_default_acl d
       JOIN pg_roles default_role ON default_role.oid = d.defaclrole
-      JOIN pg_namespace n ON n.oid = d.defaclnamespace
+      LEFT JOIN pg_namespace n ON n.oid = d.defaclnamespace
       JOIN pg_roles grantee ON grantee.rolname = '${grantee_role}'
       JOIN LATERAL aclexplode(d.defaclacl) AS acl ON true
       JOIN pg_roles exploded_grantor ON exploded_grantor.oid = acl.grantor
       WHERE default_role.rolname = 'eventsales_migrator'
         AND exploded_grantor.rolname = 'eventsales_migrator'
-        AND n.nspname = 'public'
+        AND (d.defaclnamespace = 0 OR n.nspname = 'public')
+        AND d.defaclobjtype = '${object_type}'
+        AND acl.grantee = grantee.oid
+    )::text;
+  "
+  expect_false "$check_id" "$(query_scalar prod "$sql")"
+}
+
+expect_no_grant_option_on_effective_defaults() {
+  local check_id=$1
+  local grantee_role=$2
+  local object_type=$3
+  local sql
+
+  sql="
+    SELECT EXISTS (
+      SELECT 1
+      FROM pg_default_acl d
+      JOIN pg_roles default_role ON default_role.oid = d.defaclrole
+      LEFT JOIN pg_namespace n ON n.oid = d.defaclnamespace
+      JOIN pg_roles grantee ON grantee.rolname = '${grantee_role}'
+      JOIN LATERAL aclexplode(d.defaclacl) AS acl ON true
+      JOIN pg_roles exploded_grantor ON exploded_grantor.oid = acl.grantor
+      WHERE default_role.rolname = 'eventsales_migrator'
+        AND exploded_grantor.rolname = 'eventsales_migrator'
+        AND (d.defaclnamespace = 0 OR n.nspname = 'public')
         AND d.defaclobjtype = '${object_type}'
         AND acl.grantee = grantee.oid
         AND acl.is_grantable
@@ -215,7 +240,7 @@ expect_no_grant_option_on_role_defaults() {
   expect_false "$check_id" "$(query_scalar prod "$sql")"
 }
 
-expect_no_unexpected_acl_grantor() {
+expect_no_unexpected_effective_acl_grantor() {
   local check_id=$1
   local grantee_role=$2
   local object_type=$3
@@ -226,17 +251,56 @@ expect_no_unexpected_acl_grantor() {
       SELECT 1
       FROM pg_default_acl d
       JOIN pg_roles default_role ON default_role.oid = d.defaclrole
-      JOIN pg_namespace n ON n.oid = d.defaclnamespace
+      LEFT JOIN pg_namespace n ON n.oid = d.defaclnamespace
       JOIN pg_roles grantee ON grantee.rolname = '${grantee_role}'
       JOIN LATERAL aclexplode(d.defaclacl) AS acl ON true
       LEFT JOIN pg_roles exploded_grantor ON exploded_grantor.oid = acl.grantor
       WHERE default_role.rolname = 'eventsales_migrator'
-        AND n.nspname = 'public'
+        AND (d.defaclnamespace = 0 OR n.nspname = 'public')
         AND d.defaclobjtype = '${object_type}'
         AND acl.grantee = grantee.oid
         AND (exploded_grantor.rolname IS DISTINCT FROM 'eventsales_migrator')
     )::text;
   "
+  expect_false "$check_id" "$(query_scalar prod "$sql")"
+}
+
+expect_false_effective_public_grant() {
+  local check_id=$1
+  local object_type=$2
+  local privilege_type=${3:-}
+  local sql
+
+  if [[ -n "$privilege_type" ]]; then
+    sql="
+      SELECT EXISTS (
+        SELECT 1
+        FROM pg_default_acl d
+        JOIN pg_roles default_role ON default_role.oid = d.defaclrole
+        LEFT JOIN pg_namespace n ON n.oid = d.defaclnamespace
+        JOIN LATERAL aclexplode(d.defaclacl) AS acl ON true
+        WHERE default_role.rolname = 'eventsales_migrator'
+          AND (d.defaclnamespace = 0 OR n.nspname = 'public')
+          AND d.defaclobjtype = '${object_type}'
+          AND acl.grantee = 0
+          AND acl.privilege_type = '${privilege_type}'
+      )::text;
+    "
+  else
+    sql="
+      SELECT EXISTS (
+        SELECT 1
+        FROM pg_default_acl d
+        JOIN pg_roles default_role ON default_role.oid = d.defaclrole
+        LEFT JOIN pg_namespace n ON n.oid = d.defaclnamespace
+        JOIN LATERAL aclexplode(d.defaclacl) AS acl ON true
+        WHERE default_role.rolname = 'eventsales_migrator'
+          AND (d.defaclnamespace = 0 OR n.nspname = 'public')
+          AND d.defaclobjtype = '${object_type}'
+          AND acl.grantee = 0
+      )::text;
+    "
+  fi
   expect_false "$check_id" "$(query_scalar prod "$sql")"
 }
 
@@ -288,55 +352,24 @@ probe_backup_privileges() {
 }
 
 probe_default_privileges() {
-  expect_exact_privilege_tuples runtime_default_table_privileges eventsales_runtime r 'DELETE,INSERT,SELECT,UPDATE'
-  expect_no_grant_option_on_role_defaults runtime_table_grant_option eventsales_runtime r
-  expect_no_unexpected_acl_grantor runtime_table_acl_grantor eventsales_runtime r
+  expect_exact_effective_privilege_tuples effective_runtime_table_privileges eventsales_runtime r 'DELETE,INSERT,SELECT,UPDATE'
+  expect_no_grant_option_on_effective_defaults effective_runtime_table_grant_option eventsales_runtime r
+  expect_no_unexpected_effective_acl_grantor effective_runtime_table_acl_grantor eventsales_runtime r
 
-  expect_exact_privilege_tuples runtime_default_sequence_privileges eventsales_runtime S 'SELECT,UPDATE,USAGE'
-  expect_no_grant_option_on_role_defaults runtime_sequence_grant_option eventsales_runtime S
-  expect_no_unexpected_acl_grantor runtime_sequence_acl_grantor eventsales_runtime S
+  expect_exact_effective_privilege_tuples effective_runtime_sequence_privileges eventsales_runtime S 'SELECT,UPDATE,USAGE'
+  expect_no_grant_option_on_effective_defaults effective_runtime_sequence_grant_option eventsales_runtime S
+  expect_no_unexpected_effective_acl_grantor effective_runtime_sequence_acl_grantor eventsales_runtime S
 
-  expect_exact_privilege_tuples runtime_default_function_privileges eventsales_runtime f EXECUTE
-  expect_no_grant_option_on_role_defaults runtime_function_grant_option eventsales_runtime f
-  expect_no_unexpected_acl_grantor runtime_function_acl_grantor eventsales_runtime f
+  expect_exact_effective_privilege_tuples effective_runtime_function_privileges eventsales_runtime f EXECUTE
+  expect_no_grant_option_on_effective_defaults effective_runtime_function_grant_option eventsales_runtime f
+  expect_no_unexpected_effective_acl_grantor effective_runtime_function_acl_grantor eventsales_runtime f
 
-  expect_exact_privilege_tuples backup_default_table_privileges eventsales_backup r SELECT
-  expect_no_grant_option_on_role_defaults backup_table_grant_option eventsales_backup r
-  expect_no_unexpected_acl_grantor backup_table_acl_grantor eventsales_backup r
+  expect_exact_effective_privilege_tuples effective_backup_table_privileges eventsales_backup r SELECT
+  expect_no_grant_option_on_effective_defaults effective_backup_table_grant_option eventsales_backup r
+  expect_no_unexpected_effective_acl_grantor effective_backup_table_acl_grantor eventsales_backup r
 
-  expect_false backup_default_sequence_privileges "$(query_scalar prod "
-    SELECT EXISTS (
-      SELECT 1
-      FROM pg_default_acl d
-      JOIN pg_roles default_role ON default_role.oid = d.defaclrole
-      JOIN pg_namespace n ON n.oid = d.defaclnamespace
-      JOIN pg_roles grantee ON grantee.rolname = 'eventsales_backup'
-      JOIN LATERAL aclexplode(d.defaclacl) AS acl ON true
-      JOIN pg_roles exploded_grantor ON exploded_grantor.oid = acl.grantor
-      WHERE default_role.rolname = 'eventsales_migrator'
-        AND exploded_grantor.rolname = 'eventsales_migrator'
-        AND n.nspname = 'public'
-        AND d.defaclobjtype = 'S'
-        AND acl.grantee = grantee.oid
-    )::text;
-  ")"
-
-  expect_false backup_default_function_privileges "$(query_scalar prod "
-    SELECT EXISTS (
-      SELECT 1
-      FROM pg_default_acl d
-      JOIN pg_roles default_role ON default_role.oid = d.defaclrole
-      JOIN pg_namespace n ON n.oid = d.defaclnamespace
-      JOIN pg_roles grantee ON grantee.rolname = 'eventsales_backup'
-      JOIN LATERAL aclexplode(d.defaclacl) AS acl ON true
-      JOIN pg_roles exploded_grantor ON exploded_grantor.oid = acl.grantor
-      WHERE default_role.rolname = 'eventsales_migrator'
-        AND exploded_grantor.rolname = 'eventsales_migrator'
-        AND n.nspname = 'public'
-        AND d.defaclobjtype = 'f'
-        AND acl.grantee = grantee.oid
-    )::text;
-  ")"
+  expect_no_effective_privileges_for_grantee effective_backup_sequence_privileges eventsales_backup S
+  expect_no_effective_privileges_for_grantee effective_backup_function_privileges eventsales_backup f
 
   expect_true global_function_default_override_exists "$(query_scalar prod "
     SELECT EXISTS (
@@ -349,47 +382,9 @@ probe_default_privileges() {
     );
   ")"
 
-  expect_false public_function_execute_in_global_default "$(query_scalar prod "
-    SELECT EXISTS (
-      SELECT 1
-      FROM pg_default_acl d
-      JOIN pg_roles default_role ON default_role.oid = d.defaclrole
-      JOIN LATERAL aclexplode(d.defaclacl) AS acl ON true
-      WHERE default_role.rolname = 'eventsales_migrator'
-        AND d.defaclnamespace = 0
-        AND d.defaclobjtype = 'f'
-        AND acl.grantee = 0
-        AND acl.privilege_type = 'EXECUTE'
-    )::text;
-  ")"
-
-  expect_false public_default_table_any_grant "$(query_scalar prod "
-    SELECT EXISTS (
-      SELECT 1
-      FROM pg_default_acl d
-      JOIN pg_roles default_role ON default_role.oid = d.defaclrole
-      JOIN pg_namespace n ON n.oid = d.defaclnamespace
-      JOIN LATERAL aclexplode(d.defaclacl) AS acl ON true
-      WHERE default_role.rolname = 'eventsales_migrator'
-        AND n.nspname = 'public'
-        AND d.defaclobjtype = 'r'
-        AND acl.grantee = 0
-    )::text;
-  ")"
-
-  expect_false public_default_sequence_any_grant "$(query_scalar prod "
-    SELECT EXISTS (
-      SELECT 1
-      FROM pg_default_acl d
-      JOIN pg_roles default_role ON default_role.oid = d.defaclrole
-      JOIN pg_namespace n ON n.oid = d.defaclnamespace
-      JOIN LATERAL aclexplode(d.defaclacl) AS acl ON true
-      WHERE default_role.rolname = 'eventsales_migrator'
-        AND n.nspname = 'public'
-        AND d.defaclobjtype = 'S'
-        AND acl.grantee = 0
-    )::text;
-  ")"
+  expect_false_effective_public_grant effective_public_function_execute f EXECUTE
+  expect_false_effective_public_grant effective_public_table_any_grant r
+  expect_false_effective_public_grant effective_public_sequence_any_grant S
 
   printf 'POSTGRES_PROBE_DEFAULT_PRIVILEGES=PASS\n'
 }
