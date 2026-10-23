@@ -4,6 +4,16 @@ on:
   push:
     branches:
       - main
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - mix.exs
+      - mix.lock
+      - config/**
+      - assets/**
+      - lib/**
+      - priv/**
+      - rel/**
   workflow_dispatch:
     inputs:
       tag:
