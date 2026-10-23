@@ -29,8 +29,22 @@ stop_preflight() {
 }
 
 partial_failure() {
-  printf 'STOP=POSTGRES_BOOTSTRAP_PARTIAL_FAILURE phase=%s\n' "$1" >&2
+  local phase=$1
+  local evidence_path=${2:-}
+
+  printf 'STOP=POSTGRES_BOOTSTRAP_PARTIAL_FAILURE phase=%s\n' "$phase" >&2
+  if [[ -n "$evidence_path" ]]; then
+    printf 'EVIDENCE_FILE=%s\n' "$evidence_path" >&2
+  fi
   exit 1
+}
+
+new_evidence_file() {
+  local evidence_path
+
+  evidence_path=$(mktemp "${TMPDIR:-/tmp}/eventsales-postgres-bootstrap-evidence.XXXXXXXXXX")
+  chmod 0600 -- "$evidence_path"
+  printf '%s' "$evidence_path"
 }
 
 if (($# != 1)); then
@@ -55,6 +69,14 @@ secret_dir=$1
 if [[ "$secret_dir" != /* || "$secret_dir" == / || "$secret_dir" == */ || "$secret_dir" == *//* ]]; then
   stop_preflight SECRET_DIRECTORY_PATH_NOT_CANONICAL_ABSOLUTE
 fi
+
+relative_path=${secret_dir#/}
+IFS='/' read -r -a path_parts <<<"$relative_path"
+for part in "${path_parts[@]}"; do
+  if [[ -z "$part" || "$part" == . || "$part" == .. ]]; then
+    stop_preflight SECRET_DIRECTORY_PATH_COMPONENT_INVALID
+  fi
+done
 
 if [[ -L "$secret_dir" || ! -d "$secret_dir" ]]; then
   stop_preflight SECRET_DIRECTORY_INVALID
@@ -90,23 +112,38 @@ for name in "${REQUIRED_SECRET_FILES[@]}"; do
   validate_secret_file "$name"
 done
 
-postgres_running=$(
-  docker compose --project-name "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" ps --status running --services postgres 2>/dev/null || true
-)
-postgres_running=${postgres_running//$'\r'/}
-postgres_running=${postgres_running//$'\n'/}
-if [[ "$postgres_running" != postgres ]]; then
-  stop_preflight POSTGRES_SERVICE_NOT_RUNNING
-fi
+export EVENTSALES_SECRET_DIR="$secret_dir"
+
+compose() {
+  docker compose --project-name "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" "$@"
+}
+
+ensure_compose_model() {
+  if ! compose config -q >/dev/null 2>&1; then
+    stop_preflight COMPOSE_CONFIG_FAILED
+  fi
+}
+
+ensure_postgres_service_running() {
+  local postgres_running
+
+  ensure_compose_model
+  postgres_running=$(compose ps --status running --services postgres 2>/dev/null || true)
+  postgres_running=${postgres_running//$'\r'/}
+  postgres_running=${postgres_running//$'\n'/}
+  if [[ "$postgres_running" != postgres ]]; then
+    stop_preflight POSTGRES_SERVICE_NOT_RUNNING
+  fi
+}
+
+ensure_postgres_service_running
 
 psql_admin() {
-  docker compose --project-name "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" exec -T postgres \
-    psql -X -w -U postgres -d postgres -v ON_ERROR_STOP=1 "$@"
+  compose exec -T postgres psql -X -w -U postgres -d postgres -v ON_ERROR_STOP=1 "$@"
 }
 
 psql_prod() {
-  docker compose --project-name "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" exec -T postgres \
-    psql -X -w -U postgres -d "$DATABASE_NAME" -v ON_ERROR_STOP=1 "$@"
+  compose exec -T postgres psql -X -w -U postgres -d "$DATABASE_NAME" -v ON_ERROR_STOP=1 "$@"
 }
 
 query_scalar() {
@@ -134,7 +171,7 @@ for role in "${TARGET_ROLES[@]}"; do
 done
 
 printf 'POSTGRES_BOOTSTRAP_PHASE=PHASE_1_ROLES\n'
-if ! python3 - "$secret_dir/eventsales_migrator_password" "$secret_dir/eventsales_runtime_server_password" "$secret_dir/eventsales_backup_password" <<'PY' | psql_admin -f - >/dev/null
+if ! python3 - "$secret_dir/eventsales_migrator_password" "$secret_dir/eventsales_runtime_server_password" "$secret_dir/eventsales_backup_password" <<'PY' | psql_admin -f - >/dev/null 2>&1
 import re
 import sys
 from pathlib import Path
@@ -178,12 +215,15 @@ then
 fi
 
 printf 'POSTGRES_BOOTSTRAP_PHASE=PHASE_2_DATABASE\n'
-if ! psql_admin -c "CREATE DATABASE ${DATABASE_NAME} OWNER eventsales_migrator;" >/dev/null 2>&1; then
-  partial_failure PHASE_2_DATABASE
+phase2_evidence=$(new_evidence_file)
+if ! psql_admin -c "CREATE DATABASE ${DATABASE_NAME} OWNER eventsales_migrator;" >"$phase2_evidence" 2>&1; then
+  partial_failure PHASE_2_DATABASE "$phase2_evidence"
 fi
+rm -f -- "$phase2_evidence"
 
 printf 'POSTGRES_BOOTSTRAP_PHASE=PHASE_3_PRIVILEGES\n'
-if ! psql_prod -f - >/dev/null 2>&1 <<'SQL'
+phase3_evidence=$(new_evidence_file)
+if ! psql_prod -f - >"$phase3_evidence" 2>&1 <<'SQL'
 BEGIN;
 
 REVOKE ALL ON DATABASE event_sales_prod FROM PUBLIC;
@@ -218,20 +258,20 @@ ALTER DEFAULT PRIVILEGES FOR ROLE eventsales_migrator IN SCHEMA public
 COMMIT;
 SQL
 then
-  partial_failure PHASE_3_PRIVILEGES
+  partial_failure PHASE_3_PRIVILEGES "$phase3_evidence"
 fi
+rm -f -- "$phase3_evidence"
 
 printf 'POSTGRES_BOOTSTRAP_PHASE=PHASE_4_PROBE\n'
-probe_output_file=$(mktemp)
+probe_output_file=$(new_evidence_file)
 probe_status=0
-if "$PROBE_SCRIPT" >"$probe_output_file" 2>&1; then
+if EVENTSALES_SECRET_DIR="$secret_dir" "$PROBE_SCRIPT" >"$probe_output_file" 2>&1; then
   probe_status=0
 else
   probe_status=$?
 fi
 if ((probe_status != 0)) || ! grep -qx 'POSTGRES_PROBE=PASS' "$probe_output_file"; then
-  rm -f -- "$probe_output_file"
-  partial_failure PHASE_4_PROBE
+  partial_failure PHASE_4_PROBE "$probe_output_file"
 fi
 rm -f -- "$probe_output_file"
 

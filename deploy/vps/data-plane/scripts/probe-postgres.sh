@@ -43,23 +43,58 @@ if [[ ! -f "$COMPOSE_FILE" ]]; then
   exit 1
 fi
 
-postgres_running=$(
-  docker compose --project-name "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" ps --status running --services postgres 2>/dev/null || true
-)
-postgres_running=${postgres_running//$'\r'/}
-postgres_running=${postgres_running//$'\n'/}
-if [[ "$postgres_running" != postgres ]]; then
-  probe_fail POSTGRES_SERVICE_NOT_RUNNING
-fi
+validate_secret_directory_env() {
+  local secret_dir=${EVENTSALES_SECRET_DIR:-}
+
+  if [[ -z "$secret_dir" ]]; then
+    probe_fail SECRET_DIRECTORY_ENV_INVALID
+  fi
+  if [[ "$secret_dir" != /* || "$secret_dir" == / || "$secret_dir" == */ || "$secret_dir" == *//* ]]; then
+    probe_fail SECRET_DIRECTORY_ENV_INVALID
+  fi
+
+  local relative_path=${secret_dir#/}
+  local part
+  IFS='/' read -r -a path_parts <<<"$relative_path"
+  for part in "${path_parts[@]}"; do
+    if [[ -z "$part" || "$part" == . || "$part" == .. ]]; then
+      probe_fail SECRET_DIRECTORY_ENV_INVALID
+    fi
+  done
+}
+
+validate_secret_directory_env
+
+compose() {
+  docker compose --project-name "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" "$@"
+}
+
+ensure_compose_model() {
+  if ! compose config -q >/dev/null 2>&1; then
+    probe_fail COMPOSE_CONFIG_FAILED
+  fi
+}
+
+ensure_postgres_service_running() {
+  local postgres_running
+
+  ensure_compose_model
+  postgres_running=$(compose ps --status running --services postgres 2>/dev/null || true)
+  postgres_running=${postgres_running//$'\r'/}
+  postgres_running=${postgres_running//$'\n'/}
+  if [[ "$postgres_running" != postgres ]]; then
+    probe_fail POSTGRES_SERVICE_NOT_RUNNING
+  fi
+}
+
+ensure_postgres_service_running
 
 psql_admin() {
-  docker compose --project-name "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" exec -T postgres \
-    psql -X -w -U postgres -d postgres -v ON_ERROR_STOP=1 "$@"
+  compose exec -T postgres psql -X -w -U postgres -d postgres -v ON_ERROR_STOP=1 "$@"
 }
 
 psql_prod() {
-  docker compose --project-name "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" exec -T postgres \
-    psql -X -w -U postgres -d "$DATABASE_NAME" -v ON_ERROR_STOP=1 "$@"
+  compose exec -T postgres psql -X -w -U postgres -d "$DATABASE_NAME" -v ON_ERROR_STOP=1 "$@"
 }
 
 query_scalar() {
@@ -113,7 +148,7 @@ expect_false() {
   fi
 }
 
-expect_exact_privilege_set() {
+expect_exact_privilege_tuples() {
   local check_id=$1
   local grantee_role=$2
   local object_type=$3
@@ -122,25 +157,87 @@ expect_exact_privilege_set() {
 
   sql="
     WITH expected AS (
-      SELECT unnest(string_to_array('${expected_csv}', ',')) AS privilege_type
+      SELECT privilege_type, false AS is_grantable
+      FROM unnest(string_to_array('${expected_csv}', ',')) AS privilege_type
     ),
     actual AS (
-      SELECT DISTINCT acl.privilege_type
+      SELECT DISTINCT acl.privilege_type, acl.is_grantable
       FROM pg_default_acl d
-      JOIN pg_roles grantor ON grantor.oid = d.defaclrole
+      JOIN pg_roles default_role ON default_role.oid = d.defaclrole
       JOIN pg_namespace n ON n.oid = d.defaclnamespace
       JOIN pg_roles grantee ON grantee.rolname = '${grantee_role}'
       JOIN LATERAL aclexplode(d.defaclacl) AS acl ON true
-      WHERE grantor.rolname = 'eventsales_migrator'
+      JOIN pg_roles exploded_grantor ON exploded_grantor.oid = acl.grantor
+      WHERE default_role.rolname = 'eventsales_migrator'
+        AND exploded_grantor.rolname = 'eventsales_migrator'
         AND n.nspname = 'public'
         AND d.defaclobjtype = '${object_type}'
         AND acl.grantee = grantee.oid
     )
     SELECT
-      NOT EXISTS (SELECT privilege_type FROM expected EXCEPT SELECT privilege_type FROM actual)
-      AND NOT EXISTS (SELECT privilege_type FROM actual EXCEPT SELECT privilege_type FROM expected);
+      NOT EXISTS (
+        SELECT privilege_type, is_grantable FROM expected
+        EXCEPT
+        SELECT privilege_type, is_grantable FROM actual
+      )
+      AND NOT EXISTS (
+        SELECT privilege_type, is_grantable FROM actual
+        EXCEPT
+        SELECT privilege_type, is_grantable FROM expected
+      );
   "
   expect_true "$check_id" "$(query_scalar prod "$sql")"
+}
+
+expect_no_grant_option_on_role_defaults() {
+  local check_id=$1
+  local grantee_role=$2
+  local object_type=$3
+  local sql
+
+  sql="
+    SELECT EXISTS (
+      SELECT 1
+      FROM pg_default_acl d
+      JOIN pg_roles default_role ON default_role.oid = d.defaclrole
+      JOIN pg_namespace n ON n.oid = d.defaclnamespace
+      JOIN pg_roles grantee ON grantee.rolname = '${grantee_role}'
+      JOIN LATERAL aclexplode(d.defaclacl) AS acl ON true
+      JOIN pg_roles exploded_grantor ON exploded_grantor.oid = acl.grantor
+      WHERE default_role.rolname = 'eventsales_migrator'
+        AND exploded_grantor.rolname = 'eventsales_migrator'
+        AND n.nspname = 'public'
+        AND d.defaclobjtype = '${object_type}'
+        AND acl.grantee = grantee.oid
+        AND acl.is_grantable
+    )::text;
+  "
+  expect_false "$check_id" "$(query_scalar prod "$sql")"
+}
+
+expect_no_unexpected_acl_grantor() {
+  local check_id=$1
+  local grantee_role=$2
+  local object_type=$3
+  local sql
+
+  sql="
+    SELECT EXISTS (
+      SELECT 1
+      FROM pg_default_acl d
+      JOIN pg_roles default_role ON default_role.oid = d.defaclrole
+      JOIN pg_namespace n ON n.oid = d.defaclnamespace
+      JOIN pg_roles grantee ON grantee.rolname = '${grantee_role}'
+      JOIN LATERAL aclexplode(d.defaclacl) AS acl ON true
+      LEFT JOIN pg_roles exploded_grantor ON exploded_grantor.oid = acl.grantor
+      WHERE default_role.rolname = 'eventsales_migrator'
+        AND n.nspname = 'public'
+        AND d.defaclobjtype = '${object_type}'
+        AND acl.grantee = grantee.oid
+        AND (exploded_grantor.rolname IS DISTINCT FROM 'eventsales_migrator')
+    )::text;
+  "
+  expect_false "$check_id" "$(query_scalar prod "$sql")"
 }
 
 probe_database() {
@@ -172,6 +269,7 @@ probe_roles() {
 probe_runtime_privileges() {
   expect_true runtime_connect "$(query_scalar prod "SELECT has_database_privilege('eventsales_runtime', '${DATABASE_NAME}', 'CONNECT');")"
   expect_true runtime_schema_usage "$(query_scalar prod "SELECT has_schema_privilege('eventsales_runtime', 'public', 'USAGE');")"
+  expect_eq public_schema_owner "$(query_scalar prod "SELECT pg_catalog.pg_get_userbyid(nspowner) FROM pg_namespace WHERE nspname = 'public';")" eventsales_migrator
   expect_false runtime_db_create "$(query_scalar prod "SELECT has_database_privilege('eventsales_runtime', '${DATABASE_NAME}', 'CREATE')::text;")"
   expect_false runtime_db_temp "$(query_scalar prod "SELECT has_database_privilege('eventsales_runtime', '${DATABASE_NAME}', 'TEMPORARY')::text;")"
   expect_false runtime_schema_create "$(query_scalar prod "SELECT has_schema_privilege('eventsales_runtime', 'public', 'CREATE')::text;")"
@@ -190,20 +288,33 @@ probe_backup_privileges() {
 }
 
 probe_default_privileges() {
-  expect_exact_privilege_set runtime_default_table_privileges eventsales_runtime r 'DELETE,INSERT,SELECT,UPDATE'
-  expect_exact_privilege_set runtime_default_sequence_privileges eventsales_runtime S 'SELECT,UPDATE,USAGE'
-  expect_exact_privilege_set runtime_default_function_privileges eventsales_runtime f EXECUTE
-  expect_exact_privilege_set backup_default_table_privileges eventsales_backup r SELECT
+  expect_exact_privilege_tuples runtime_default_table_privileges eventsales_runtime r 'DELETE,INSERT,SELECT,UPDATE'
+  expect_no_grant_option_on_role_defaults runtime_table_grant_option eventsales_runtime r
+  expect_no_unexpected_acl_grantor runtime_table_acl_grantor eventsales_runtime r
+
+  expect_exact_privilege_tuples runtime_default_sequence_privileges eventsales_runtime S 'SELECT,UPDATE,USAGE'
+  expect_no_grant_option_on_role_defaults runtime_sequence_grant_option eventsales_runtime S
+  expect_no_unexpected_acl_grantor runtime_sequence_acl_grantor eventsales_runtime S
+
+  expect_exact_privilege_tuples runtime_default_function_privileges eventsales_runtime f EXECUTE
+  expect_no_grant_option_on_role_defaults runtime_function_grant_option eventsales_runtime f
+  expect_no_unexpected_acl_grantor runtime_function_acl_grantor eventsales_runtime f
+
+  expect_exact_privilege_tuples backup_default_table_privileges eventsales_backup r SELECT
+  expect_no_grant_option_on_role_defaults backup_table_grant_option eventsales_backup r
+  expect_no_unexpected_acl_grantor backup_table_acl_grantor eventsales_backup r
 
   expect_false backup_default_sequence_privileges "$(query_scalar prod "
     SELECT EXISTS (
       SELECT 1
       FROM pg_default_acl d
-      JOIN pg_roles grantor ON grantor.oid = d.defaclrole
+      JOIN pg_roles default_role ON default_role.oid = d.defaclrole
       JOIN pg_namespace n ON n.oid = d.defaclnamespace
       JOIN pg_roles grantee ON grantee.rolname = 'eventsales_backup'
       JOIN LATERAL aclexplode(d.defaclacl) AS acl ON true
-      WHERE grantor.rolname = 'eventsales_migrator'
+      JOIN pg_roles exploded_grantor ON exploded_grantor.oid = acl.grantor
+      WHERE default_role.rolname = 'eventsales_migrator'
+        AND exploded_grantor.rolname = 'eventsales_migrator'
         AND n.nspname = 'public'
         AND d.defaclobjtype = 'S'
         AND acl.grantee = grantee.oid
@@ -214,11 +325,13 @@ probe_default_privileges() {
     SELECT EXISTS (
       SELECT 1
       FROM pg_default_acl d
-      JOIN pg_roles grantor ON grantor.oid = d.defaclrole
+      JOIN pg_roles default_role ON default_role.oid = d.defaclrole
       JOIN pg_namespace n ON n.oid = d.defaclnamespace
       JOIN pg_roles grantee ON grantee.rolname = 'eventsales_backup'
       JOIN LATERAL aclexplode(d.defaclacl) AS acl ON true
-      WHERE grantor.rolname = 'eventsales_migrator'
+      JOIN pg_roles exploded_grantor ON exploded_grantor.oid = acl.grantor
+      WHERE default_role.rolname = 'eventsales_migrator'
+        AND exploded_grantor.rolname = 'eventsales_migrator'
         AND n.nspname = 'public'
         AND d.defaclobjtype = 'f'
         AND acl.grantee = grantee.oid
@@ -229,8 +342,8 @@ probe_default_privileges() {
     SELECT EXISTS (
       SELECT 1
       FROM pg_default_acl d
-      JOIN pg_roles grantor ON grantor.oid = d.defaclrole
-      WHERE grantor.rolname = 'eventsales_migrator'
+      JOIN pg_roles default_role ON default_role.oid = d.defaclrole
+      WHERE default_role.rolname = 'eventsales_migrator'
         AND d.defaclnamespace = 0
         AND d.defaclobjtype = 'f'
     );
@@ -240,9 +353,9 @@ probe_default_privileges() {
     SELECT EXISTS (
       SELECT 1
       FROM pg_default_acl d
-      JOIN pg_roles grantor ON grantor.oid = d.defaclrole
+      JOIN pg_roles default_role ON default_role.oid = d.defaclrole
       JOIN LATERAL aclexplode(d.defaclacl) AS acl ON true
-      WHERE grantor.rolname = 'eventsales_migrator'
+      WHERE default_role.rolname = 'eventsales_migrator'
         AND d.defaclnamespace = 0
         AND d.defaclobjtype = 'f'
         AND acl.grantee = 0
@@ -250,33 +363,31 @@ probe_default_privileges() {
     )::text;
   ")"
 
-  expect_false public_default_table_application_grants "$(query_scalar prod "
+  expect_false public_default_table_any_grant "$(query_scalar prod "
     SELECT EXISTS (
       SELECT 1
       FROM pg_default_acl d
-      JOIN pg_roles grantor ON grantor.oid = d.defaclrole
+      JOIN pg_roles default_role ON default_role.oid = d.defaclrole
       JOIN pg_namespace n ON n.oid = d.defaclnamespace
       JOIN LATERAL aclexplode(d.defaclacl) AS acl ON true
-      WHERE grantor.rolname = 'eventsales_migrator'
+      WHERE default_role.rolname = 'eventsales_migrator'
         AND n.nspname = 'public'
         AND d.defaclobjtype = 'r'
         AND acl.grantee = 0
-        AND acl.privilege_type IN ('SELECT', 'INSERT', 'UPDATE', 'DELETE')
     )::text;
   ")"
 
-  expect_false public_default_sequence_application_grants "$(query_scalar prod "
+  expect_false public_default_sequence_any_grant "$(query_scalar prod "
     SELECT EXISTS (
       SELECT 1
       FROM pg_default_acl d
-      JOIN pg_roles grantor ON grantor.oid = d.defaclrole
+      JOIN pg_roles default_role ON default_role.oid = d.defaclrole
       JOIN pg_namespace n ON n.oid = d.defaclnamespace
       JOIN LATERAL aclexplode(d.defaclacl) AS acl ON true
-      WHERE grantor.rolname = 'eventsales_migrator'
+      WHERE default_role.rolname = 'eventsales_migrator'
         AND n.nspname = 'public'
         AND d.defaclobjtype = 'S'
         AND acl.grantee = 0
-        AND acl.privilege_type IN ('USAGE', 'SELECT', 'UPDATE')
     )::text;
   ")"
 
