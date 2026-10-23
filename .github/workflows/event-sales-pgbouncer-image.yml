@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+    paths:
+      - "deploy/vps/data-plane/pgbouncer-image/**"
   workflow_dispatch:
     inputs:
       tag:
