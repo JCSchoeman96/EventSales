@@ -35,6 +35,32 @@ fail() {
   exit 1
 }
 
+resolve_frozen_base_image() {
+  local image_id
+
+  if image_id=$(docker image inspect --format '{{.Id}}' "$BASE_IMAGE_REFERENCE" 2>/dev/null) && [[ -n "$image_id" ]]; then
+    printf '%s\n' "$image_id"
+    return 0
+  fi
+
+  printf 'Frozen base is not locally inspectable; pulling the exact linux/amd64 digest.\n' >&2
+  if ! docker pull --platform linux/amd64 "$BASE_IMAGE_REFERENCE" >&2; then
+    printf 'ERROR: failed to pull frozen base image: %s\n' "$BASE_IMAGE_REFERENCE" >&2
+    return 1
+  fi
+
+  if ! image_id=$(docker image inspect --format '{{.Id}}' "$BASE_IMAGE_REFERENCE"); then
+    printf 'ERROR: frozen base image did not resolve after pulling: %s\n' "$BASE_IMAGE_REFERENCE" >&2
+    return 1
+  fi
+  if [[ -z "$image_id" ]]; then
+    printf 'ERROR: frozen base image resolved to an empty image ID: %s\n' "$BASE_IMAGE_REFERENCE" >&2
+    return 1
+  fi
+
+  printf '%s\n' "$image_id"
+}
+
 create_run_context() {
   local mode=$1
   TMP_ROOT=${TMPDIR:-/tmp}
@@ -602,8 +628,7 @@ run_static() {
 
   create_run_context static
   command -v timeout >/dev/null 2>&1 || fail 'timeout utility is required for bounded proof helpers'
-  BASE_IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$BASE_IMAGE_REFERENCE")
-  [[ -n "$BASE_IMAGE_ID" ]] || fail 'frozen base image did not resolve locally'
+  BASE_IMAGE_ID=$(resolve_frozen_base_image) || fail 'unable to resolve frozen base image from the exact digest'
   CANDIDATE_IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$image_reference")
   [[ -n "$CANDIDATE_IMAGE_ID" ]] || fail "candidate image reference did not resolve: $image_reference"
   base_platform=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$BASE_IMAGE_ID")
