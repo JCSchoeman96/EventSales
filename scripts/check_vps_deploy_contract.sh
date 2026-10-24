@@ -19,7 +19,7 @@ if (($# != 0)); then
   fail ARGUMENTS
 fi
 
-for tool in docker jq timeout grep awk cmp mktemp; do
+for tool in docker python3 timeout grep awk cmp mktemp; do
   command -v "$tool" >/dev/null 2>&1 || fail TOOLING
 done
 
@@ -126,6 +126,43 @@ secret_source_gate() {
     done < "$source_file"
   done
 
+  if ! python3 - "$NETWORK_SCRIPT" "$RUNTIME_CONFIG" <<'PY'
+import re
+import sys
+
+url_credentials = re.compile(r"[A-Za-z][A-Za-z0-9.+-]*://[^/@\s]+:[^/@\s]+@", re.I)
+private_key = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----", re.I)
+token = re.compile(r"gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}")
+quoted_literal = re.compile(
+    r"\b(?:password|passwd|token|api[_-]?key|client[_-]?secret|secret|credential|"
+    r"private[_-]?key|secret_key_base|release_cookie|database_url|redis_url)"
+    r"\s*[:=]\s*(?:\"[^\"]+\"|'[^']+')",
+    re.I,
+)
+unquoted_environment_value = re.compile(
+    r"\b(?:POSTGRES_PASSWORD|PGPASSWORD|PGPASSFILE|DIRECT_DATABASE_URL|DATABASE_URL|"
+    r"REDIS_URL|SECRET_KEY_BASE|RELEASE_COOKIE|EVENTSALES_[A-Z_]*(?:PASSWORD|SECRET|TOKEN))"
+    r"\s*=\s*[^$\s\"']+",
+)
+environment_literal = re.compile(
+    r"System\.(?:put_env|put_env!)\s*\(\s*[\"'](?:POSTGRES_PASSWORD|PGPASSWORD|PGPASSFILE|"
+    r"DIRECT_DATABASE_URL|DATABASE_URL|REDIS_URL|SECRET_KEY_BASE|RELEASE_COOKIE|"
+    r"EVENTSALES_[A-Z_]*(?:PASSWORD|SECRET|TOKEN))[\"']\s*,\s*[\"'][^\"']+[\"']",
+    re.I,
+)
+
+for path in sys.argv[1:]:
+    source = open(path, encoding="utf-8").read()
+    source = source.replace("ecto://USER:PASS@HOST/DATABASE", "")
+    if any(pattern.search(source) for pattern in (
+        url_credentials, private_key, token, quoted_literal, unquoted_environment_value, environment_literal
+    )):
+        sys.exit(1)
+PY
+  then
+    fail COMMITTED_SECRET_LITERAL
+  fi
+
   if grep -Eiq -- '(^|[[:space:]])#[[:xdigit:]]{64}([[:space:]]|$)' "$REDIS_ACL_TEMPLATE" 2>/dev/null; then
     fail COMMITTED_SECRET_LITERAL
   fi
@@ -139,16 +176,6 @@ secret_source_gate() {
 }
 
 secret_source_gate
-
-json_must_match() {
-  local check=$1
-  local json_file=$2
-  local query=$3
-  shift 3
-  if ! jq -e "$@" "$query" "$json_file" >/dev/null 2>&1; then
-    fail "$check"
-  fi
-}
 
 render_data_plane() {
   timeout 20s env -i \
@@ -228,40 +255,253 @@ if ! render_app "$TMP_DIR/app-ingress.json" "$APP_COMPOSE" "$INGRESS_COMPOSE"; t
   fail APP_INGRESS_RENDER
 fi
 
-json_must_match DATA_PLANE_JSON "$TMP_DIR/data-plane.json" 'type == "object" and (.services | type == "object")'
-json_must_match APP_BASE_JSON "$TMP_DIR/app-base.json" 'type == "object" and (.services.app | type == "object")'
-json_must_match APP_INGRESS_JSON "$TMP_DIR/app-ingress.json" 'type == "object" and (.services.app | type == "object")'
+cat > "$TMP_DIR/contract_validator.py" <<'PY'
+import json
+import sys
 
-if ! jq -c 'del(.services.app.ports)' "$TMP_DIR/app-base.json" > "$TMP_DIR/app-base-normalized.json" 2>/dev/null || \
-  ! jq -c 'del(.services.app.ports)' "$TMP_DIR/app-ingress.json" > "$TMP_DIR/app-ingress-normalized.json" 2>/dev/null; then
-  fail APP_NORMALIZATION
-fi
-cmp -s "$TMP_DIR/app-base-normalized.json" "$TMP_DIR/app-ingress-normalized.json" || fail INGRESS_OVERLAY_DRIFT
+APP_IMAGE = "ghcr.io/jcschoeman96/eventsales@sha256:" + "a" * 64
+NODE_IP = "172.31.255.10"
+POSTGRES_IMAGE = "dhi.io/postgres:18.6-alpine3.24@sha256:d33bd884995daddfb515d0ce9aec23b74d20d72e03ca42b72c4abf617c76bb19"
+PGBOUNCER_IMAGE = "ghcr.io/jcschoeman96/eventsales-pgbouncer@sha256:965b0223f1096666471e11595f4f6dc5d32dfacbc688418b8ae2385946c41e3b"
+REDIS_IMAGE = "dhi.io/redis:8.10.2-debian13@sha256:953ca2c2ab4ff7a93f8abac31339ba4d913ec0914861453ab4faa29d154115a0"
 
-json_must_match DATA_PROJECT "$TMP_DIR/data-plane.json" \
-  '(.name == "eventsales-prod") and ((.services | keys | sort) == ["pgbouncer", "postgres", "redis"])'
-json_must_match DATA_NETWORKS "$TMP_DIR/data-plane.json" \
-  '((.networks | keys | sort) == ["eventsales_data"]) and (.networks.eventsales_data.external == true) and (.networks.eventsales_data.name == "eventsales-prod_eventsales_data")'
-json_must_match DATA_NO_HOST_PORTS "$TMP_DIR/data-plane.json" \
-  'all(.services[]; ((has("ports") | not) and (((.networks | if type == "array" then sort else keys end) == ["eventsales_data"]))))'
-json_must_match DATA_VOLUME "$TMP_DIR/data-plane.json" \
-  '((.volumes | keys | sort) == ["postgres_data"]) and (.volumes.postgres_data.name == "eventsales-prod_postgres_data") and ((.services.postgres.volumes | length) == 1) and (.services.postgres.volumes[0].type == "volume") and (.services.postgres.volumes[0].source == "postgres_data") and (.services.postgres.volumes[0].target == "/var/lib/postgresql")'
 
-POSTGRES_IMAGE='dhi.io/postgres:18.6-alpine3.24@sha256:d33bd884995daddfb515d0ce9aec23b74d20d72e03ca42b72c4abf617c76bb19'
-PGBOUNCER_IMAGE='ghcr.io/jcschoeman96/eventsales-pgbouncer@sha256:965b0223f1096666471e11595f4f6dc5d32dfacbc688418b8ae2385946c41e3b'
-REDIS_IMAGE='dhi.io/redis:8.10.2-debian13@sha256:953ca2c2ab4ff7a93f8abac31339ba4d913ec0914861453ab4faa29d154115a0'
+def read(path):
+    with open(path, encoding="utf-8") as source:
+        return json.load(source)
 
-json_must_match POSTGRES_CONTRACT "$TMP_DIR/data-plane.json" \
-  '(.services.postgres.image == $image) and (.services.postgres.cpus == 2) and ((.services.postgres.mem_limit == "3221225472") or (.services.postgres.mem_limit == "3g") or (.services.postgres.mem_limit == 3221225472)) and (.services.postgres.expose == ["5432"]) and (.services.postgres.environment.POSTGRES_DB == "postgres") and (.services.postgres.environment.POSTGRES_USER == "postgres") and (.services.postgres.environment.POSTGRES_PASSWORD_FILE == "/run/secrets/postgres_bootstrap_password") and ((.services.postgres.environment | has("POSTGRES_PASSWORD")) | not) and (.services.postgres.command == ["postgres", "-c", "max_connections=100", "-c", "shared_buffers=768MB", "-c", "effective_cache_size=2GB", "-c", "work_mem=8MB", "-c", "maintenance_work_mem=256MB"])' \
-  --arg image "$POSTGRES_IMAGE"
 
-json_must_match PGBOUNCER_CONTAINER "$TMP_DIR/data-plane.json" \
-  '(.services.pgbouncer.image == $image) and (.services.pgbouncer.user == "65532:65532") and (.services.pgbouncer.read_only == true) and (.services.pgbouncer.cap_drop == ["ALL"]) and ((.services.pgbouncer.cap_add // []) == []) and ((.services.pgbouncer.privileged // false) == false) and (.services.pgbouncer.security_opt == ["no-new-privileges:true"]) and (.services.pgbouncer.cpus == 0.5) and ((.services.pgbouncer.mem_limit == "134217728") or (.services.pgbouncer.mem_limit == "128m") or (.services.pgbouncer.mem_limit == 134217728)) and (.services.pgbouncer.expose == ["6432"])' \
-  --arg image "$PGBOUNCER_IMAGE"
+def require(condition):
+    if not condition:
+        raise ValueError
 
-json_must_match REDIS_CONTAINER "$TMP_DIR/data-plane.json" \
-  '(.services.redis.image == $image) and (.services.redis.user == "65532:65532") and (.services.redis.read_only == true) and (.services.redis.cap_drop == ["ALL"]) and ((.services.redis.cap_add // []) == []) and ((.services.redis.privileged // false) == false) and (.services.redis.security_opt == ["no-new-privileges:true"]) and (.services.redis.cpus == 0.5) and ((.services.redis.mem_limit == "536870912") or (.services.redis.mem_limit == "512m") or (.services.redis.mem_limit == 536870912)) and (.services.redis.expose == ["6379"]) and (.services.redis.command == ["redis-server", "/etc/redis/redis.conf", "--bind", "0.0.0.0", "--protected-mode", "no", "--aclfile", "/run/secrets/redis-users.acl", "--maxmemory", "384mb", "--maxmemory-policy", "noeviction", "--save", "", "--appendonly", "no", "--dir", "/tmp", "--logfile", ""])' \
-  --arg image "$REDIS_IMAGE"
+
+def is_memory(value, accepted):
+    return value in accepted
+
+
+def network_names(value):
+    if isinstance(value, list):
+        return sorted(value)
+    if isinstance(value, dict):
+        return sorted(value)
+    return None
+
+
+def check(mode, paths):
+    if mode == "DATA_PLANE_JSON":
+        data = read(paths[0])
+        require(isinstance(data, dict) and isinstance(data.get("services"), dict))
+    elif mode == "APP_BASE_JSON":
+        require(isinstance(read(paths[0]).get("services", {}).get("app"), dict))
+    elif mode == "APP_INGRESS_JSON":
+        require(isinstance(read(paths[0]).get("services", {}).get("app"), dict))
+    elif mode == "APP_OVERLAY_EQUAL":
+        base, ingress = (read(path) for path in paths)
+        base["services"]["app"].pop("ports", None)
+        ingress["services"]["app"].pop("ports", None)
+        require(base == ingress)
+    elif mode == "DATA_PROJECT":
+        data = read(paths[0])
+        require(data.get("name") == "eventsales-prod")
+        require(sorted(data.get("services", {})) == ["pgbouncer", "postgres", "redis"])
+    elif mode == "DATA_NETWORKS":
+        data = read(paths[0])
+        networks = data.get("networks", {})
+        require(sorted(networks) == ["eventsales_data"])
+        require(networks["eventsales_data"].get("external") is True)
+        require(networks["eventsales_data"].get("name") == "eventsales-prod_eventsales_data")
+    elif mode == "DATA_NO_HOST_PORTS":
+        data = read(paths[0])
+        for service in data["services"].values():
+            require("ports" not in service)
+            require(network_names(service.get("networks")) == ["eventsales_data"])
+    elif mode == "DATA_VOLUME":
+        data = read(paths[0])
+        postgres = data["services"]["postgres"]
+        volumes = data.get("volumes", {})
+        mounts = postgres.get("volumes", [])
+        require(sorted(volumes) == ["postgres_data"])
+        require(volumes["postgres_data"].get("name") == "eventsales-prod_postgres_data")
+        require(len(mounts) == 1)
+        require(mounts[0].get("type") == "volume")
+        require(mounts[0].get("source") == "postgres_data")
+        require(mounts[0].get("target") == "/var/lib/postgresql")
+    elif mode == "POSTGRES_CONTRACT":
+        postgres = read(paths[0])["services"]["postgres"]
+        environment = postgres.get("environment", {})
+        require(postgres.get("image") == POSTGRES_IMAGE)
+        require(postgres.get("cpus") == 2)
+        require(is_memory(postgres.get("mem_limit"), {"3221225472", "3g", 3221225472}))
+        require(postgres.get("expose") == ["5432"])
+        require(environment.get("POSTGRES_DB") == "postgres")
+        require(environment.get("POSTGRES_USER") == "postgres")
+        require(environment.get("POSTGRES_PASSWORD_FILE") == "/run/secrets/postgres_bootstrap_password")
+        require("POSTGRES_PASSWORD" not in environment)
+        require(postgres.get("command") == [
+            "postgres", "-c", "max_connections=100", "-c", "shared_buffers=768MB",
+            "-c", "effective_cache_size=2GB", "-c", "work_mem=8MB",
+            "-c", "maintenance_work_mem=256MB",
+        ])
+    elif mode == "PGBOUNCER_CONTAINER":
+        service = read(paths[0])["services"]["pgbouncer"]
+        require(service.get("image") == PGBOUNCER_IMAGE)
+        require(service.get("user") == "65532:65532")
+        require(service.get("read_only") is True)
+        require(service.get("cap_drop") == ["ALL"])
+        require(service.get("cap_add", []) == [])
+        require(service.get("privileged", False) is False)
+        require(service.get("security_opt") == ["no-new-privileges:true"])
+        require(service.get("cpus") == 0.5)
+        require(is_memory(service.get("mem_limit"), {"134217728", "128m", 134217728}))
+        require(service.get("expose") == ["6432"])
+    elif mode == "REDIS_CONTAINER":
+        service = read(paths[0])["services"]["redis"]
+        require(service.get("image") == REDIS_IMAGE)
+        require(service.get("user") == "65532:65532")
+        require(service.get("read_only") is True)
+        require(service.get("cap_drop") == ["ALL"])
+        require(service.get("cap_add", []) == [])
+        require(service.get("privileged", False) is False)
+        require(service.get("security_opt") == ["no-new-privileges:true"])
+        require(service.get("cpus") == 0.5)
+        require(is_memory(service.get("mem_limit"), {"536870912", "512m", 536870912}))
+        require(service.get("expose") == ["6379"])
+        require(service.get("command") == [
+            "redis-server", "/etc/redis/redis.conf", "--bind", "0.0.0.0",
+            "--protected-mode", "no", "--aclfile", "/run/secrets/redis-users.acl",
+            "--maxmemory", "384mb", "--maxmemory-policy", "noeviction", "--save", "",
+            "--appendonly", "no", "--dir", "/tmp", "--logfile", "",
+        ])
+    elif mode == "PGBOUNCER_SETTINGS":
+        expected = {
+            "listen_addr": "0.0.0.0",
+            "listen_port": "6432",
+            "unix_socket_dir": "/tmp",
+            "pidfile": "/tmp/pgbouncer.pid",
+            "auth_type": "scram-sha-256",
+            "auth_file": "/run/secrets/pgbouncer_users.txt",
+            "pool_mode": "transaction",
+            "max_client_conn": "64",
+            "default_pool_size": "12",
+            "reserve_pool_size": "4",
+            "max_db_connections": "16",
+            "max_user_connections": "16",
+            "max_prepared_statements": "200",
+        }
+        section = None
+        sections = []
+        settings = {}
+        database_mappings = []
+        with open(paths[0], encoding="utf-8") as source:
+            for raw_line in source:
+                line = raw_line.strip()
+                if not line or line.startswith((";", "#")):
+                    continue
+                if line.startswith("[") and line.endswith("]"):
+                    section = line
+                    sections.append(section)
+                    continue
+                require(section is not None and "=" in line)
+                key, value = (part.strip() for part in line.split("=", 1))
+                require(key and value)
+                if section == "[databases]":
+                    database_mappings.append((key, value))
+                elif section == "[pgbouncer]":
+                    require(key not in settings)
+                    settings[key] = value
+                else:
+                    require(False)
+        require(sections == ["[databases]", "[pgbouncer]"])
+        require(database_mappings == [(
+            "event_sales_prod",
+            "host=postgres port=5432 dbname=event_sales_prod user=eventsales_runtime "
+            "password=__EVENTSALES_RUNTIME_SERVER_PASSWORD__",
+        )])
+        require(settings == expected)
+    elif mode == "APP_BASE":
+        data = read(paths[0])
+        app = data["services"]["app"]
+        environment = {
+            "PHX_SERVER": "true",
+            "PORT": "4000",
+            "POOL_SIZE": "20",
+            "DNS_CLUSTER_QUERY": "eventsales-app",
+            "EVENTSALES_NODE_IP": NODE_IP,
+            "WEBHOOK_REDIS_BUFFER_ENABLED": "false",
+            "WEBHOOK_REDIS_BUFFER_DURABILITY_ACCEPTED": "false",
+        }
+        networks = data.get("networks", {})
+        require(data.get("name") == "eventsales-app")
+        require(sorted(data.get("services", {})) == ["app"])
+        require(app.get("image") == APP_IMAGE)
+        require("build" not in app and "ports" not in app)
+        require(app.get("user") == "eventsales")
+        require(app.get("init") is True)
+        require(app.get("restart") == "unless-stopped")
+        require(app.get("read_only") is True)
+        require(app.get("cap_drop") == ["ALL"])
+        require(app.get("cap_add", []) == [])
+        require(app.get("privileged", False) is False)
+        require(app.get("security_opt") == ["no-new-privileges:true"])
+        require(app.get("cpus") == 4)
+        require(is_memory(app.get("mem_limit"), {"2147483648", "2g", 2147483648}))
+        require(app.get("pids_limit") == 512)
+        require(app.get("tmpfs") == ["/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777"])
+        require(app.get("expose") == ["4000"])
+        require(app.get("healthcheck", {}).get("test") == ["CMD", "bin/event_sales", "pid"])
+        require(app.get("environment") == environment)
+        require("volumes" not in app)
+        require(sorted(networks) == ["eventsales_data", "eventsales_edge"])
+        require(networks["eventsales_data"].get("external") is True)
+        require(networks["eventsales_data"].get("name") == "eventsales-prod_eventsales_data")
+        require(networks["eventsales_edge"].get("external") is True)
+        require(networks["eventsales_edge"].get("name") == "eventsales-prod_eventsales_edge")
+        app_networks = app.get("networks", {})
+        require(app_networks["eventsales_data"].get("aliases", []) == ["eventsales-app"])
+        require(app_networks["eventsales_data"].get("ipv4_address") == NODE_IP)
+        require(sorted(app_networks) == ["eventsales_data", "eventsales_edge"])
+        require(app_networks["eventsales_edge"] == {})
+    elif mode == "APP_INGRESS":
+        app = read(paths[0])["services"]["app"]
+        ports = app.get("ports", [])
+        require(len(ports) == 1)
+        port = ports[0]
+        require(port.get("host_ip") == "127.0.0.1")
+        require(port.get("target") in (4000, "4000"))
+        require(port.get("published") in ("4100", 4100))
+        require(port.get("protocol") == "tcp")
+        require(port.get("mode", "ingress") == "ingress")
+    else:
+        raise ValueError
+
+
+try:
+    check(sys.argv[1], sys.argv[2:])
+except Exception:
+    sys.exit(1)
+PY
+
+python_check() {
+  local check=$1
+  shift
+  if ! python3 "$TMP_DIR/contract_validator.py" "$check" "$@" >/dev/null 2>&1; then
+    fail "$check"
+  fi
+}
+
+python_check DATA_PLANE_JSON "$TMP_DIR/data-plane.json"
+python_check APP_BASE_JSON "$TMP_DIR/app-base.json"
+python_check APP_INGRESS_JSON "$TMP_DIR/app-ingress.json"
+python_check APP_OVERLAY_EQUAL "$TMP_DIR/app-base.json" "$TMP_DIR/app-ingress.json"
+python_check DATA_PROJECT "$TMP_DIR/data-plane.json"
+python_check DATA_NETWORKS "$TMP_DIR/data-plane.json"
+python_check DATA_NO_HOST_PORTS "$TMP_DIR/data-plane.json"
+python_check DATA_VOLUME "$TMP_DIR/data-plane.json"
+
+python_check POSTGRES_CONTRACT "$TMP_DIR/data-plane.json"
+python_check PGBOUNCER_CONTAINER "$TMP_DIR/data-plane.json"
+python_check REDIS_CONTAINER "$TMP_DIR/data-plane.json"
 
 line_is_present "$NETWORK_SCRIPT" 'DATA_NETWORK=eventsales-prod_eventsales_data' || fail DATA_NETWORK_PROVISIONER
 line_is_present "$NETWORK_SCRIPT" 'EDGE_NETWORK=eventsales-prod_eventsales_edge' || fail DATA_NETWORK_PROVISIONER
@@ -273,49 +513,7 @@ line_is_present "$NETWORK_SCRIPT" '    if [[ "$expected_internal" == true ]]; th
 line_is_present "$NETWORK_SCRIPT" '      docker network create --driver bridge --internal "$name" >/dev/null || {' || fail DATA_NETWORK_PROVISIONER
 line_is_present "$NETWORK_SCRIPT" '      docker network create --driver bridge "$name" >/dev/null || {' || fail DATA_NETWORK_PROVISIONER
 
-ini_setting_is() {
-  local wanted_key=$1
-  local expected_value=$2
-  awk -v wanted_key="$wanted_key" -v expected_value="$expected_value" '
-    function trim(value) {
-      sub(/^[ \t]+/, "", value)
-      sub(/[ \t]+$/, "", value)
-      return value
-    }
-    {
-      line = trim($0)
-      if (line == "" || line ~ /^[;#]/) next
-      if (line ~ /^\[/) {
-        section = line
-        next
-      }
-      if (section != "[pgbouncer]" || index(line, "=") == 0) next
-      separator = index(line, "=")
-      key = trim(substr(line, 1, separator - 1))
-      value = trim(substr(line, separator + 1))
-      if (key == wanted_key) {
-        count++
-        if (value != expected_value) bad = 1
-      }
-    }
-    END { if (count != 1 || bad) exit 1 }
-  ' "$PGBOUNCER_TEMPLATE" 2>/dev/null
-}
-
-for pair in \
-  'listen_port 6432' \
-  'auth_type scram-sha-256' \
-  'pool_mode transaction' \
-  'max_client_conn 64' \
-  'default_pool_size 12' \
-  'reserve_pool_size 4' \
-  'max_db_connections 16' \
-  'max_user_connections 16' \
-  'max_prepared_statements 200'; do
-  setting_key=${pair%% *}
-  setting_value=${pair#* }
-  ini_setting_is "$setting_key" "$setting_value" || fail PGBOUNCER_SETTINGS
-done
+python_check PGBOUNCER_SETTINGS "$PGBOUNCER_TEMPLATE"
 
 check_acl_tokens() {
   local expected_name=$1
@@ -374,12 +572,7 @@ check_redis_acl() {
 
 check_redis_acl || fail REDIS_ACL
 
-json_must_match APP_BASE "$TMP_DIR/app-base.json" \
-  '(.name == "eventsales-app") and ((.services | keys) == ["app"]) and (.services.app.image == $image) and ((.services.app | has("build")) | not) and ((.services.app | has("ports")) | not) and (.services.app.user == "eventsales") and (.services.app.init == true) and (.services.app.restart == "unless-stopped") and (.services.app.read_only == true) and (.services.app.cap_drop == ["ALL"]) and ((.services.app.cap_add // []) == []) and ((.services.app.privileged // false) == false) and (.services.app.security_opt == ["no-new-privileges:true"]) and (.services.app.cpus == 4) and ((.services.app.mem_limit == "2147483648") or (.services.app.mem_limit == "2g") or (.services.app.mem_limit == 2147483648)) and (.services.app.pids_limit == 512) and (.services.app.tmpfs == ["/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777"]) and (.services.app.expose == ["4000"]) and (.services.app.healthcheck.test == ["CMD", "bin/event_sales", "pid"]) and (.services.app.environment == {"PHX_SERVER":"true", "PORT":"4000", "POOL_SIZE":"20", "DNS_CLUSTER_QUERY":"eventsales-app", "EVENTSALES_NODE_IP":$node_ip, "WEBHOOK_REDIS_BUFFER_ENABLED":"false", "WEBHOOK_REDIS_BUFFER_DURABILITY_ACCEPTED":"false"}) and ((.services.app | has("volumes")) | not) and ((.networks | keys | sort) == ["eventsales_data", "eventsales_edge"]) and (.networks.eventsales_data.external == true) and (.networks.eventsales_data.name == "eventsales-prod_eventsales_data") and (.networks.eventsales_edge.external == true) and (.networks.eventsales_edge.name == "eventsales-prod_eventsales_edge") and ((.services.app.networks.eventsales_data.aliases // []) == ["eventsales-app"]) and (.services.app.networks.eventsales_data.ipv4_address == $node_ip) and (((.services.app.networks.eventsales_edge // {}) | keys | length) == 0)' \
-  --arg image "$APP_IMAGE" \
-  --arg node_ip "$NODE_IP"
-
-json_must_match APP_INGRESS "$TMP_DIR/app-ingress.json" \
-  '(.services.app.ports | length == 1) and (.services.app.ports[0].host_ip == "127.0.0.1") and ((.services.app.ports[0].target == 4000) or (.services.app.ports[0].target == "4000")) and ((.services.app.ports[0].published == "4100") or (.services.app.ports[0].published == 4100)) and (.services.app.ports[0].protocol == "tcp") and ((.services.app.ports[0].mode // "ingress") == "ingress")'
+python_check APP_BASE "$TMP_DIR/app-base.json"
+python_check APP_INGRESS "$TMP_DIR/app-ingress.json"
 
 printf 'VPS_DEPLOY_CONTRACT=PASS\n'
