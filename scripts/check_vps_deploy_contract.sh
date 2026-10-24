@@ -33,6 +33,13 @@ RUNTIME_CONFIG="$ROOT/config/runtime.exs"
 SECRET_GENERATOR="$ROOT/deploy/vps/data-plane/scripts/generate-secrets.sh"
 RUNTIME_RENDERER="$ROOT/deploy/vps/data-plane/scripts/render-runtime-config.sh"
 POSTGRES_BOOTSTRAP="$ROOT/deploy/vps/data-plane/scripts/bootstrap-postgres.sh"
+DEPLOY_PROBE_SCRIPTS=(
+  "$ROOT/deploy/vps/data-plane/scripts/probe-postgres.sh"
+  "$ROOT/deploy/vps/data-plane/scripts/probe-pgbouncer.sh"
+  "$ROOT/deploy/vps/data-plane/scripts/probe-redis.sh"
+  "$ROOT/deploy/vps/app/scripts/probe-private.sh"
+  "$ROOT/deploy/vps/app/scripts/probe-loopback.sh"
+)
 # Pin the accepted provisioner control flow so a bypass cannot hide beside expected lines.
 NETWORK_SCRIPT_SHA256='dc22844432d1591bd31abfb7b62595afa373ac13a113dd2a7553633e02813348'
 
@@ -46,7 +53,8 @@ for source_file in \
   "$RUNTIME_CONFIG" \
   "$SECRET_GENERATOR" \
   "$RUNTIME_RENDERER" \
-  "$POSTGRES_BOOTSTRAP"; do
+  "$POSTGRES_BOOTSTRAP" \
+  "${DEPLOY_PROBE_SCRIPTS[@]}"; do
   [[ -f "$source_file" && -r "$source_file" ]] || fail SOURCE_FILE_MISSING
 done
 
@@ -134,15 +142,19 @@ secret_source_gate() {
     done < "$source_file"
   done
 
-  if ! python3 - "$NETWORK_SCRIPT" "$RUNTIME_CONFIG" "$SECRET_GENERATOR" "$RUNTIME_RENDERER" "$POSTGRES_BOOTSTRAP" <<'PY'
+  if ! python3 - "$NETWORK_SCRIPT" "$RUNTIME_CONFIG" "$SECRET_GENERATOR" "$RUNTIME_RENDERER" "$POSTGRES_BOOTSTRAP" "${DEPLOY_PROBE_SCRIPTS[@]}" <<'PY'
 import re
 import sys
 
 url_credentials = re.compile(r"[A-Za-z][A-Za-z0-9.+-]*://[^/@\s]+:[^/@\s]+@", re.I)
 private_key = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----", re.I)
 token = re.compile(r"gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}")
+pgpass_field = r"(?:\\.|[^:'\"$\s])+"
+pgpass_entry = rf"{pgpass_field}:(?:\*|\d{{1,5}}):{pgpass_field}:{pgpass_field}:{pgpass_field}"
+pgpass_literal = re.compile(rf"(?:'{pgpass_entry}'|\"{pgpass_entry}\")")
+pgpass_line_literal = re.compile(rf"(?m)^[ \t]*{pgpass_entry}[ \t]*$")
 quoted_literal = re.compile(
-    r"(?<![A-Za-z0-9])(?:POSTGRES_PASSWORD|PGPASSWORD|PGPASSFILE|DIRECT_DATABASE_URL|"
+    r"(?<![A-Za-z0-9])(?:POSTGRES_PASSWORD|PGPASSWORD|DIRECT_DATABASE_URL|"
     r"DATABASE_URL|REDIS_URL|SECRET_KEY_BASE|RELEASE_COOKIE|EVENTSALES_[A-Z_]*(?:PASSWORD|SECRET|TOKEN)|"
     r"[A-Za-z0-9_]*(?:PASSWORD|PASSWD|TOKEN|API[_-]?KEY|CLIENT[_-]?SECRET|SECRET_KEY_BASE|"
     r"RELEASE_COOKIE|DATABASE_URL|REDIS_URL|CREDENTIAL|PRIVATE[_-]?KEY))"
@@ -150,12 +162,12 @@ quoted_literal = re.compile(
     re.I,
 )
 unquoted_environment_value = re.compile(
-    r"(?<![A-Za-z0-9])(?:POSTGRES_PASSWORD|PGPASSWORD|PGPASSFILE|DIRECT_DATABASE_URL|DATABASE_URL|"
+    r"(?<![A-Za-z0-9])(?:POSTGRES_PASSWORD|PGPASSWORD|DIRECT_DATABASE_URL|DATABASE_URL|"
     r"REDIS_URL|SECRET_KEY_BASE|RELEASE_COOKIE|EVENTSALES_[A-Z_]*(?:PASSWORD|SECRET|TOKEN))"
     r"\s*=\s*[^$\s\"']+",
 )
 environment_literal = re.compile(
-    r"System\.(?:put_env|put_env!)\s*\(\s*[\"'](?:POSTGRES_PASSWORD|PGPASSWORD|PGPASSFILE|"
+    r"System\.(?:put_env|put_env!)\s*\(\s*[\"'](?:POSTGRES_PASSWORD|PGPASSWORD|"
     r"DIRECT_DATABASE_URL|DATABASE_URL|REDIS_URL|SECRET_KEY_BASE|RELEASE_COOKIE|"
     r"EVENTSALES_[A-Z_]*(?:PASSWORD|SECRET|TOKEN)|[A-Z0-9_]*(?:PASSWORD|PASSWD|TOKEN|SECRET_KEY_BASE))"
     r"[\"']\s*,\s*[\"'][^\"']+[\"']",
@@ -166,7 +178,8 @@ for path in sys.argv[1:]:
     source = open(path, encoding="utf-8").read()
     source = source.replace("ecto://USER:PASS@HOST/DATABASE", "")
     if any(pattern.search(source) for pattern in (
-        url_credentials, private_key, token, quoted_literal, unquoted_environment_value, environment_literal
+        url_credentials, private_key, token, pgpass_literal, pgpass_line_literal, quoted_literal,
+        unquoted_environment_value, environment_literal
     )):
         sys.exit(1)
 PY
@@ -293,6 +306,16 @@ def is_memory(value, accepted):
     return value in accepted
 
 
+def require_healthcheck(service, test, start_period):
+    require(service.get("healthcheck") == {
+        "test": test,
+        "interval": "10s",
+        "timeout": "3s",
+        "retries": 5,
+        "start_period": start_period,
+    })
+
+
 def network_names(value):
     if isinstance(value, list):
         return sorted(value)
@@ -340,6 +363,8 @@ def check(mode, paths):
         require(mounts[0].get("type") == "volume")
         require(mounts[0].get("source") == "postgres_data")
         require(mounts[0].get("target") == "/var/lib/postgresql")
+        require(data["services"]["pgbouncer"].get("volumes", []) == [])
+        require(data["services"]["redis"].get("volumes", []) == [])
     elif mode == "DATA_SECRET_MOUNTS":
         data = read(paths[0])
         secret_dir = paths[1]
@@ -371,6 +396,9 @@ def check(mode, paths):
     elif mode == "POSTGRES_CONTRACT":
         postgres = read(paths[0])["services"]["postgres"]
         environment = postgres.get("environment", {})
+        require(set(environment) == {
+            "POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD_FILE",
+        })
         require(postgres.get("image") == POSTGRES_IMAGE)
         require(postgres.get("cpus") == 2)
         require(is_memory(postgres.get("mem_limit"), {"3221225472", "3g", 3221225472}))
@@ -379,14 +407,17 @@ def check(mode, paths):
         require(environment.get("POSTGRES_USER") == "postgres")
         require(environment.get("POSTGRES_PASSWORD_FILE") == "/run/secrets/postgres_bootstrap_password")
         require("POSTGRES_PASSWORD" not in environment)
+        require(postgres.get("entrypoint") is None)
         require(postgres.get("command") == [
             "postgres", "-c", "max_connections=100", "-c", "shared_buffers=768MB",
             "-c", "effective_cache_size=2GB", "-c", "work_mem=8MB",
             "-c", "maintenance_work_mem=256MB",
         ])
+        require_healthcheck(postgres, ["CMD", "pg_isready", "-h", "127.0.0.1", "-p", "5432", "-U", "postgres"], "30s")
     elif mode == "PGBOUNCER_CONTAINER":
         service = read(paths[0])["services"]["pgbouncer"]
         require(service.get("image") == PGBOUNCER_IMAGE)
+        require(service.get("command") is None and service.get("entrypoint") is None)
         require(service.get("user") == "65532:65532")
         require(service.get("read_only") is True)
         require(service.get("cap_drop") == ["ALL"])
@@ -396,9 +427,11 @@ def check(mode, paths):
         require(service.get("cpus") == 0.5)
         require(is_memory(service.get("mem_limit"), {"134217728", "128m", 134217728}))
         require(service.get("expose") == ["6432"])
+        require_healthcheck(service, ["CMD", "/usr/local/bin/eventsales-pgbouncer-healthcheck", "127.0.0.1", "6432", "eventsales_runtime"], "10s")
     elif mode == "REDIS_CONTAINER":
         service = read(paths[0])["services"]["redis"]
         require(service.get("image") == REDIS_IMAGE)
+        require(service.get("entrypoint") is None)
         require(service.get("user") == "65532:65532")
         require(service.get("read_only") is True)
         require(service.get("cap_drop") == ["ALL"])
@@ -414,6 +447,7 @@ def check(mode, paths):
             "--maxmemory", "384mb", "--maxmemory-policy", "noeviction", "--save", "",
             "--appendonly", "no", "--dir", "/tmp", "--logfile", "",
         ])
+        require_healthcheck(service, ["CMD", "redis-cli", "-h", "127.0.0.1", "ping"], "10s")
     elif mode == "PGBOUNCER_SETTINGS":
         expected = {
             "listen_addr": "0.0.0.0",
@@ -477,6 +511,7 @@ def check(mode, paths):
         require(sorted(data.get("services", {})) == ["app"])
         require("secrets" not in data)
         require(app.get("image") == APP_IMAGE)
+        require(app.get("command") is None and app.get("entrypoint") is None)
         require("build" not in app and "ports" not in app)
         require(app.get("user") == "eventsales")
         require(app.get("init") is True)
@@ -491,6 +526,7 @@ def check(mode, paths):
         require(app.get("pids_limit") == 512)
         require(app.get("tmpfs") == ["/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777"])
         require(app.get("expose") == ["4000"])
+        require(app.get("volumes_from", []) == [])
         healthcheck = app.get("healthcheck", {})
         require(healthcheck.get("disable", False) is False)
         require(healthcheck.get("test") == ["CMD", "bin/event_sales", "pid"])
