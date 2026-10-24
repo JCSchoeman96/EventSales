@@ -1,0 +1,50 @@
+name: eventsales-app
+
+services:
+  app:
+    image: "${EVENTSALES_IMAGE_REF:?EVENTSALES_IMAGE_REF_must_be_set}"
+    user: eventsales
+    init: true
+    restart: unless-stopped
+    read_only: true
+    env_file:
+      - "${EVENTSALES_DEPLOY_ENV_FILE:?EVENTSALES_DEPLOY_ENV_FILE_must_be_set}"
+    environment:
+      PHX_SERVER: "true"
+      PORT: "4000"
+      POOL_SIZE: "20"
+      DNS_CLUSTER_QUERY: eventsales-app
+      EVENTSALES_NODE_IP: "${EVENTSALES_NODE_IP:?EVENTSALES_NODE_IP_must_be_set}"
+      WEBHOOK_REDIS_BUFFER_ENABLED: "false"
+      WEBHOOK_REDIS_BUFFER_DURABILITY_ACCEPTED: "false"
+    networks:
+      eventsales_data:
+        aliases:
+          - eventsales-app
+        ipv4_address: "${EVENTSALES_NODE_IP:?EVENTSALES_NODE_IP_must_be_set}"
+      eventsales_edge: {}
+    expose:
+      - "4000"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    cpus: 4.0
+    mem_limit: 2g
+    pids_limit: 512
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+    healthcheck:
+      test: ["CMD", "bin/event_sales", "pid"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+networks:
+  eventsales_data:
+    external: true
+    name: eventsales-prod_eventsales_data
+  eventsales_edge:
+    external: true
+    name: eventsales-prod_eventsales_edge
