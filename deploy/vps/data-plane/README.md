@@ -99,12 +99,7 @@ The PostgreSQL bootstrap password is supplied through `POSTGRES_PASSWORD_FILE`. 
 
 These host-side probes may run only after the accepted V3/V4 procedure has created and started the production data plane and a future V5 authority explicitly authorizes the proof. Repository merge does not authorize VPS execution. Both probes require root and the absolute R4.2 secret directory; each validates only its required raw password files and writes mode-0600 evidence there. The probes inspect and execute bounded clients against the already-running `eventsales-prod` services. They do not create, start, restart, or stop services.
 
-From the repository root, invoke each probe once with the accepted secret directory:
-
-```bash
-sudo bash deploy/vps/data-plane/scripts/probe-pgbouncer.sh /absolute/secret-dir
-sudo bash deploy/vps/data-plane/scripts/probe-redis.sh /absolute/secret-dir
-```
+`agentops` remains unprivileged. Production root execution must use a separately reviewed narrow sudo/root wrapper that executes reviewed, root-owned immutable staged bytes. Never execute these privileged scripts directly from an `agentops`-writable Git checkout. The exact wrapper and installation invocation will be defined and reviewed before V5. R4.4 does not implement that wrapper.
 
 Each probe is one-shot. A failed run preserves its evidence and must stop for review; failed PostgreSQL proof objects remain in place. Do not blindly rerun a failed or successful proof, repair its state automatically, or perform automatic destructive cleanup. Do not use `--rm` helper containers for failure-sensitive proof. Successful evidence and proof artifacts remain until explicit acceptance and cleanup authority is granted. The PostgreSQL proof table is retained for later V5 acceptance; Redis proof keys expire under their 60-second rate-limit and one-hour hot-state TTLs.
 

@@ -29,6 +29,10 @@ evidence_file=
 failure_reported=false
 temporary_outputs=()
 created_output_path=
+created_error_path=
+runtime_auth_proven=false
+stats_auth_proven=false
+default_auth_proven=false
 
 record() {
   if [[ -n "$evidence_file" ]]; then
@@ -256,10 +260,19 @@ create_output_file() {
   temporary_outputs+=("$created_output_path")
 }
 
-auth_client() {
-  local password_file=$1 username=$2 output_file=$3
-  shift 3
-  {
+create_error_file() {
+  created_error_path=$(mktemp -- "$secret_dir/.eventsales-r44-redis-stderr.XXXXXXXX") || report_preflight_failure CLIENT_STDERR_CREATE_FAILED
+  chmod 600 -- "$created_error_path" || report_preflight_failure CLIENT_STDERR_PERMISSION_FAILED
+  temporary_outputs+=("$created_error_path")
+}
+
+auth_client_with_stderr() {
+  local password_file=$1 username=$2 output_file=$3 error_file=$4 raw_error_file status
+  shift 4
+  raw_error_file=$(mktemp -- "$secret_dir/.eventsales-r44-redis-raw-stderr.XXXXXXXX") || report_preflight_failure CLIENT_STDERR_CREATE_FAILED
+  chmod 600 -- "$raw_error_file" || report_preflight_failure CLIENT_STDERR_PERMISSION_FAILED
+  temporary_outputs+=("$raw_error_file")
+  if {
     cat -- "$password_file"
     printf '\n'
   } | timeout --signal=TERM --kill-after=2s "$DOCKER_TIMEOUT" \
@@ -268,8 +281,24 @@ auth_client() {
         unset REDISCLI_AUTH
         username=$1
         shift
-        exec timeout 12s redis-cli --user "$username" --askpass --raw --exit-on-error -h redis -p 6379 "$@" 2>/dev/null
-      ' sh "$username" "$@" >"$output_file" 2>&1
+        exec timeout 12s redis-cli -e --user "$username" --askpass --raw -h redis -p 6379 "$@"
+      ' sh "$username" "$@" >"$output_file" 2>"$raw_error_file"; then
+    status=0
+  else
+    status=$?
+  fi
+  if ! sed 's/Please input password:[[:space:]]*//g' "$raw_error_file" >"$error_file"; then
+    rm -f -- "$raw_error_file" 2>/dev/null || true
+    report_failure CLIENT_STDERR_FILTER_FAILED
+  fi
+  rm -f -- "$raw_error_file" 2>/dev/null || report_failure CLIENT_STDERR_CLEANUP_FAILED
+  return "$status"
+}
+
+auth_client() {
+  local password_file=$1 username=$2 output_file=$3
+  shift 3
+  auth_client_with_stderr "$password_file" "$username" "$output_file" /dev/null "$@"
 }
 
 auth_client_stdin() {
@@ -283,30 +312,57 @@ auth_client_stdin() {
     docker compose --project-name "$COMPOSE_PROJECT" --file "$COMPOSE_FILE" \
       exec -T -i redis sh -c '
         unset REDISCLI_AUTH
-        exec timeout 12s redis-cli --user "$1" --askpass --raw --exit-on-error -h redis -p 6379 2>/dev/null
-      ' sh "$username" >"$output_file" 2>&1
+        exec timeout 12s redis-cli -e --user "$1" --askpass --raw -h redis -p 6379
+      ' sh "$username" >"$output_file" 2>/dev/null
+}
+
+default_client_with_stderr() {
+  local output_file=$1 error_file=$2
+  shift 2
+  timeout --signal=TERM --kill-after=2s "$DOCKER_TIMEOUT" \
+    docker compose --project-name "$COMPOSE_PROJECT" --file "$COMPOSE_FILE" \
+      exec -T redis sh -c '
+        unset REDISCLI_AUTH
+        exec timeout 12s redis-cli -e --user default --raw -h redis -p 6379 "$@"
+      ' sh "$@" >"$output_file" 2>"$error_file"
 }
 
 default_client() {
   local output_file=$1
   shift
-  timeout --signal=TERM --kill-after=2s "$DOCKER_TIMEOUT" \
-    docker compose --project-name "$COMPOSE_PROJECT" --file "$COMPOSE_FILE" \
-      exec -T redis sh -c '
-        unset REDISCLI_AUTH
-        exec timeout 12s redis-cli --user default --raw --exit-on-error -h redis -p 6379 "$@" 2>/dev/null
-      ' sh "$@" >"$output_file" 2>&1
+  default_client_with_stderr "$output_file" /dev/null "$@"
+}
+
+has_noperm_reply() {
+  local error_file=$1
+  grep -Eq '^NOPERM([[:space:]]|$)' "$error_file"
 }
 
 require_noperm() {
   local command_name=$1 password_file=$2 username=$3
   shift 3
+  if [[ "$username" == eventsales_runtime && "$runtime_auth_proven" != true ]]; then
+    report_failure "${username^^}_${command_name^^}_AUTH_NOT_PROVEN"
+  fi
+  if [[ "$username" == eventsales_stats && "$stats_auth_proven" != true ]]; then
+    report_failure "${username^^}_${command_name^^}_AUTH_NOT_PROVEN"
+  fi
   create_output_file
   local output_file=$created_output_path
-  if auth_client "$password_file" "$username" "$output_file" "$command_name" "$@"; then
+  create_error_file
+  local error_file=$created_error_path client_status
+  if auth_client_with_stderr "$password_file" "$username" "$output_file" "$error_file" "$command_name" "$@"; then
     report_failure "${username^^}_${command_name^^}_UNEXPECTEDLY_ALLOWED"
+  else
+    client_status=$?
   fi
-  if ! grep -Fq 'NOPERM' "$output_file"; then
+  if [[ "$client_status" != 1 ]]; then
+    report_failure "${username^^}_${command_name^^}_CLIENT_EXIT_STATUS_NOT_REDIS_ERROR"
+  fi
+  if [[ -s "$output_file" ]]; then
+    report_failure "${username^^}_${command_name^^}_UNEXPECTED_STDOUT"
+  fi
+  if ! has_noperm_reply "$error_file"; then
     report_failure "${username^^}_${command_name^^}_DENIAL_NOT_PROVEN"
   fi
 }
@@ -314,12 +370,25 @@ require_noperm() {
 require_default_noperm() {
   local command_name=$1
   shift
+  if [[ "$default_auth_proven" != true ]]; then
+    report_failure "DEFAULT_${command_name^^}_AUTH_NOT_PROVEN"
+  fi
   create_output_file
   local output_file=$created_output_path
-  if default_client "$output_file" "$command_name" "$@"; then
+  create_error_file
+  local error_file=$created_error_path client_status
+  if default_client_with_stderr "$output_file" "$error_file" "$command_name" "$@"; then
     report_failure "DEFAULT_${command_name^^}_UNEXPECTEDLY_ALLOWED"
+  else
+    client_status=$?
   fi
-  if ! grep -Fq 'NOPERM' "$output_file"; then
+  if [[ "$client_status" != 1 ]]; then
+    report_failure "DEFAULT_${command_name^^}_CLIENT_EXIT_STATUS_NOT_REDIS_ERROR"
+  fi
+  if [[ -s "$output_file" ]]; then
+    report_failure "DEFAULT_${command_name^^}_UNEXPECTED_STDOUT"
+  fi
+  if ! has_noperm_reply "$error_file"; then
     report_failure "DEFAULT_${command_name^^}_DENIAL_NOT_PROVEN"
   fi
 }
@@ -340,6 +409,7 @@ fi
 if [[ "$(<"$output_file")" != PONG ]]; then
   report_failure RUNTIME_AUTH
 fi
+runtime_auth_proven=true
 record 'REDIS_STATE=RUNTIME_AUTH_PROVEN'
 record 'REDIS_RUNTIME_AUTH=PASS'
 printf 'REDIS_RUNTIME_AUTH=PASS\n'
@@ -467,21 +537,25 @@ printf 'REDIS_BOUNDED_SCAN=PASS\n'
 
 create_output_file
 output_file=$created_output_path
-if auth_client "$runtime_secret" eventsales_runtime "$output_file" SET "$outside_key" eventsales-r44-outside NX PX "$RATE_LIMIT_TTL_MS"; then
-  if [[ "$(<"$output_file")" == OK ]]; then
-    record 'REDIS_OUT_OF_PREFIX_WRITE=UNEXPECTEDLY_ALLOWED'
-    create_output_file
-    cleanup_output=$created_output_path
-    if auth_client "$runtime_secret" eventsales_runtime "$cleanup_output" DEL "$outside_key" && [[ "$(<"$cleanup_output")" == 1 ]]; then
-      record 'REDIS_OUT_OF_PREFIX_CLEANUP=SCOPED_DEL_COMPLETED'
-    else
-      record 'REDIS_OUT_OF_PREFIX_CLEANUP=NOT_PERMITTED_OR_UNAVAILABLE'
-    fi
-    report_failure PREFIX_ISOLATION_NOT_ENFORCED
-  fi
-  report_failure PREFIX_ISOLATION_DENIAL_NOT_PROVEN
+create_error_file
+error_file=$created_error_path
+if auth_client_with_stderr "$runtime_secret" eventsales_runtime "$output_file" "$error_file" SET "$outside_key" eventsales-r44-outside NX PX "$RATE_LIMIT_TTL_MS"; then
+  client_status=0
+else
+  client_status=$?
 fi
-if ! grep -Fq 'NOPERM' "$output_file"; then
+if [[ "$(<"$output_file")" == OK ]]; then
+  record 'REDIS_OUT_OF_PREFIX_WRITE=UNEXPECTEDLY_ALLOWED'
+  create_output_file
+  cleanup_output=$created_output_path
+  if auth_client "$runtime_secret" eventsales_runtime "$cleanup_output" DEL "$outside_key" && [[ "$(<"$cleanup_output")" == 1 ]]; then
+    record 'REDIS_OUT_OF_PREFIX_CLEANUP=SCOPED_DEL_COMPLETED'
+  else
+    record 'REDIS_OUT_OF_PREFIX_CLEANUP=NOT_PERMITTED_OR_UNAVAILABLE'
+  fi
+  report_failure PREFIX_ISOLATION_NOT_ENFORCED
+fi
+if [[ "$client_status" != 1 ]] || [[ -s "$output_file" ]] || ! has_noperm_reply "$error_file"; then
   report_failure PREFIX_ISOLATION_DENIAL_NOT_PROVEN
 fi
 record 'REDIS_STATE=PREFIX_DENIAL_PROVEN'
@@ -503,6 +577,7 @@ output_file=$created_output_path
 if ! auth_client "$stats_secret" eventsales_stats "$output_file" PING || [[ "$(<"$output_file")" != PONG ]]; then
   report_failure STATS_AUTH
 fi
+stats_auth_proven=true
 create_output_file
 output_file=$created_output_path
 if ! auth_client "$stats_secret" eventsales_stats "$output_file" INFO; then
@@ -591,13 +666,17 @@ printf 'REDIS_PERSISTENCE=PASS\n'
 require_noperm GET "$stats_secret" eventsales_stats "$hot_key"
 create_output_file
 output_file=$created_output_path
-if auth_client "$stats_secret" eventsales_stats "$output_file" SET "$stats_key" eventsales-r44-stats NX PX "$RATE_LIMIT_TTL_MS"; then
+create_error_file
+error_file=$created_error_path
+if auth_client_with_stderr "$stats_secret" eventsales_stats "$output_file" "$error_file" SET "$stats_key" eventsales-r44-stats NX PX "$RATE_LIMIT_TTL_MS"; then
   if [[ "$(<"$output_file")" == OK ]]; then
     report_failure STATS_WRITE_UNEXPECTEDLY_ALLOWED
   fi
   report_failure STATS_WRITE_DENIAL_NOT_PROVEN
+else
+  client_status=$?
 fi
-if ! grep -Fq 'NOPERM' "$output_file"; then
+if [[ "$client_status" != 1 ]] || [[ -s "$output_file" ]] || ! has_noperm_reply "$error_file"; then
   report_failure STATS_WRITE_DENIAL_NOT_PROVEN
 fi
 record 'REDIS_STATE=STATS_KEY_DENIAL_PROVEN'
@@ -609,14 +688,19 @@ output_file=$created_output_path
 if ! default_client "$output_file" PING || [[ "$(<"$output_file")" != PONG ]]; then
   report_failure DEFAULT_PING
 fi
+default_auth_proven=true
 record 'REDIS_STATE=DEFAULT_PING_PROVEN'
 require_default_noperm GET "$hot_key"
 create_output_file
 output_file=$created_output_path
-if default_client "$output_file" SET "$default_key" eventsales-r44-default NX PX "$RATE_LIMIT_TTL_MS"; then
+create_error_file
+error_file=$created_error_path
+if default_client_with_stderr "$output_file" "$error_file" SET "$default_key" eventsales-r44-default NX PX "$RATE_LIMIT_TTL_MS"; then
   report_failure DEFAULT_WRITE_UNEXPECTEDLY_ALLOWED
+else
+  client_status=$?
 fi
-if ! grep -Fq 'NOPERM' "$output_file"; then
+if [[ "$client_status" != 1 ]] || [[ -s "$output_file" ]] || ! has_noperm_reply "$error_file"; then
   report_failure DEFAULT_WRITE_DENIAL_NOT_PROVEN
 fi
 require_default_noperm INFO
