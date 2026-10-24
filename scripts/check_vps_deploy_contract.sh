@@ -19,7 +19,7 @@ if (($# != 0)); then
   fail ARGUMENTS
 fi
 
-for tool in docker python3 timeout grep awk cmp mktemp; do
+for tool in docker python3 timeout grep awk cmp mktemp sha256sum; do
   command -v "$tool" >/dev/null 2>&1 || fail TOOLING
 done
 
@@ -30,6 +30,11 @@ REDIS_ACL_TEMPLATE="$ROOT/deploy/vps/data-plane/templates/redis-users.acl.templa
 APP_COMPOSE="$ROOT/deploy/vps/app/compose.yaml"
 INGRESS_COMPOSE="$ROOT/deploy/vps/app/compose.ingress.yaml"
 RUNTIME_CONFIG="$ROOT/config/runtime.exs"
+SECRET_GENERATOR="$ROOT/deploy/vps/data-plane/scripts/generate-secrets.sh"
+RUNTIME_RENDERER="$ROOT/deploy/vps/data-plane/scripts/render-runtime-config.sh"
+POSTGRES_BOOTSTRAP="$ROOT/deploy/vps/data-plane/scripts/bootstrap-postgres.sh"
+# Pin the accepted provisioner control flow so a bypass cannot hide beside expected lines.
+NETWORK_SCRIPT_SHA256='dc22844432d1591bd31abfb7b62595afa373ac13a113dd2a7553633e02813348'
 
 for source_file in \
   "$DATA_COMPOSE" \
@@ -38,7 +43,10 @@ for source_file in \
   "$REDIS_ACL_TEMPLATE" \
   "$APP_COMPOSE" \
   "$INGRESS_COMPOSE" \
-  "$RUNTIME_CONFIG"; do
+  "$RUNTIME_CONFIG" \
+  "$SECRET_GENERATOR" \
+  "$RUNTIME_RENDERER" \
+  "$POSTGRES_BOOTSTRAP"; do
   [[ -f "$source_file" && -r "$source_file" ]] || fail SOURCE_FILE_MISSING
 done
 
@@ -126,7 +134,7 @@ secret_source_gate() {
     done < "$source_file"
   done
 
-  if ! python3 - "$NETWORK_SCRIPT" "$RUNTIME_CONFIG" <<'PY'
+  if ! python3 - "$NETWORK_SCRIPT" "$RUNTIME_CONFIG" "$SECRET_GENERATOR" "$RUNTIME_RENDERER" "$POSTGRES_BOOTSTRAP" <<'PY'
 import re
 import sys
 
@@ -134,20 +142,23 @@ url_credentials = re.compile(r"[A-Za-z][A-Za-z0-9.+-]*://[^/@\s]+:[^/@\s]+@", re
 private_key = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----", re.I)
 token = re.compile(r"gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}")
 quoted_literal = re.compile(
-    r"\b(?:password|passwd|token|api[_-]?key|client[_-]?secret|secret|credential|"
-    r"private[_-]?key|secret_key_base|release_cookie|database_url|redis_url)"
+    r"(?<![A-Za-z0-9])(?:POSTGRES_PASSWORD|PGPASSWORD|PGPASSFILE|DIRECT_DATABASE_URL|"
+    r"DATABASE_URL|REDIS_URL|SECRET_KEY_BASE|RELEASE_COOKIE|EVENTSALES_[A-Z_]*(?:PASSWORD|SECRET|TOKEN)|"
+    r"[A-Za-z0-9_]*(?:PASSWORD|PASSWD|TOKEN|API[_-]?KEY|CLIENT[_-]?SECRET|SECRET_KEY_BASE|"
+    r"RELEASE_COOKIE|DATABASE_URL|REDIS_URL|CREDENTIAL|PRIVATE[_-]?KEY))"
     r"\s*[:=]\s*(?:\"[^\"]+\"|'[^']+')",
     re.I,
 )
 unquoted_environment_value = re.compile(
-    r"\b(?:POSTGRES_PASSWORD|PGPASSWORD|PGPASSFILE|DIRECT_DATABASE_URL|DATABASE_URL|"
+    r"(?<![A-Za-z0-9])(?:POSTGRES_PASSWORD|PGPASSWORD|PGPASSFILE|DIRECT_DATABASE_URL|DATABASE_URL|"
     r"REDIS_URL|SECRET_KEY_BASE|RELEASE_COOKIE|EVENTSALES_[A-Z_]*(?:PASSWORD|SECRET|TOKEN))"
     r"\s*=\s*[^$\s\"']+",
 )
 environment_literal = re.compile(
     r"System\.(?:put_env|put_env!)\s*\(\s*[\"'](?:POSTGRES_PASSWORD|PGPASSWORD|PGPASSFILE|"
     r"DIRECT_DATABASE_URL|DATABASE_URL|REDIS_URL|SECRET_KEY_BASE|RELEASE_COOKIE|"
-    r"EVENTSALES_[A-Z_]*(?:PASSWORD|SECRET|TOKEN))[\"']\s*,\s*[\"'][^\"']+[\"']",
+    r"EVENTSALES_[A-Z_]*(?:PASSWORD|SECRET|TOKEN)|[A-Z0-9_]*(?:PASSWORD|PASSWD|TOKEN|SECRET_KEY_BASE))"
+    r"[\"']\s*,\s*[\"'][^\"']+[\"']",
     re.I,
 )
 
@@ -170,7 +181,14 @@ PY
     fail COMMITTED_SECRET_LITERAL
   fi
 
-  if grep -Fq -- 'prepare: :unnamed' "$RUNTIME_CONFIG" 2>/dev/null; then
+  if python3 - "$RUNTIME_CONFIG" <<'PY'
+import re
+import sys
+
+source = open(sys.argv[1], encoding="utf-8").read()
+sys.exit(0 if re.search(r"\bprepare\s*:\s*:unnamed\b", source) else 1)
+PY
+  then
     fail PGBOUNCER_PREPARED_STATEMENTS
   fi
 }
@@ -230,11 +248,6 @@ render_app() {
       "${compose_args[@]}" \
       config --format json > "$output" 2> "$TMP_DIR/render.err"
 }
-
-if ! env -i PATH="$PATH" LC_ALL=C HOME="$TMP_DIR/home" DOCKER_CONFIG="$TMP_DIR/docker-config" \
-  timeout 20s docker compose version --short >/dev/null 2>&1; then
-  fail DOCKER_COMPOSE_UNAVAILABLE
-fi
 
 if render_app_without_image > "$TMP_DIR/app-without-image.json" 2> "$TMP_DIR/app-without-image.err"; then
   fail APP_IMAGE_REQUIRED
@@ -327,6 +340,34 @@ def check(mode, paths):
         require(mounts[0].get("type") == "volume")
         require(mounts[0].get("source") == "postgres_data")
         require(mounts[0].get("target") == "/var/lib/postgresql")
+    elif mode == "DATA_SECRET_MOUNTS":
+        data = read(paths[0])
+        secret_dir = paths[1]
+        expected_secrets = {
+            "postgres_bootstrap_password": "postgres_bootstrap_password",
+            "pgbouncer_ini": "pgbouncer.ini",
+            "pgbouncer_users": "pgbouncer_users.txt",
+            "redis_acl": "redis-users.acl",
+        }
+        secrets = data.get("secrets", {})
+        require(sorted(secrets) == sorted(expected_secrets))
+        for name, filename in expected_secrets.items():
+            secret = secrets[name]
+            require(secret.get("name") == f"eventsales-prod_{name}")
+            require(secret.get("file") == f"{secret_dir}/{filename}")
+
+        expected_mounts = {
+            "postgres": [("postgres_bootstrap_password", "postgres_bootstrap_password")],
+            "pgbouncer": [
+                ("pgbouncer_ini", "/etc/pgbouncer/pgbouncer.ini"),
+                ("pgbouncer_users", "/run/secrets/pgbouncer_users.txt"),
+            ],
+            "redis": [("redis_acl", "/run/secrets/redis-users.acl")],
+        }
+        for service_name, expected in expected_mounts.items():
+            mounts = data["services"][service_name].get("secrets", [])
+            actual = [(mount.get("source"), mount.get("target")) for mount in mounts]
+            require(actual == expected)
     elif mode == "POSTGRES_CONTRACT":
         postgres = read(paths[0])["services"]["postgres"]
         environment = postgres.get("environment", {})
@@ -434,6 +475,7 @@ def check(mode, paths):
         networks = data.get("networks", {})
         require(data.get("name") == "eventsales-app")
         require(sorted(data.get("services", {})) == ["app"])
+        require("secrets" not in data)
         require(app.get("image") == APP_IMAGE)
         require("build" not in app and "ports" not in app)
         require(app.get("user") == "eventsales")
@@ -449,7 +491,9 @@ def check(mode, paths):
         require(app.get("pids_limit") == 512)
         require(app.get("tmpfs") == ["/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777"])
         require(app.get("expose") == ["4000"])
-        require(app.get("healthcheck", {}).get("test") == ["CMD", "bin/event_sales", "pid"])
+        healthcheck = app.get("healthcheck", {})
+        require(healthcheck.get("disable", False) is False)
+        require(healthcheck.get("test") == ["CMD", "bin/event_sales", "pid"])
         require(app.get("environment") == environment)
         require("volumes" not in app)
         require(sorted(networks) == ["eventsales_data", "eventsales_edge"])
@@ -498,6 +542,7 @@ python_check DATA_PROJECT "$TMP_DIR/data-plane.json"
 python_check DATA_NETWORKS "$TMP_DIR/data-plane.json"
 python_check DATA_NO_HOST_PORTS "$TMP_DIR/data-plane.json"
 python_check DATA_VOLUME "$TMP_DIR/data-plane.json"
+python_check DATA_SECRET_MOUNTS "$TMP_DIR/data-plane.json" "$TMP_DIR/secrets"
 
 python_check POSTGRES_CONTRACT "$TMP_DIR/data-plane.json"
 python_check PGBOUNCER_CONTAINER "$TMP_DIR/data-plane.json"
@@ -512,6 +557,8 @@ line_is_present "$NETWORK_SCRIPT" 'provision_network "$EDGE_NETWORK" false "$EDG
 line_is_present "$NETWORK_SCRIPT" '    if [[ "$expected_internal" == true ]]; then' || fail DATA_NETWORK_PROVISIONER
 line_is_present "$NETWORK_SCRIPT" '      docker network create --driver bridge --internal "$name" >/dev/null || {' || fail DATA_NETWORK_PROVISIONER
 line_is_present "$NETWORK_SCRIPT" '      docker network create --driver bridge "$name" >/dev/null || {' || fail DATA_NETWORK_PROVISIONER
+actual_network_script_sha256=$(sha256sum "$NETWORK_SCRIPT" | awk '{print $1}') || fail DATA_NETWORK_PROVISIONER
+[[ "$actual_network_script_sha256" == "$NETWORK_SCRIPT_SHA256" ]] || fail DATA_NETWORK_PROVISIONER
 
 python_check PGBOUNCER_SETTINGS "$PGBOUNCER_TEMPLATE"
 
