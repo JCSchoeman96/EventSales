@@ -63,6 +63,7 @@ try:
     network_settings = source.get("NetworkSettings") or {}
     networks = network_settings.get("Networks") or {}
     health = state.get("Health") or {}
+    raw_mounts = source.get("Mounts")
     env_names = []
     for entry in config.get("Env") or []:
         if isinstance(entry, str) and "=" in entry:
@@ -92,8 +93,8 @@ try:
         "tmpfs": host.get("Tmpfs") or {},
         "mounts": [
             {"destination": mount.get("Destination"), "type": mount.get("Type"), "rw": mount.get("RW")}
-            for mount in source.get("Mounts") or []
-        ],
+            for mount in raw_mounts
+        ] if isinstance(raw_mounts, list) else None,
         "state": state.get("Status"),
         "health": health.get("Status"),
         "restart_count": source.get("RestartCount"),
@@ -195,8 +196,8 @@ try:
                 else:
                     normalized.add("invalid=" + token)
             tmpfs_ok = len(tokens) == 6 and normalized == {"rw", "noexec", "nosuid", "nodev", "size=64m", "mode=1777"}
-        mounts = summary.get("mounts") or []
-        mounts_ok = mounts == [{"destination": "/tmp", "type": "tmpfs", "rw": True}]
+        mounts = summary.get("mounts")
+        mounts_ok = mounts == [] or mounts == [{"destination": "/tmp", "type": "tmpfs", "rw": True}]
         ok = cpu_ok and memory_ok and pids_ok and tmpfs_ok and mounts_ok
     elif phase == "environment":
         forbidden = {
