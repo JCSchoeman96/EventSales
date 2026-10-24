@@ -1,15 +1,42 @@
-# PgBouncer Strategy
+# PgBouncer strategy
 
 ## Historical Railway topology
 
-Slice 24.0 connected EventSales, release migrations, and Oban directly to Railway's private managed PostgreSQL endpoint. That record describes the earlier deployment and does not define the approved D1 target.
+Slice 24.0 connected EventSales, release migrations, and Oban directly to Railway's private managed PostgreSQL endpoint. That record describes the earlier Railway deployment and does not define the D1 VPS target.
 
-## Approved D1 target
+## D1 runtime and migration paths
 
-The D1 production target uses PgBouncer transaction pooling for normal `DATABASE_URL` runtime traffic. Oban uses `Oban.Notifiers.PG` so notifications do not depend on PostgreSQL session-level `LISTEN/NOTIFY`. Migrations use direct PostgreSQL through `DIRECT_DATABASE_URL`; R2 will define their separate entrypoints.
+For D1 production, runtime `DATABASE_URL` uses PgBouncer transaction pooling and the `eventsales_runtime` role. Migration `DIRECT_DATABASE_URL` connects directly to PostgreSQL as `eventsales_migrator`. The direct migration path is not the normal runtime path.
 
-The target configuration sets `max_prepared_statements=200`. Keep Postgrex's named prepared statements enabled until the later private runtime proof establishes whether any adjustment is needed. Do not claim that the production PgBouncer has been deployed or that transaction-pooling compatibility has been runtime-proven.
+The accepted pool settings are:
 
-For D1 clustering, the deployment contract places the app's `eventsales-app` DNS alias on the internal EventSales data network, not the edge network. The production release uses the long node name `event_sales@${EVENTSALES_NODE_IP}` and an externally supplied cookie. The approved internal IP is selected later after a read-only VPS network collision audit. When configured, `rel/env.sh.eex` sets `ERL_EPMD_ADDRESS` to that IP and configures long-running release nodes and distributed helper nodes to use it with `inet_dist_use_interface`. R4 must verify the actual BEAM and EPMD listening sockets, confirm that the edge IP has no distribution listener, and confirm that no distribution port is published to the host. This release contract is configured in R1 but is not runtime-proven.
+```ini
+pool_mode = transaction
+max_client_conn = 64
+default_pool_size = 12
+reserve_pool_size = 4
+max_db_connections = 16
+max_user_connections = 16
+max_prepared_statements = 200
+```
 
-The previous direct/session-pooling topology remains historical evidence. It does not authorize changing D1's selected transaction-pooling model.
+Keep named Postgrex/Ecto prepared statements enabled. The repository's accepted R4 probes exercise runtime authentication, DML, DDL denial, direct runtime-client PostgreSQL authentication denial, transaction backend reuse, and the named prepared-statement protocol. Do not switch to `prepare: :unnamed` without failure evidence and a new review. The probes exist in the repository; production execution and acceptance remain unproven until the separately authorized V5 gate passes.
+
+Oban runtime notifications use `Oban.Notifiers.PG`, so notification delivery does not depend on session-level PostgreSQL `LISTEN/NOTIFY` through the transaction pool. Oban's database-backed job and leadership behavior remains separate from its notifier.
+
+## R1 release identity and cluster boundary
+
+`R1-RULING-01` locks:
+
+```text
+RELEASE_DISTRIBUTION=name
+RELEASE_NODE=event_sales@EVENTSALES_NODE_IP
+CLUSTER_DNS_QUERY=eventsales-app
+CLUSTER_NETWORK=eventsales-prod_eventsales_data
+```
+
+The ruling names this setting `CLUSTER_DNS_QUERY`; the current Compose/runtime environment binding is `DNS_CLUSTER_QUERY=eventsales-app`. The `eventsales-app` DNS alias belongs only to `eventsales-prod_eventsales_data`, not the edge network. The approved `EVENTSALES_NODE_IP` is selected only after a read-only VPS Docker-network collision audit proves the candidate safe. The same address is used as the data-network `ipv4_address`. Never use Docker `HOSTNAME` as node identity or place the cluster alias on the edge network.
+
+The release configuration directs EPMD and the BEAM distribution listener to the approved data-network address. The private runtime proof must inspect their actual sockets, confirm `Node.alive?`, the exact node name, PubSub, DNS resolution, and absence of a distribution host port. Configuration alone does not prove runtime binding. Production clustering has not been proven; multi-node behavior remains a separate scaling gate.
+
+See the [VPS production runbook](vps-production.md) for the separate migration, private proof, ingress, and authorization transitions. No statement here authorizes production deployment or claims that PgBouncer is running in production.
