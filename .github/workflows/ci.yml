@@ -304,3 +304,13 @@ jobs:
           STAGING_HTTP_PASSWORD: placeholder
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
         run: npm run test:unit
+
+  vps_deploy_contract:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check VPS deployment contract
+        shell: bash
+        run: bash scripts/check_vps_deploy_contract.sh
