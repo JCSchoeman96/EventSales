@@ -1,0 +1,20 @@
+{
+  "baseline_sha": "050d66e88d55270655833cd9c9b51476a4bfefeb",
+  "canonical_repository_path": "docs/feature_packs/0001_VS-26E.0_catalog-lifecycle-production-baseline",
+  "canonical_source_commit": null,
+  "canonical_source_commit_note": "Recorded externally in GitHub PR and Linear after the canonical source commit is created; self-referential commit IDs are not embedded.",
+  "created_at": "2026-07-16T21:24:00Z",
+  "default_branch": "main",
+  "github_pack_issue": 114,
+  "github_roadmap_issue": 113,
+  "linear_pack_issue": "JC-106",
+  "linear_parent": "JC-105",
+  "linear_review_issue": "JC-107",
+  "pack_id": "0001_VS-26E.0",
+  "pack_status": "review_ready",
+  "pack_version": "1.1.0",
+  "repository": "JCSchoeman96/EventSales",
+  "slice": "VS-26E.0",
+  "supersedes": "1.0.0",
+  "supersession_reason": "Independent review found that merging the pack PR would trigger Railway pre-deploy before JC-109 authorisation."
+}
