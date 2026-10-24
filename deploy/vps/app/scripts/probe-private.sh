@@ -77,6 +77,12 @@ try:
         "init": host.get("Init"),
         "restart_policy": (host.get("RestartPolicy") or {}).get("Name"),
         "cap_drop": host.get("CapDrop") or [],
+        "cap_add": host.get("CapAdd") or [],
+        "privileged": host.get("Privileged"),
+        "devices": host.get("Devices") or [],
+        "device_requests": host.get("DeviceRequests") or [],
+        "pid_mode": host.get("PidMode") or "",
+        "ipc_mode": host.get("IpcMode") or "",
         "security_opt": host.get("SecurityOpt") or [],
         "nano_cpus": host.get("NanoCpus") or 0,
         "cpu_quota": host.get("CpuQuota") or 0,
@@ -159,6 +165,17 @@ try:
             and "ALL" in (summary.get("cap_drop") or [])
             and "no-new-privileges:true" in options
         )
+    elif phase == "capabilities":
+        ok = "ALL" in (summary.get("cap_drop") or []) and not (summary.get("cap_add") or [])
+    elif phase == "privileged":
+        ok = summary.get("privileged") is False
+    elif phase == "namespace_device":
+        ok = (
+            summary.get("pid_mode") != "host"
+            and summary.get("ipc_mode") != "host"
+            and not (summary.get("devices") or [])
+            and not (summary.get("device_requests") or [])
+        )
     elif phase == "resources":
         nano_cpus = summary.get("nano_cpus") or 0
         quota = summary.get("cpu_quota") or 0
@@ -183,11 +200,9 @@ try:
                     normalized.add("mode=" + token.split("=", 1)[1])
                 else:
                     normalized.add("invalid=" + token)
-            tmpfs_ok = normalized == {"rw", "noexec", "nosuid", "nodev", "size=64m", "mode=1777"}
-        mounts_ok = all(
-            not mount.get("rw") or (mount.get("destination") == "/tmp" and mount.get("type") == "tmpfs")
-            for mount in summary.get("mounts") or []
-        )
+            tmpfs_ok = len(tokens) == 6 and normalized == {"rw", "noexec", "nosuid", "nodev", "size=64m", "mode=1777"}
+        mounts = summary.get("mounts") or []
+        mounts_ok = mounts == [{"destination": "/tmp", "type": "tmpfs", "rw": True}]
         ok = cpu_ok and memory_ok and pids_ok and tmpfs_ok and mounts_ok
     elif phase == "topology":
         networks = summary.get("networks") or {}
@@ -323,8 +338,9 @@ list_exactly() {
 }
 
 snapshot_data_plane() {
-  local result=''
+  local result='' all_ids
   local service ids container_id summary
+  all_ids=$(list_exactly containers eventsales-prod '' 3 hex) || return 1
   for service in postgres pgbouncer redis; do
     ids=$(list_exactly containers eventsales-prod "$service" 1 hex) || return 1
     container_id=$ids
@@ -332,6 +348,10 @@ snapshot_data_plane() {
     validate_summary "$summary" service eventsales-prod "$service" || return 1
     result+="$service=$container_id"$'\n'
   done
+  python3 -c 'import sys
+expected = sorted(line for line in sys.argv[1].splitlines() if line)
+actual = sorted(line.split("=", 1)[1] for line in sys.argv[2].splitlines() if line)
+sys.exit(0 if expected == actual else 1)' "$all_ids" "$result" >/dev/null 2>&1 || return 1
   printf '%s' "$result"
 }
 
@@ -465,8 +485,15 @@ validate_summary "$app_summary" app_identity || stop APP_IDENTITY
 printf 'PRIVATE_APP_IDENTITY=PASS\n'
 validate_summary "$app_summary" security || stop SECURITY_ENVELOPE
 printf 'PRIVATE_SECURITY_ENVELOPE=PASS\n'
+validate_summary "$app_summary" capabilities || stop CAPABILITIES
+printf 'PRIVATE_CAPABILITIES=PASS\n'
+validate_summary "$app_summary" privileged || stop PRIVILEGED
+printf 'PRIVATE_PRIVILEGED=PASS\n'
+validate_summary "$app_summary" namespace_device || stop NAMESPACE_DEVICE
+printf 'PRIVATE_NAMESPACE_DEVICE=PASS\n'
 validate_summary "$app_summary" resources || stop RESOURCE_ENVELOPE
 printf 'PRIVATE_RESOURCE_ENVELOPE=PASS\n'
+printf 'PRIVATE_EXACT_MOUNTS=PASS\n'
 edge_ip=$(python3 -c "$SUMMARY_CHECK_PY" topology "$image_ref" "$node_ip" <<<"$app_summary" 2>/dev/null) || stop NETWORK_TOPOLOGY
 printf 'PRIVATE_NETWORK_TOPOLOGY=PASS\n'
 validate_summary "$app_summary" private_ports || stop HOST_PORTS

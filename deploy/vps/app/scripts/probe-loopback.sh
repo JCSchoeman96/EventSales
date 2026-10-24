@@ -63,9 +63,37 @@ try:
     network_settings = source.get("NetworkSettings") or {}
     networks = network_settings.get("Networks") or {}
     health = state.get("Health") or {}
+    env_names = []
+    for entry in config.get("Env") or []:
+        if isinstance(entry, str) and "=" in entry:
+            env_names.append(entry.split("=", 1)[0])
+        else:
+            env_names.append("<malformed>")
     summary = {
         "id": source.get("Id"),
         "image": config.get("Image"),
+        "user": config.get("User"),
+        "readonly_rootfs": host.get("ReadonlyRootfs"),
+        "init": host.get("Init"),
+        "restart_policy": (host.get("RestartPolicy") or {}).get("Name"),
+        "cap_drop": host.get("CapDrop") or [],
+        "cap_add": host.get("CapAdd") or [],
+        "privileged": host.get("Privileged"),
+        "devices": host.get("Devices") or [],
+        "device_requests": host.get("DeviceRequests") or [],
+        "pid_mode": host.get("PidMode") or "",
+        "ipc_mode": host.get("IpcMode") or "",
+        "security_opt": host.get("SecurityOpt") or [],
+        "nano_cpus": host.get("NanoCpus") or 0,
+        "cpu_quota": host.get("CpuQuota") or 0,
+        "cpu_period": host.get("CpuPeriod") or 0,
+        "memory": host.get("Memory") or 0,
+        "pids_limit": host.get("PidsLimit"),
+        "tmpfs": host.get("Tmpfs") or {},
+        "mounts": [
+            {"destination": mount.get("Destination"), "type": mount.get("Type"), "rw": mount.get("RW")}
+            for mount in source.get("Mounts") or []
+        ],
         "state": state.get("Status"),
         "health": health.get("Status"),
         "restart_count": source.get("RestartCount"),
@@ -82,6 +110,7 @@ try:
             }
             for name, details in networks.items()
         },
+        "env_names": env_names,
     }
     json.dump(summary, sys.stdout, separators=(",", ":"))
 except Exception:
@@ -121,6 +150,73 @@ try:
             and summary.get("restart_count") == 0
             and summary.get("image") == image
         )
+    elif phase == "security":
+        ok = (
+            summary.get("user") == "eventsales"
+            and summary.get("readonly_rootfs") is True
+            and summary.get("init") is True
+            and summary.get("restart_policy") == "unless-stopped"
+            and "ALL" in (summary.get("cap_drop") or [])
+            and "no-new-privileges:true" in (summary.get("security_opt") or [])
+        )
+    elif phase == "capabilities":
+        ok = "ALL" in (summary.get("cap_drop") or []) and not (summary.get("cap_add") or [])
+    elif phase == "privileged":
+        ok = summary.get("privileged") is False
+    elif phase == "namespace_device":
+        ok = (
+            summary.get("pid_mode") != "host"
+            and summary.get("ipc_mode") != "host"
+            and not (summary.get("devices") or [])
+            and not (summary.get("device_requests") or [])
+        )
+    elif phase == "resources":
+        nano_cpus = summary.get("nano_cpus") or 0
+        quota = summary.get("cpu_quota") or 0
+        period = summary.get("cpu_period") or 0
+        cpu_ok = (
+            nano_cpus == 4_000_000_000 and (quota == 0 or (period > 0 and quota == 4 * period))
+        ) or (nano_cpus == 0 and period > 0 and quota == 4 * period)
+        memory_ok = summary.get("memory") == 2_147_483_648
+        pids_ok = summary.get("pids_limit") == 512
+        tmpfs = summary.get("tmpfs") or {}
+        tmpfs_ok = False
+        if set(tmpfs) == {"/tmp"} and isinstance(tmpfs.get("/tmp"), str):
+            tokens = tmpfs["/tmp"].split(",")
+            normalized = set()
+            for token in tokens:
+                if token.lower() in {"rw", "noexec", "nosuid", "nodev"}:
+                    normalized.add(token.lower())
+                elif token.lower().startswith("size="):
+                    size = token.split("=", 1)[1].lower()
+                    normalized.add("size=64m" if size in {"64m", "64mb", "64mi", "67108864"} else "size=invalid")
+                elif token.lower().startswith("mode="):
+                    normalized.add("mode=" + token.split("=", 1)[1])
+                else:
+                    normalized.add("invalid=" + token)
+            tmpfs_ok = len(tokens) == 6 and normalized == {"rw", "noexec", "nosuid", "nodev", "size=64m", "mode=1777"}
+        mounts = summary.get("mounts") or []
+        mounts_ok = mounts == [{"destination": "/tmp", "type": "tmpfs", "rw": True}]
+        ok = cpu_ok and memory_ok and pids_ok and tmpfs_ok and mounts_ok
+    elif phase == "environment":
+        forbidden = {
+            "DIRECT_DATABASE_URL",
+            "EVENTSALES_BOOTSTRAP_ADMIN_EMAIL",
+            "EVENTSALES_BOOTSTRAP_ADMIN_PASSWORD",
+            "EVENTSALES_BOOTSTRAP_ADMIN_NAME",
+            "EVENTSALES_BOOTSTRAP_ADMIN_ROTATE_PASSWORD",
+            "EVENTSALES_BOOTSTRAP_SOURCE_NAME",
+            "EVENTSALES_BOOTSTRAP_SOURCE_BASE_URL",
+            "POSTGRES_PASSWORD",
+            "POSTGRES_PASSWORD_FILE",
+            "PGPASSWORD",
+            "PGPASSFILE",
+            "EVENTSALES_SECRET_DIR",
+            "EVENTSALES_MIGRATOR_PASSWORD",
+            "EVENTSALES_BACKUP_PASSWORD",
+            "POSTGRES_BOOTSTRAP_PASSWORD",
+        }
+        ok = not (forbidden & set(summary.get("env_names") or []))
     elif phase == "topology":
         networks = summary.get("networks") or {}
         data = networks.get("eventsales-prod_eventsales_data") or {}
@@ -322,7 +418,8 @@ list_exactly() {
 }
 
 snapshot_data_plane() {
-  local result='' service ids container_id summary
+  local result='' all_ids service ids container_id summary
+  all_ids=$(list_exactly containers eventsales-prod '' 3 hex) || return 1
   for service in postgres pgbouncer redis; do
     ids=$(list_exactly containers eventsales-prod "$service" 1 hex) || return 1
     container_id=$ids
@@ -330,6 +427,10 @@ snapshot_data_plane() {
     validate_summary "$summary" service eventsales-prod "$service" || return 1
     result+="$service=$container_id"$'\n'
   done
+  python3 -c 'import sys
+expected = sorted(line for line in sys.argv[1].splitlines() if line)
+actual = sorted(line.split("=", 1)[1] for line in sys.argv[2].splitlines() if line)
+sys.exit(0 if expected == actual else 1)' "$all_ids" "$result" >/dev/null 2>&1 || return 1
   printf '%s' "$result"
 }
 
@@ -353,7 +454,14 @@ verify_app_continuity() {
   [[ $ids == "$app_id" ]] || return 1
   summary=$(read_summary "$app_id") || return 1
   validate_summary "$summary" app_identity || return 1
+  validate_summary "$summary" security || return 1
+  validate_summary "$summary" capabilities || return 1
+  validate_summary "$summary" privileged || return 1
+  validate_summary "$summary" namespace_device || return 1
+  validate_summary "$summary" resources || return 1
   validate_summary "$summary" topology || return 1
+  validate_summary "$summary" environment || return 1
+  validate_summary "$summary" loopback_ports || return 1
 }
 
 probe_http() {
@@ -380,10 +488,20 @@ app_ids=$(list_exactly containers eventsales-app app 1 hex) || stop APP_CONTAINE
 app_id=$app_ids
 app_summary=$(read_summary "$app_id") || stop APP_INSPECT
 validate_summary "$app_summary" app_identity || stop APP_CONTINUITY
+validate_summary "$app_summary" security || stop SECURITY_ENVELOPE
+printf 'LOOPBACK_SECURITY_ENVELOPE=PASS\n'
+validate_summary "$app_summary" capabilities || stop CAPABILITIES
+validate_summary "$app_summary" privileged || stop PRIVILEGED
+validate_summary "$app_summary" namespace_device || stop NAMESPACE_DEVICE
+validate_summary "$app_summary" resources || stop RESOURCE_ENVELOPE
+printf 'LOOPBACK_RESOURCE_ENVELOPE=PASS\n'
+printf 'LOOPBACK_EXACT_MOUNT=PASS\n'
 validate_summary "$app_summary" topology || stop NETWORK_TOPOLOGY
-printf 'LOOPBACK_APP_CONTINUITY=PASS\n'
+validate_summary "$app_summary" environment || stop ENVIRONMENT_BOUNDARY
+printf 'LOOPBACK_ENVIRONMENT_BOUNDARY=PASS\n'
 validate_summary "$app_summary" loopback_ports || stop EXACT_BINDING
 printf 'LOOPBACK_EXACT_BINDING=PASS\n'
+printf 'LOOPBACK_APP_CONTINUITY=PASS\n'
 
 if python3 -c "$PROC_WILDCARD_PY" >/dev/null 2>&1; then
   proc_status=0
