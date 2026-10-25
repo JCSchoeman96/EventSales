@@ -84,16 +84,16 @@ No other file may change.
 
 ## Task 9: Freeze and publish for review
 
-- [ ] Compute SHA-256 for the wrapper and sudoers candidate.
-- [ ] Create a signed commit containing only the four authorized files.
-- [ ] Push `ops/eventsales-v0-audit-wrapper` and open a DRAFT PR against `main`.
-- [ ] Register the PR with the current T3 thread and update the matching Linear issue.
-- [ ] Report the commit, tree, test results, hashes, PR URL, and the unchanged no-VPS/no-install boundary. Do not merge or install.
+- [x] Compute SHA-256 for the wrapper and sudoers candidate.
+- [x] Create a signed commit containing only the four authorized files.
+- [x] Push `ops/eventsales-v0-audit-wrapper` and open a DRAFT PR against `main`.
+- [x] Register the PR with the current T3 thread and update the matching Linear issue.
+- [x] Report the commit, tree, test results, hashes, PR URL, and the unchanged no-VPS/no-install boundary. Do not merge or install.
 
 ## Acceptance checklist
 
-- [ ] `origin/main` remained `460e7ab1c231167d89e6b75916768829d094dafd` before worktree creation.
-- [ ] Fake-Docker tests prove the service, network, pool, volume, absence, bounds, secret-output, and mutation-verb contracts.
-- [ ] Empty custom address pools use the pinned built-in IPv4 pool list; unsupported field access fails closed.
-- [ ] The production wrapper has no Docker path, context, socket, object, filter, or format input from callers.
-- [ ] Exactly four files changed; commit is signed; PR is draft; VPS connection and wrapper installation remain absent.
+- [x] `origin/main` remained `460e7ab1c231167d89e6b75916768829d094dafd` before worktree creation.
+- [x] Fake-Docker tests prove the service, network, pool, volume, absence, bounds, secret-output, and mutation-verb contracts.
+- [x] Empty custom address pools use the pinned built-in IPv4 pool list; unsupported field access fails closed.
+- [x] The production wrapper has no Docker path, context, socket, object, filter, or format input from callers.
+- [x] Exactly four files changed; commit is signed; PR is draft; VPS connection and wrapper installation remain absent.
