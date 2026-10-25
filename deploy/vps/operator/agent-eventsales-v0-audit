@@ -1,0 +1,555 @@
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+
+readonly DOCKER=/usr/bin/docker
+readonly DOCKER_HOST_FIXED=unix:///var/run/docker.sock
+readonly DOCKER_CONFIG_FIXED=/run/eventsales-v0-audit-no-docker-config
+readonly PYTHON=/usr/bin/python3
+
+emit_header() {
+  printf 'EVENTSALES_V0_DOCKER_AUDIT_VERSION=1\n'
+  printf 'AUDIT_MUTATION=NONE\n'
+  printf 'SECRETS_REQUESTED=NO\n'
+}
+
+emit_stop() {
+  local code=$1
+  local status=$2
+  emit_header
+  printf 'AUDIT_RESULT=BLOCKED\nSTOP=%s\n' "$code"
+  exit "$status"
+}
+
+if (($# != 0)); then
+  emit_stop ARGUMENTS_NOT_ALLOWED 2
+fi
+
+unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH DOCKER_TLS \
+  DOCKER_API_VERSION DOCKER_CUSTOM_HEADERS DOCKER_AUTH_CONFIG
+export LC_ALL=C LANG=C
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export DOCKER_HOST="$DOCKER_HOST_FIXED"
+export DOCKER_CONFIG="$DOCKER_CONFIG_FIXED"
+
+if [[ -e "$DOCKER_CONFIG_FIXED" || -L "$DOCKER_CONFIG_FIXED" ]]; then
+  emit_stop DOCKER_CONFIG_PATH_PRESENT 1
+fi
+if ! command -v -- "$DOCKER" >/dev/null 2>&1; then
+  emit_stop DOCKER_CLI_UNAVAILABLE 127
+fi
+if [[ ! -x "$PYTHON" ]]; then
+  emit_stop PYTHON3_UNAVAILABLE 127
+fi
+
+exec "$PYTHON" -I - "$DOCKER" <<'PY'
+import ipaddress
+import json
+import os
+import re
+import select
+import subprocess
+import sys
+import time
+
+DOCKER = sys.argv[1]
+DOCKER_HOST = "unix:///var/run/docker.sock"
+DOCKER_CONFIG = "/run/eventsales-v0-audit-no-docker-config"
+MAX_AUDIT_SECONDS = 120
+MAX_QUERY_SECONDS = 15
+MAX_QUERY_BYTES = 131072
+MAX_TOTAL_CAPTURE_BYTES = 1048576
+MAX_OUTPUT_BYTES = 131072
+MAX_LINE_BYTES = 1024
+FOOTER_RESERVE_BYTES = 96
+RAW_CAPTURE_BYTES = 0
+OUTPUT_BYTES = 0
+AUDIT_DEADLINE = time.monotonic() + MAX_AUDIT_SECONDS
+
+BUILTIN_IPV4_POOLS = [
+    ("172.17.0.0/16", 16),
+    ("172.18.0.0/16", 16),
+    ("172.19.0.0/16", 16),
+    ("172.20.0.0/14", 16),
+    ("172.24.0.0/14", 16),
+    ("172.28.0.0/14", 16),
+    ("192.168.0.0/16", 20),
+]
+
+
+class AuditStop(Exception):
+    def __init__(self, code, status=1):
+        self.code = code
+        self.status = status
+
+
+def emit(key, value="", footer=False):
+    global OUTPUT_BYTES
+    if not re.fullmatch(r"[A-Z0-9_]+", key):
+        raise AuditStop("OUTPUT_BOUND_EXCEEDED")
+    value = str(value)
+    encoded = f"{key}={value}\n".encode("utf-8")
+    if b"\n" in encoded[:-1] or len(encoded) > MAX_LINE_BYTES:
+        raise AuditStop("OUTPUT_BOUND_EXCEEDED")
+    reserve = 0 if footer else FOOTER_RESERVE_BYTES
+    if OUTPUT_BYTES + len(encoded) + reserve > MAX_OUTPUT_BYTES:
+        raise AuditStop("OUTPUT_BOUND_EXCEEDED")
+    sys.stdout.buffer.write(encoded)
+    sys.stdout.buffer.flush()
+    OUTPUT_BYTES += len(encoded)
+
+
+def finish(code=None, status=0):
+    emit("AUDIT_RESULT", "PASS" if code is None else "BLOCKED", footer=True)
+    emit("STOP", "NONE" if code is None else code, footer=True)
+    raise SystemExit(status)
+
+
+def stop(code, status=1):
+    finish(code, status)
+
+
+def kill_and_reap(process):
+    if process.poll() is None:
+        process.kill()
+    process.wait()
+
+
+def run_docker(args, failure_code):
+    global RAW_CAPTURE_BYTES
+    env = {
+        "PATH": os.environ["PATH"],
+        "LC_ALL": "C",
+        "LANG": "C",
+        "HOME": "/root",
+        "DOCKER_HOST": DOCKER_HOST,
+        "DOCKER_CONFIG": DOCKER_CONFIG,
+    }
+    try:
+        process = subprocess.Popen(
+            [DOCKER, *args],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env=env,
+            close_fds=True,
+        )
+    except OSError:
+        stop("DOCKER_CLI_UNAVAILABLE", 127)
+
+    output = []
+    size = 0
+    query_deadline = time.monotonic() + MAX_QUERY_SECONDS
+    deadline = min(query_deadline, AUDIT_DEADLINE)
+    fd = process.stdout.fileno()
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            kill_and_reap(process)
+            stop("DOCKER_AUDIT_TIMEOUT" if time.monotonic() >= AUDIT_DEADLINE else "DOCKER_QUERY_TIMEOUT")
+        ready, _, _ = select.select([fd], [], [], min(remaining, 0.25))
+        if not ready:
+            if process.poll() is not None:
+                continue
+            continue
+        remaining_capture = MAX_TOTAL_CAPTURE_BYTES - RAW_CAPTURE_BYTES - size
+        if remaining_capture < 0:
+            kill_and_reap(process)
+            stop("OUTPUT_BOUND_EXCEEDED")
+        read_limit = min(4096, MAX_QUERY_BYTES - size + 1, remaining_capture + 1)
+        chunk = os.read(fd, read_limit)
+        if not chunk:
+            break
+        size += len(chunk)
+        if size > MAX_QUERY_BYTES or RAW_CAPTURE_BYTES + size > MAX_TOTAL_CAPTURE_BYTES:
+            kill_and_reap(process)
+            stop("OUTPUT_BOUND_EXCEEDED")
+        output.append(chunk)
+
+    try:
+        status = process.wait(timeout=max(0, deadline - time.monotonic()))
+    except subprocess.TimeoutExpired:
+        kill_and_reap(process)
+        stop("DOCKER_AUDIT_TIMEOUT" if time.monotonic() >= AUDIT_DEADLINE else "DOCKER_QUERY_TIMEOUT")
+    if status != 0:
+        stop(failure_code)
+    RAW_CAPTURE_BYTES += size
+    if RAW_CAPTURE_BYTES > MAX_TOTAL_CAPTURE_BYTES:
+        stop("OUTPUT_BOUND_EXCEEDED")
+    try:
+        return b"".join(output).decode("utf-8", errors="strict").splitlines()
+    except UnicodeDecodeError:
+        stop(failure_code)
+
+
+def one_line(args, failure_code):
+    lines = run_docker(args, failure_code)
+    if len(lines) != 1 or not lines[0]:
+        stop(failure_code)
+    return lines[0]
+
+
+def valid_version(value):
+    if not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}", value):
+        stop("DOCKER_INFO_FAILED")
+    return value
+
+
+def parse_default_pools(raw):
+    try:
+        pools = json.loads(raw)
+    except json.JSONDecodeError:
+        stop("DEFAULT_ADDRESS_POOLS_UNAVAILABLE")
+    if pools is None or pools == []:
+        return "BUILTIN", BUILTIN_IPV4_POOLS
+    if not isinstance(pools, list) or len(pools) > 32:
+        stop("OUTPUT_BOUND_EXCEEDED" if isinstance(pools, list) else "DEFAULT_ADDRESS_POOLS_MALFORMED")
+    parsed = []
+    for pool in pools:
+        if not isinstance(pool, dict) or not isinstance(pool.get("Base"), str):
+            stop("DEFAULT_ADDRESS_POOLS_MALFORMED")
+        size = pool.get("Size")
+        if isinstance(size, str) and size.isdecimal():
+            size = int(size)
+        if isinstance(size, bool) or not isinstance(size, int):
+            stop("DEFAULT_ADDRESS_POOLS_MALFORMED")
+        try:
+            base = ipaddress.ip_network(pool["Base"], strict=True)
+        except ValueError:
+            stop("DEFAULT_ADDRESS_POOLS_MALFORMED")
+        if base.version != 4:
+            stop("DEFAULT_ADDRESS_POOLS_MALFORMED")
+        if size < base.prefixlen or size > base.max_prefixlen:
+            stop("DEFAULT_ADDRESS_POOLS_MALFORMED")
+        parsed.append((str(base), size))
+    if not parsed:
+        stop("DEFAULT_ADDRESS_POOLS_MALFORMED")
+    return "CUSTOM", parsed
+
+
+def audit_address_pools():
+    server_version = valid_version(
+        one_line(["info", "--format", "{{.ServerVersion}}"], "DOCKER_INFO_FAILED")
+    )
+    emit("DOCKER_SERVER_VERSION", server_version)
+
+    raw_pools = one_line(
+        ["info", "--format", "{{json .DefaultAddressPools}}"],
+        "DEFAULT_ADDRESS_POOLS_UNAVAILABLE",
+    )
+    if raw_pools == "<no value>":
+        stop("DEFAULT_ADDRESS_POOLS_UNAVAILABLE")
+    source, pools = parse_default_pools(raw_pools)
+    emit("DEFAULT_ADDRESS_POOL_SOURCE", source)
+    emit("DEFAULT_ADDRESS_POOL_COUNT", len(pools))
+    for index, (base, size) in enumerate(pools, start=1):
+        emit(f"DEFAULT_ADDRESS_POOL_{index}_BASE", base)
+        emit(f"DEFAULT_ADDRESS_POOL_{index}_PREFIX_SIZE", size)
+
+
+def audit_d0_container_list():
+    raw_ids = run_docker(
+        [
+            "ps",
+            "-a",
+            "--no-trunc",
+            "--filter",
+            "label=com.docker.compose.project=eventsales-d0-proof",
+            "--format",
+            "{{.ID}}",
+        ],
+        "D0_CONTAINER_LIST_FAILED",
+    )
+    if len(raw_ids) > 16:
+        stop("OUTPUT_BOUND_EXCEEDED")
+    ids = [line for line in raw_ids if line]
+    if len(ids) != len(raw_ids) or any(not re.fullmatch(r"[0-9a-f]{64}", item) for item in ids):
+        stop("D0_CONTAINER_LIST_FAILED")
+    if len(set(ids)) != len(ids):
+        stop("D0_CONTAINER_LIST_FAILED")
+    if not ids:
+        emit("D0_CONTAINER_COUNT", 0)
+        stop("D0_SERVICE_SET_MISMATCH")
+
+    template = (
+        '{{index .Config.Labels "com.docker.compose.project"}}|'
+        '{{index .Config.Labels "com.docker.compose.service"}}|'
+        '{{.Name}}|{{.Config.Image}}|{{.State.Status}}|'
+        '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}|'
+        '{{.RestartCount}}'
+    )
+    records = run_docker(
+        ["inspect", "--type", "container", "--format", template, *ids],
+        "D0_CONTAINER_INSPECT_FAILED",
+    )
+    if len(records) != len(ids):
+        stop("D0_CONTAINER_INSPECT_FAILED")
+
+    rows = []
+    for record in records:
+        fields = record.split("|")
+        if len(fields) != 7:
+            stop("D0_CONTAINER_INSPECT_FAILED")
+        project, service, name, image, state, health, restart_count = fields
+        if project != "eventsales-d0-proof":
+            stop("D0_CONTAINER_INSPECT_FAILED")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", service):
+            stop("D0_CONTAINER_INSPECT_FAILED")
+        if not re.fullmatch(r"/[A-Za-z0-9][A-Za-z0-9_.-]{0,254}", name):
+            stop("D0_CONTAINER_INSPECT_FAILED")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/:@+-]{0,255}", image):
+            stop("D0_CONTAINER_INSPECT_FAILED")
+        if state not in {"created", "restarting", "running", "removing", "paused", "exited", "dead"}:
+            stop("D0_CONTAINER_INSPECT_FAILED")
+        if health not in {"healthy", "unhealthy", "starting", "missing"}:
+            stop("D0_CONTAINER_INSPECT_FAILED")
+        if not re.fullmatch(r"0|[1-9][0-9]{0,9}", restart_count):
+            stop("D0_CONTAINER_INSPECT_FAILED")
+        rows.append((project, service, name, image, state, health, int(restart_count)))
+
+    service_order = {"postgres": 0, "pgbouncer": 1, "redis": 2}
+    rows.sort(key=lambda row: (service_order.get(row[1], 3), row[1], row[2]))
+    emit("D0_CONTAINER_COUNT", len(rows))
+    for index, (project, service, name, image, state, health, restarts) in enumerate(rows, start=1):
+        prefix = f"D0_CONTAINER_{index}_"
+        emit(prefix + "PROJECT", project)
+        emit(prefix + "SERVICE", service)
+        emit(prefix + "NAME", name)
+        emit(prefix + "IMAGE", image)
+        emit(prefix + "STATE", state)
+        emit(prefix + "HEALTH", health)
+        emit(prefix + "RESTART_COUNT", restarts)
+
+    services = [row[1] for row in rows]
+    if len(rows) != 3 or sorted(services) != ["pgbouncer", "postgres", "redis"]:
+        stop("D0_SERVICE_SET_MISMATCH")
+    if any(row[4] != "running" for row in rows):
+        stop("D0_CONTAINER_NOT_RUNNING")
+    if any(row[5] != "healthy" for row in rows):
+        stop("D0_CONTAINER_UNHEALTHY")
+    if any(row[6] != 0 for row in rows):
+        stop("D0_RESTART_COUNT_NONZERO")
+
+
+def container_ids_for_project(project, failure_code):
+    ids = run_docker(
+        [
+            "ps",
+            "-a",
+            "--no-trunc",
+            "--filter",
+            f"label=com.docker.compose.project={project}",
+            "--format",
+            "{{.ID}}",
+        ],
+        failure_code,
+    )
+    if len(ids) > 16:
+        stop("OUTPUT_BOUND_EXCEEDED")
+    if any(not re.fullmatch(r"[0-9a-f]{64}", item) for item in ids):
+        stop("D0_CONTAINER_LIST_FAILED")
+    if len(set(ids)) != len(ids):
+        stop("D0_CONTAINER_LIST_FAILED")
+    return ids
+
+
+def audit_production_containers():
+    prod_ids = container_ids_for_project("eventsales-prod", "PRODUCTION_CONTAINER_LIST_FAILED")
+    app_ids = container_ids_for_project("eventsales-app", "PRODUCTION_CONTAINER_LIST_FAILED")
+    prod_present = bool(prod_ids)
+    app_present = bool(app_ids)
+    emit("EVENTSALES_PROD_CONTAINER_PROJECT_OBJECT_PRESENT", "YES" if prod_present else "NO")
+    emit("EVENTSALES_APP_CONTAINER_PROJECT_OBJECT_PRESENT", "YES" if app_present else "NO")
+    if prod_present or app_present:
+        stop("UNEXPECTED_PREEXISTING_PRODUCTION_OBJECT")
+
+
+def audit_networks():
+    network_ids = run_docker(
+        ["network", "ls", "--no-trunc", "--format", "{{.ID}}"],
+        "NETWORK_LIST_FAILED",
+    )
+    if len(network_ids) > 128:
+        stop("OUTPUT_BOUND_EXCEEDED")
+    if any(not re.fullmatch(r"[0-9a-f]{64}", item) for item in network_ids):
+        stop("NETWORK_METADATA_MALFORMED")
+    if len(set(network_ids)) != len(network_ids):
+        stop("NETWORK_METADATA_MALFORMED")
+
+    template = (
+        '{{.Name}}|{{.Driver}}|{{.Scope}}|{{.Internal}}|'
+        '{{with index .Labels "com.docker.compose.project"}}{{.}}{{else}}NONE{{end}}|'
+        '{{if gt (len .IPAM.Config) 16}}TOO_MANY{{else if eq (len .IPAM.Config) 0}}NONE{{else}}'
+        '{{range $index, $config := .IPAM.Config}}{{if $index}};{{end}}{{$config.Subnet}}{{end}}{{end}}'
+    )
+    rows = []
+    for network_id in network_ids:
+        record = one_line(
+            ["network", "inspect", "--format", template, network_id],
+            "NETWORK_INSPECT_FAILED",
+        )
+        fields = record.split("|")
+        if len(fields) != 6:
+            stop("NETWORK_METADATA_MALFORMED")
+        name, driver, scope, internal, project, subnet_field = fields
+        if subnet_field == "TOO_MANY":
+            stop("OUTPUT_BOUND_EXCEEDED")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,254}", name):
+            stop("NETWORK_METADATA_MALFORMED")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", driver):
+            stop("NETWORK_METADATA_MALFORMED")
+        if scope not in {"local", "swarm"} or internal not in {"true", "false"}:
+            stop("NETWORK_METADATA_MALFORMED")
+        if project != "NONE" and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", project):
+            stop("NETWORK_METADATA_MALFORMED")
+
+        subnet_values = [] if subnet_field == "NONE" else subnet_field.split(";")
+        if len(subnet_values) > 16 or any(not subnet for subnet in subnet_values):
+            stop("OUTPUT_BOUND_EXCEEDED" if len(subnet_values) > 16 else "NETWORK_METADATA_MALFORMED")
+        ipv4_subnets = []
+        ipv6_present = False
+        for subnet in subnet_values:
+            try:
+                parsed = ipaddress.ip_network(subnet, strict=True)
+            except ValueError:
+                stop("NETWORK_METADATA_MALFORMED")
+            if parsed.version == 4:
+                ipv4_subnets.append(str(parsed))
+            else:
+                ipv6_present = True
+        if len(set(ipv4_subnets)) != len(ipv4_subnets):
+            stop("NETWORK_METADATA_MALFORMED")
+
+        rows.append({
+            "name": name,
+            "driver": driver,
+            "scope": scope,
+            "internal": internal,
+            "project": project,
+            "ipv4": sorted(ipv4_subnets),
+            "ipv6": ipv6_present,
+        })
+
+    names = [row["name"] for row in rows]
+    if len(set(names)) != len(names):
+        stop("NETWORK_METADATA_MALFORMED")
+    d0_rows = sorted(
+        (row for row in rows if row["project"] == "eventsales-d0-proof"),
+        key=lambda row: row["name"],
+    )
+    bridge_rows = sorted(
+        (row for row in rows if row["driver"] == "bridge" and row["scope"] == "local"),
+        key=lambda row: row["name"],
+    )
+
+    def emit_network_group(prefix, group):
+        emit(prefix + "_COUNT", len(group))
+        for index, row in enumerate(group, start=1):
+            record_prefix = f"{prefix}_{index}_"
+            emit(record_prefix + "NAME", row["name"])
+            emit(record_prefix + "DRIVER", row["driver"])
+            emit(record_prefix + "SCOPE", row["scope"])
+            emit(record_prefix + "INTERNAL", row["internal"])
+            emit(record_prefix + "IPV4_SUBNET_COUNT", len(row["ipv4"]))
+            for subnet_index, subnet in enumerate(row["ipv4"], start=1):
+                emit(record_prefix + f"IPV4_SUBNET_{subnet_index}", subnet)
+            emit(record_prefix + "IPV6_PRESENT", "YES" if row["ipv6"] else "NO")
+
+    emit_network_group("D0_NETWORK", d0_rows)
+    emit_network_group("BRIDGE_NETWORK", bridge_rows)
+    if len(d0_rows) != 2:
+        stop("D0_NETWORK_SET_MISMATCH")
+
+    prod_project_present = any(row["project"] == "eventsales-prod" for row in rows)
+    app_project_present = any(row["project"] == "eventsales-app" for row in rows)
+    prod_data_present = any(row["name"] == "eventsales-prod_eventsales_data" for row in rows)
+    prod_edge_present = any(row["name"] == "eventsales-prod_eventsales_edge" for row in rows)
+    emit("EVENTSALES_PROD_NETWORK_PROJECT_OBJECT_PRESENT", "YES" if prod_project_present else "NO")
+    emit("EVENTSALES_APP_NETWORK_PROJECT_OBJECT_PRESENT", "YES" if app_project_present else "NO")
+    emit("EVENTSALES_PROD_DATA_NETWORK_PRESENT", "YES" if prod_data_present else "NO")
+    emit("EVENTSALES_PROD_EDGE_NETWORK_PRESENT", "YES" if prod_edge_present else "NO")
+    if prod_project_present or app_project_present or prod_data_present or prod_edge_present:
+        stop("UNEXPECTED_PREEXISTING_PRODUCTION_OBJECT")
+
+
+def volume_rows_for_filter(filter_value, template, failure_code="VOLUME_LIST_FAILED"):
+    lines = run_docker(
+        ["volume", "ls", "--filter", filter_value, "--format", template],
+        failure_code,
+    )
+    if len(lines) > 16:
+        stop("OUTPUT_BOUND_EXCEEDED")
+    return lines
+
+
+def audit_volumes():
+    d0_lines = volume_rows_for_filter(
+        "label=com.docker.compose.project=eventsales-d0-proof",
+        '{{.Name}}|{{.Driver}}|{{.Label "com.docker.compose.project"}}',
+    )
+    d0_rows = []
+    for line in d0_lines:
+        fields = line.split("|")
+        if len(fields) != 3:
+            stop("VOLUME_METADATA_MALFORMED")
+        name, driver, project = fields
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,254}", name):
+            stop("VOLUME_METADATA_MALFORMED")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", driver):
+            stop("VOLUME_METADATA_MALFORMED")
+        if project != "eventsales-d0-proof":
+            stop("VOLUME_METADATA_MALFORMED")
+        d0_rows.append((name, driver, project))
+    if len({row[0] for row in d0_rows}) != len(d0_rows):
+        stop("VOLUME_METADATA_MALFORMED")
+    d0_rows.sort()
+    emit("D0_VOLUME_COUNT", len(d0_rows))
+    for index, (name, driver, project) in enumerate(d0_rows, start=1):
+        prefix = f"D0_VOLUME_{index}_"
+        emit(prefix + "NAME", name)
+        emit(prefix + "DRIVER", driver)
+        emit(prefix + "PROJECT", project)
+    if len(d0_rows) != 1:
+        stop("D0_VOLUME_SET_MISMATCH")
+
+    prod_volumes = volume_rows_for_filter(
+        "label=com.docker.compose.project=eventsales-prod", "{{.Name}}"
+    )
+    app_volumes = volume_rows_for_filter(
+        "label=com.docker.compose.project=eventsales-app", "{{.Name}}"
+    )
+    exact_prod_volume = volume_rows_for_filter(
+        "name=eventsales-prod_postgres_data", "{{.Name}}"
+    )
+    if any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,254}", name)
+           for name in prod_volumes + app_volumes + exact_prod_volume):
+        stop("VOLUME_METADATA_MALFORMED")
+    prod_volume_present = bool(prod_volumes) or "eventsales-prod_postgres_data" in exact_prod_volume
+    app_volume_present = bool(app_volumes)
+    target_volume_present = "eventsales-prod_postgres_data" in exact_prod_volume
+    emit("EVENTSALES_PROD_VOLUME_PROJECT_OBJECT_PRESENT", "YES" if prod_volume_present else "NO")
+    emit("EVENTSALES_APP_VOLUME_PROJECT_OBJECT_PRESENT", "YES" if app_volume_present else "NO")
+    emit("PROD_POSTGRES_VOLUME_ABSENT", "NO" if target_volume_present else "YES")
+    return prod_volume_present, app_volume_present, target_volume_present
+
+
+def main():
+    emit("EVENTSALES_V0_DOCKER_AUDIT_VERSION", 1)
+    emit("AUDIT_MUTATION", "NONE")
+    emit("SECRETS_REQUESTED", "NO")
+    audit_address_pools()
+    audit_d0_container_list()
+    audit_production_containers()
+    audit_networks()
+    prod_volume, app_volume, target_volume = audit_volumes()
+    if prod_volume or app_volume or target_volume:
+        stop("UNEXPECTED_PREEXISTING_PRODUCTION_OBJECT")
+    emit("EVENTSALES_PROD_PROJECT_OBJECTS_ABSENT", "YES")
+    emit("EVENTSALES_APP_PROJECT_OBJECTS_ABSENT", "YES")
+
+
+try:
+    main()
+    finish()
+except AuditStop as failure:
+    finish(failure.code, failure.status)
+PY
