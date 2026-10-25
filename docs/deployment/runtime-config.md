@@ -1,62 +1,75 @@
-# Runtime Configuration
+# Runtime configuration
 
-## Database and Redis paths
+## Local and development runtime
 
-- `DATABASE_URL` is the PostgreSQL connection used by Phoenix, Ecto, Ash, and Oban. For the D1 VPS runtime, it points to PgBouncer.
-- `REDIS_URL` is the Redis connection used by webhook rate limiting and by optional hot-state snapshots or degraded-mode buffering.
-- Docker Compose reads these URLs from a protected deployment environment file selected through `EVENTSALES_DEPLOY_ENV_FILE`. Pass `--env-file /dev/null` to Compose so it does not load the repository root `.env`. Its dependencies remain externally managed or separately project-owned; the repository Compose file does not duplicate workstation shared DEV/TEST services.
-- The app listens on `PORT`; the canonical Compose contract uses the container port `4000`.
+Use `bash scripts/dev_local.sh` for the local EventSales runtime. It verifies the local dependencies, applies development migrations, loads the local catalogue secret without printing it, and starts native Phoenix. Use `bash scripts/dev_local.sh doctor` and `bash scripts/dev_local.sh status` for local configuration and service checks. Do not use the production VPS Compose project for development.
 
-Example single-host deployment command:
+Local tests use the workstation PostgreSQL TEST server through `bash scripts/dev_local.sh test`. Each run gets an EventSales-owned database under the `event_sales_test` prefix; partition suffixes remain unique. Tests use in-memory Redis adapters and do not connect to shared Redis.
 
-```bash
-EVENTSALES_DEPLOY_ENV_FILE=/etc/eventsales/eventsales.env \
-  docker compose --env-file /dev/null up -d --build
-```
+## Production artifact and Compose boundary
 
-## Credential classes
-
-### Final long-running runtime
-
-The final D1 VPS runtime receives runtime-required values only. Depending on enabled features, these include:
+Production VPS runs a reviewed immutable image reference in this form:
 
 ```text
-DATABASE_URL
-REDIS_URL
-SECRET_KEY_BASE
-PHX_HOST
-EVENTSALES_BUSINESS_TIMEZONE=Africa/Johannesburg
-EVENTSALES_DEFAULT_CURRENCY=ZAR
-HOT_STATE_REDIS_SNAPSHOTS_ENABLED=true
-WEBHOOK_PATH_TOKEN
-WOOCOMMERCE_WEBHOOK_SECRET
-DNS_CLUSTER_QUERY
-EVENTSALES_NODE_IP
-RELEASE_COOKIE
-WOOCOMMERCE_REST_BASE_URL
-WOOCOMMERCE_CONSUMER_KEY
-WOOCOMMERCE_CONSUMER_SECRET
+EVENTSALES_IMAGE_REF=ghcr.io/jcschoeman96/eventsales@sha256:<64 lowercase hex characters>
 ```
 
-Feature-specific values are present only when the corresponding runtime feature requires them. The final long-running VPS runtime must exclude:
+The reference belongs to an accepted source commit and tree and a successful GHCR image publication. Production does not build source on the VPS. Use `deploy/vps/app/compose.yaml`; it has no `build:` directive. The loopback overlay is a later, separately authorized transition. This document contains no production start command.
+
+Every production Compose invocation must use `--env-file /dev/null` so Compose cannot load the repository `.env`. `EVENTSALES_DEPLOY_ENV_FILE` identifies a separately protected, root-owned runtime environment file. Its exact path is supplied by later reviewed authority. This documentation and a repository merge do not authorize a production lifecycle; use the [VPS production runbook](vps-production.md) for the separate gates.
+
+## Final runtime environment
+
+The app Compose file supplies these structural values to the container:
+
+```text
+PHX_SERVER=true
+PORT=4000
+POOL_SIZE=20
+DNS_CLUSTER_QUERY=eventsales-app
+EVENTSALES_NODE_IP=<approved data-network IPv4>
+WEBHOOK_REDIS_BUFFER_ENABLED=false
+WEBHOOK_REDIS_BUFFER_DURABILITY_ACCEPTED=false
+```
+
+The node IP must equal the app's `ipv4_address` on `eventsales-prod_eventsales_data`. The `eventsales-app` alias belongs only to that data network. The approved node identity is `event_sales@EVENTSALES_NODE_IP`; `HOSTNAME` and an edge-network alias are not node or discovery authority.
+
+The protected runtime file contains only the runtime values needed by explicitly enabled production features. The current required runtime inputs are:
+
+| Name | Purpose |
+|---|---|
+| `DATABASE_URL` | Runtime database URL through PgBouncer to `event_sales_prod`, using `eventsales_runtime`. |
+| `REDIS_URL` | Production Redis URL using the `eventsales_runtime` ACL identity and `eventsales:prod:*` namespace. |
+| `SECRET_KEY_BASE` | Phoenix signing and encryption key. |
+| `PHX_HOST` | Owner-approved public host used by endpoint URL/origin policy. |
+| `WEBHOOK_PATH_TOKEN` | Authenticated webhook path token. |
+| `WOOCOMMERCE_WEBHOOK_SECRET` | WooCommerce webhook signature secret. |
+| `RELEASE_COOKIE` | Externally supplied distributed-release cookie. |
+
+`EVENTSALES_NODE_IP` is also passed by Compose and is not a value to invent or choose before the read-only network collision audit. Set `EVENTSALES_BUSINESS_TIMEZONE` and `EVENTSALES_DEFAULT_CURRENCY` only to their accepted values when overriding the current defaults of `Africa/Johannesburg` and `ZAR`. `EVENTSALES_CHECK_ORIGIN` may be set from the separately approved host/origin decision.
+
+For the approved runtime Redis paths, set `HOT_STATE_REDIS_SNAPSHOTS_ENABLED=true` and `WEBHOOK_RATE_LIMIT_ENABLED=true` only with the accepted values. The current snapshot TTL is `HOT_STATE_REDIS_SNAPSHOT_TTL_MS=3600000`; the rate-limit defaults are `WEBHOOK_RATE_LIMIT_WINDOW_MS=60000` and `WEBHOOK_RATE_LIMIT_MAX_REQUESTS=120`. The default rate-limit URL uses `REDIS_URL`; any explicit `WEBHOOK_RATE_LIMIT_REDIS_URL` or `HOT_STATE_REDIS_URL` override must use the same approved runtime Redis identity and namespace.
+
+The runtime configuration reads additional feature-specific values. Do not include them unless the feature has separate authority and an accepted name-only inventory: WooCommerce REST (`WOOCOMMERCE_REST_BASE_URL`, `WOOCOMMERCE_CONSUMER_KEY`, `WOOCOMMERCE_CONSUMER_SECRET`); the Woo order index (`WOO_ORDER_INDEX_BASE_URL`, `WOO_ORDER_INDEX_KEY_ID`, `WOO_ORDER_INDEX_SECRET`); Tickera catalogue feed (`TICKERA_CATALOG_FEED_*`); and catalogue change receiver/dispatcher (`CATALOG_CHANGE_*`). Keep catalogue auto-Apply, catalogue change receivers, live cutover controls, copied WordPress webhooks, and Redis webhook degraded buffering disabled unless a specific reviewed task enables and tests them.
+
+At final private-runtime acceptance, derive and record the exact container environment-name inventory from the accepted `config/runtime.exs`, `rel/env.sh.eex`, app Compose, and private probe. Record names and role/destination only. Never print `DATABASE_URL`, `REDIS_URL`, secret values, release-cookie values, or password verifiers.
+
+The final long-running runtime must exclude:
 
 ```text
 DIRECT_DATABASE_URL
-EVENTSALES_BOOTSTRAP_ADMIN_EMAIL
-EVENTSALES_BOOTSTRAP_ADMIN_PASSWORD
-EVENTSALES_BOOTSTRAP_ADMIN_NAME
-EVENTSALES_BOOTSTRAP_ADMIN_ROTATE_PASSWORD
-EVENTSALES_BOOTSTRAP_SOURCE_NAME
-EVENTSALES_BOOTSTRAP_SOURCE_BASE_URL
+EVENTSALES_MIGRATOR_PASSWORD
+EVENTSALES_BACKUP_PASSWORD
+POSTGRES_BOOTSTRAP_PASSWORD
+POSTGRES_PASSWORD
+POSTGRES_PASSWORD_FILE
+PGPASSWORD
+PGPASSFILE
+EVENTSALES_SECRET_DIR
+all EVENTSALES_BOOTSTRAP_*
 ```
 
-### Migration-only
-
-`DIRECT_DATABASE_URL` is the D1 VPS migration-only database path. The VPS migration transition uses the direct PostgreSQL route; pooled PgBouncer is not the migration authority. Release migration code retains its Railway compatibility fallback to `DATABASE_URL` only where that fallback has already been established as safe.
-
-### Bootstrap-only
-
-The bootstrap-only class is:
+The current bootstrap-only names are:
 
 ```text
 EVENTSALES_BOOTSTRAP_ADMIN_EMAIL
@@ -67,50 +80,18 @@ EVENTSALES_BOOTSTRAP_SOURCE_NAME
 EVENTSALES_BOOTSTRAP_SOURCE_BASE_URL
 ```
 
-The temporary bootstrap-authorized application needs the union of the runtime and bootstrap classes because it starts the application to run Ash bootstrap operations. These classes remain distinct. After bootstrap succeeds, recreate the final long-running runtime with the bootstrap-only class absent.
+The final app receives no PostgreSQL bootstrap, migrator, backup, PgBouncer-rendering, or Redis ACL source files. Its only database role is `eventsales_runtime` through PgBouncer. Migration and bootstrap use separate, explicitly authorized temporary lifecycles.
 
-## D1 release contract
+## Migration and bootstrap classes
 
-The D1 production deployment contract will set `DNS_CLUSTER_QUERY=eventsales-app`, provide an approved `EVENTSALES_NODE_IP` on the internal EventSales data network, and provide `RELEASE_COOKIE` through the protected secret mechanism. `rel/env.sh.eex` sets `RELEASE_DISTRIBUTION=name`, `RELEASE_NODE=event_sales@${EVENTSALES_NODE_IP}`, and `ERL_EPMD_ADDRESS=${EVENTSALES_NODE_IP}` only when the node IP is supplied; it fails safely if the IP is invalid or the node IP is set without a cookie. For long-running server commands and distributed helper commands, it appends the matching IPv4 tuple as the kernel `inet_dist_use_interface` setting while preserving existing `ELIXIR_ERL_OPTIONS`. `eval` and `version` do not receive that listener option. Other release environments that omit the node IP are not forced into VPS distribution settings.
+`DIRECT_DATABASE_URL` is migration-only and points directly to PostgreSQL as `eventsales_migrator`. The runtime `DATABASE_URL` through PgBouncer is not migration authority. Bootstrap-only values exist only in the temporary bootstrap lifecycle. Normal app startup runs neither `EventSales.Release.migrate()` nor `EventSales.Release.bootstrap()`.
 
-The node IP is not selected in R1. R4 will choose it after a read-only VPS Docker-network collision audit and use the same value for the app attachment's `ipv4_address`. The deployment contract places the `eventsales-app` alias on the internal data network and configures the Erlang distribution listener to bind to `EVENTSALES_NODE_IP`. The private runtime proof must inspect the actual BEAM listener and EPMD sockets, confirm no distribution listener on the edge IP, confirm no host-published distribution port, and verify that `eventsales-app` resolves to the expected data-network peer IP set. Production and multi-node clustering have not been runtime-proven.
+The release environment sets `RELEASE_DISTRIBUTION=name` and `RELEASE_NODE=event_sales@${EVENTSALES_NODE_IP}`. It binds EPMD and the Erlang distribution listener to the approved data-network address. A private proof must verify actual sockets; configuration alone does not prove the bind. Production and multi-node clustering remain unproven until their authorized gates pass.
 
-`EventSales.Repo` defaults to `POOL_SIZE=20` in the production runtime configuration. A deployment may override it with `POOL_SIZE`; the default and override behavior are covered by a focused test. This is a client-pool setting, not a PgBouncer server-pool setting.
+## WooCommerce access
 
-`WOOCOMMERCE_REST_BASE_URL`, `WOOCOMMERCE_CONSUMER_KEY`, and `WOOCOMMERCE_CONSUMER_SECRET` must be set before live ingestion, reconciliation, or metadata recovery is enabled. WooCommerce REST concurrency remains fixed at `2` in runtime configuration.
-
-Live cutover controls:
-
-```text
-EVENTSALES_LIVE_CUTOVER_ENABLED=true
-WEBHOOK_RATE_LIMIT_ENABLED=true
-WEBHOOK_RATE_LIMIT_WINDOW_MS=60000
-WEBHOOK_RATE_LIMIT_MAX_REQUESTS=120
-WEBHOOK_RATE_LIMIT_REDIS_URL=<optional override; defaults to REDIS_URL>
-```
-
-When `EVENTSALES_LIVE_CUTOVER_ENABLED=true`, boot fails unless `WooCommerceRestConfig.validate_for_live_cutover!/0` passes.
-
-Optional smoke controls:
-
-```text
-EVENTSALES_PUBLIC_BASE_URL
-EVENTSALES_SMOKE_TIMEOUT_MS=60000
-EVENTSALES_SMOKE_POLL_INTERVAL_MS=500
-RAILWAY_SERVICE=EventSales
-```
-
-`EVENTSALES_PUBLIC_BASE_URL` is only needed when the generated `RAILWAY_PUBLIC_DOMAIN` should be overridden. It must use HTTPS.
+`WOOCOMMERCE_REST_BASE_URL`, `WOOCOMMERCE_CONSUMER_KEY`, and `WOOCOMMERCE_CONSUMER_SECRET` are required before live REST ingestion, reconciliation, or metadata recovery is enabled. WooCommerce REST concurrency remains fixed at `2` in runtime configuration. Live cutover needs its own explicit authority.
 
 ## Secret handling
 
-Set secrets through the selected deployment's protected environment mechanism.
-Never commit values, place them in command-line arguments, or print them. Safe
-templates such as `.env.example` contain placeholders only.
-
-## Local test requirement
-
-Local tests use the workstation PostgreSQL TEST server through
-`bash scripts/dev_local.sh test`. Each run gets an EventSales-owned database
-under the `event_sales_test` prefix; partition suffixes remain unique. Tests
-use in-memory Redis adapters and do not connect to shared Redis.
+Keep local secrets in ignored `.env` or `.env.local` files. Tracked example files contain placeholders only. Store production values only through the separately approved protected environment mechanism. Never commit, print, log, hash for reporting, or pass secret values in command-line arguments.

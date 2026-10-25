@@ -1,67 +1,46 @@
-# Migrations and Release Initialization
+# Migrations and release initialization
 
 ## Runtime contract
 
-- `DATABASE_URL` serves application traffic.
-- `DIRECT_DATABASE_URL` is preferred by `EventSales.Release.migrate/0` and falls back to `DATABASE_URL` only when explicitly safe.
-- Slice 24.0 points both variables to Railway’s direct private PostgreSQL URL.
+- `DATABASE_URL` serves application traffic through the approved runtime database path.
+- The VPS migration lifecycle requires `DIRECT_DATABASE_URL` to connect directly to PostgreSQL as `eventsales_migrator`. The PgBouncer runtime URL is not migration authority.
+- `EventSales.Release.migrate()` runs migrations only. `EventSales.Release.bootstrap()` runs admin and source-system bootstrap only. Normal application startup runs neither.
+- Migration and bootstrap use the same separately approved immutable application image digest that later runs the app.
 - Database URLs and startup failures are redacted before error messages are emitted.
-- Normal long-running application startup runs neither migrations nor bootstrap.
 
-## Railway pre-deploy command
+## Historical Railway compatibility
 
-The versioned `railway.toml` keeps the Railway compatibility command:
+The versioned Railway pre-deploy configuration retains its historical compatibility operation, `EventSales.Release.migrate_and_bootstrap()`. That Railway-specific operation composes migrations followed by admin and WooCommerce source-system bootstrap. It is retained for Railway compatibility and does not define or authorize the VPS lifecycle.
 
-```bash
-bin/event_sales eval 'EventSales.Release.migrate_and_bootstrap()'
-```
+## Separate VPS transitions
 
-`migrate_and_bootstrap/0` composes the release migration and bootstrap operations, in order:
+The VPS runbook separates migration, temporary bootstrap-app start, bootstrap invocation, and final runtime recreation. Each transition needs a new explicit authorization. A completed migration does not authorize bootstrap, and bootstrap does not authorize final app start.
 
-1. All pending Ecto/Ash migrations through the direct migration URL.
-2. Application startup for Ash access.
-3. Idempotent admin bootstrap.
-4. Idempotent active WooCommerce source-system bootstrap.
+The one-shot migration transition uses the approved image digest and direct `DIRECT_DATABASE_URL` path as `eventsales_migrator`. It invokes only `EventSales.Release.migrate()`. It requires accepted data-plane proof, reviewed backup/restore evidence, a destructive-risk review, no running app, and no host port.
 
-Any failure exits non-zero and prevents Railway from activating the deployment. Railway pre-deploy containers have private-network and service-variable access but do not share filesystem changes with the running application.
+The bootstrap transition runs later in a temporary private app using the same digest. After readiness, it invokes only `EventSales.Release.bootstrap()`. Bootstrap does not migrate. It is not the final runtime. The final runtime is recreated from the same digest after bootstrap succeeds, with all bootstrap-only and migration-only credentials removed.
 
-## Separate VPS lifecycle transitions
+## Failure and rollback handling
 
-The VPS production lifecycle uses two distinct one-shot release operations:
+Each one-shot transition consumes its own authorization. A failure preserves output, container identity, and resulting database state for review. Inspect `schema_migrations` after a migration failure under separate read-only authority. Do not blindly rerun a migration or bootstrap, even where bootstrap operations are idempotent. Idempotency does not grant a new authorization.
 
-1. After the separately authorized direct-database migration transition succeeds, run `EventSales.Release.bootstrap/0` through a temporary runtime explicitly authorized for bootstrap.
-2. Recreate the final long-running runtime without migration- or bootstrap-only credentials.
+Database rollback is never automatic. It requires a current backup, data and schema compatibility review, and separate explicit destructive authority. Preserve migration evidence until the review accepts the next action.
 
-The bootstrap operation starts the application, runs the idempotent admin bootstrap, then the idempotent source-system bootstrap. It does not run migrations. Normal application startup runs neither operation.
-
-These are deployment requirements, not claims that a VPS deployment has occurred. If either one-shot transition fails, preserve its output and resulting state for review; do not blindly rerun it.
+See the [VPS production runbook](vps-production.md) for the complete transition gates and the [database backup and restore guidance](../runbooks/database-backup-restore.md) for the repository's current recovery reference.
 
 ## Release operations
 
-Run migrations without bootstrap:
+The release entrypoints remain separate:
 
-```bash
-bin/event_sales eval 'EventSales.Release.migrate()'
+```elixir
+EventSales.Release.migrate()
+EventSales.Release.bootstrap()
 ```
 
-Run bootstrap without migrations, only in an explicitly bootstrap-authorized temporary runtime and after the migration transition succeeds:
-
-```bash
-bin/event_sales eval 'EventSales.Release.bootstrap()'
-```
-
-Rollback a repo to a reviewed migration version:
-
-```bash
-bin/event_sales eval 'EventSales.Release.rollback(EventSales.Repo, 20260513122000)'
-```
-
-Do not run rollback during an incident without confirming data compatibility and taking a current backup.
-
-See also [`docs/runbooks/database-backup-restore.md`](../runbooks/database-backup-restore.md).
+Use the migration entrypoint only for the separately authorized migration transition. Use the bootstrap entrypoint only for the separately authorized temporary bootstrap runtime after migration acceptance. Do not combine them for VPS production.
 
 ## Bootstrap behavior
 
-`mix eventsales.admin.bootstrap` and `mix eventsales.source_system.bootstrap` remain available in a Mix environment. Railway retains `migrate_and_bootstrap/0` for compatibility. The VPS release lifecycle uses the release operations `migrate/0` and `bootstrap/0` separately; these functions are available in an OTP runtime release and do not depend on Mix tasks.
+`mix eventsales.admin.bootstrap` and `mix eventsales.source_system.bootstrap` remain available in a Mix environment. Railway retains `migrate_and_bootstrap/0` for compatibility. The VPS release lifecycle uses the release operations `migrate/0` and `bootstrap/0`; they are available in an OTP runtime release and do not depend on Mix tasks.
 
-The source bootstrap matches `kind=:woocommerce` plus normalized base URL, creates only when missing, reactivates inactive records, updates changed names, and is safe to repeat. It does not call WooCommerce or alter webhook destinations.
+The source bootstrap matches `kind=:woocommerce` plus normalized base URL, creates only when missing, reactivates inactive records, and updates changed names. It does not call WooCommerce or alter webhook destinations. This implementation detail does not authorize a blind retry after a failed bootstrap transition.
