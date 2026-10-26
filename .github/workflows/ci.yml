@@ -314,3 +314,11 @@ jobs:
       - name: Check VPS deployment contract
         shell: bash
         run: bash scripts/check_vps_deploy_contract.sh
+
+      - name: Verify EventSales V0 Docker audit wrapper
+        shell: bash
+        run: |
+          bash -n deploy/vps/operator/agent-eventsales-v0-audit
+          bash -n test/scripts/agent_eventsales_v0_audit_test.sh
+          bash test/scripts/agent_eventsales_v0_audit_test.sh
+          /usr/sbin/visudo -cf deploy/vps/operator/agent-eventsales-v0-audit.sudoers
