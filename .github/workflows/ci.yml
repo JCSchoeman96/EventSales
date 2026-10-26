@@ -314,3 +314,7 @@ jobs:
       - name: Check VPS deployment contract
         shell: bash
         run: bash scripts/check_vps_deploy_contract.sh
+
+      - name: Verify EventSales V3 privileged wrappers
+        shell: bash
+        run: bash test/scripts/agent_eventsales_v3_wrappers_test.sh

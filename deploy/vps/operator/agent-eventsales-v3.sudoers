@@ -1,0 +1,1 @@
+agentops ALL=(root) NOPASSWD: /usr/local/sbin/agent-eventsales-v3-provision-networks "", /usr/local/sbin/agent-eventsales-v3-start-postgres "", /usr/local/sbin/agent-eventsales-v3-bootstrap-postgres ""

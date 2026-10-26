@@ -1,0 +1,85 @@
+#!/bin/bash -p
+set -euo pipefail
+set +x
+umask 077
+IFS=$' \t\n'
+
+readonly SAFE_PATH='/usr/sbin:/usr/bin:/sbin:/bin'
+readonly DOCKER_SOCKET='unix:///var/run/docker.sock'
+readonly DATA_NETWORK='eventsales-prod_eventsales_data'
+readonly EDGE_NETWORK='eventsales-prod_eventsales_edge'
+readonly PRODUCTION_VOLUME='eventsales-prod_postgres_data'
+readonly STAGED_SCRIPT='/root/eventsales-prod/staged/2f69c126ab0098ed2d1323ed33d6bc2761df752f/data-plane/scripts/provision-networks.sh'
+readonly EXPECTED_SCRIPT_SHA256='dc22844432d1591bd31abfb7b62595afa373ac13a113dd2a7553633e02813348'
+readonly -a STAGED_DIRECTORIES=(
+  '/root'
+  '/root/eventsales-prod'
+  '/root/eventsales-prod/staged'
+  '/root/eventsales-prod/staged/2f69c126ab0098ed2d1323ed33d6bc2761df752f'
+  '/root/eventsales-prod/staged/2f69c126ab0098ed2d1323ed33d6bc2761df752f/data-plane'
+  '/root/eventsales-prod/staged/2f69c126ab0098ed2d1323ed33d6bc2761df752f/data-plane/scripts'
+)
+
+stop() {
+  printf 'STOP=%s\n' "$1" >&2
+  exit 1
+}
+
+if (($# != 0)); then
+  stop CALLER_ARGUMENTS_FORBIDDEN
+fi
+if ((EUID != 0)); then
+  stop ROOT_REQUIRED
+fi
+
+PATH=$SAFE_PATH
+LC_ALL=C
+export PATH LC_ALL
+unset CDPATH ENV BASH_ENV COMPOSE_FILE COMPOSE_PROJECT_NAME DOCKER_CONTEXT DOCKER_HOST DOCKER_CONFIG EVENTSALES_SECRET_DIR
+cd / || stop FIXED_WORKING_DIRECTORY_UNAVAILABLE
+
+require_trusted_directory() {
+  local path=$1 metadata owner group mode mode_value
+  [[ ! -L "$path" ]] || stop STAGED_DIRECTORY_SYMLINK
+  [[ -d "$path" ]] || stop STAGED_DIRECTORY_UNAVAILABLE
+  metadata=$(/usr/bin/stat -c '%u:%g:%a' -- "$path" 2>/dev/null) || stop STAGED_DIRECTORY_METADATA_UNAVAILABLE
+  IFS=: read -r owner group mode <<<"$metadata"
+  [[ "$owner" == 0 && "$group" == 0 ]] || stop STAGED_DIRECTORY_NOT_ROOT_OWNED
+  mode_value=$((8#$mode))
+  (( (mode_value & 0022) == 0 )) || stop STAGED_DIRECTORY_GROUP_OR_OTHER_WRITABLE
+}
+
+for directory in "${STAGED_DIRECTORIES[@]}"; do
+  require_trusted_directory "$directory"
+done
+
+[[ ! -L "$STAGED_SCRIPT" ]] || stop STAGED_SCRIPT_SYMLINK
+[[ -f "$STAGED_SCRIPT" ]] || stop STAGED_SCRIPT_NOT_REGULAR
+[[ -x "$STAGED_SCRIPT" ]] || stop STAGED_SCRIPT_NOT_EXECUTABLE
+script_metadata=$(/usr/bin/stat -c '%u:%g:%a' -- "$STAGED_SCRIPT" 2>/dev/null) || stop STAGED_SCRIPT_METADATA_UNAVAILABLE
+IFS=: read -r script_owner script_group script_mode <<<"$script_metadata"
+[[ "$script_owner" == 0 && "$script_group" == 0 ]] || stop STAGED_SCRIPT_NOT_ROOT_OWNED
+script_mode_value=$((8#$script_mode))
+(( (script_mode_value & 0222) == 0 )) || stop STAGED_SCRIPT_WRITABLE
+script_digest=$(/usr/bin/sha256sum -- "$STAGED_SCRIPT" 2>/dev/null) || stop STAGED_SCRIPT_HASH_UNAVAILABLE
+[[ "${script_digest%% *}" == "$EXPECTED_SCRIPT_SHA256" ]] || stop STAGED_SCRIPT_HASH_MISMATCH
+
+docker_fixed() {
+  /usr/bin/env -i PATH="$SAFE_PATH" LC_ALL=C HOME=/root DOCKER_HOST="$DOCKER_SOCKET" docker "$@"
+}
+
+network_names=$(docker_fixed network ls --format '{{.Name}}' 2>/dev/null) || stop FIRST_PROVISION_NETWORK_LIST_FAILED
+while IFS= read -r name; do
+  [[ "$name" != "$DATA_NETWORK" && "$name" != "$EDGE_NETWORK" ]] || stop FIRST_PROVISION_NETWORK_PRESENT
+done <<<"$network_names"
+
+volume_names=$(docker_fixed volume ls --format '{{.Name}}' 2>/dev/null) || stop FIRST_PROVISION_VOLUME_LIST_FAILED
+while IFS= read -r name; do
+  [[ "$name" != "$PRODUCTION_VOLUME" ]] || stop FIRST_PROVISION_VOLUME_PRESENT
+done <<<"$volume_names"
+
+project_containers=$(docker_fixed ps -a --filter label=com.docker.compose.project=eventsales-prod --format '{{.Names}}' 2>/dev/null) || stop FIRST_PROVISION_CONTAINER_LIST_FAILED
+named_containers=$(docker_fixed ps -a --filter name=eventsales-prod --format '{{.Names}}' 2>/dev/null) || stop FIRST_PROVISION_CONTAINER_LIST_FAILED
+[[ -z "$project_containers" && -z "$named_containers" ]] || stop FIRST_PROVISION_CONTAINER_PRESENT
+
+exec -c /usr/bin/env -i PATH="$SAFE_PATH" LC_ALL=C HOME=/root DOCKER_HOST="$DOCKER_SOCKET" "$STAGED_SCRIPT"

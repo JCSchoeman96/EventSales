@@ -1,0 +1,190 @@
+#!/bin/bash -p
+set -euo pipefail
+set +x
+umask 077
+IFS=$' \t\n'
+
+readonly SAFE_PATH='/usr/sbin:/usr/bin:/sbin:/bin'
+readonly DOCKER_SOCKET='unix:///var/run/docker.sock'
+readonly COMPOSE_PROJECT='eventsales-prod'
+readonly DATA_NETWORK='eventsales-prod_eventsales_data'
+readonly EDGE_NETWORK='eventsales-prod_eventsales_edge'
+readonly POSTGRES_VOLUME='eventsales-prod_postgres_data'
+readonly POSTGRES_CONTAINER='eventsales-prod-postgres-1'
+readonly POSTGRES_IMAGE='dhi.io/postgres:18.6-alpine3.24@sha256:d33bd884995daddfb515d0ce9aec23b74d20d72e03ca42b72c4abf617c76bb19'
+readonly SECRET_DIR='/root/eventsales-prod/secrets-v1'
+readonly COMPOSE_FILE='/root/eventsales-prod/staged/2f69c126ab0098ed2d1323ed33d6bc2761df752f/data-plane/compose.yaml'
+readonly EXPECTED_COMPOSE_SHA256='f8d2cee51d6647d7026324ffee8a6ebf82cf8ea7e7a3ed6ca82626cf67b5819f'
+readonly INSPECT_FORMAT='{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}|{{.RestartCount}}|{{.Config.Image}}|{{.HostConfig.Memory}}|{{.HostConfig.NanoCpus}}|{{json .Config.Cmd}}|{{json .HostConfig.PortBindings}}|{{json .Mounts}}|{{json .NetworkSettings.Networks}}'
+
+stop() {
+  printf 'STOP=%s\n' "$1" >&2
+  exit 1
+}
+
+if (($# != 0)); then
+  stop CALLER_ARGUMENTS_FORBIDDEN
+fi
+if ((EUID != 0)); then
+  stop ROOT_REQUIRED
+fi
+
+PATH=$SAFE_PATH
+LC_ALL=C
+export PATH LC_ALL
+unset CDPATH ENV BASH_ENV COMPOSE_PROJECT_NAME DOCKER_CONTEXT DOCKER_HOST DOCKER_CONFIG EVENTSALES_SECRET_DIR
+cd / || stop FIXED_WORKING_DIRECTORY_UNAVAILABLE
+
+require_trusted_directory() {
+  local path=$1 metadata owner group mode mode_value
+  [[ ! -L "$path" ]] || stop STAGED_DIRECTORY_SYMLINK
+  [[ -d "$path" ]] || stop STAGED_DIRECTORY_UNAVAILABLE
+  metadata=$(/usr/bin/stat -c '%u:%g:%a' -- "$path" 2>/dev/null) || stop STAGED_DIRECTORY_METADATA_UNAVAILABLE
+  IFS=: read -r owner group mode <<<"$metadata"
+  [[ "$owner" == 0 && "$group" == 0 ]] || stop STAGED_DIRECTORY_NOT_ROOT_OWNED
+  mode_value=$((8#$mode))
+  (( (mode_value & 0022) == 0 )) || stop STAGED_DIRECTORY_GROUP_OR_OTHER_WRITABLE
+}
+
+require_trusted_directory '/root'
+require_trusted_directory '/root/eventsales-prod'
+require_trusted_directory '/root/eventsales-prod/staged'
+require_trusted_directory '/root/eventsales-prod/staged/2f69c126ab0098ed2d1323ed33d6bc2761df752f'
+require_trusted_directory '/root/eventsales-prod/staged/2f69c126ab0098ed2d1323ed33d6bc2761df752f/data-plane'
+
+[[ ! -L "$COMPOSE_FILE" ]] || stop STAGED_COMPOSE_SYMLINK
+[[ -f "$COMPOSE_FILE" ]] || stop STAGED_COMPOSE_NOT_REGULAR
+compose_metadata=$(/usr/bin/stat -c '%u:%g:%a' -- "$COMPOSE_FILE" 2>/dev/null) || stop STAGED_COMPOSE_METADATA_UNAVAILABLE
+IFS=: read -r compose_owner compose_group compose_mode <<<"$compose_metadata"
+[[ "$compose_owner" == 0 && "$compose_group" == 0 ]] || stop STAGED_COMPOSE_NOT_ROOT_OWNED
+compose_mode_value=$((8#$compose_mode))
+(( (compose_mode_value & 0222) == 0 )) || stop STAGED_COMPOSE_WRITABLE
+compose_digest=$(/usr/bin/sha256sum -- "$COMPOSE_FILE" 2>/dev/null) || stop STAGED_COMPOSE_HASH_UNAVAILABLE
+[[ "$compose_digest" == "$EXPECTED_COMPOSE_SHA256 "* ]] || stop STAGED_COMPOSE_HASH_MISMATCH
+
+require_secret_directory() {
+  local directory=$1 metadata
+  [[ ! -L "$directory" ]] || stop SECRET_DIRECTORY_SYMLINK
+  [[ -d "$directory" ]] || stop SECRET_DIRECTORY_NOT_PRESENT
+  metadata=$(/usr/bin/stat -c '%u:%g:%a' -- "$directory" 2>/dev/null) || stop SECRET_DIRECTORY_METADATA_UNAVAILABLE
+  [[ "$metadata" == 0:0:700 ]] || stop SECRET_DIRECTORY_METADATA_MISMATCH
+}
+
+require_secret_file() {
+  local name=$1 expected_owner=$2 expected_group=$3 expected_mode=$4 expected_size=$5
+  local path="$SECRET_DIR/$name" metadata
+  [[ ! -L "$path" ]] || stop SECRET_FILE_SYMLINK
+  [[ -f "$path" ]] || stop SECRET_FILE_NOT_REGULAR
+  metadata=$(/usr/bin/stat -c '%u:%g:%a:%s' -- "$path" 2>/dev/null) || stop SECRET_FILE_METADATA_UNAVAILABLE
+  if [[ "$expected_size" == '*' ]]; then
+    [[ "$metadata" == "$expected_owner:$expected_group:$expected_mode:"* ]] || stop SECRET_FILE_METADATA_MISMATCH
+  else
+    [[ "$metadata" == "$expected_owner:$expected_group:$expected_mode:$expected_size" ]] || stop SECRET_FILE_METADATA_MISMATCH
+  fi
+}
+
+require_secret_directory "$SECRET_DIR"
+require_secret_file postgres_bootstrap_password 0 70 440 64
+require_secret_file pgbouncer.ini 0 65532 440 '*'
+require_secret_file pgbouncer_users.txt 0 65532 440 '*'
+require_secret_file redis-users.acl 0 65532 440 '*'
+
+docker_fixed() {
+  /usr/bin/env -i PATH="$SAFE_PATH" LC_ALL=C HOME=/root DOCKER_HOST="$DOCKER_SOCKET" EVENTSALES_SECRET_DIR="$SECRET_DIR" docker "$@"
+}
+
+network_metadata() {
+  local name=$1 expected_internal=$2 metadata actual_name actual_driver actual_internal
+  metadata=$(docker_fixed network inspect --format '{{.Name}}|{{.Driver}}|{{.Internal}}' "$name" 2>/dev/null) || stop NETWORK_NOT_PRESENT
+  [[ "$metadata" != *$'\n'* ]] || stop NETWORK_METADATA_MISMATCH
+  IFS='|' read -r actual_name actual_driver actual_internal <<<"$metadata"
+  [[ "$actual_name" == "$name" && "$actual_driver" == bridge && "$actual_internal" == "$expected_internal" ]] || stop NETWORK_METADATA_MISMATCH
+}
+
+network_metadata "$DATA_NETWORK" true
+network_metadata "$EDGE_NETWORK" false
+
+volume_names=$(docker_fixed volume ls --format '{{.Name}}' 2>/dev/null) || stop VOLUME_LIST_FAILED
+while IFS= read -r name; do
+  [[ "$name" != "$POSTGRES_VOLUME" ]] || stop FIRST_START_VOLUME_PRESENT
+done <<<"$volume_names"
+
+project_containers=$(docker_fixed ps -a --filter label=com.docker.compose.project=eventsales-prod --format '{{.Names}}' 2>/dev/null) || stop PRODUCTION_CONTAINER_LIST_FAILED
+named_containers=$(docker_fixed ps -a --filter name=eventsales-prod --format '{{.Names}}' 2>/dev/null) || stop PRODUCTION_CONTAINER_LIST_FAILED
+[[ -z "$project_containers" && -z "$named_containers" ]] || stop PRODUCTION_CONTAINER_PRESENT
+
+docker_fixed compose --project-name "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" up -d postgres || stop POSTGRES_START_FAILED
+
+project_containers=$(docker_fixed ps -a --filter label=com.docker.compose.project=eventsales-prod --format '{{.Names}}' 2>/dev/null) || stop POSTGRES_CONTAINER_INSPECT_FAILED
+[[ "$project_containers" == "$POSTGRES_CONTAINER" ]] || stop UNEXPECTED_SERVICE_CONTAINER
+
+volume_names=$(docker_fixed volume ls --format '{{.Name}}' 2>/dev/null) || stop POSTGRES_VOLUME_INSPECT_FAILED
+volume_found=0
+while IFS= read -r name; do
+  if [[ "$name" == "$POSTGRES_VOLUME" ]]; then
+    volume_found=1
+  fi
+done <<<"$volume_names"
+((volume_found == 1)) || stop POSTGRES_VOLUME_NOT_PRESENT
+volume_metadata=$(docker_fixed volume inspect --format '{{.Name}}' "$POSTGRES_VOLUME" 2>/dev/null) || stop POSTGRES_VOLUME_INSPECT_FAILED
+[[ "$volume_metadata" == "$POSTGRES_VOLUME" ]] || stop POSTGRES_VOLUME_METADATA_MISMATCH
+
+validate_runtime_contract() {
+  local details=$1 state health restarts image memory nano_cpus command_json port_bindings mounts_json networks_json
+  IFS='|' read -r state health restarts image memory nano_cpus command_json port_bindings mounts_json networks_json <<<"$details"
+  [[ "$restarts" == 0 ]] || stop POSTGRES_RESTART_COUNT_MISMATCH
+  [[ "$image" == "$POSTGRES_IMAGE" ]] || stop POSTGRES_IMAGE_MISMATCH
+  [[ "$memory" == 3221225472 && "$nano_cpus" == 2000000000 ]] || stop POSTGRES_RESOURCE_MISMATCH
+  [[ "$command_json" == '["postgres","-c","max_connections=100","-c","shared_buffers=768MB","-c","effective_cache_size=2GB","-c","work_mem=8MB","-c","maintenance_work_mem=256MB"]' ]] || stop POSTGRES_RESOURCE_MISMATCH
+  /usr/bin/python3 - "$port_bindings" "$mounts_json" "$networks_json" "$POSTGRES_VOLUME" "$DATA_NETWORK" <<'PY' || stop POSTGRES_RUNTIME_CONTRACT_MISMATCH
+import json
+import sys
+
+bindings = json.loads(sys.argv[1])
+mounts = json.loads(sys.argv[2])
+networks = json.loads(sys.argv[3])
+expected_volume = sys.argv[4]
+expected_network = sys.argv[5]
+
+if bindings not in (None, {}):
+    if not isinstance(bindings, dict):
+        raise SystemExit(1)
+    for published in bindings.values():
+        if published not in (None, []):
+            raise SystemExit(1)
+
+volume_mounts = [item for item in mounts if item.get("Type") == "volume"]
+if len(volume_mounts) != 1:
+    raise SystemExit(1)
+if volume_mounts[0].get("Name") != expected_volume:
+    raise SystemExit(1)
+if volume_mounts[0].get("Destination") != "/var/lib/postgresql":
+    raise SystemExit(1)
+if set(networks) != {expected_network}:
+    raise SystemExit(1)
+PY
+}
+
+SECONDS=0
+deadline=$((SECONDS + 120))
+healthy=0
+while ((SECONDS < deadline)); do
+  details=$(docker_fixed inspect --format "$INSPECT_FORMAT" "$POSTGRES_CONTAINER" 2>/dev/null) || {
+    /usr/bin/sleep 2
+    continue
+  }
+  IFS='|' read -r state health restarts image _memory _nano_cpus _command _bindings _mounts _networks <<<"$details"
+  [[ "$restarts" == 0 ]] || stop POSTGRES_RESTART_COUNT_MISMATCH
+  [[ "$image" == "$POSTGRES_IMAGE" ]] || stop POSTGRES_IMAGE_MISMATCH
+  [[ "$state" != exited && "$state" != dead ]] || stop POSTGRES_NOT_RUNNING
+  [[ "$health" != unhealthy ]] || stop POSTGRES_HEALTH_FAILED
+  if [[ "$state" == running && "$health" == healthy ]]; then
+    validate_runtime_contract "$details"
+    healthy=1
+    break
+  fi
+  /usr/bin/sleep 2
+done
+((healthy == 1)) || stop POSTGRES_HEALTH_TIMEOUT
+
+printf 'POSTGRES_START_STATE=HEALTHY\n'
