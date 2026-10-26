@@ -187,6 +187,7 @@ if [[ "${1:-}" == network && "${2:-}" == ls ]]; then
     network-data-present) printf '%064d\n%064d\n%064d\n%064d\n' 11 12 13 14 ;;
     network-edge-present) printf '%064d\n%064d\n%064d\n%064d\n' 11 12 13 15 ;;
     network-app-present) printf '%064d\n%064d\n%064d\n%064d\n' 11 12 13 17 ;;
+    network-global-plugin) printf '%064d\n%064d\n%064d\n%064d\n' 11 12 13 18 ;;
     *) printf '%064d\n%064d\n%064d\n' 11 12 13 ;;
   esac
   exit 0
@@ -241,6 +242,7 @@ if [[ "${1:-}" == network && "${2:-}" == inspect ]]; then
     *0015) printf 'eventsales-prod_eventsales_edge|bridge|local|false|eventsales-prod|10.31.0.0/24\n' ;;
     *0016) printf 'd0-extra|bridge|local|false|eventsales-d0-proof|10.23.0.0/24\n' ;;
     *0017) printf 'eventsales-app_eventsales_edge|bridge|local|false|eventsales-app|10.32.0.0/24\n' ;;
+    *0018) printf 'external-global|thirdparty/net-driver:v1|global|false|NONE|10.40.0.0/16\n' ;;
     *) exit 85 ;;
   esac
   exit 0
@@ -512,14 +514,18 @@ test_d0_guards() {
 
 test_network_contract() {
   local mode expected
-  for mode in network-multi network-ipv6 network-no-ipv4; do
+  for mode in network-multi network-ipv6 network-no-ipv4 network-global-plugin; do
     prepare_test_wrapper
     make_fake_docker "$mode"
     run_wrapper
     [[ "$TEST_STATUS" -eq 0 ]] || fail "$mode exit was $TEST_STATUS: $TEST_OUTPUT stderr=$TEST_STDERR calls=$TEST_DOCKER_LOG"
     assert_contains "$TEST_OUTPUT" 'AUDIT_RESULT=PASS'
     assert_contains "$TEST_OUTPUT" 'D0_NETWORK_COUNT=2'
-    if [[ "$mode" == network-multi ]]; then
+    if [[ "$mode" == network-global-plugin ]]; then
+      assert_contains "$TEST_OUTPUT" 'BRIDGE_NETWORK_COUNT=3'
+      assert_not_contains "$TEST_OUTPUT" 'external-global'
+      assert_not_contains "$TEST_OUTPUT" 'thirdparty/net-driver:v1'
+    elif [[ "$mode" == network-multi ]]; then
       assert_contains "$TEST_OUTPUT" '10.20.0.0/24'
       assert_contains "$TEST_OUTPUT" '10.21.0.0/24'
       assert_contains "$TEST_OUTPUT" 'D0_NETWORK_1_IPV6_PRESENT=YES'

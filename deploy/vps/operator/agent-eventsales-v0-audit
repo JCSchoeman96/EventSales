@@ -395,9 +395,9 @@ def audit_networks():
             stop("OUTPUT_BOUND_EXCEEDED")
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,254}", name):
             stop("NETWORK_METADATA_MALFORMED")
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", driver):
+        if not re.fullmatch(r"[!-~]{1,128}", driver):
             stop("NETWORK_METADATA_MALFORMED")
-        if scope not in {"local", "swarm"} or internal not in {"true", "false"}:
+        if scope not in {"local", "swarm", "global"} or internal not in {"true", "false"}:
             stop("NETWORK_METADATA_MALFORMED")
         if project != "NONE" and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", project):
             stop("NETWORK_METADATA_MALFORMED")
@@ -436,6 +436,12 @@ def audit_networks():
         (row for row in rows if row["project"] == "eventsales-d0-proof"),
         key=lambda row: row["name"],
     )
+    if any(
+        row["scope"] == "global"
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", row["driver"])
+        for row in d0_rows
+    ):
+        stop("NETWORK_METADATA_MALFORMED")
     bridge_rows = sorted(
         (row for row in rows if row["driver"] == "bridge" and row["scope"] == "local"),
         key=lambda row: row["name"],

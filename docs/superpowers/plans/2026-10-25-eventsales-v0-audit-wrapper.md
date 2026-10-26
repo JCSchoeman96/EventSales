@@ -1,6 +1,6 @@
 # EventSales V0 audit wrapper implementation plan
 
-> **For agentic workers:** Execute this plan in the isolated `ops/eventsales-v0-audit-wrapper` worktree. Preserve the exact four-file scope and use red-green-refactor for each behavior group.
+> **For agentic workers:** Execute this plan in the isolated `ops/eventsales-v0-audit-wrapper` worktree. Preserve the exact five-file scope and use red-green-refactor for each behavior group.
 
 **Goal:** Add a zero-argument, read-only Docker metadata audit for future EventSales V0 preflight without granting `agentops` Docker-group membership or general-purpose sudo.
 
@@ -16,8 +16,9 @@
 - `deploy/vps/operator/agent-eventsales-v0-audit.sudoers`: One root-only command rule with the explicit empty-argument marker.
 - `test/scripts/agent_eventsales_v0_audit_test.sh`: PATH-injected fake Docker and assertions for output, exit codes, bounds, and forbidden access.
 - `docs/superpowers/plans/2026-10-25-eventsales-v0-audit-wrapper.md`: This implementation record and verification checklist.
+- `.github/workflows/ci.yml`: Run the wrapper syntax checks, fake-Docker suite, and sudoers validation in the existing required `vps_deploy_contract` job.
 
-No other file may change.
+Only these five files may change.
 
 ## Task 1: Build the fake-Docker test harness with the first failing case
 
@@ -72,7 +73,7 @@ No other file may change.
 - [x] Run `git diff --check`.
 - [x] Run `bash scripts/check_vps_deploy_contract.sh`.
 - [x] Run `bash scripts/local_ci.sh` through the repository-owned lifecycle. Stop if any required check fails; do not weaken or bypass a gate.
-- [x] Confirm the changed path list contains only the four files above and verify that no Docker or VPS contact occurred.
+- [x] Confirm the changed path list contains only the five files above and verify that no Docker or VPS contact occurred.
 
 
 ## Verification record
@@ -85,7 +86,7 @@ No other file may change.
 ## Task 9: Freeze and publish for review
 
 - [x] Compute SHA-256 for the wrapper and sudoers candidate.
-- [x] Create a signed commit containing only the four authorized files.
+- [x] Create a signed commit containing only the five authorized files.
 - [x] Push `ops/eventsales-v0-audit-wrapper` and open a DRAFT PR against `main`.
 - [x] Register the PR with the current T3 thread and update the matching Linear issue.
 - [x] Report the commit, tree, test results, hashes, PR URL, and the unchanged no-VPS/no-install boundary. Do not merge or install.
@@ -96,4 +97,4 @@ No other file may change.
 - [x] Fake-Docker tests prove the service, network, pool, volume, absence, bounds, secret-output, and mutation-verb contracts.
 - [x] Empty custom address pools use the pinned built-in IPv4 pool list; unsupported field access fails closed.
 - [x] The production wrapper has no Docker path, context, socket, object, filter, or format input from callers.
-- [x] Exactly four files changed; commit is signed; PR is draft; VPS connection and wrapper installation remain absent.
+- [x] Exactly five files changed; commits are signed; PR is draft; VPS connection and wrapper installation remain absent.
