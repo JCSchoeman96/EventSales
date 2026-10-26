@@ -1,0 +1,1 @@
+agentops ALL=(root) NOPASSWD: /usr/local/sbin/agent-eventsales-v2-generate-secrets "", /usr/local/sbin/agent-eventsales-v2-render-config ""
