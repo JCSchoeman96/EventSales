@@ -52,8 +52,8 @@ defmodule EventSales.MixProject do
   # Type `mix help deps` for examples and options.
   defp deps do
     [
-      {:ash, ">= 3.34.6 and < 4.0.0"},
-      {:ash_postgres, "~> 2.9"},
+      {:ash, ">= 3.37.1 and < 4.0.0"},
+      {:ash_postgres, ">= 2.15.2 and < 3.0.0"},
       {:ash_authentication, "~> 4.14"},
       {:ash_admin, "~> 1.1"},
       {:ash_state_machine, "~> 0.2.13"},
