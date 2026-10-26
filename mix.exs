@@ -74,7 +74,7 @@ defmodule EventSales.MixProject do
       {:jason, "~> 1.2"},
       {:tzdata, "~> 1.1"},
       {:dns_cluster, "~> 0.2.0"},
-      {:bandit, "~> 1.13.1"},
+      {:bandit, "~> 1.14.0"},
       {:oban, "~> 2.24.0"},
       {:oban_web, "~> 2.12.7"},
       {:nimble_csv, "~> 1.3"},
