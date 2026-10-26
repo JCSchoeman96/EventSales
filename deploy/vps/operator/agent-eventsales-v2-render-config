@@ -1,0 +1,56 @@
+#!/bin/bash -p
+set -euo pipefail
+
+readonly secret_target='/root/eventsales-prod/secrets-v1'
+readonly staged_script='/root/eventsales-prod/staged/2f69c126ab0098ed2d1323ed33d6bc2761df752f/data-plane/scripts/render-runtime-config.sh'
+readonly -a staged_directories=(
+  '/root/eventsales-prod'
+  '/root/eventsales-prod/staged'
+  '/root/eventsales-prod/staged/2f69c126ab0098ed2d1323ed33d6bc2761df752f'
+  '/root/eventsales-prod/staged/2f69c126ab0098ed2d1323ed33d6bc2761df752f/data-plane'
+  '/root/eventsales-prod/staged/2f69c126ab0098ed2d1323ed33d6bc2761df752f/data-plane/scripts'
+)
+
+stop() {
+  printf 'STOP=%s\n' "$1" >&2
+  exit 1
+}
+
+if (( $# != 0 )); then
+  stop CALLER_ARGUMENTS_FORBIDDEN
+fi
+if (( EUID != 0 )); then
+  stop ROOT_REQUIRED
+fi
+
+require_trusted_directory() {
+  local path=$1 metadata owner group mode mode_value
+  [[ ! -L "$path" ]] || stop STAGED_DIRECTORY_SYMLINK
+  [[ -d "$path" ]] || stop STAGED_DIRECTORY_UNAVAILABLE
+  metadata=$(/usr/bin/stat -c '%u:%g:%a' -- "$path" 2>/dev/null) || stop STAGED_DIRECTORY_METADATA_UNAVAILABLE
+  IFS=: read -r owner group mode <<<"$metadata"
+  [[ "$owner" == 0 && "$group" == 0 ]] || stop STAGED_DIRECTORY_NOT_ROOT_OWNED
+  mode_value=$((8#$mode))
+  (( (mode_value & 0022) == 0 )) || stop STAGED_DIRECTORY_GROUP_OR_OTHER_WRITABLE
+}
+
+for directory in "${staged_directories[@]}"; do
+  require_trusted_directory "$directory"
+done
+
+[[ ! -L "$staged_script" ]] || stop STAGED_SCRIPT_SYMLINK
+[[ -f "$staged_script" ]] || stop STAGED_SCRIPT_NOT_REGULAR
+[[ -x "$staged_script" ]] || stop STAGED_SCRIPT_NOT_EXECUTABLE
+script_metadata=$(/usr/bin/stat -c '%u:%g:%a' -- "$staged_script" 2>/dev/null) || stop STAGED_SCRIPT_METADATA_UNAVAILABLE
+IFS=: read -r script_owner script_group script_mode <<<"$script_metadata"
+[[ "$script_owner" == 0 && "$script_group" == 0 ]] || stop STAGED_SCRIPT_NOT_ROOT_OWNED
+script_mode_value=$((8#$script_mode))
+(( (script_mode_value & 0222) == 0 )) || stop STAGED_SCRIPT_WRITABLE
+
+[[ ! -L "$secret_target" ]] || stop SECRET_DIRECTORY_SYMLINK
+[[ -d "$secret_target" ]] || stop SECRET_DIRECTORY_NOT_PRESENT
+secret_metadata=$(/usr/bin/stat -c '%u:%g:%a' -- "$secret_target" 2>/dev/null) || stop SECRET_DIRECTORY_METADATA_UNAVAILABLE
+IFS=: read -r secret_owner secret_group secret_mode <<<"$secret_metadata"
+[[ "$secret_owner" == 0 && "$secret_group" == 0 && "$secret_mode" == 700 ]] || stop SECRET_DIRECTORY_METADATA_MISMATCH
+
+exec -c "$staged_script" "$secret_target"
