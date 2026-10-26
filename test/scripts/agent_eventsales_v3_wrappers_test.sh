@@ -35,6 +35,33 @@ for wrapper_source in "$provision_source" "$start_source" "$bootstrap_source"; d
 done
 pass 'source wrappers retain the actual root boundary'
 
+assert_source_sha_pin() {
+  local label=$1 source=$2 wrapper=$3 constant=$4 actual
+  local -a embedded_pins=()
+
+  actual=$(/usr/bin/sha256sum "$source" | /usr/bin/awk '{print $1}') || fail "$label source hash could not be calculated"
+  mapfile -t embedded_pins < <(/usr/bin/sed -n "s/^readonly ${constant}='\\([[:xdigit:]]\\{64\\}\\)'$/\\1/p" "$wrapper")
+  [[ ${#embedded_pins[@]} -eq 1 ]] || fail "$label production wrapper must contain exactly one SHA pin"
+  [[ ${embedded_pins[0]} == "$actual" ]] || fail "$label production SHA pin does not match canonical repository bytes"
+  pass "$label production SHA pin matches canonical repository bytes"
+}
+
+assert_source_sha_pin 'provision script' \
+  "$repo_root/deploy/vps/data-plane/scripts/provision-networks.sh" \
+  "$provision_source" EXPECTED_SCRIPT_SHA256
+assert_source_sha_pin 'start Compose file' \
+  "$repo_root/deploy/vps/data-plane/compose.yaml" \
+  "$start_source" EXPECTED_COMPOSE_SHA256
+assert_source_sha_pin 'bootstrap Compose file' \
+  "$repo_root/deploy/vps/data-plane/compose.yaml" \
+  "$bootstrap_source" EXPECTED_COMPOSE_SHA256
+assert_source_sha_pin 'bootstrap script' \
+  "$repo_root/deploy/vps/data-plane/scripts/bootstrap-postgres.sh" \
+  "$bootstrap_source" EXPECTED_BOOTSTRAP_SHA256
+assert_source_sha_pin 'probe script' \
+  "$repo_root/deploy/vps/data-plane/scripts/probe-postgres.sh" \
+  "$bootstrap_source" EXPECTED_PROBE_SHA256
+
 grep -Fq "$expected_stage/scripts/provision-networks.sh" "$provision_source" || fail 'network wrapper does not use the fixed staged provisioner'
 grep -Fq "$expected_stage/compose.yaml" "$start_source" || fail 'PostgreSQL start wrapper does not use the fixed Compose file'
 grep -Fq "$expected_stage/scripts/bootstrap-postgres.sh" "$bootstrap_source" || fail 'bootstrap wrapper does not use the fixed bootstrap script'
@@ -43,8 +70,6 @@ grep -Fq "$expected_secret_dir" "$bootstrap_source" || fail 'bootstrap wrapper d
 grep -Fq 'eventsales-prod_eventsales_data' "$provision_source" || fail 'network wrapper data network is not fixed'
 grep -Fq 'eventsales-prod_eventsales_edge' "$provision_source" || fail 'network wrapper edge network is not fixed'
 grep -Fq 'eventsales-prod_postgres_data' "$start_source" || fail 'PostgreSQL volume identity is not fixed'
-grep -Fq "EXPECTED_SCRIPT_SHA256='dc22844432d1591bd31abfb7b62595afa373ac13a113dd2a7553633e02813348'" "$provision_source" || fail 'network wrapper does not pin the accepted provisioner bytes'
-grep -Fq "EXPECTED_COMPOSE_SHA256='f8d2cee51d6647d7026324ffee8a6ebf82cf8ea7e7a3ed6ca82626cf67b5819f'" "$start_source" || fail 'PostgreSQL wrapper does not pin the accepted Compose bytes'
 
 tmp_root=$(mktemp -d "${TMPDIR:-/tmp}/eventsales-v3-wrappers.XXXXXX")
 chmod 0755 "$tmp_root"
@@ -129,7 +154,6 @@ new_fixture() {
 printf 'POSTGRES_BOOTSTRAP_PHASE=PHASE_0_PREFLIGHT\n'
 printf 'CHILD_SECRET_TARGET=%s\n' "$1"
 printf 'POSTGRES_BOOTSTRAP_PHASE=PHASE_4_PROBE\n'
-printf 'POSTGRES_PROBE=PASS\n'
 printf 'POSTGRES_BOOTSTRAP_STATE=BOOTSTRAPPED\n'
 CHILD
   cat >"$stage/scripts/probe-postgres.sh" <<'CHILD'
@@ -603,8 +627,9 @@ else
   fail 'bootstrap wrapper failed against healthy fake Docker'
 fi
 [[ "$output" == *"CHILD_SECRET_TARGET=$fixture/secrets-v1"* ]] || fail 'bootstrap wrapper did not pass its fixed secret directory'
-[[ "$output" == *'POSTGRES_BOOTSTRAP_PHASE=PHASE_4_PROBE'* && "$output" == *'POSTGRES_PROBE=PASS'* ]] || fail 'bootstrap wrapper did not preserve embedded probe evidence'
+[[ "$output" == *'POSTGRES_BOOTSTRAP_PHASE=PHASE_0_PREFLIGHT'* && "$output" == *'POSTGRES_BOOTSTRAP_PHASE=PHASE_4_PROBE'* ]] || fail 'bootstrap wrapper did not preserve its externally visible phase markers'
 [[ "$output" == *'POSTGRES_BOOTSTRAP_STATE=BOOTSTRAPPED'* ]] || fail 'bootstrap wrapper discarded the accepted bootstrap result'
+[[ "$output" != *'POSTGRES_PROBE=PASS'* ]] || fail 'bootstrap fixture exposed probe-private evidence on stdout'
 [[ "$output" != *'STANDALONE_PROBE_CHILD_EXECUTED'* ]] || fail 'bootstrap wrapper invoked a duplicate standalone probe'
 [[ $(printf '%s\n' "$output" | /usr/bin/grep -c '^POSTGRES_BOOTSTRAP_PHASE=PHASE_0_PREFLIGHT$') -eq 1 ]] || fail 'bootstrap wrapper invoked its one-shot child more than once'
 grep -Fq "secret=$fixture/secrets-v1" "$fixture/docker.log" || fail 'bootstrap preflight did not use the fixed secret directory'
