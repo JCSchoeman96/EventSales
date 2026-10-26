@@ -12,6 +12,9 @@ sudoers_source="$repo_root/deploy/vps/operator/agent-eventsales-v3.sudoers"
 expected_stage='/root/eventsales-prod/staged/2f69c126ab0098ed2d1323ed33d6bc2761df752f/data-plane'
 expected_secret_dir='/root/eventsales-prod/secrets-v1'
 secret_sentinel='V3_FIXTURE_SECRET_VALUE_MUST_NEVER_BE_PRINTED'
+fixture_uid=$(id -u)
+fixture_gid=$(id -g)
+passes=0
 
 fail() {
   printf 'FAIL: %s\n' "$1" >&2
@@ -27,6 +30,11 @@ for source in "$provision_source" "$start_source" "$bootstrap_source" "$sudoers_
   [[ -f "$source" && ! -L "$source" ]] || fail 'required V3 wrapper or sudoers source is missing'
 done
 
+for wrapper_source in "$provision_source" "$start_source" "$bootstrap_source"; do
+  grep -Fq 'if ((EUID != 0)); then' "$wrapper_source" || fail 'source wrapper is missing its actual root boundary'
+done
+pass 'source wrappers retain the actual root boundary'
+
 grep -Fq "$expected_stage/scripts/provision-networks.sh" "$provision_source" || fail 'network wrapper does not use the fixed staged provisioner'
 grep -Fq "$expected_stage/compose.yaml" "$start_source" || fail 'PostgreSQL start wrapper does not use the fixed Compose file'
 grep -Fq "$expected_stage/scripts/bootstrap-postgres.sh" "$bootstrap_source" || fail 'bootstrap wrapper does not use the fixed bootstrap script'
@@ -41,7 +49,6 @@ grep -Fq "EXPECTED_COMPOSE_SHA256='f8d2cee51d6647d7026324ffee8a6ebf82cf8ea7e7a3e
 tmp_root=$(mktemp -d "${TMPDIR:-/tmp}/eventsales-v3-wrappers.XXXXXX")
 chmod 0755 "$tmp_root"
 fixture=''
-passes=0
 
 cleanup_fixture() {
   if [[ -n "$fixture" && -d "$fixture" ]]; then
@@ -59,16 +66,14 @@ cleanup() {
 trap cleanup EXIT
 
 root_run() {
-  /usr/bin/unshare --user --map-root-user -- "$@"
+  # The source is transformed below, so use a test-only effective UID instead
+  # of relying on user namespaces, which hosted runners may disable.
+  EVENTSALES_TEST_EUID=0 "$@"
 }
 
 nonroot_run() {
-  if (( EUID != 0 )); then
-    "$@"
-  else
-    command -v /usr/bin/setpriv >/dev/null 2>&1 || fail 'setpriv is required for the non-root boundary checks'
-    /usr/bin/setpriv --reuid=65534 --regid=65534 --clear-groups -- "$@"
-  fi
+  local wrapper=$1
+  EVENTSALES_TEST_EUID=65534 "$wrapper"
 }
 
 state_set() {
@@ -331,6 +336,13 @@ SLEEP
     -e "s|/usr/sbin:/usr/bin:/sbin:/bin|$fixture/bin:/usr/sbin:/usr/bin:/sbin:/bin|g" \
     -e 's|postgres_bootstrap_password 0 70 440 64|postgres_bootstrap_password 0 0 440 64|g' \
     -e 's| 0 65532 440| 0 0 440|g' \
+    -e 's|EUID != 0|EVENTSALES_TEST_EUID != 0|g' \
+    -e "s|owner\" == 0|owner\" == $fixture_uid|g" \
+    -e "s|group\" == 0|group\" == $fixture_gid|g" \
+    -e "s|0:0:700|$fixture_uid:$fixture_gid:700|g" \
+    -e "s|postgres_bootstrap_password 0 0 440 64|postgres_bootstrap_password $fixture_uid $fixture_gid 440 64|g" \
+    -e "s| 0 0 400| $fixture_uid $fixture_gid 400|g" \
+    -e "s| 0 0 440| $fixture_uid $fixture_gid 440|g" \
     "$provision_source" >"$fixture/provision-wrapper"
   sed \
     -e "s|/root/eventsales-prod|$fixture|g" \
@@ -338,6 +350,13 @@ SLEEP
     -e "s|/usr/sbin:/usr/bin:/sbin:/bin|$fixture/bin:/usr/sbin:/usr/bin:/sbin:/bin|g" \
     -e 's|postgres_bootstrap_password 0 70 440 64|postgres_bootstrap_password 0 0 440 64|g' \
     -e 's| 0 65532 440| 0 0 440|g' \
+    -e 's|EUID != 0|EVENTSALES_TEST_EUID != 0|g' \
+    -e "s|owner\" == 0|owner\" == $fixture_uid|g" \
+    -e "s|group\" == 0|group\" == $fixture_gid|g" \
+    -e "s|0:0:700|$fixture_uid:$fixture_gid:700|g" \
+    -e "s|postgres_bootstrap_password 0 0 440 64|postgres_bootstrap_password $fixture_uid $fixture_gid 440 64|g" \
+    -e "s| 0 0 400| $fixture_uid $fixture_gid 400|g" \
+    -e "s| 0 0 440| $fixture_uid $fixture_gid 440|g" \
     "$start_source" >"$fixture/start-wrapper"
   sed \
     -e "s|/root/eventsales-prod|$fixture|g" \
@@ -347,6 +366,13 @@ SLEEP
     -e "s|3019e4560946957e27f3fca033c754dda1cf9a66adebd61a46208d87b24e77ce|$probe_fixture_sha|g" \
     -e 's|postgres_bootstrap_password 0 70 440 64|postgres_bootstrap_password 0 0 440 64|g' \
     -e 's| 0 65532 440| 0 0 440|g' \
+    -e 's|EUID != 0|EVENTSALES_TEST_EUID != 0|g' \
+    -e "s|owner\" == 0|owner\" == $fixture_uid|g" \
+    -e "s|group\" == 0|group\" == $fixture_gid|g" \
+    -e "s|0:0:700|$fixture_uid:$fixture_gid:700|g" \
+    -e "s|postgres_bootstrap_password 0 0 440 64|postgres_bootstrap_password $fixture_uid $fixture_gid 440 64|g" \
+    -e "s| 0 0 400| $fixture_uid $fixture_gid 400|g" \
+    -e "s| 0 0 440| $fixture_uid $fixture_gid 440|g" \
     "$bootstrap_source" >"$fixture/bootstrap-wrapper"
   chmod 0555 "$fixture/provision-wrapper" "$fixture/start-wrapper" "$fixture/bootstrap-wrapper"
   chmod 0755 "$fixture" "$fixture/staged" \
