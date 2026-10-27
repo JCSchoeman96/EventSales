@@ -22,7 +22,6 @@ services:
     cpus: 2.0
     mem_limit: 3g
     command:
-      - postgres
       - -c
       - max_connections=100
       - -c

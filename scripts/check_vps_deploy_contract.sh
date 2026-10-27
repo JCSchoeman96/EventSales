@@ -408,8 +408,9 @@ def check(mode, paths):
         require(environment.get("POSTGRES_PASSWORD_FILE") == "/run/secrets/postgres_bootstrap_password")
         require("POSTGRES_PASSWORD" not in environment)
         require(postgres.get("entrypoint") is None)
+        # The DHI PostgreSQL entrypoint invokes postgres; Compose supplies arguments only.
         require(postgres.get("command") == [
-            "postgres", "-c", "max_connections=100", "-c", "shared_buffers=768MB",
+            "-c", "max_connections=100", "-c", "shared_buffers=768MB",
             "-c", "effective_cache_size=2GB", "-c", "work_mem=8MB",
             "-c", "maintenance_work_mem=256MB",
         ])
