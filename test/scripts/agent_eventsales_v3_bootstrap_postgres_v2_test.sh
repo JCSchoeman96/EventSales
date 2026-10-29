@@ -79,11 +79,10 @@ new_fixture() {
   chmod 0555 "$stage/scripts/probe-postgres.sh"
   mkdir -m 0700 "$recovery_marker"
   chmod 0755 "$root_fixture" "$prod_root" "$prod_root/staged" "$stage_root" "$stage"
-  printf 'fixture-only\n' >"$secret_dir/postgres_bootstrap_password"
-  truncate -s 64 "$secret_dir/postgres_bootstrap_password"
+  printf '%064d' 0 >"$secret_dir/postgres_bootstrap_password"
   chmod 0440 "$secret_dir/postgres_bootstrap_password"
   for name in eventsales_migrator_password eventsales_runtime_server_password eventsales_runtime_client_password eventsales_backup_password redis_runtime_password redis_stats_password; do
-    truncate -s 64 "$secret_dir/$name"
+    printf '%064d' 0 >"$secret_dir/$name"
     chmod 0400 "$secret_dir/$name"
   done
   for name in pgbouncer.ini pgbouncer_users.txt redis-users.acl; do
@@ -115,6 +114,14 @@ if [[ "$(/usr/bin/awk -F= '$1=="D0_CHANGE_AFTER_CHILD" {print $2}' 'FIXTURE_STAT
 fi
 if [[ "$(/usr/bin/awk -F= '$1=="D0_CHANGE_AFTER_CHILD" {print $2}' 'FIXTURE_STATE')" == count ]]; then
   /usr/bin/sed -i 's#,FIXTURE_D0_THREE|eventsales-d0-proof-three$##' 'FIXTURE_STATE'
+fi
+case "$(/usr/bin/awk -F= '$1=="PG_CHANGE_AFTER_CHILD" {print $2}' 'FIXTURE_STATE')" in
+  status) /usr/bin/sed -i -e 's/^PG_STATUS=running$/PG_STATUS=exited/' -e 's/^PG_RUNNING=true$/PG_RUNNING=false/' 'FIXTURE_STATE' ;;
+  image) /usr/bin/sed -i 's/^PG_IMAGE=.*/PG_IMAGE=wrong/' 'FIXTURE_STATE' ;;
+esac
+production_name_extra=$(/usr/bin/awk -F= '$1=="PROD_NAME_EXTRA_AFTER_CHILD" {print $2}' 'FIXTURE_STATE')
+if [[ "$production_name_extra" != none ]]; then
+  /usr/bin/sed -i "s/^PROD_NAME_EXTRA=none$/PROD_NAME_EXTRA=$production_name_extra/" 'FIXTURE_STATE'
 fi
 printf 'POSTGRES_BOOTSTRAP_PHASE=PHASE_4_PROBE\n'
 printf 'POSTGRES_BOOTSTRAP_STATE=BOOTSTRAPPED\n'
@@ -151,6 +158,7 @@ PG_MOUNTS=valid
 PG_NETWORKS=valid
 PG_PORTS=null
 PROD_EXTRA=no
+PROD_NAME_EXTRA=none
 DATA_DRIVER=bridge
 DATA_INTERNAL=true
 VOLUME_PRESENT=yes
@@ -163,6 +171,16 @@ D0_RUNNING=false
 D0_RESTARTING=false
 CHILD_FAIL=no
 D0_CHANGE_AFTER_CHILD=no
+PG_CHANGE_AFTER_CHILD=none
+PROD_NAME_EXTRA_AFTER_CHILD=none
+PG_TARGET_DATABASE=absent
+PG_TARGET_MIGRATOR=absent
+PG_TARGET_RUNTIME=absent
+PG_TARGET_BACKUP=absent
+PG_QUERY_FAIL=none
+PG_QUERY_OUTPUT=normal
+PG_DRIFT_AFTER_QUERY=none
+D0_DRIFT_AFTER_QUERY=none
 MARKER_MKDIR_FAIL=no
 STAT_OVERRIDE_PATH=none
 STAT_OVERRIDE_VALUE=none
@@ -194,12 +212,50 @@ case "$1" in
   ps)
     if [[ "$*" == *eventsales-d0-proof* ]]; then
       /usr/bin/tr ',' '\n' <<<"$(get D0_ROWS)"
+    elif [[ "$*" == *'name=eventsales-prod'* ]]; then
+      if [[ "$(get PG_PRESENT)" == yes ]]; then printf '%s|%s\n' "$(get PG_ID)" "$(get PG_NAME)"; fi
+      if [[ "$(get PROD_EXTRA)" == yes ]]; then printf '%s|eventsales-prod-extra\n' "$(printf 'c%.0s' {1..64})"; fi
+      case "$(get PROD_NAME_EXTRA)" in
+        pgbouncer) printf '%s|eventsales-prod-pgbouncer-1\n' "$(printf '4%.0s' {1..64})" ;;
+        redis) printf '%s|eventsales-prod-redis-1\n' "$(printf '5%.0s' {1..64})" ;;
+        app) printf '%s|eventsales-prod-app-1\n' "$(printf '6%.0s' {1..64})" ;;
+        unknown) printf '%s|eventsales-prod-unknown-1\n' "$(printf '7%.0s' {1..64})" ;;
+      esac
     elif [[ "$*" == *com.docker.compose.project=eventsales-prod* ]]; then
       if [[ "$(get PG_PRESENT)" == yes ]]; then printf '%s|%s\n' "$(get PG_ID)" "$(get PG_NAME)"; fi
       if [[ "$(get PROD_EXTRA)" == yes ]]; then printf '%s|eventsales-prod-extra\n' "$(printf 'c%.0s' {1..64})"; fi
     else
       exit 92
     fi
+    ;;
+  exec)
+    [[ "$2" == "$(get PG_ID)" && "$3" == psql ]] || exit 97
+    shift 3
+    query=''
+    while (($#)); do
+      if [[ "$1" == -c && $# -ge 2 ]]; then query=$2; break; fi
+      shift
+    done
+    case "$query" in
+      *"datname = 'event_sales_prod'"*) target=database ;;
+      *"rolname = 'eventsales_migrator'"*) target=migrator ;;
+      *"rolname = 'eventsales_runtime'"*) target=runtime ;;
+      *"rolname = 'eventsales_backup'"*) target=backup ;;
+      *) exit 98 ;;
+    esac
+    target_key=${target^^}
+    [[ "$(get PG_QUERY_FAIL)" != "$target" && "$(get PG_QUERY_FAIL)" != all ]] || exit 99
+    if [[ "$(get PG_QUERY_OUTPUT)" == multiple ]]; then printf 't\nt\n'; exit 0; fi
+    if [[ "$(get PG_QUERY_OUTPUT)" == malformed ]]; then printf 'diagnostic-must-not-leak\n'; exit 0; fi
+    if [[ "$(get PG_QUERY_OUTPUT)" == blank-row ]]; then printf 't\n\n'; exit 0; fi
+    if [[ "$(get PG_QUERY_OUTPUT)" == unexpected ]]; then printf 'yes\n'; exit 0; fi
+    if [[ "$(get PG_DRIFT_AFTER_QUERY)" == status ]]; then
+      /usr/bin/sed -i -e 's/^PG_STATUS=running$/PG_STATUS=exited/' -e 's/^PG_RUNNING=true$/PG_RUNNING=false/' "$state"
+    fi
+    if [[ "$(get D0_DRIFT_AFTER_QUERY)" == status ]]; then
+      /usr/bin/sed -i -e 's/^D0_STATUS=exited$/D0_STATUS=running/' -e 's/^D0_RUNNING=false$/D0_RUNNING=true/' "$state"
+    fi
+    if [[ "$(get PG_TARGET_$target_key)" == present ]]; then printf 'f\n'; else printf 't\n'; fi
     ;;
   inspect)
     subject=$4
@@ -308,11 +364,13 @@ assert_preflight_stop() {
   if output=$(root_run 2>&1); then fail "$label unexpectedly succeeded"; else status=$?; fi
   ((status != 0)) || fail "$label returned success"
   [[ "$output" == *"STOP=$expected"* ]] || fail "$label returned unexpected output: $output"
+  [[ "$output" == *'BOOTSTRAP_STATE=BOOTSTRAP_PREFLIGHT_BLOCKED'* ]] || fail "$label did not report preflight blocked"
   if [[ "$allow_marker" != yes ]]; then
     [[ ! -e "$bootstrap_marker" && ! -L "$bootstrap_marker" ]] || fail "$label consumed bootstrap authority"
   fi
   [[ ! -s "$child_log" ]] || fail "$label invoked the child"
   ! /usr/bin/grep -F -e 'CALL|compose' -e 'CALL|rm ' -e 'CALL|stop ' -e 'CALL|volume create' -e 'CALL|volume rm' -e 'CALL|network create' -e 'CALL|network rm' "$docker_log" >/dev/null || fail "$label attempted a Docker mutation"
+  ! /usr/bin/grep -Eiq '(^|[[:space:]])(CREATE|ALTER|GRANT|DROP|REVOKE|INSERT|UPDATE|DELETE|TRUNCATE)([[:space:]]|$)' "$docker_log" || fail "$label attempted database mutation SQL"
   pass "$label"
 }
 
@@ -466,6 +524,50 @@ new_fixture
 state_set STAT_OVERRIDE_PATH "$secret_dir/postgres_bootstrap_password"
 state_set STAT_OVERRIDE_VALUE "$fixture_uid:999:440"
 assert_preflight_stop 'rejects bootstrap secret metadata drift' SECRET_FILE_METADATA_MISMATCH
+
+for secret_name in eventsales_migrator_password eventsales_runtime_server_password eventsales_backup_password; do
+  new_fixture
+  chmod 0600 "$secret_dir/$secret_name"
+  printf 'g%.0s' {1..64} >"$secret_dir/$secret_name"
+  chmod 0400 "$secret_dir/$secret_name"
+  assert_preflight_stop "rejects non-hex database secret content: $secret_name" DATABASE_SECRET_CONTENT_MISMATCH
+done
+
+for target in database migrator runtime backup; do
+  new_fixture
+  target_key=${target^^}
+  state_set "PG_TARGET_$target_key" present
+  assert_preflight_stop "rejects existing bootstrap target: $target" POSTGRES_BOOTSTRAP_TARGET_NOT_ABSENT
+done
+
+new_fixture
+state_set PG_QUERY_FAIL database
+assert_preflight_stop 'fails closed on PostgreSQL target query failure' POSTGRES_BOOTSTRAP_TARGET_QUERY_FAILED
+
+for query_output in multiple malformed blank-row unexpected; do
+  new_fixture
+  state_set PG_QUERY_OUTPUT "$query_output"
+  if output=$(root_run 2>&1); then fail "accepted $query_output target query output"; fi
+  [[ "$output" == *'BOOTSTRAP_STATE=BOOTSTRAP_PREFLIGHT_BLOCKED'* && "$output" == *'STOP=POSTGRES_BOOTSTRAP_TARGET_QUERY_OUTPUT_INVALID'* ]] || fail "$query_output target query output returned an unexpected failure"
+  [[ "$output" != *diagnostic-must-not-leak* ]] || fail 'target query output leaked into wrapper diagnostics'
+  [[ ! -e "$bootstrap_marker" && ! -L "$bootstrap_marker" && ! -s "$child_log" ]] || fail "$query_output target query output consumed authority or invoked child"
+  ! /usr/bin/grep -Eiq '(^|[[:space:]])(CREATE|ALTER|GRANT|DROP|REVOKE|INSERT|UPDATE|DELETE|TRUNCATE)([[:space:]]|$)' "$docker_log" || fail "$query_output target preflight attempted database mutation"
+  pass "fails closed on $query_output target query output"
+done
+
+for production_name in pgbouncer redis app unknown; do
+  new_fixture
+  state_set PROD_NAME_EXTRA "$production_name"
+  assert_preflight_stop "rejects production-named container with missing project label: $production_name" PRODUCTION_INVENTORY_MISMATCH
+done
+
+new_fixture
+state_set PG_DRIFT_AFTER_QUERY status
+assert_preflight_stop 'revalidates PostgreSQL before marker creation' POSTGRES_RUNTIME_CHANGED_BEFORE_MARKER
+
+new_fixture
+state_set D0_DRIFT_AFTER_QUERY status
+assert_preflight_stop 'revalidates D0 before marker creation' D0_STATE_CHANGED_BEFORE_MARKER
 
 new_fixture
 state_set VOLUME_PRESENT no
@@ -625,6 +727,20 @@ if output=$(root_run 2>&1); then fail 'post-bootstrap D0 count drift was accepte
 pass 'rejects D0 count changes after child success'
 
 new_fixture
+state_set PG_CHANGE_AFTER_CHILD status
+if output=$(root_run 2>&1); then fail 'post-bootstrap PostgreSQL drift was accepted'; fi
+[[ "$output" == *'BOOTSTRAP_STATE=BOOTSTRAP_PARTIAL_FAILURE'* && "$output" == *'STOP=POSTGRES_RUNTIME_CHANGED_AFTER_BOOTSTRAP'* ]] || fail 'post-bootstrap PostgreSQL drift returned the wrong failure'
+[[ -d "$bootstrap_marker" && $(/usr/bin/grep -c '^CALL|' "$child_log") -eq 1 ]] || fail 'post-bootstrap PostgreSQL drift cleared marker or retried child'
+pass 'revalidates PostgreSQL runtime after child success'
+
+new_fixture
+state_set PROD_NAME_EXTRA_AFTER_CHILD app
+if output=$(root_run 2>&1); then fail 'post-bootstrap production inventory drift was accepted'; fi
+[[ "$output" == *'BOOTSTRAP_STATE=BOOTSTRAP_PARTIAL_FAILURE'* && "$output" == *'STOP=POSTGRES_RUNTIME_CHANGED_AFTER_BOOTSTRAP'* ]] || fail 'post-bootstrap production inventory drift returned the wrong failure'
+[[ -d "$bootstrap_marker" && $(/usr/bin/grep -c '^CALL|' "$child_log") -eq 1 ]] || fail 'post-bootstrap inventory drift cleared marker or retried child'
+pass 'revalidates dual production inventory after child success'
+
+new_fixture
 CALLER_SENTINEL=must-not-pass DOCKER_HOST=tcp://attacker DOCKER_CONTEXT=attacker DOCKER_CONFIG=/tmp/attacker \
   root_run >"$fixture/stdout" 2>"$fixture/stderr" || fail 'valid fixture failed'
 expected_child_env="CALL|args=1|secret=$secret_dir|path=$fixture_bin:/usr/sbin:/usr/bin:/sbin:/bin|home=/root|host=unix:///var/run/docker.sock|project=|config=|bash_env="
@@ -632,6 +748,8 @@ grep -Fqx "$expected_child_env" "$child_log" || fail 'child did not receive only
 grep -Fq "ENV|host=unix:///var/run/docker.sock|context=|path=$fixture_bin:/usr/sbin:/usr/bin:/sbin:/bin|project=|secret=$secret_dir|config=|compose=|bash_env=" "$docker_log" || fail 'Docker did not receive only its fixed environment'
 [[ -d "$bootstrap_marker" && ! -L "$bootstrap_marker" ]] || fail 'success did not consume bootstrap marker'
 [[ $(/usr/bin/grep -c '^CALL|' "$child_log") -eq 1 ]] || fail 'success did not invoke child exactly once'
+[[ $(/usr/bin/grep -c '^CALL|exec ' "$docker_log") -eq 4 ]] || fail 'success did not perform exactly four fixed target-absence queries'
+grep -Fq 'filter name=eventsales-prod' "$docker_log" || fail 'success did not inspect production-name inventory'
 [[ "$(state_get PG_PRESENT)" == yes && "$(state_get D0_STATUS)" == exited ]] || fail 'success changed PostgreSQL or D0'
 ! /usr/bin/grep -E 'attacker|must-not-pass' "$docker_log" "$child_log" >/dev/null || fail 'caller-controlled environment reached Docker or child'
 [[ "$(<"$fixture/stdout")" == *'POSTGRES_BOOTSTRAP=BOOTSTRAPPED'* ]] || fail 'success output missing terminal state'
