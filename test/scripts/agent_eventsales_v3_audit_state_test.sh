@@ -59,7 +59,7 @@ PG_RESTART_COUNT=24
 PG_OOM=false
 PG_IMAGE=$postgres_image
 PG_COMMAND=postgres,-c,max_connections=100,-c,shared_buffers=768MB,-c,effective_cache_size=2GB,-c,work_mem=8MB,-c,maintenance_work_mem=256MB,
-PG_MOUNTS=volume:eventsales-prod_postgres_data:/var/lib/postgresql,
+PG_MOUNTS=volume:eventsales-prod_postgres_data:/var/lib/postgresql,bind::/run/secrets/postgres_bootstrap_password,
 PG_NETWORKS=eventsales-prod_eventsales_data,
 PG_PORTS=none
 VOLUME_EXISTS=yes
@@ -341,6 +341,9 @@ grep -Fxq 'OLD_STAGE_SYMLINK=NO' "$out" || fail 'old stage symlink status is wro
 if grep -Eq 'AUDIT_TEST_SECRET_MUST_NOT_APPEAR|CALLER_SECRET|tcp://attacker|caller-context|caller-project|caller/secrets|caller/docker-config|Config\.Env|\{[^}]*\}' "$out"; then
   fail 'audit output exposed caller-controlled, secret, or raw Docker data'
 fi
+if grep -Eq '/host/secrets|POSTGRES_BOOTSTRAP_SECRET_CONTENT|volume:eventsales-prod_postgres_data|bind::/run/secrets/postgres_bootstrap_password' "$out"; then
+  fail 'audit output exposed mount details or secret data'
+fi
 pass 'reports safe deterministic metadata and recognizes historical command'
 
 grep -Fq 'ENV|host=unix:///var/run/docker.sock|' "$docker_log" || fail 'Docker socket is not fixed'
@@ -435,8 +438,26 @@ set_state PG_IMAGE 'unexpected/postgres:latest'
 expect_failure 'rejects PostgreSQL image mismatch' POSTGRES_IMAGE_MISMATCH
 
 reset_case
-set_state PG_MOUNTS 'volume:wrong-volume:/var/lib/postgresql,'
+set_state PG_MOUNTS 'volume:wrong-volume:/var/lib/postgresql,bind::/run/secrets/postgres_bootstrap_password,'
 expect_failure 'rejects wrong PostgreSQL volume attachment' POSTGRES_VOLUME_ATTACHMENT_MISMATCH
+
+reset_case
+set_state PG_MOUNTS 'volume:eventsales-prod_postgres_data:/wrong,bind::/run/secrets/postgres_bootstrap_password,'
+expect_failure 'rejects wrong PostgreSQL volume destination' POSTGRES_VOLUME_ATTACHMENT_MISMATCH
+
+reset_case
+set_state PG_MOUNTS 'volume:eventsales-prod_postgres_data:/var/lib/postgresql,volume:unexpected:/other,bind::/run/secrets/postgres_bootstrap_password,'
+expect_failure 'rejects an extra PostgreSQL volume mount' POSTGRES_VOLUME_ATTACHMENT_MISMATCH
+
+reset_case
+set_state PG_MOUNTS 'bind::/run/secrets/postgres_bootstrap_password,'
+expect_failure 'rejects a missing PostgreSQL volume mount' POSTGRES_VOLUME_ATTACHMENT_MISMATCH
+
+reset_case
+set_state PG_MOUNTS 'bind::/run/secrets/postgres_bootstrap_password,volume:eventsales-prod_postgres_data:/var/lib/postgresql,'
+run_wrapper || { cat "$err" >&2; fail 'non-volume mount order changed volume validation'; }
+grep -Fxq 'POSTGRES_VOLUME_ATTACHMENT_MATCH=YES' "$out" || fail 'volume validation did not ignore a valid secret bind mount'
+pass 'accepts the expected volume when a non-volume secret mount precedes it'
 
 reset_case
 set_state PG_NETWORKS 'eventsales-prod_eventsales_edge,'
