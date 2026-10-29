@@ -1,0 +1,253 @@
+#!/bin/bash -p
+set -euo pipefail
+set +x
+umask 077
+IFS=$' \t\n'
+
+readonly SAFE_PATH='/usr/sbin:/usr/bin:/sbin:/bin'
+readonly ROOT_UID=0
+readonly ROOT_GID=0
+readonly DOCKER_SOCKET='unix:///var/run/docker.sock'
+readonly COMPOSE_PROJECT='eventsales-prod'
+readonly POSTGRES_NAME='eventsales-prod-postgres-1'
+readonly POSTGRES_IMAGE='dhi.io/postgres:18.6-alpine3.24@sha256:d33bd884995daddfb515d0ce9aec23b74d20d72e03ca42b72c4abf617c76bb19'
+readonly POSTGRES_VOLUME='eventsales-prod_postgres_data'
+readonly DATA_NETWORK='eventsales-prod_eventsales_data'
+readonly SECRET_DIR='/root/eventsales-prod/secrets-v1'
+readonly PROD_ROOT='/root/eventsales-prod'
+readonly SOURCE_SHA='c9ce0f9239123a6e58f66fde0b5a1e60238bb107'
+readonly DATA_PLANE_DIR='/root/eventsales-prod/staged/c9ce0f9239123a6e58f66fde0b5a1e60238bb107/data-plane'
+readonly COMPOSE_FILE='/root/eventsales-prod/staged/c9ce0f9239123a6e58f66fde0b5a1e60238bb107/data-plane/compose.yaml'
+readonly BOOTSTRAP_SCRIPT='/root/eventsales-prod/staged/c9ce0f9239123a6e58f66fde0b5a1e60238bb107/data-plane/scripts/bootstrap-postgres.sh'
+readonly PROBE_SCRIPT='/root/eventsales-prod/staged/c9ce0f9239123a6e58f66fde0b5a1e60238bb107/data-plane/scripts/probe-postgres.sh'
+readonly RECOVERY_MARKER='/root/eventsales-prod/.v3-postgres-recovery-consumed'
+readonly BOOTSTRAP_MARKER='/root/eventsales-prod/.v3-postgres-bootstrap-v2-consumed'
+readonly EXPECTED_COMPOSE_SHA256='3f41703fd15decd8c6a174142f8eaa4e205383cad539ddaf0ae4cd7a944fb218'
+readonly EXPECTED_BOOTSTRAP_SHA256='afa7c663abd06ec109bbb9172f2d5391fa856e3dfbff1a1f90da29a46265fa7f'
+readonly EXPECTED_PROBE_SHA256='3019e4560946957e27f3fca033c754dda1cf9a66adebd61a46208d87b24e77ce'
+readonly CORRECTED_COMMAND='["-c","max_connections=100","-c","shared_buffers=768MB","-c","effective_cache_size=2GB","-c","work_mem=8MB","-c","maintenance_work_mem=256MB"]'
+readonly POSTGRES_FORMAT='{{.Id}}|{{.Name}}|{{.State.Status}}|{{.State.Running}}|{{.State.Restarting}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}|{{.RestartCount}}|{{.State.OOMKilled}}|{{.Config.Image}}|{{.HostConfig.Memory}}|{{.HostConfig.NanoCpus}}|{{json .Config.Cmd}}|{{json .Mounts}}|{{json .NetworkSettings.Networks}}|{{json .HostConfig.PortBindings}}'
+readonly D0_FORMAT='{{.Id}}|{{.Name}}|{{.State.Status}}|{{.State.Running}}|{{.State.Restarting}}'
+
+stop_preflight() {
+  printf 'BOOTSTRAP_STATE=BOOTSTRAP_PREFLIGHT_BLOCKED\n' >&2
+  printf 'STOP=%s\n' "$1" >&2
+  exit 1
+}
+
+stop_partial() {
+  printf 'BOOTSTRAP_STATE=BOOTSTRAP_PARTIAL_FAILURE\n' >&2
+  printf 'STOP=%s\n' "$1" >&2
+  exit 1
+}
+
+if (($# != 0)); then stop_preflight CALLER_ARGUMENTS_FORBIDDEN; fi
+if ((EUID != 0)); then stop_preflight ROOT_REQUIRED; fi
+
+PATH=$SAFE_PATH
+LC_ALL=C
+DOCKER_HOST=$DOCKER_SOCKET
+EVENTSALES_SECRET_DIR=$SECRET_DIR
+export PATH LC_ALL DOCKER_HOST EVENTSALES_SECRET_DIR
+unset CDPATH ENV BASH_ENV COMPOSE_PROJECT_NAME COMPOSE_FILE_SEPARATOR \
+  COMPOSE_PROFILES COMPOSE_ENV_FILES DOCKER_CONTEXT DOCKER_CONFIG DOCKER_TLS_VERIFY \
+  DOCKER_CERT_PATH DOCKER_API_VERSION DOCKER_DEFAULT_PLATFORM DOCKER_CLI_EXPERIMENTAL
+cd / || stop_preflight FIXED_WORKING_DIRECTORY_UNAVAILABLE
+
+require_trusted_directory() {
+  local path=$1 reason=$2 metadata owner group mode mode_value
+  [[ ! -L "$path" ]] || stop_preflight "${reason}_SYMLINK"
+  [[ -d "$path" ]] || stop_preflight "${reason}_MISSING"
+  metadata=$(stat -c '%u:%g:%a' -- "$path" 2>/dev/null) || stop_preflight "${reason}_STAT_FAILED"
+  IFS=: read -r owner group mode <<<"$metadata"
+  [[ "$owner" == "$ROOT_UID" && "$group" == "$ROOT_GID" ]] || stop_preflight "${reason}_OWNER_MISMATCH"
+  mode_value=$((8#$mode))
+  (( (mode_value & 0022) == 0 )) || stop_preflight "${reason}_WRITABLE"
+}
+
+require_trusted_file() {
+  local path=$1 reason=$2 expected_digest=$3 executable=$4
+  local metadata owner group mode mode_value digest
+  [[ ! -L "$path" ]] || stop_preflight "${reason}_SYMLINK"
+  [[ -f "$path" ]] || stop_preflight "${reason}_NOT_REGULAR"
+  metadata=$(stat -c '%u:%g:%a' -- "$path" 2>/dev/null) || stop_preflight "${reason}_STAT_FAILED"
+  IFS=: read -r owner group mode <<<"$metadata"
+  [[ "$owner" == "$ROOT_UID" && "$group" == "$ROOT_GID" ]] || stop_preflight "${reason}_OWNER_MISMATCH"
+  mode_value=$((8#$mode))
+  (( (mode_value & 0222) == 0 )) || stop_preflight "${reason}_WRITABLE"
+  if [[ "$executable" == yes ]]; then [[ -x "$path" ]] || stop_preflight "${reason}_NOT_EXECUTABLE"; fi
+  digest=$(sha256sum -- "$path" 2>/dev/null | awk '{print $1}') || stop_preflight "${reason}_HASH_UNAVAILABLE"
+  [[ "$digest" == "$expected_digest" ]] || stop_preflight "${reason}_HASH_MISMATCH"
+}
+
+for path in '/root' "$PROD_ROOT" "$PROD_ROOT/staged" \
+  "$PROD_ROOT/staged/$SOURCE_SHA" "$DATA_PLANE_DIR" "$DATA_PLANE_DIR/scripts"; do
+  require_trusted_directory "$path" C9CE_STAGE_DIRECTORY
+done
+require_trusted_file "$COMPOSE_FILE" COMPOSE "$EXPECTED_COMPOSE_SHA256" no
+require_trusted_file "$BOOTSTRAP_SCRIPT" BOOTSTRAP_SCRIPT "$EXPECTED_BOOTSTRAP_SHA256" yes
+require_trusted_file "$PROBE_SCRIPT" PROBE_SCRIPT "$EXPECTED_PROBE_SHA256" yes
+
+require_exact_directory() {
+  local path=$1 reason=$2 expected=$3 metadata
+  [[ ! -L "$path" ]] || stop_preflight "${reason}_SYMLINK"
+  [[ -d "$path" ]] || stop_preflight "${reason}_INVALID"
+  metadata=$(stat -c '%u:%g:%a' -- "$path" 2>/dev/null) || stop_preflight "${reason}_METADATA_MISMATCH"
+  [[ "$metadata" == "$expected" ]] || stop_preflight "${reason}_METADATA_MISMATCH"
+}
+require_exact_directory "$SECRET_DIR" SECRET_DIRECTORY 0:0:700
+require_exact_directory "$RECOVERY_MARKER" RECOVERY_MARKER 0:0:700
+
+require_secret_file() {
+  local name=$1 expected_owner=$2 expected_group=$3 expected_mode=$4 expected_size=$5
+  local path="$SECRET_DIR/$name" metadata
+  [[ ! -L "$path" ]] || stop_preflight SECRET_FILE_SYMLINK
+  [[ -f "$path" ]] || stop_preflight SECRET_FILE_NOT_REGULAR
+  metadata=$(stat -c '%u:%g:%a:%s' -- "$path" 2>/dev/null) || stop_preflight SECRET_FILE_METADATA_MISMATCH
+  if [[ "$expected_size" == '*' ]]; then
+    [[ "$metadata" == "$expected_owner:$expected_group:$expected_mode:"* ]] || stop_preflight SECRET_FILE_METADATA_MISMATCH
+    [[ "${metadata##*:}" -gt 0 ]] || stop_preflight SECRET_FILE_METADATA_MISMATCH
+  else
+    [[ "$metadata" == "$expected_owner:$expected_group:$expected_mode:$expected_size" ]] || stop_preflight SECRET_FILE_METADATA_MISMATCH
+  fi
+}
+require_secret_file postgres_bootstrap_password 0 70 440 64
+require_secret_file eventsales_migrator_password 0 0 400 64
+require_secret_file eventsales_runtime_server_password 0 0 400 64
+require_secret_file eventsales_runtime_client_password 0 0 400 64
+require_secret_file eventsales_backup_password 0 0 400 64
+require_secret_file redis_runtime_password 0 0 400 64
+require_secret_file redis_stats_password 0 0 400 64
+require_secret_file pgbouncer.ini 0 65532 440 '*'
+require_secret_file pgbouncer_users.txt 0 65532 440 '*'
+require_secret_file redis-users.acl 0 65532 440 '*'
+
+[[ ! -e "$BOOTSTRAP_MARKER" && ! -L "$BOOTSTRAP_MARKER" ]] || stop_preflight BOOTSTRAP_AUTHORITY_ALREADY_CONSUMED
+
+docker_fixed() {
+  local operation="$1"
+  case "$operation" in
+    ps|inspect) ;;
+    network|volume) [[ $# -ge 2 && "$2" == inspect ]] || stop_preflight DOCKER_OPERATION_FORBIDDEN ;;
+    *) stop_preflight DOCKER_OPERATION_FORBIDDEN ;;
+  esac
+  /usr/bin/env -i PATH="$SAFE_PATH" LC_ALL=C HOME=/root DOCKER_HOST="$DOCKER_SOCKET" \
+    EVENTSALES_SECRET_DIR="$SECRET_DIR" docker "$@"
+}
+
+network_row=$(docker_fixed network inspect --format '{{.Name}}|{{.Driver}}|{{.Internal}}' "$DATA_NETWORK" 2>/dev/null) \
+  || stop_preflight DATA_NETWORK_MISMATCH
+[[ "$network_row" == "$DATA_NETWORK|bridge|true" ]] || stop_preflight DATA_NETWORK_MISMATCH
+volume_row=$(docker_fixed volume inspect --format '{{.Name}}|{{.Driver}}|{{.Scope}}' "$POSTGRES_VOLUME" 2>/dev/null) \
+  || stop_preflight POSTGRES_VOLUME_MISMATCH
+[[ "$volume_row" == "$POSTGRES_VOLUME|local|local" ]] || stop_preflight POSTGRES_VOLUME_MISMATCH
+
+production_rows=$(docker_fixed ps -a --no-trunc --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+  --format '{{.ID}}|{{.Names}}' 2>/dev/null) || stop_preflight PRODUCTION_INVENTORY_UNAVAILABLE
+[[ "$production_rows" != *$'\n'* ]] || stop_preflight PRODUCTION_INVENTORY_MISMATCH
+IFS='|' read -r POSTGRES_ID production_name <<<"$production_rows"
+[[ "$POSTGRES_ID" =~ ^[0-9a-f]{64}$ && "$production_name" == "$POSTGRES_NAME" ]] \
+  || stop_preflight PRODUCTION_INVENTORY_MISMATCH
+
+postgres_details=$(docker_fixed inspect --format "$POSTGRES_FORMAT" "$POSTGRES_ID" 2>/dev/null) \
+  || stop_preflight POSTGRES_INSPECT_FAILED
+[[ "$postgres_details" != *$'\n'* ]] || stop_preflight POSTGRES_RUNTIME_CONTRACT_MISMATCH
+IFS='|' read -r inspected_id inspected_name postgres_status postgres_running postgres_restarting \
+  postgres_health postgres_restarts postgres_oom postgres_image postgres_memory postgres_nano \
+  postgres_command postgres_mounts postgres_networks postgres_ports <<<"$postgres_details"
+inspected_name=$(printf '%s' "$inspected_name" | sed 's|^/||')
+[[ "$inspected_id" == "$POSTGRES_ID" && "$inspected_name" == "$POSTGRES_NAME" ]] \
+  || stop_preflight POSTGRES_IDENTITY_MISMATCH
+[[ "$postgres_status" == running && "$postgres_running" == true && "$postgres_restarting" == false \
+  && "$postgres_health" == healthy ]] || stop_preflight POSTGRES_NOT_HEALTHY
+[[ "$postgres_restarts" == 0 ]] || stop_preflight POSTGRES_RESTART_COUNT_MISMATCH
+[[ "$postgres_oom" == false ]] || stop_preflight POSTGRES_OOM_KILLED
+[[ "$postgres_image" == "$POSTGRES_IMAGE" ]] || stop_preflight POSTGRES_IMAGE_MISMATCH
+[[ "$postgres_memory" == 3221225472 && "$postgres_nano" == 2000000000 ]] \
+  || stop_preflight POSTGRES_RESOURCE_MISMATCH
+[[ "$postgres_command" == "$CORRECTED_COMMAND" ]] || stop_preflight POSTGRES_COMMAND_MISMATCH
+
+if ! printf '%s\n%s\n%s\n' "$postgres_mounts" "$postgres_networks" "$postgres_ports" | \
+  /usr/bin/env -i PATH="$SAFE_PATH" LC_ALL=C \
+    /usr/bin/python3 -I -c '
+import json
+import sys
+
+try:
+    mounts, networks, ports = [json.loads(line) for line in sys.stdin]
+except Exception:
+    raise SystemExit(1)
+
+volume, network, secret_source = sys.argv[1:]
+if not isinstance(mounts, list) or not isinstance(networks, dict):
+    raise SystemExit(1)
+volume_mounts = [item for item in mounts if isinstance(item, dict) and item.get("Type") == "volume"]
+secret_mounts = [item for item in mounts if isinstance(item, dict) and item.get("Destination") == "/run/secrets/postgres_bootstrap_password"]
+if len(mounts) != 2 or len(volume_mounts) != 1 or len(secret_mounts) != 1:
+    raise SystemExit(1)
+volume_mount = volume_mounts[0]
+secret_mount = secret_mounts[0]
+if volume_mount.get("Name") != volume or volume_mount.get("Destination") != "/var/lib/postgresql":
+    raise SystemExit(1)
+if secret_mount.get("Type") != "bind" or secret_mount.get("Source") != secret_source:
+    raise SystemExit(1)
+if secret_mount.get("RW") is not False or set(networks) != {network}:
+    raise SystemExit(1)
+if ports not in (None, {}):
+    if not isinstance(ports, dict) or any(value not in (None, []) for value in ports.values()):
+        raise SystemExit(1)
+' "$POSTGRES_VOLUME" "$DATA_NETWORK" "$SECRET_DIR/postgres_bootstrap_password" 2>/dev/null; then
+  stop_preflight POSTGRES_ATTACHMENT_MISMATCH
+fi
+
+valid_docker_id() { [[ "$1" =~ ^[0-9a-f]{64}$ ]]; }
+read_d0_snapshot() {
+  local rows row id name details detail_id detail_name status running restarting count=0 seen_ids=''
+  rows=$(docker_fixed ps -a --no-trunc --filter label=com.docker.compose.project=eventsales-d0-proof \
+    --format '{{.ID}}|{{.Names}}' 2>/dev/null) || return 1
+  [[ -n "$rows" ]] || return 1
+  D0_SNAPSHOT=$(printf '%s\n' "$rows" | sort)
+  while IFS= read -r row; do
+    [[ -n "$row" && "$row" == *'|'* ]] || return 1
+    id=$(printf '%s' "$row" | cut -d'|' -f1)
+    name=$(printf '%s' "$row" | cut -d'|' -f2)
+    valid_docker_id "$id" || return 1
+    [[ "$name" =~ ^eventsales-d0-proof-[A-Za-z0-9_.-]+$ ]] || return 1
+    [[ "$seen_ids" != *"|$id|"* ]] || return 1
+    seen_ids="$seen_ids|$id|"
+    details=$(docker_fixed inspect --format "$D0_FORMAT" "$id" 2>/dev/null) || return 1
+    IFS='|' read -r detail_id detail_name status running restarting <<<"$details"
+    detail_name=$(printf '%s' "$detail_name" | sed 's|^/||')
+    [[ "$detail_id" == "$id" && "$detail_name" == "$name" ]] || return 1
+    [[ "$status" == exited && "$running" == false && "$restarting" == false ]] || return 1
+    count=$((count + 1))
+  done <<<"$D0_SNAPSHOT"
+  [[ "$count" -eq 3 ]]
+}
+read_d0_snapshot || stop_preflight D0_STATE_MISMATCH
+initial_d0_snapshot=$D0_SNAPSHOT
+
+if ! mkdir -m 0700 -- "$BOOTSTRAP_MARKER" 2>/dev/null; then
+  stop_preflight BOOTSTRAP_MARKER_CREATE_FAILED
+fi
+marker_metadata=$(stat -c '%u:%g:%a' -- "$BOOTSTRAP_MARKER" 2>/dev/null) \
+  || stop_partial BOOTSTRAP_MARKER_METADATA_MISMATCH
+[[ "$marker_metadata" == 0:0:700 ]] || stop_partial BOOTSTRAP_MARKER_METADATA_MISMATCH
+printf 'BOOTSTRAP_STATE=BOOTSTRAP_AUTHORITY_CONSUMED\n'
+
+child_status=0
+if /usr/bin/env -i PATH="$SAFE_PATH" LC_ALL=C HOME=/root DOCKER_HOST="$DOCKER_SOCKET" \
+  EVENTSALES_SECRET_DIR="$SECRET_DIR" "$BOOTSTRAP_SCRIPT" "$SECRET_DIR"; then
+  child_status=0
+else
+  child_status=$?
+fi
+if [[ "$child_status" -ne 0 ]]; then stop_partial BOOTSTRAP_PARTIAL_FAILURE; fi
+
+if ! read_d0_snapshot || [[ "$D0_SNAPSHOT" != "$initial_d0_snapshot" ]]; then
+  stop_partial D0_STATE_CHANGED_AFTER_BOOTSTRAP
+fi
+
+printf 'POSTGRES_BOOTSTRAP=BOOTSTRAPPED\n'
+printf 'BOOTSTRAP_STATE=BOOTSTRAPPED\n'
+printf 'D0_STATE=ARCHIVED_STOPPED\n'

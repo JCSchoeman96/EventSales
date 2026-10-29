@@ -326,3 +326,7 @@ jobs:
       - name: Verify EventSales V3 PostgreSQL recovery wrapper
         shell: bash
         run: bash test/scripts/agent_eventsales_v3_recover_postgres_test.sh
+
+      - name: Verify EventSales V3 PostgreSQL bootstrap-v2 wrapper
+        shell: bash
+        run: bash test/scripts/agent_eventsales_v3_bootstrap_postgres_v2_test.sh

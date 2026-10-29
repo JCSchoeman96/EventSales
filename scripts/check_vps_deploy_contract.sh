@@ -35,6 +35,8 @@ RUNTIME_RENDERER="$ROOT/deploy/vps/data-plane/scripts/render-runtime-config.sh"
 POSTGRES_BOOTSTRAP="$ROOT/deploy/vps/data-plane/scripts/bootstrap-postgres.sh"
 RECOVERY_WRAPPER="$ROOT/deploy/vps/operator/agent-eventsales-v3-recover-postgres"
 RECOVERY_SUDOERS="$ROOT/deploy/vps/operator/agent-eventsales-v3-recover-postgres.sudoers"
+BOOTSTRAP_V2_WRAPPER="$ROOT/deploy/vps/operator/agent-eventsales-v3-bootstrap-postgres-v2"
+BOOTSTRAP_V2_SUDOERS="$ROOT/deploy/vps/operator/agent-eventsales-v3-bootstrap-postgres-v2.sudoers"
 DEPLOY_PROBE_SCRIPTS=(
   "$ROOT/deploy/vps/data-plane/scripts/probe-postgres.sh"
   "$ROOT/deploy/vps/data-plane/scripts/probe-pgbouncer.sh"
@@ -58,6 +60,8 @@ for source_file in \
   "$POSTGRES_BOOTSTRAP" \
   "$RECOVERY_WRAPPER" \
   "$RECOVERY_SUDOERS" \
+  "$BOOTSTRAP_V2_WRAPPER" \
+  "$BOOTSTRAP_V2_SUDOERS" \
   "${DEPLOY_PROBE_SCRIPTS[@]}"; do
   [[ -f "$source_file" && -r "$source_file" ]] || fail SOURCE_FILE_MISSING
 done
@@ -75,6 +79,17 @@ grep -Fq 'docker_fixed stop --time 10 "$NEW_POSTGRES_ID"' "$RECOVERY_WRAPPER" ||
 if grep -Eiq 'docker[[:space:]]+(volume[[:space:]]+rm|system[[:space:]]+prune)|compose[[:space:]]+down[[:space:]]+-v' "$RECOVERY_WRAPPER"; then
   fail RECOVERY_STORAGE_MUTATION
 fi
+
+[[ -x "$BOOTSTRAP_V2_WRAPPER" && ! -L "$BOOTSTRAP_V2_WRAPPER" ]] || fail BOOTSTRAP_V2_WRAPPER_TYPE
+bash -n "$BOOTSTRAP_V2_WRAPPER" || fail BOOTSTRAP_V2_WRAPPER_SYNTAX
+expected_bootstrap_v2_rule='agentops ALL=(root) NOPASSWD: /usr/local/sbin/agent-eventsales-v3-bootstrap-postgres-v2 ""'
+[[ "$(cat -- "$BOOTSTRAP_V2_SUDOERS")" == "$expected_bootstrap_v2_rule" ]] || fail BOOTSTRAP_V2_SUDOERS_RULE
+[[ $(wc -l <"$BOOTSTRAP_V2_SUDOERS") -eq 1 ]] || fail BOOTSTRAP_V2_SUDOERS_SCOPE
+grep -Fqx 'readonly SOURCE_SHA='\''c9ce0f9239123a6e58f66fde0b5a1e60238bb107'\''' "$BOOTSTRAP_V2_WRAPPER" || fail BOOTSTRAP_V2_STAGE_PIN
+grep -Fqx 'readonly EXPECTED_COMPOSE_SHA256='\''3f41703fd15decd8c6a174142f8eaa4e205383cad539ddaf0ae4cd7a944fb218'\''' "$BOOTSTRAP_V2_WRAPPER" || fail BOOTSTRAP_V2_COMPOSE_PIN
+grep -Fqx 'readonly EXPECTED_BOOTSTRAP_SHA256='\''afa7c663abd06ec109bbb9172f2d5391fa856e3dfbff1a1f90da29a46265fa7f'\''' "$BOOTSTRAP_V2_WRAPPER" || fail BOOTSTRAP_V2_CHILD_PIN
+grep -Fqx 'readonly EXPECTED_PROBE_SHA256='\''3019e4560946957e27f3fca033c754dda1cf9a66adebd61a46208d87b24e77ce'\''' "$BOOTSTRAP_V2_WRAPPER" || fail BOOTSTRAP_V2_PROBE_PIN
+/usr/sbin/visudo -cf "$BOOTSTRAP_V2_SUDOERS" >/dev/null || fail BOOTSTRAP_V2_SUDOERS_SYNTAX
 
 TMP_DIR="$(mktemp -d /tmp/vps-deploy-contract.XXXXXX 2>/dev/null)" || fail TEMP_DIR
 trap 'rm -rf -- "$TMP_DIR"' EXIT
