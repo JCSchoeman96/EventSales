@@ -318,3 +318,7 @@ jobs:
       - name: Verify EventSales V3 privileged wrappers
         shell: bash
         run: bash test/scripts/agent_eventsales_v3_wrappers_test.sh
+
+      - name: Verify EventSales V3 read-only audit authority
+        shell: bash
+        run: bash test/scripts/agent_eventsales_v3_audit_state_test.sh
