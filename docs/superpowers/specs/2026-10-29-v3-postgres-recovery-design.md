@@ -2,252 +2,297 @@
 
 ## Status
 
-Design for review only. This document does not authorize installation or recovery. No wrapper has been implemented.
+Design for review only. It does not authorize implementation, installation, or recovery. No wrapper has been implemented.
 
 ## Goal and non-goals
 
-Add a dedicated, zero-argument, one-shot root wrapper to replace only the known failed PostgreSQL container with one created from the corrected immutable c9ce stage:
+Design a dedicated, zero-argument, one-shot root wrapper that replaces only the known failed PostgreSQL container with one created from the corrected immutable c9ce stage:
 
-```text
-SOURCE_SHA=c9ce0f9239123a6e58f66fde0b5a1e60238bb107
-STAGE=/root/eventsales-prod/staged/c9ce0f9239123a6e58f66fde0b5a1e60238bb107/data-plane
-COMPOSE_SHA256=3f41703fd15decd8c6a174142f8eaa4e205383cad539ddaf0ae4cd7a944fb218
-```
+    SOURCE_SHA=c9ce0f9239123a6e58f66fde0b5a1e60238bb107
+    STAGE=/root/eventsales-prod/staged/c9ce0f9239123a6e58f66fde0b5a1e60238bb107/data-plane
+    COMPOSE_SHA256=3f41703fd15decd8c6a174142f8eaa4e205383cad539ddaf0ae4cd7a944fb218
 
-The corrected Compose source in the repository has the expected hash. Its PostgreSQL command is flags-only, image digest is pinned, resources are 3 GiB and 2 CPUs, it names the existing volume, uses the internal data network, publishes no ports, and has a health check.
+The corrected Compose uses the pinned PostgreSQL image, flags-only command, 3 GiB memory limit, 2 CPU limit, the existing named data volume, the internal data network, no published ports, and a health check.
 
-The wrapper does not bootstrap, migrate, rotate or rerender secrets; start PgBouncer, Redis, EventSales, or D0; change networks or volumes; edit any historical V3 authority; repair a failed attempt; or print Docker JSON, secret values, secret hashes, or secret mount source paths.
+The wrapper will not bootstrap, migrate, regenerate or rerender secrets; start PgBouncer, Redis, EventSales, or D0; mutate networks or volumes; edit historical V3 authorities; retry recovery; roll back to the failed container; or print Docker JSON, secret values, secret hashes, or secret mount source paths.
+
+The wrapper must preserve the already initialized database volume. The existing database contents remain authoritative; attaching the bootstrap secret does not reinitialize the database or change its existing password.
+
+## Authority and implementation baseline
+
+The design was authored against:
+
+    DESIGN_BASE_SHA=86c023afb9b5f18c8c8230e1e739453c4c722c30
+    DESIGN_BASE_TREE=705facd5f932a1dd7fa107514b9cc14a0c377d0b
+    REVIEWED_DESIGN_HEAD=<final signed PR #348 reviewed head>
+    IMPLEMENTATION_BASE_SHA=<supplied after PR #348 merge>
+    IMPLEMENTATION_BASE_TREE=<supplied after PR #348 merge>
+
+The design base records the historical source context. It is not the future implementation baseline.
+
+Before implementation, a separate authorization must supply exact implementation-base SHA and tree, final reviewed PR #348 commit SHA, and the reviewed blob identities of both this design and its implementation plan. The implementation preflight must require:
+
+1. The clean implementation worktree and origin/main both equal the supplied IMPLEMENTATION_BASE_SHA and IMPLEMENTATION_BASE_TREE.
+2. The final reviewed PR #348 commit is an ancestor of IMPLEMENTATION_BASE_SHA. The merge method must preserve that commit in ancestry; a squash merge that omits it does not satisfy this guard.
+3. The design and plan blobs at the reviewed commit have the exact separately supplied blob identities.
+4. c9ce0f9239123a6e58f66fde0b5a1e60238bb107 is an ancestor of IMPLEMENTATION_BASE_SHA.
+5. deploy/vps/data-plane/** has no content, path, or mode difference between that c9ce source commit and IMPLEMENTATION_BASE_SHA.
+6. The corrected Compose file still has SHA-256 3f41703fd15decd8c6a174142f8eaa4e205383cad539ddaf0ae4cd7a944fb218.
+
+Any mismatch is a STOP. Never refresh a SHA, tree, blob, source, or Compose pin automatically. The final reviewed head and document blob identities are recorded only after the final signed correction commit exists; they cannot be self-references inside that commit.
 
 ## State machine and terminal states
 
-```text
-FAILED_CONTAINED
-  | all preconditions pass
-  v
-RECOVERY_AUTHORIZED
-  | one-shot marker created
-  v
-REMOVING_FAILED_CONTAINER
-  | exact stopped container removed
-  v
-RECREATING
-  | postgres only, from corrected immutable Compose
-  v
-HEALTH_CHECKING
-  | runtime contract and health pass
-  v
-RECOVERED_HEALTHY
-```
+    FAILED_CONTAINED
+      | all read-only preconditions pass; persistent marker is created
+      v
+    RECOVERY_AUTHORIZED
+      | exact failed container is re-inspected by captured ID
+      v
+    REMOVING_FAILED_CONTAINER
+      | one docker rm of the validated ID succeeds
+      v
+    RECREATING
+      | one Compose up for postgres only returns
+      v
+    VALIDATING_RECREATED_CONTAINER
+      | new ID and complete runtime contract pass
+      v
+    HEALTH_CHECKING
+      | running, healthy, restart count zero, all invariants hold
+      v
+    RECOVERED_HEALTHY
 
-Any failure in removal, recreation, or health checking ends in `RECOVERY_FAILED_CONTAINED`. The wrapper stops without retry, rollback, stopping a newly created container, or deleting storage. Depending on the failure point, PostgreSQL may be absent, exited, starting, unhealthy, or restarting. Only PostgreSQL may have been started; it has no published ports and is configured only on the internal data network. PgBouncer, Redis, EventSales, and D0 remain stopped. A new recovery attempt needs a separately reviewed authority.
+    RECREATING / VALIDATING_RECREATED_CONTAINER / HEALTH_CHECKING
+      | failure while new PostgreSQL is running or restarting
+      v
+    CONTAINING_FAILED_RECREATION
+      | one bounded docker stop of the captured new ID
+      +--> verified stopped: RECOVERY_FAILED_CONTAINED
+      +--> stop fails or still running/restarting: RECOVERY_FAILED_UNCONTAINED
 
-## Entry, environment, and concurrency guards
+A failure after the old container has been removed is terminal. There is no retry, rollback, second Compose call, or restoration of the old container. If Compose fails before creating a new container, or the new container is already stopped, recovery ends as RECOVERY_FAILED_CONTAINED without a stop. Every post-Compose contract or health failure inspects the exact new ID; if that object is running or restarting, the wrapper makes exactly one containment-stop attempt against that ID.
 
-Start the executable with:
+RECOVERY_FAILED_CONTAINED means the newly created PostgreSQL object is absent or verified stopped. RECOVERY_FAILED_UNCONTAINED means the one containment stop failed or the exact new object remains running or restarting. It requires immediate owner intervention. The wrapper emits a deterministic STOP reason in either failure state and retains the consumed marker.
 
-```bash
-#!/bin/bash -p
-set -euo pipefail
-set +x
-umask 077
-```
+## Entry, environment, lock, and consumed marker
 
-Reject arguments and require `EUID=0`. Set fixed `PATH=/usr/sbin:/usr/bin:/sbin:/bin`, `LC_ALL=C`, and `DOCKER_HOST=unix:///var/run/docker.sock`. Unset caller-controlled `BASH_ENV`, `ENV`, `CDPATH`, every `DOCKER_*` and `COMPOSE_*` variable, and `EVENTSALES_SECRET_DIR`. Set only fixed values, change to `/`, and run each Docker command with a cleared environment and the fixed socket.
+The wrapper starts with:
 
-Take a nonblocking `flock` on `/run/agent-eventsales-v3-recover-postgres.lock`; hold it through final verification. Require `/run` and the lock file to be non-symlink root-owned paths with safe permissions. A busy or unsafe lock stops before Docker access. This serializes invocations of this wrapper.
+    #!/bin/bash -p
+    set -euo pipefail
+    set +x
+    umask 077
 
-Also require an exclusive Docker maintenance interval. Existing V3 wrappers do not use this lock. No root operator or other `agentops` session may run direct Docker commands or invoke historical start, bootstrap, or provision wrappers until the recovery ends. If exclusive Docker access cannot be established, stop with `UNRESOLVED_CONCURRENCY`.
+It rejects all arguments and requires EUID=0. It unsets caller-controlled Docker, Compose, shell startup, and EventSales secret-directory variables, then sets fixed PATH=/usr/sbin:/usr/bin:/sbin:/bin, LC_ALL=C, DOCKER_HOST=unix:///var/run/docker.sock, and EVENTSALES_SECRET_DIR=/root/eventsales-prod/secrets-v1. Docker commands run with a cleared environment and the fixed socket. Paths, container names, network names, hashes, project name, Compose files, and options are constants.
 
-Once all read-only preconditions pass, atomically create `/root/eventsales-prod/.v3-postgres-recovery-consumed` as a `root:root` directory with mode `0700`, immediately before the first Docker mutation. Never overwrite or follow an existing path and never remove the marker. A preflight failure does not consume authority. Marker creation consumes it even if `docker rm` then fails. A later invocation sees the marker and stops before Docker.
+The wrapper takes a nonblocking flock on /run/agent-eventsales-v3-recover-postgres.lock and holds it through final verification. Require /run to be a non-symlink root:root directory with no group/other write bits. If the lock file is absent, create it exclusively as root under umask 077. Then require a non-symlink regular file owned root:root, mode 0600. Reject an unsafe or busy lock before Docker access. Keep the fixed lock inode in place after releasing the lock; unlinking it could allow a waiter to lock a different inode and defeat serialization.
 
-The marker is authority bookkeeping, not a Docker mutation. The only Docker mutations are the two operations in the allowlist below.
+Before any Docker mutation, validate that /root/eventsales-prod/.v3-postgres-recovery-consumed is absent and has no symlink, file, or directory conflict. After all read-only preconditions pass, create this persistent root-owned mode-0700 directory atomically immediately before the first Docker mutation. Marker creation failure stops before Docker. Marker creation consumes authority even if the subsequent removal fails. Never clear or replace the marker. A later invocation stops before Docker.
 
-## Stage trust checks
+The wrapper-created private temporary directory holds only the recovery Compose override. A cleanup trap may remove only that exact wrapper-created temporary directory and its override file. It must never remove or alter the consumed marker, fixed lock file, containers, networks, volumes, or D0 resources.
 
-Before any Docker mutation, require each path below to be a non-symlink directory owned by uid 0 and gid 0 with no group/other write bits:
+Create and validate the override before creating the consumed marker. If temporary-directory or override creation, metadata validation, content validation, or hashing fails, stop before Docker mutation and leave the marker absent. Re-hash the override again immediately before Compose. This keeps avoidable local preparation failures outside the destructive interval.
 
-```text
-/root
-/root/eventsales-prod
-/root/eventsales-prod/staged
-/root/eventsales-prod/staged/c9ce0f9239123a6e58f66fde0b5a1e60238bb107
-/root/eventsales-prod/staged/c9ce0f9239123a6e58f66fde0b5a1e60238bb107/data-plane
-```
+The fixed wrapper lock serializes this wrapper. Because other Docker actors do not honor it, an exclusive Docker maintenance interval is also a precondition. No root operator or other agentops session may invoke Docker or historical V3 start, bootstrap, or provision authorities during recovery. If this cannot be established, stop with UNRESOLVED_CONCURRENCY.
 
-Require `compose.yaml` to be a non-symlink regular file owned by root:root, with no write bits, and SHA-256 `3f41703fd15decd8c6a174142f8eaa4e205383cad539ddaf0ae4cd7a944fb218`. Recheck the hash immediately before Compose. The directory name alone does not prove file identity.
+## Immutable stage trust checks
+
+Before any Docker mutation, require each path below to be a non-symlink directory owned by uid 0 and gid 0, with no group/other write bits:
+
+    /root
+    /root/eventsales-prod
+    /root/eventsales-prod/staged
+    /root/eventsales-prod/staged/c9ce0f9239123a6e58f66fde0b5a1e60238bb107
+    /root/eventsales-prod/staged/c9ce0f9239123a6e58f66fde0b5a1e60238bb107/data-plane
+
+Require compose.yaml to be a non-symlink regular file, root:root, with no write bits, and the exact SHA-256 above. Recheck its hash immediately before Compose. The directory name alone does not establish file identity.
 
 ## Secret handling
 
-Require `/root/eventsales-prod/secrets-v1` to be a non-symlink `root:root` directory, mode `0700`. Match the current V3 start/bootstrap metadata contract. Every listed item must be a non-symlink regular file:
+Require /root/eventsales-prod/secrets-v1 to be a non-symlink root:root directory, mode 0700. Preserve the current V3 start/bootstrap metadata contract:
 
 | File | uid:gid | Mode | Size |
 | --- | --- | --- | --- |
-| `postgres_bootstrap_password` | `0:70` | `0440` | 64 |
-| `eventsales_migrator_password` | `0:0` | `0400` | 64 |
-| `eventsales_runtime_server_password` | `0:0` | `0400` | 64 |
-| `eventsales_runtime_client_password` | `0:0` | `0400` | 64 |
-| `eventsales_backup_password` | `0:0` | `0400` | 64 |
-| `redis_runtime_password` | `0:0` | `0400` | 64 |
-| `redis_stats_password` | `0:0` | `0400` | 64 |
-| `pgbouncer.ini` | `0:65532` | `0440` | nonempty |
-| `pgbouncer_users.txt` | `0:65532` | `0440` | nonempty |
-| `redis-users.acl` | `0:65532` | `0440` | nonempty |
+| postgres_bootstrap_password | 0:70 | 0440 | 64 |
+| eventsales_migrator_password | 0:0 | 0400 | 64 |
+| eventsales_runtime_server_password | 0:0 | 0400 | 64 |
+| eventsales_runtime_client_password | 0:0 | 0400 | 64 |
+| eventsales_backup_password | 0:0 | 0400 | 64 |
+| redis_runtime_password | 0:0 | 0400 | 64 |
+| redis_stats_password | 0:0 | 0400 | 64 |
+| pgbouncer.ini | 0:65532 | 0440 | nonempty |
+| pgbouncer_users.txt | 0:65532 | 0440 | nonempty |
+| redis-users.acl | 0:65532 | 0440 | nonempty |
 
-Check metadata only. Never read or print secret contents or hashes. Compose declares all four file-backed secrets, so require the three non-PostgreSQL rendered files too. The initialized database volume remains authoritative. Mounting the bootstrap secret does not reset an existing database password. Do not invoke bootstrap.
+Every item is a non-symlink regular file. Check metadata only; never read or print secret contents or hashes. Preserve the rendered-secret checks needed for Compose evaluation. The bootstrap secret remains mounted as expected, but the wrapper never invokes bootstrap.
 
 ## Network guards
 
 Before removal, require both existing networks and exact metadata:
 
-```text
-eventsales-prod_eventsales_data: driver=bridge, internal=true
-eventsales-prod_eventsales_edge: driver=bridge, internal=false
-```
+    eventsales-prod_eventsales_data: driver=bridge, internal=true
+    eventsales-prod_eventsales_edge: driver=bridge, internal=false
 
-Record their Docker IDs. Recheck IDs and metadata after container removal and after recreation. The data network is external in Compose. The wrapper has no network mutation command.
+Record IDs and recheck identities and metadata after removal and recreation. The postgres service uses the existing data network. The wrapper has no network mutation operation, and Compose must not be allowed to create a replacement data network.
 
-## Volume preservation invariant
+## Volume preservation invariant and recovery-only Compose override
 
-Never call `docker volume rm`, `docker compose down -v`, `docker system prune`, or an equivalent command. Never pass `-v` or `--volumes` to `docker rm`.
+Never call docker volume rm, docker compose down -v, docker system prune, or any equivalent operation. Never pass -v or --volumes to docker rm.
 
-Require `eventsales-prod_postgres_data` to exist, with exact name, local driver, local scope, and a non-symlink mountpoint directory. Capture its mountpoint device/inode fingerprint in memory. Require the failed container to have exactly one volume mount with that name at `/var/lib/postgresql`.
+Require eventsales-prod_postgres_data to exist with exact name, local driver, local scope, and a non-symlink mountpoint directory. Capture its mountpoint device/inode fingerprint. Require the failed container to have exactly one volume mount with this name at /var/lib/postgresql.
 
-Immediately after removal, re-inspect the same volume and require its metadata and fingerprint to match before Compose. After Compose, require the new container to use the same volume and fingerprint. Do not print the mountpoint. If any check fails, stop without retry.
+Immediately before removal, capture the fingerprint. After removal and immediately before Compose, re-inspect the volume and require unchanged metadata and fingerprint. After Compose, require the same volume identity, attachment, and fingerprint. Do not print the mountpoint. Any fingerprint change stops recovery.
 
-The corrected Compose names the volume but does not set `external: true`; Compose can create it if it is missing. The existence checks, unchanged fingerprint, and exclusive Docker maintenance interval are therefore mandatory. If the volume's local identity cannot be established, stop with `UNRESOLVED_VOLUME_IDENTITY` before container removal.
+The immutable c9ce Compose file remains untouched. Its named-volume declaration is not external, so it alone would allow Compose to create the name if the volume disappeared. Prevent that race with a recovery-only override generated from these exact literal bytes:
 
-## Production and failed-container guards
+    volumes:
+      postgres_data:
+        external: true
+        name: eventsales-prod_postgres_data
 
-Read both the Compose-project inventory and the `eventsales-prod` name-filter inventory. Require each to contain exactly `eventsales-prod-postgres-1`. Reject any other production container, including PgBouncer, Redis, or EventSales.
+The exact bytes include one final newline and have SHA-256:
 
-Require the exact failed PostgreSQL object:
+    RECOVERY_OVERRIDE_SHA256=cc4bc2cee5847d9d24984ccc5521ef81868aeb77456e66b94df62c50685f2e14
 
-```text
-status=exited
-running=false
-restarting=false
-exit_code=1
-restart_count=24
-oom_killed=false
-image=dhi.io/postgres:18.6-alpine3.24@sha256:d33bd884995daddfb515d0ce9aec23b74d20d72e03ca42b72c4abf617c76bb19
-command=["postgres","-c","max_connections=100","-c","shared_buffers=768MB","-c","effective_cache_size=2GB","-c","work_mem=8MB","-c","maintenance_work_mem=256MB"]
-memory=3221225472
-nano_cpus=2000000000
-```
+The wrapper creates a private root:root temporary directory with mode 0700 and a non-symlink override file owned root:root with mode 0400. The fixed content and SHA-256 are embedded in the wrapper. Re-hash the file immediately before Compose. The override is the second Compose file, after the immutable c9ce file. It changes only the top-level postgres_data declaration and requires the existing external volume. Compose must fail if that volume is missing; the wrapper must not create a replacement.
 
-Require no published ports. Require exactly the expected named volume mount and only the expected Compose bootstrap-secret mount. Validate the secret mount's fixed source internally without printing it. Require the data network only.
+Use the fixed environment, /dev/null env file, both Compose files in this order, and postgres-only command:
 
-Read the PostgreSQL container ID and recheck all failed-object fields immediately before `docker rm eventsales-prod-postgres-1`. The lock and exclusive maintenance interval prevent cooperating actors from replacing it between the check and removal.
+    docker compose --project-name eventsales-prod --env-file /dev/null \
+      -f /root/eventsales-prod/staged/c9ce0f9239123a6e58f66fde0b5a1e60238bb107/data-plane/compose.yaml \
+      -f <root-only recovery override> \
+      up -d --no-deps postgres
+
+Retain pre-removal, post-removal, immediately-pre-Compose, and post-Compose fingerprint checks. If the volume disappears before Compose, do not invoke Compose. The external declaration also ensures Docker Compose refuses a missing volume rather than creating an empty replacement.
+
+## Production inventory and exact failed-container guard
+
+Read the Compose-project inventory and eventsales-prod name-filter inventory. Each must contain exactly eventsales-prod-postgres-1. Reject every unexpected eventsales-prod container, including PgBouncer, Redis, or EventSales.
+
+Require the exact known failed PostgreSQL object:
+
+    name=eventsales-prod-postgres-1
+    status=exited
+    running=false
+    restarting=false
+    exit_code=1
+    restart_count=24
+    oom_killed=false
+    image=dhi.io/postgres:18.6-alpine3.24@sha256:d33bd884995daddfb515d0ce9aec23b74d20d72e03ca42b72c4abf617c76bb19
+    command=["postgres","-c","max_connections=100","-c","shared_buffers=768MB","-c","effective_cache_size=2GB","-c","work_mem=8MB","-c","maintenance_work_mem=256MB"]
+    memory=3221225472
+    nano_cpus=2000000000
+
+Require no published ports, exactly the expected named volume mount, only the expected Compose bootstrap-secret mount, and the data network only. Validate the secret mount source internally but never print it.
+
+Capture the full failed container ID and validate its Docker ID format as exactly 64 lowercase hexadecimal characters. Immediately before mutation, re-inspect that captured ID and prove the exact name, failed state, image, historical command, resources, volume, secret mount, network, and absence of ports. Then remove exactly that object using docker rm "$FAILED_POSTGRES_CONTAINER_ID", with no flags. Never remove by mutable name. If the ID changed or any field drifted, stop before removal.
 
 ## D0 isolation
 
-Use `com.docker.compose.project=eventsales-d0-proof` to list D0 container IDs. Require exactly three IDs. Inspect each and require `status=exited`, `running=false`, `restarting=false`. Save all three IDs.
+Use the fixed com.docker.compose.project=eventsales-d0-proof label to list D0 IDs. Require exactly three unique valid IDs. Inspect each and require status=exited, running=false, restarting=false. Save and revalidate those same IDs and states after PostgreSQL recreation.
 
-Never mutate or address D0 containers by name. After PostgreSQL recreation, list by the same project label and require the same three IDs and stopped states. Do not use a D0 Compose file or project name.
+Never address a D0 container by name or mutate a D0 object. Do not use a D0 Compose file or project name. No recovery command may start, stop, attach, or otherwise affect D0.
 
 ## Docker operation allowlist
 
-Read-only commands:
+Allowed read-only Docker operations are limited to fixed production/D0 container listing, inspect of the fixed PostgreSQL object and captured D0 IDs, inspect of the two fixed networks, and list/inspect of the fixed PostgreSQL volume.
 
-- `docker ps -a` with fixed production and D0 filters.
-- `docker inspect` for the fixed PostgreSQL container and D0 IDs.
-- `docker network inspect` for the two fixed production networks.
-- `docker volume ls` and `docker volume inspect` for the fixed PostgreSQL volume.
+The only authorized Docker mutations are:
 
-Exactly two Docker mutations:
+1. One docker rm "$FAILED_POSTGRES_CONTAINER_ID", where the full validated and immediately re-inspected ID is the known failed object. No flags.
+2. One Compose up -d --no-deps postgres with the immutable c9ce Compose file first, the exact root-only external-volume override second, fixed project name, fixed environment, and /dev/null env file.
+3. At most one docker stop --time 10 "$NEW_POSTGRES_CONTAINER_ID" if and only if the captured newly recreated PostgreSQL object is running or restarting after a post-Compose validation or health failure.
 
-1. `docker rm eventsales-prod-postgres-1`, without force or volume flags.
-2. `docker compose --project-name eventsales-prod --env-file /dev/null -f /root/eventsales-prod/staged/c9ce0f9239123a6e58f66fde0b5a1e60238bb107/data-plane/compose.yaml up -d --no-deps postgres`, with only the fixed `EVENTSALES_SECRET_DIR` and cleared environment.
+After Compose returns, capture the newly created PostgreSQL ID immediately and validate it as 64 lowercase hexadecimal characters. Require it to differ from FAILED_POSTGRES_CONTAINER_ID. Re-inspect and validate by this ID. All containment acts on this ID only, never the name. Never remove the new object. Never stop any other object.
 
-The second command starts PostgreSQL only. It does not start dependencies or run bootstrap. Suppress raw Docker output. On failure, emit one fixed STOP reason. On success, emit only the safe output below.
+For a Compose command failure, still inspect the fixed production inventory once to identify whether a new postgres object was created. If exactly one new object exists, capture its ID and apply the same stopped-or-running containment rule. If there is no new object, the PostgreSQL service is absent and the failure is contained. If a possible new object cannot be uniquely identified, do not guess or stop by name; classify the result as RECOVERY_FAILED_UNCONTAINED, emit a deterministic STOP, and require owner intervention because safe containment cannot be proven.
 
-Forbid Docker start/stop/restart/exec, `docker rm` of any other object or with force/volume flags, all network/volume mutation commands, Compose `down`, `create`, `run`, or `up` for any other service, and all prune commands.
+Forbid every other start, stop, restart, exec, rm, network, volume, prune, or Compose operation. Do not use Compose down, create, run, or up for any other service.
 
-## Corrected runtime and health contract
+## Recreated-container validation and health
 
-Immediately after Compose returns and on every health poll, require:
+Immediately validate the new object by captured ID before health polling. Require:
 
-```text
-image=dhi.io/postgres:18.6-alpine3.24@sha256:d33bd884995daddfb515d0ce9aec23b74d20d72e03ca42b72c4abf617c76bb19
-Config.Cmd=["-c","max_connections=100","-c","shared_buffers=768MB","-c","effective_cache_size=2GB","-c","work_mem=8MB","-c","maintenance_work_mem=256MB"]
-Config.Cmd[0] != "postgres"
-memory=3221225472
-nano_cpus=2000000000
-restart_count=0
-running=true
-oom_killed=false
-```
+    image=dhi.io/postgres:18.6-alpine3.24@sha256:d33bd884995daddfb515d0ce9aec23b74d20d72e03ca42b72c4abf617c76bb19
+    Config.Cmd=["-c","max_connections=100","-c","shared_buffers=768MB","-c","effective_cache_size=2GB","-c","work_mem=8MB","-c","maintenance_work_mem=256MB"]
+    Config.Cmd[0] != "postgres"
+    memory=3221225472
+    nano_cpus=2000000000
+    restart_count=0
+    running=true
+    restarting=false
+    oom_killed=false
 
-Also require the same volume at `/var/lib/postgresql`, the same data network only, the expected secret mount, and no published ports. A nonzero restart count, exited/dead state, unhealthy state, inspect failure, or contract mismatch stops immediately. Never recreate again.
+Also require the same volume mounted at /var/lib/postgresql, only the existing data network, expected bootstrap-secret mount, and no published ports. Require production inventory to contain exactly this PostgreSQL object, and D0 IDs/states and network/volume identities to match the preflight snapshot.
 
-Poll with a fixed interval and a fixed 120-second deadline. Missing container or failed inspect is an error, not grounds to retry. Success requires `status=running` and `health=healthy`.
+Any mismatch is a post-Compose failure. If the exact new ID is running or restarting, transition to CONTAINING_FAILED_RECREATION and make one docker stop --time 10 call. Then inspect that ID and require running=false and restarting=false. A successful stop followed by verified stopped state ends RECOVERY_FAILED_CONTAINED; otherwise end RECOVERY_FAILED_UNCONTAINED. Do not retry containment.
 
-After health passes, require exactly one production container, no PgBouncer/Redis/app containers, unchanged volume/network identity, and the same three stopped D0 IDs. Emit exactly:
+Health checks have a fixed 120-second deadline and bounded polling interval. Require status=running, health=healthy, restart_count=0, and all runtime, attachment, volume, network, port, inventory, and D0 invariants on each poll. If any check fails while the object is running or restarting, perform the one containment stop, then verify stopped state. If it is already stopped, do not issue a stop. Health timeout follows the same rule. Missing object is a contained failure. No automatic recreation follows any failure.
 
-```text
-POSTGRES_RECOVERY=HEALTHY
-POSTGRES_STATUS=running
-POSTGRES_HEALTH=healthy
-POSTGRES_RESTART_COUNT=0
-POSTGRES_IMAGE_MATCH=YES
-POSTGRES_COMMAND_CLASS=CORRECTED_FLAGS_ONLY
-POSTGRES_VOLUME_ATTACHMENT_MATCH=YES
-POSTGRES_NETWORK_ATTACHMENT_MATCH=YES
-POSTGRES_PORTS_PUBLISHED=NO
-POSTGRES_VOLUME_PRESERVED=YES
-PGBOUNCER_STARTED=NO
-REDIS_STARTED=NO
-APP_STARTED=NO
-D0_STATE=ARCHIVED_STOPPED
-```
+Success requires healthy PostgreSQL, exactly one production container, no PgBouncer/Redis/app, unchanged volume and network identity, and the same three stopped D0 IDs. Emit only:
 
-Do not include arbitrary metadata, Docker JSON, secret content/hash, or mount host paths. On any post-marker failure, retain the marker and stop without retry or rollback.
+    POSTGRES_RECOVERY=HEALTHY
+    POSTGRES_STATUS=running
+    POSTGRES_HEALTH=healthy
+    POSTGRES_RESTART_COUNT=0
+    POSTGRES_IMAGE_MATCH=YES
+    POSTGRES_COMMAND_CLASS=CORRECTED_FLAGS_ONLY
+    POSTGRES_VOLUME_ATTACHMENT_MATCH=YES
+    POSTGRES_NETWORK_ATTACHMENT_MATCH=YES
+    POSTGRES_PORTS_PUBLISHED=NO
+    POSTGRES_VOLUME_PRESERVED=YES
+    PGBOUNCER_STARTED=NO
+    REDIS_STARTED=NO
+    APP_STARTED=NO
+    D0_STATE=ARCHIVED_STOPPED
+
+No raw Docker JSON, arbitrary metadata, secret values/hashes, secret mount source paths, or volume mountpoint may be printed.
 
 ## Sudo boundary
 
-Add a new fragment containing only:
+A future dedicated sudoers fragment contains only:
 
-```text
-agentops ALL=(root) NOPASSWD: /usr/local/sbin/agent-eventsales-v3-recover-postgres ""
-```
+    agentops ALL=(root) NOPASSWD: /usr/local/sbin/agent-eventsales-v3-recover-postgres ""
 
-No Docker command, shell, wildcard, path argument, or `ALL` authority. Leave existing V2/V3/audit sudoers byte-identical. The wrapper also enforces zero arguments and EUID 0.
+Do not grant Docker, shell, wildcard, path-argument, or broad sudo authority. Leave all existing V2/V3/audit sudoers unchanged. The wrapper independently enforces root execution and zero arguments.
 
 ## Test strategy
 
-Use a shell suite with temporary fixtures and fake Docker, following the existing V3 tests' test-only EUID pattern. Log and reject every Docker call outside the allowlist. Every pre-mutation rejection proves remove and Compose were not called. Every test proves no volume deletion or D0 mutation.
+Use isolated fixtures and fake Docker, following the existing V3 suite's test-only EUID pattern. Fake Docker records every call and rejects everything outside the allowlist. Tests never contact production Docker or a VPS.
 
-Cover all requested pre-mutation cases: arguments, non-root, stage symlinks/ownership/write bits, Compose symlink/type/ownership/write/hash, secret directory and bootstrap secret metadata, other rendered secrets, both network mismatches, missing or changed volume, unexpected production containers, missing/running/restarting PostgreSQL, wrong status/exit/restart/OOM/image/command/resources, wrong/extra volume or destination, wrong network, published ports, and D0 count/running/restarting drift.
+Pre-mutation rejection coverage includes arguments; non-root; stage path/symlink/owner/write-bit drift; Compose symlink/type/owner/write/hash drift; secret directory and each required secret mismatch; data/edge network mismatch; missing, wrong, or fingerprint-changed volume; unexpected production inventory; missing/running/restarting PostgreSQL; all failed-state, image, command, resource, mount, network, port, and D0 mismatches.
 
-Cover mutation failures: failed `docker rm` stops before Compose; failed Compose is not retried; recreated container missing; wrong image/command including leading `postgres`; nonzero restarts; exited/dead/unhealthy state; timeout; resource, volume, network, mount, or port mismatch; extra production container; changed D0 IDs or state. Each proves one-shot consumption, no retry, no rollback, and no volume deletion.
+Authority mechanics must explicitly cover unsafe /run metadata; lock path symlink; lock wrong ownership or mode; busy lock; consumed marker conflict as directory, file, or symlink; and marker-creation failure. Each proves no docker rm, no Compose, no docker stop, no volume mutation, and no D0 mutation.
 
-Success must prove one exact `docker rm`, one Compose `up -d --no-deps postgres`, zero bootstrap, zero network/volume mutation, zero PgBouncer/Redis/app starts, unchanged D0 IDs, preserved volume fingerprint, and exact safe output.
+Recovery-volume tests prove exact override content and hash, root-only metadata, no symlink, override passed as second Compose file, missing volume immediately before Compose results in no Compose invocation and no replacement volume, fingerprint change blocks Compose, and post-Compose fingerprint change fails closed.
+
+Failed-object tests prove the exact captured validated ID is removed once and a changed/rebound name cannot redirect removal. Failed removal prevents Compose. Compose failure is not retried.
+
+Post-recreation tests cover missing/ambiguous object, wrong image, wrong command and leading postgres, wrong resources, published port, wrong network, wrong volume, nonzero restart count, unhealthy state, health timeout, extra production container, changed D0 IDs/state, and changed volume/network identity. Model the listed contract and health failures with the new PostgreSQL object running or restarting and assert exactly one containment stop, targeting the new ID only. For an object already stopped, assert zero stop calls and verified stopped state. Every case asserts no second Compose, no new-object rm, no volume deletion, no D0 mutation, and persistent marker retained. Assert stop success plus verified stopped state leads to RECOVERY_FAILED_CONTAINED. Assert stop failure, unresolved object identity, or remaining running/restarting state leads to RECOVERY_FAILED_UNCONTAINED. No retries in either branch.
+
+Success proves exactly one removal by the captured failed ID; exactly one Compose up with the override second; zero bootstrap/migration/secret regeneration; zero network/volume mutation; zero starts of PgBouncer, Redis, or app; zero D0 mutations; unchanged volume fingerprint; unchanged network and D0 identities; and exact safe output.
+
+## Failure semantics and authority consumption
+
+All read-only preflight checks, lock checks, and marker-path checks occur before authority consumption. Their failure produces no Docker mutation and leaves the marker absent. Atomic marker creation is the persistent point of no return. A marker-creation failure stops before Docker; a successfully created marker remains after any later success or failure.
+
+After failed-container removal, there is no rollback authority. Recovery may make one Compose call and, if a newly created PostgreSQL object is running/restarting after failure, one containment stop by new ID. It may never retry removal, Compose, or stop. It may never delete storage or clear the marker.
 
 ## Installation and execution lifecycle
 
-Implementation and tests require review first. A later installation task must transfer only reviewed candidates, independently hash them, run VPS-native `/usr/sbin/visudo -cf` on the candidate before activation, install the wrapper root:root mode `0755` and sudoers root:root mode `0440`, then verify hashes, metadata, and exact sudo listing. Do not edit historical sudoers or create/clear the consumed marker during installation.
+Implementation and tests require separate review. Installation then requires separate authorization: transfer only reviewed candidates, independently verify hashes, run VPS-native /usr/sbin/visudo -cf on the candidate fragment before activation, install wrapper root:root mode 0755 and sudoers root:root mode 0440, and verify file identities, metadata, and exact sudo listing. Do not edit historical sudoers or create/clear the marker during installation.
 
-Execution needs separate explicit authorization and an exclusive Docker maintenance interval. Invoke exactly once with `sudo -n /usr/local/sbin/agent-eventsales-v3-recover-postgres`. Capture safe output and exit status. Stop after PASS or STOP. Do not run bootstrap, another wrapper, or Docker afterward.
+Execution requires separate explicit authorization and an exclusive Docker maintenance interval. Invoke exactly once using the zero-argument sudo rule, capture safe output and exit status, then stop. Do not run bootstrap, another wrapper, direct Docker commands, or a second recovery attempt.
 
-Preflight failures occur before authority consumption. After every precondition passes, atomically create the persistent consumed marker before removal. This consumes authority even when removal fails. A second invocation stops before Docker. Reset requires separately reviewed authority.
+## Historical authority evidence at design time
 
-## Repository evidence
+Historical files matched the accepted hashes:
 
-At design time `HEAD` and `origin/main` were:
+    provision=4ede4ad5ae0696ee605bd890e3ced9a18d8d5ac4c7a11992325823de7e5cdad3
+    start=b054b6e97da5e8455615534273168fe4322ce7f6800a5b6486892027df33b567
+    bootstrap=b763431776faf81a8cc84b61c494b3ed22bb8bf732962306973878e83fae79ab
+    v3 sudoers=8575c6c1e85d111bb78b360b8e03f2c9f6e6a1dfccc5fbc0273003a354bc51d3
+    audit sudoers=52c7e97b51338bcaa34ebe74ed5731055bf3dfa36000af3fa826315ce5a2d974
 
-```text
-MAIN_SHA=86c023afb9b5f18c8c8230e1e739453c4c722c30
-MAIN_TREE=705facd5f932a1dd7fa107514b9cc14a0c377d0b
-```
-
-The corrected repository Compose hash was `3f41703fd15decd8c6a174142f8eaa4e205383cad539ddaf0ae4cd7a944fb218`. Historical authority hashes matched:
-
-```text
-provision=4ede4ad5ae0696ee605bd890e3ced9a18d8d5ac4c7a11992325823de7e5cdad3
-start=b054b6e97da5e8455615534273168fe4322ce7f6800a5b6486892027df33b567
-bootstrap=b763431776faf81a8cc84b61c494b3ed22bb8bf732962306973878e83fae79ab
-v3 sudoers=8575c6c1e85d111bb78b360b8e03f2c9f6e6a1dfccc5fbc0273003a354bc51d3
-audit sudoers=52c7e97b51338bcaa34ebe74ed5731055bf3dfa36000af3fa826315ce5a2d974
-```
-
-The historical start wrapper still pins the old stage and Compose hash. It remains byte-identical. The recovery wrapper is a separate authority.
+The historical start wrapper still pins the prior stage and remains byte-identical. Recovery is a separate authority and must not modify it.
