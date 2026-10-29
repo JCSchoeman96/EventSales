@@ -21,7 +21,7 @@ readonly DATA_NETWORK='eventsales-prod_eventsales_data'
 readonly EDGE_NETWORK='eventsales-prod_eventsales_edge'
 readonly POSTGRES_IMAGE='dhi.io/postgres:18.6-alpine3.24@sha256:d33bd884995daddfb515d0ce9aec23b74d20d72e03ca42b72c4abf617c76bb19'
 readonly POSTGRES_COMMAND='postgres,-c,max_connections=100,-c,shared_buffers=768MB,-c,effective_cache_size=2GB,-c,work_mem=8MB,-c,maintenance_work_mem=256MB,'
-readonly POSTGRES_MOUNT='volume:eventsales-prod_postgres_data:/var/lib/postgresql,'
+readonly POSTGRES_VOLUME_DESTINATION='/var/lib/postgresql'
 readonly POSTGRES_NETWORK="${DATA_NETWORK},"
 # Docker consumes these literal Go-template expressions at runtime.
 # shellcheck disable=SC2016
@@ -108,7 +108,15 @@ IFS='|' read -r \
 [[ "$postgres_status" == exited && "$postgres_running" == false && "$postgres_restarting" == false && "$postgres_exit_code" == 1 && "$postgres_restart_count" == 24 && "$postgres_oom" == false ]] || stop POSTGRES_STATE_MISMATCH
 [[ "$postgres_image" == "$POSTGRES_IMAGE" ]] || stop POSTGRES_IMAGE_MISMATCH
 [[ "$postgres_command" == "$POSTGRES_COMMAND" ]] || stop POSTGRES_COMMAND_MISMATCH
-[[ "$postgres_mounts" == "$POSTGRES_MOUNT" ]] || stop POSTGRES_VOLUME_ATTACHMENT_MISMATCH
+postgres_volume_mount_count=0
+IFS=, read -r -a postgres_mount_entries <<<"$postgres_mounts"
+for postgres_mount_entry in "${postgres_mount_entries[@]}"; do
+  IFS=: read -r postgres_mount_type postgres_mount_name postgres_mount_destination <<<"$postgres_mount_entry"
+  [[ "$postgres_mount_type" == volume ]] || continue
+  postgres_volume_mount_count=$((postgres_volume_mount_count + 1))
+  [[ "$postgres_mount_name" == "$POSTGRES_VOLUME" && "$postgres_mount_destination" == "$POSTGRES_VOLUME_DESTINATION" ]] || stop POSTGRES_VOLUME_ATTACHMENT_MISMATCH
+done
+((postgres_volume_mount_count == 1)) || stop POSTGRES_VOLUME_ATTACHMENT_MISMATCH
 [[ "$postgres_networks" == "$POSTGRES_NETWORK" ]] || stop POSTGRES_NETWORK_ATTACHMENT_MISMATCH
 [[ "$postgres_ports" == none ]] || stop POSTGRES_PORTS_PUBLISHED
 
