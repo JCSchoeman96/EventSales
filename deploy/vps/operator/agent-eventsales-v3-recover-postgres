@@ -1,0 +1,461 @@
+#!/bin/bash -p
+set -euo pipefail
+set +x
+umask 077
+IFS=$' \t\n'
+
+readonly SAFE_PATH='/usr/sbin:/usr/bin:/sbin:/bin'
+readonly ROOT_UID='0'
+readonly ROOT_GID='0'
+readonly DOCKER_SOCKET='unix:///var/run/docker.sock'
+readonly PROJECT='eventsales-prod'
+readonly PROD_PREFIX='eventsales-prod'
+readonly POSTGRES_NAME='eventsales-prod-postgres-1'
+readonly POSTGRES_IMAGE='dhi.io/postgres:18.6-alpine3.24@sha256:d33bd884995daddfb515d0ce9aec23b74d20d72e03ca42b72c4abf617c76bb19'
+readonly DATA_NETWORK='eventsales-prod_eventsales_data'
+readonly EDGE_NETWORK='eventsales-prod_eventsales_edge'
+readonly VOLUME_NAME='eventsales-prod_postgres_data'
+readonly SECRET_DIR='/root/eventsales-prod/secrets-v1'
+readonly PROD_ROOT='/root/eventsales-prod'
+readonly SOURCE_SHA='c9ce0f9239123a6e58f66fde0b5a1e60238bb107'
+readonly STAGE_DIR="/root/eventsales-prod/staged/$SOURCE_SHA/data-plane"
+readonly STAGED_COMPOSE_FILE="$STAGE_DIR/compose.yaml"
+readonly COMPOSE_SHA256='3f41703fd15decd8c6a174142f8eaa4e205383cad539ddaf0ae4cd7a944fb218'
+readonly OVERRIDE_SHA256='cc4bc2cee5847d9d24984ccc5521ef81868aeb77456e66b94df62c50685f2e14'
+readonly OVERRIDE_CONTENT=$'volumes:\n  postgres_data:\n    external: true\n    name: eventsales-prod_postgres_data\n'
+readonly MARKER='/root/eventsales-prod/.v3-postgres-recovery-consumed'
+readonly RUN_DIR='/run'
+readonly LOCK_FILE='/run/agent-eventsales-v3-recover-postgres.lock'
+readonly LOCK_MODE='600'
+readonly RECOVERY_COMMAND='["-c","max_connections=100","-c","shared_buffers=768MB","-c","effective_cache_size=2GB","-c","work_mem=8MB","-c","maintenance_work_mem=256MB"]'
+readonly FAILED_COMMAND='["postgres","-c","max_connections=100","-c","shared_buffers=768MB","-c","effective_cache_size=2GB","-c","work_mem=8MB","-c","maintenance_work_mem=256MB"]'
+readonly CONTAINER_FORMAT='{{.Id}}|{{.Name}}|{{.State.Status}}|{{.State.Running}}|{{.State.Restarting}}|{{.State.ExitCode}}|{{.RestartCount}}|{{.State.OOMKilled}}|{{.Config.Image}}|{{.HostConfig.Memory}}|{{.HostConfig.NanoCpus}}|{{json .Config.Cmd}}|{{json .Mounts}}|{{json .NetworkSettings.Networks}}|{{json .HostConfig.PortBindings}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}'
+readonly BASIC_FORMAT='{{.Id}}|{{.Name}}|{{.State.Status}}|{{.State.Running}}|{{.State.Restarting}}'
+readonly HEALTH_TIMEOUT=120
+readonly HEALTH_INTERVAL=2
+
+stop() {
+  printf 'STOP=%s\n' "$1" >&2
+  exit 1
+}
+
+post_stop() {
+  printf 'RECOVERY_STATE=RECOVERY_FAILED_CONTAINED\n' >&2
+  printf 'STOP=%s\n' "$1" >&2
+  exit 1
+}
+
+uncontained() {
+  printf 'RECOVERY_STATE=RECOVERY_FAILED_UNCONTAINED\n' >&2
+  printf 'STOP=%s\n' "$1" >&2
+  exit 1
+}
+
+if (($# != 0)); then stop CALLER_ARGUMENTS_FORBIDDEN; fi
+if ((EUID != ROOT_UID)); then stop ROOT_REQUIRED; fi
+
+PATH=$SAFE_PATH
+LC_ALL=C
+DOCKER_HOST=$DOCKER_SOCKET
+EVENTSALES_SECRET_DIR=$SECRET_DIR
+export PATH LC_ALL DOCKER_HOST EVENTSALES_SECRET_DIR
+unset CDPATH ENV BASH_ENV DOCKER_CONTEXT DOCKER_CONFIG COMPOSE_FILE COMPOSE_FILE_SEPARATOR \
+  COMPOSE_PROJECT_NAME COMPOSE_PROFILES COMPOSE_ENV_FILES DOCKER_TLS_VERIFY DOCKER_CERT_PATH \
+  DOCKER_API_VERSION DOCKER_DEFAULT_PLATFORM DOCKER_CLI_EXPERIMENTAL
+cd / || stop FIXED_WORKING_DIRECTORY_UNAVAILABLE
+
+require_directory() {
+  local path=$1 reason=$2 metadata owner group mode mode_value
+  [[ ! -L "$path" ]] || stop "${reason}_SYMLINK"
+  [[ -d "$path" ]] || stop "${reason}_MISSING"
+  metadata=$(stat -c '%u:%g:%a' -- "$path" 2>/dev/null) || stop "${reason}_STAT_FAILED"
+  IFS=: read -r owner group mode <<<"$metadata"
+  [[ "$owner" == "$ROOT_UID" && "$group" == "$ROOT_GID" ]] || stop "${reason}_OWNER_MISMATCH"
+  mode_value=$((8#$mode))
+  (( (mode_value & 0022) == 0 )) || stop "${reason}_WRITABLE"
+}
+
+require_file() {
+  local path=$1 reason=$2 metadata owner group mode mode_value
+  [[ ! -L "$path" ]] || stop "${reason}_SYMLINK"
+  [[ -f "$path" ]] || stop "${reason}_NOT_REGULAR"
+  metadata=$(stat -c '%u:%g:%a' -- "$path" 2>/dev/null) || stop "${reason}_STAT_FAILED"
+  IFS=: read -r owner group mode <<<"$metadata"
+  [[ "$owner" == "$ROOT_UID" && "$group" == "$ROOT_GID" ]] || stop "${reason}_OWNER_MISMATCH"
+  mode_value=$((8#$mode))
+  (( (mode_value & 0222) == 0 )) || stop "${reason}_WRITABLE"
+}
+
+for path in /root /root/eventsales-prod /root/eventsales-prod/staged \
+  "/root/eventsales-prod/staged/$SOURCE_SHA" "$STAGE_DIR"; do
+  require_directory "$path" IMMUTABLE_STAGE_DIRECTORY
+done
+require_file "$STAGED_COMPOSE_FILE" IMMUTABLE_COMPOSE
+compose_digest=$(sha256sum -- "$STAGED_COMPOSE_FILE" 2>/dev/null) || stop COMPOSE_HASH_UNAVAILABLE
+[[ "${compose_digest%% *}" == "$COMPOSE_SHA256" ]] || stop COMPOSE_HASH_MISMATCH
+
+require_directory "$SECRET_DIR" SECRET_DIRECTORY
+[[ "$(stat -c '%u:%g:%a' -- "$SECRET_DIR" 2>/dev/null)" == "$ROOT_UID:$ROOT_GID:700" ]] || stop SECRET_DIRECTORY_METADATA_MISMATCH
+require_secret() {
+  local name=$1 owner=$2 group=$3 mode=$4 size=$5 path metadata
+  path="$SECRET_DIR/$name"
+  [[ ! -L "$path" ]] || stop SECRET_FILE_SYMLINK
+  [[ -f "$path" ]] || stop SECRET_FILE_NOT_REGULAR
+  metadata=$(stat -c '%u:%g:%a:%s' -- "$path" 2>/dev/null) || stop SECRET_FILE_STAT_FAILED
+  if [[ "$size" == '*' ]]; then
+    [[ "$metadata" == "$owner:$group:$mode:"* ]] || stop SECRET_FILE_METADATA_MISMATCH
+    [[ "${metadata##*:}" -gt 0 ]] || stop SECRET_FILE_METADATA_MISMATCH
+  else
+    [[ "$metadata" == "$owner:$group:$mode:$size" ]] || stop SECRET_FILE_METADATA_MISMATCH
+  fi
+}
+require_secret postgres_bootstrap_password 0 70 440 64
+require_secret eventsales_migrator_password 0 0 400 64
+require_secret eventsales_runtime_server_password 0 0 400 64
+require_secret eventsales_runtime_client_password 0 0 400 64
+require_secret eventsales_backup_password 0 0 400 64
+require_secret redis_runtime_password 0 0 400 64
+require_secret redis_stats_password 0 0 400 64
+require_secret pgbouncer.ini 0 65532 440 '*'
+require_secret pgbouncer_users.txt 0 65532 440 '*'
+require_secret redis-users.acl 0 65532 440 '*'
+
+[[ ! -e "$MARKER" && ! -L "$MARKER" ]] || stop RECOVERY_AUTHORITY_ALREADY_CONSUMED
+
+docker_fixed() {
+  case "${1-}" in
+    ps|inspect) ;;
+    network|volume) [[ "${2-}" == inspect ]] || stop DOCKER_OPERATION_FORBIDDEN ;;
+    rm)
+      [[ $# -eq 2 && "${2-}" =~ ^[0-9a-f]{64}$ ]] || stop DOCKER_OPERATION_FORBIDDEN ;;
+    stop)
+      [[ $# -eq 4 && "$2" == --time && "$3" == 10 && "$4" =~ ^[0-9a-f]{64}$ ]] || stop DOCKER_OPERATION_FORBIDDEN ;;
+    *) stop DOCKER_OPERATION_FORBIDDEN ;;
+  esac
+  env -i PATH="$SAFE_PATH" LC_ALL=C HOME=/root DOCKER_HOST="$DOCKER_SOCKET" \
+    EVENTSALES_SECRET_DIR="$SECRET_DIR" docker "$@"
+}
+
+compose_up() {
+  env -i PATH="$SAFE_PATH" LC_ALL=C HOME=/root DOCKER_HOST="$DOCKER_SOCKET" \
+    EVENTSALES_SECRET_DIR="$SECRET_DIR" docker compose --project-name "$PROJECT" \
+      --env-file /dev/null -f "$STAGED_COMPOSE_FILE" -f "$OVERRIDE_FILE" up -d --no-deps postgres
+}
+
+network_identity() {
+  local name=$1 internal=$2 row
+  row=$(docker_fixed network inspect --format '{{.ID}}|{{.Name}}|{{.Driver}}|{{.Internal}}' "$name" 2>/dev/null) || return 1
+  [[ "$row" != *$'\n'* ]] || return 1
+  local id actual_name driver actual_internal
+  IFS='|' read -r id actual_name driver actual_internal <<<"$row"
+  [[ "$id" =~ ^[0-9a-f]{64}$ && "$actual_name" == "$name" && "$driver" == bridge && "$actual_internal" == "$internal" ]] || return 1
+  printf '%s\n' "$id"
+}
+
+volume_identity() {
+  local row name driver scope mountpoint
+  row=$(docker_fixed volume inspect --format '{{.Name}}|{{.Driver}}|{{.Scope}}|{{.Mountpoint}}' "$VOLUME_NAME" 2>/dev/null) || return 1
+  [[ "$row" != *$'\n'* ]] || return 1
+  IFS='|' read -r name driver scope mountpoint <<<"$row"
+  [[ "$name" == "$VOLUME_NAME" && "$driver" == local && "$scope" == local && -n "$mountpoint" && "$mountpoint" == /* ]] || return 1
+  [[ ! -L "$mountpoint" && -d "$mountpoint" ]] || return 1
+  local fingerprint
+  fingerprint=$(stat -c '%d:%i' -- "$mountpoint" 2>/dev/null) || return 1
+  [[ "$fingerprint" =~ ^[0-9]+:[0-9]+$ ]] || return 1
+  printf '%s|%s|%s\n' "$name" "$mountpoint" "$fingerprint"
+}
+
+container_rows() {
+  docker_fixed ps -a --no-trunc --filter "label=com.docker.compose.project=$PROJECT" --format '{{.ID}}|{{.Names}}'
+}
+
+name_rows() {
+  docker_fixed ps -a --no-trunc --filter "name=$PROD_PREFIX" --format '{{.ID}}|{{.Names}}'
+}
+
+id_rows() {
+  local id=$1
+  docker_fixed ps -a --no-trunc --filter "id=$id" --format '{{.ID}}'
+}
+
+parse_container() {
+  local id=$1 row
+  row=$(docker_fixed inspect --format "$CONTAINER_FORMAT" "$id" 2>/dev/null) || return 1
+  [[ "$row" != *$'\n'* ]] || return 1
+  IFS='|' read -r C_ID C_NAME C_STATUS C_RUNNING C_RESTARTING C_EXIT C_RESTARTS C_OOM \
+    C_IMAGE C_MEMORY C_NANO C_COMMAND C_MOUNTS C_NETWORKS C_PORTS C_HEALTH <<<"$row"
+  [[ "$C_ID" == "$id" ]] || return 1
+  C_NAME=${C_NAME#/}
+}
+
+valid_id() { [[ "$1" =~ ^[0-9a-f]{64}$ ]]; }
+
+validate_attachments() {
+  local mounts=$1 networks=$2 ports=$3
+  printf '%s\n%s\n%s\n' "$mounts" "$networks" "$ports" | \
+    env -i PATH="$SAFE_PATH" LC_ALL=C EVENTSALES_SECRET_DIR="$SECRET_DIR" \
+      /usr/bin/python3 -I -c '
+import json
+import os
+import sys
+
+mounts, networks, ports = [json.loads(line) for line in sys.stdin]
+volume, network = sys.argv[1:]
+secret_source = os.path.join(os.environ["EVENTSALES_SECRET_DIR"], "postgres_bootstrap_password")
+if not isinstance(mounts, list) or not isinstance(networks, dict):
+    raise SystemExit(1)
+volumes = [m for m in mounts if m.get("Type") == "volume"]
+secrets = [m for m in mounts if m.get("Destination") == "/run/secrets/postgres_bootstrap_password"]
+if len(volumes) != 1 or volumes[0].get("Name") != volume or volumes[0].get("Destination") != "/var/lib/postgresql":
+    raise SystemExit(1)
+if len(secrets) != 1 or secrets[0].get("Type") != "bind" or secrets[0].get("Source") != secret_source or secrets[0].get("RW") is not False:
+    raise SystemExit(1)
+if len(mounts) != 2 or set(networks) != {network}:
+    raise SystemExit(1)
+if ports not in (None, {}):
+    if not isinstance(ports, dict) or any(value not in (None, []) for value in ports.values()):
+        raise SystemExit(1)
+' "$VOLUME_NAME" "$DATA_NETWORK" 2>/dev/null
+}
+
+read_production_inventory() {
+  local project_rows named_rows
+  project_rows=$(container_rows 2>/dev/null) || return 1
+  named_rows=$(name_rows 2>/dev/null) || return 1
+  [[ "$project_rows" == "$named_rows" ]] || return 1
+  INVENTORY=$project_rows
+}
+
+capture_recreated_id() {
+  local project_rows named_rows row id name matched=0 named_matched=0
+  project_rows=$(container_rows 2>/dev/null) || return 1
+  named_rows=$(name_rows 2>/dev/null) || return 1
+  if [[ -z "$project_rows" && -z "$named_rows" ]]; then return 2; fi
+  [[ -n "$project_rows" && -n "$named_rows" ]] || return 1
+  while IFS= read -r row; do
+    IFS='|' read -r id name <<<"$row"
+    if [[ "$name" == "$POSTGRES_NAME" ]]; then
+      matched=$((matched + 1))
+      NEW_POSTGRES_ID=$id
+    fi
+  done <<<"$project_rows"
+  [[ "$matched" -eq 1 ]] || return 1
+  valid_id "$NEW_POSTGRES_ID" || return 1
+  while IFS= read -r row; do
+    IFS='|' read -r id name <<<"$row"
+    if [[ "$name" == "$POSTGRES_NAME" && "$id" == "$NEW_POSTGRES_ID" ]]; then
+      named_matched=$((named_matched + 1))
+    fi
+  done <<<"$named_rows"
+  [[ "$named_matched" -eq 1 ]] || return 1
+  return 0
+}
+
+read_volume_checked() {
+  local now
+  now=$(volume_identity) || return 1
+  [[ "$now" == "$VOLUME_SNAPSHOT" ]] || return 1
+}
+
+read_networks_checked() {
+  [[ "$(network_identity "$DATA_NETWORK" true)" == "$DATA_NETWORK_ID" ]] || return 1
+  [[ "$(network_identity "$EDGE_NETWORK" false)" == "$EDGE_NETWORK_ID" ]] || return 1
+}
+
+snapshot_d0() {
+  local rows id name status running restarting
+  rows=$(docker_fixed ps -a --no-trunc --filter label=com.docker.compose.project=eventsales-d0-proof --format '{{.ID}}|{{.Names}}' 2>/dev/null) || return 1
+  [[ -n "$rows" ]] || return 1
+  mapfile -t D0_ROWS <<<"$rows"
+  [[ ${#D0_ROWS[@]} -eq 3 ]] || return 1
+  local -A seen=()
+  D0_IDS=()
+  for row in "${D0_ROWS[@]}"; do
+    IFS='|' read -r id name <<<"$row"
+    valid_id "$id" || return 1
+    [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ && -z "${seen[$id]+x}" ]] || return 1
+    seen[$id]=1
+    local detail
+    detail=$(docker_fixed inspect --format "$BASIC_FORMAT" "$id" 2>/dev/null) || return 1
+    IFS='|' read -r detail_id detail_name status running restarting <<<"$detail"
+    [[ "$detail_id" == "$id" && "${detail_name#/}" == "$name" && "$status" == exited && "$running" == false && "$restarting" == false ]] || return 1
+    D0_IDS+=("$id")
+  done
+}
+
+revalidate_d0() {
+  local rows row id name detail detail_id detail_name status running restarting
+  rows=$(docker_fixed ps -a --no-trunc --filter label=com.docker.compose.project=eventsales-d0-proof --format '{{.ID}}|{{.Names}}' 2>/dev/null) || return 1
+  mapfile -t current <<<"$rows"
+  [[ ${#current[@]} -eq 3 ]] || return 1
+  local i
+  for ((i=0; i<3; i++)); do
+    [[ "${current[$i]}" == "${D0_ROWS[$i]}" ]] || return 1
+    IFS='|' read -r id name <<<"${D0_ROWS[$i]}"
+    detail=$(docker_fixed inspect --format "$BASIC_FORMAT" "$id" 2>/dev/null) || return 1
+    IFS='|' read -r detail_id detail_name status running restarting <<<"$detail"
+    [[ "$detail_id" == "$id" && "${detail_name#/}" == "$name" && "$status" == exited && "$running" == false && "$restarting" == false ]] || return 1
+  done
+}
+
+validate_failed_container() {
+  local id=$1
+  parse_container "$id" || return 1
+  [[ "$C_NAME" == "$POSTGRES_NAME" && "$C_STATUS" == exited && "$C_RUNNING" == false && "$C_RESTARTING" == false \
+    && "$C_EXIT" == 1 && "$C_RESTARTS" == 24 && "$C_OOM" == false ]] || return 1
+  [[ "$C_IMAGE" == "$POSTGRES_IMAGE" && "$C_MEMORY" == 3221225472 && "$C_NANO" == 2000000000 && "$C_COMMAND" == "$FAILED_COMMAND" ]] || return 1
+  validate_attachments "$C_MOUNTS" "$C_NETWORKS" "$C_PORTS" || return 1
+}
+
+validate_recreated() {
+  local id=$1 expected_state=${2:-running}
+  parse_container "$id" || return 1
+  [[ "$C_NAME" == "$POSTGRES_NAME" && "$C_IMAGE" == "$POSTGRES_IMAGE" \
+    && "$C_COMMAND" == "$RECOVERY_COMMAND" && "$C_MEMORY" == 3221225472 \
+    && "$C_NANO" == 2000000000 && "$C_RESTARTS" == 0 && "$C_OOM" == false \
+    && "$C_RUNNING" == true && "$C_RESTARTING" == false ]] || return 1
+  validate_attachments "$C_MOUNTS" "$C_NETWORKS" "$C_PORTS" || return 1
+  read_volume_checked || return 1
+  read_networks_checked || return 1
+  revalidate_d0 || return 1
+  read_production_inventory || return 1
+  [[ "$INVENTORY" == "$id|$POSTGRES_NAME" ]] || return 1
+  [[ "$C_STATUS" == running ]] || return 1
+  if [[ "$expected_state" == healthy ]]; then [[ "$C_HEALTH" == healthy ]] || return 1; fi
+}
+
+contain_post_compose_failure() {
+  local reason=$1 detail
+  if [[ -z "${NEW_POSTGRES_ID:-}" ]] || ! valid_id "$NEW_POSTGRES_ID"; then
+    uncontained "$reason"
+  fi
+  if ! parse_container "$NEW_POSTGRES_ID"; then
+    # A missing exact ID is safely absent. An inspect error cannot establish that.
+    local rows
+    rows=$(id_rows "$NEW_POSTGRES_ID" 2>/dev/null) || uncontained "$reason"
+    [[ -z "$rows" ]] && post_stop "$reason"
+    uncontained "$reason"
+  fi
+  if [[ "$C_RUNNING" == true || "$C_RESTARTING" == true ]]; then
+    docker_fixed stop --time 10 "$NEW_POSTGRES_ID" >/dev/null 2>&1 || uncontained "$reason"
+    parse_container "$NEW_POSTGRES_ID" || uncontained "$reason"
+    [[ "$C_RUNNING" == false && "$C_RESTARTING" == false ]] || uncontained "$reason"
+  fi
+  post_stop "$reason"
+}
+
+# /run and its lock are checked before Docker access. The inode is retained.
+require_directory "$RUN_DIR" RUN_DIRECTORY
+[[ ! -L "$LOCK_FILE" ]] || stop LOCK_SYMLINK
+if [[ ! -e "$LOCK_FILE" ]]; then (set -o noclobber; : >"$LOCK_FILE") 2>/dev/null || stop LOCK_CREATE_FAILED; chmod 0600 -- "$LOCK_FILE" || stop LOCK_CREATE_FAILED; fi
+[[ ! -L "$LOCK_FILE" && -f "$LOCK_FILE" ]] || stop LOCK_FILE_INVALID
+lock_metadata=$(stat -c '%u:%g:%a' -- "$LOCK_FILE" 2>/dev/null) || stop LOCK_STAT_FAILED
+[[ "$lock_metadata" == "$ROOT_UID:$ROOT_GID:$LOCK_MODE" ]] || stop LOCK_METADATA_MISMATCH
+exec 9<>"$LOCK_FILE" || stop LOCK_OPEN_FAILED
+flock -n 9 || stop LOCK_BUSY
+
+# The first run/lock block is intentionally the only one that can create the lock.
+[[ ! -e "$MARKER" && ! -L "$MARKER" ]] || stop RECOVERY_AUTHORITY_ALREADY_CONSUMED
+
+DATA_NETWORK_ID=$(network_identity "$DATA_NETWORK" true) || stop DATA_NETWORK_IDENTITY_MISMATCH
+EDGE_NETWORK_ID=$(network_identity "$EDGE_NETWORK" false) || stop EDGE_NETWORK_IDENTITY_MISMATCH
+VOLUME_SNAPSHOT=$(volume_identity) || stop POSTGRES_VOLUME_IDENTITY_MISMATCH
+
+read_production_inventory || stop PRODUCTION_INVENTORY_MISMATCH
+[[ "$INVENTORY" == *'|'* ]] || stop POSTGRES_CONTAINER_MISSING
+[[ "$(printf '%s\n' "$INVENTORY" | wc -l)" -eq 1 ]] || stop UNEXPECTED_PRODUCTION_CONTAINER
+IFS='|' read -r FAILED_POSTGRES_CONTAINER_ID failed_name <<<"$INVENTORY"
+valid_id "$FAILED_POSTGRES_CONTAINER_ID" || stop FAILED_CONTAINER_ID_INVALID
+[[ "$failed_name" == "$POSTGRES_NAME" ]] || stop POSTGRES_CONTAINER_MISSING
+validate_failed_container "$FAILED_POSTGRES_CONTAINER_ID" || stop FAILED_CONTAINER_CONTRACT_MISMATCH
+snapshot_d0 || stop D0_CONTRACT_MISMATCH
+
+OVERRIDE_DIR=$(mktemp -d "$PROD_ROOT/.v3-postgres-recovery.XXXXXXXX") || stop OVERRIDE_DIRECTORY_CREATE_FAILED
+OVERRIDE_FILE="$OVERRIDE_DIR/compose.override.yaml"
+# shellcheck disable=SC2329 # Registered with the EXIT trap.
+cleanup_override() {
+  if [[ -n "${OVERRIDE_DIR:-}" && -d "$OVERRIDE_DIR" && ! -L "$OVERRIDE_DIR" ]]; then
+    if [[ -n "${OVERRIDE_FILE:-}" && -f "$OVERRIDE_FILE" && ! -L "$OVERRIDE_FILE" ]]; then rm -f -- "$OVERRIDE_FILE"; fi
+    rmdir -- "$OVERRIDE_DIR" 2>/dev/null || true
+  fi
+}
+trap cleanup_override EXIT
+chmod 0700 -- "$OVERRIDE_DIR" || stop OVERRIDE_DIRECTORY_MODE_MISMATCH
+[[ "$(stat -c '%u:%g:%a' -- "$OVERRIDE_DIR")" == "$ROOT_UID:$ROOT_GID:700" ]] || stop OVERRIDE_DIRECTORY_METADATA_MISMATCH
+printf '%s' "$OVERRIDE_CONTENT" >"$OVERRIDE_FILE" || stop OVERRIDE_CREATE_FAILED
+chmod 0400 -- "$OVERRIDE_FILE" || stop OVERRIDE_MODE_MISMATCH
+[[ ! -L "$OVERRIDE_FILE" && -f "$OVERRIDE_FILE" ]] || stop OVERRIDE_FILE_INVALID
+[[ "$(stat -c '%u:%g:%a' -- "$OVERRIDE_FILE")" == "$ROOT_UID:$ROOT_GID:400" ]] || stop OVERRIDE_METADATA_MISMATCH
+override_digest=$(sha256sum -- "$OVERRIDE_FILE" 2>/dev/null) || stop OVERRIDE_HASH_FAILED
+[[ "${override_digest%% *}" == "$OVERRIDE_SHA256" ]] || stop OVERRIDE_HASH_MISMATCH
+[[ "$(cat -- "$OVERRIDE_FILE")"$'\n' == "$OVERRIDE_CONTENT" ]] || stop OVERRIDE_CONTENT_MISMATCH
+
+# Revalidate the exact objects immediately before the one-shot marker and rm.
+[[ "$(sha256sum -- "$STAGED_COMPOSE_FILE" | { read -r hash _; printf '%s' "$hash"; })" == "$COMPOSE_SHA256" ]] || stop COMPOSE_HASH_MISMATCH
+[[ "$(volume_identity)" == "$VOLUME_SNAPSHOT" ]] || stop PRE_REMOVE_VOLUME_FINGERPRINT_CHANGED
+read_networks_checked || stop PRE_REMOVE_NETWORK_CHANGED
+validate_failed_container "$FAILED_POSTGRES_CONTAINER_ID" || stop FAILED_CONTAINER_REINSPECTION_DRIFT
+revalidate_d0 || stop PRE_REMOVE_D0_CHANGED
+[[ ! -e "$MARKER" && ! -L "$MARKER" ]] || stop RECOVERY_AUTHORITY_ALREADY_CONSUMED
+mkdir -m 0700 -- "$MARKER" 2>/dev/null || stop RECOVERY_MARKER_CREATE_FAILED
+
+docker_fixed rm "$FAILED_POSTGRES_CONTAINER_ID" >/dev/null 2>&1 || post_stop FAILED_CONTAINER_REMOVAL_FAILED
+post_remove_rows=$(container_rows 2>/dev/null) || post_stop POST_REMOVE_PRODUCTION_INVENTORY_INSPECT_FAILED
+[[ -z "$post_remove_rows" ]] || post_stop POST_REMOVE_PRODUCTION_INVENTORY_MISMATCH
+[[ "$(volume_identity 2>/dev/null)" == "$VOLUME_SNAPSHOT" ]] || post_stop POST_REMOVE_VOLUME_FINGERPRINT_CHANGED
+read_networks_checked || post_stop POST_REMOVE_NETWORK_CHANGED
+revalidate_d0 || post_stop POST_REMOVE_D0_CHANGED
+
+# Missing external volume or any fingerprint change blocks Compose entirely.
+[[ "$(sha256sum -- "$STAGED_COMPOSE_FILE" | { read -r hash _; printf '%s' "$hash"; })" == "$COMPOSE_SHA256" ]] || post_stop COMPOSE_HASH_CHANGED_AFTER_REMOVAL
+override_digest=$(sha256sum -- "$OVERRIDE_FILE" 2>/dev/null) || post_stop OVERRIDE_HASH_CHANGED
+[[ "${override_digest%% *}" == "$OVERRIDE_SHA256" ]] || post_stop OVERRIDE_HASH_CHANGED
+[[ "$(cat -- "$OVERRIDE_FILE")"$'\n' == "$OVERRIDE_CONTENT" ]] || post_stop OVERRIDE_CONTENT_CHANGED
+read_networks_checked || post_stop PRE_COMPOSE_NETWORK_CHANGED
+revalidate_d0 || post_stop PRE_COMPOSE_D0_CHANGED
+[[ "$(volume_identity 2>/dev/null)" == "$VOLUME_SNAPSHOT" ]] || post_stop PRE_COMPOSE_VOLUME_FINGERPRINT_CHANGED
+
+compose_status=0
+compose_up >/dev/null 2>&1 || compose_status=$?
+capture_status=0
+capture_recreated_id || capture_status=$?
+if ((capture_status == 2)); then
+  if ((compose_status == 0)); then post_stop RECREATED_CONTAINER_MISSING; fi
+  post_stop COMPOSE_FAILED_NO_RECREATED_CONTAINER
+fi
+((capture_status == 0)) || uncontained COMPOSE_RESULT_INVENTORY_AMBIGUOUS
+[[ "$NEW_POSTGRES_ID" != "$FAILED_POSTGRES_CONTAINER_ID" ]] || uncontained RECREATED_CONTAINER_ID_REUSED
+if ((compose_status != 0)); then contain_post_compose_failure COMPOSE_UP_FAILED; fi
+
+read_production_inventory || contain_post_compose_failure PRODUCTION_INVENTORY_MISMATCH
+[[ "$INVENTORY" == "$NEW_POSTGRES_ID|$POSTGRES_NAME" ]] || contain_post_compose_failure PRODUCTION_INVENTORY_MISMATCH
+
+validate_recreated "$NEW_POSTGRES_ID" || contain_post_compose_failure RECREATED_CONTAINER_CONTRACT_MISMATCH
+SECONDS=0
+deadline=$((SECONDS + HEALTH_TIMEOUT))
+while ((SECONDS < deadline)); do
+  if validate_recreated "$NEW_POSTGRES_ID" healthy; then
+    printf 'POSTGRES_RECOVERY=HEALTHY\n'
+    printf 'POSTGRES_STATUS=running\n'
+    printf 'POSTGRES_HEALTH=healthy\n'
+    printf 'POSTGRES_RESTART_COUNT=0\n'
+    printf 'POSTGRES_IMAGE_MATCH=YES\n'
+    printf 'POSTGRES_COMMAND_CLASS=CORRECTED_FLAGS_ONLY\n'
+    printf 'POSTGRES_VOLUME_ATTACHMENT_MATCH=YES\n'
+    printf 'POSTGRES_NETWORK_ATTACHMENT_MATCH=YES\n'
+    printf 'POSTGRES_PORTS_PUBLISHED=NO\n'
+    printf 'POSTGRES_VOLUME_PRESERVED=YES\n'
+    printf 'PGBOUNCER_STARTED=NO\n'
+    printf 'REDIS_STARTED=NO\n'
+    printf 'APP_STARTED=NO\n'
+    printf 'D0_STATE=ARCHIVED_STOPPED\n'
+    exit 0
+  fi
+  validate_recreated "$NEW_POSTGRES_ID" || contain_post_compose_failure RECREATED_CONTAINER_CONTRACT_MISMATCH
+  [[ "$C_RESTARTS" == 0 ]] || contain_post_compose_failure POSTGRES_RESTART_COUNT_MISMATCH
+  [[ "$C_HEALTH" != unhealthy ]] || contain_post_compose_failure POSTGRES_HEALTH_UNHEALTHY
+  [[ "$C_RUNNING" == true && "$C_RESTARTING" == false && "$C_STATUS" == running ]] \
+    || contain_post_compose_failure POSTGRES_NOT_RUNNING
+  sleep "$HEALTH_INTERVAL"
+done
+contain_post_compose_failure POSTGRES_HEALTH_TIMEOUT
