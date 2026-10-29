@@ -35,35 +35,35 @@ for wrapper_source in "$provision_source" "$start_source" "$bootstrap_source"; d
 done
 pass 'source wrappers retain the actual root boundary'
 
-assert_source_sha_pin() {
-  local label=$1 source=$2 wrapper=$3 constant=$4 actual
+assert_historical_sha_pin() {
+  local label=$1 wrapper=$2 constant=$3 expected=$4
   local -a embedded_pins=()
 
-  actual=$(/usr/bin/sha256sum "$source" | /usr/bin/awk '{print $1}') || fail "$label source hash could not be calculated"
   mapfile -t embedded_pins < <(/usr/bin/sed -n "s/^readonly ${constant}='\\([[:xdigit:]]\\{64\\}\\)'$/\\1/p" "$wrapper")
-  [[ ${#embedded_pins[@]} -eq 1 ]] || fail "$label production wrapper must contain exactly one SHA pin"
-  [[ ${embedded_pins[0]} == "$actual" ]] || fail "$label production SHA pin does not match canonical repository bytes"
-  pass "$label production SHA pin matches canonical repository bytes"
+  [[ ${#embedded_pins[@]} -eq 1 ]] || fail "$label historical wrapper must contain exactly one SHA pin"
+  [[ ${embedded_pins[0]} == "$expected" ]] || fail "$label historical SHA pin changed"
+  pass "$label historical SHA pin remains fixed"
 }
 
-assert_source_sha_pin 'provision script' \
-  "$repo_root/deploy/vps/data-plane/scripts/provision-networks.sh" \
-  "$provision_source" EXPECTED_SCRIPT_SHA256
-assert_source_sha_pin 'start Compose file' \
-  "$repo_root/deploy/vps/data-plane/compose.yaml" \
-  "$start_source" EXPECTED_COMPOSE_SHA256
-assert_source_sha_pin 'bootstrap Compose file' \
-  "$repo_root/deploy/vps/data-plane/compose.yaml" \
-  "$bootstrap_source" EXPECTED_COMPOSE_SHA256
-assert_source_sha_pin 'bootstrap script' \
-  "$repo_root/deploy/vps/data-plane/scripts/bootstrap-postgres.sh" \
-  "$bootstrap_source" EXPECTED_BOOTSTRAP_SHA256
-assert_source_sha_pin 'probe script' \
-  "$repo_root/deploy/vps/data-plane/scripts/probe-postgres.sh" \
-  "$bootstrap_source" EXPECTED_PROBE_SHA256
+assert_historical_sha_pin 'provision script' \
+  "$provision_source" EXPECTED_SCRIPT_SHA256 \
+  dc22844432d1591bd31abfb7b62595afa373ac13a113dd2a7553633e02813348
+assert_historical_sha_pin 'start Compose file' \
+  "$start_source" EXPECTED_COMPOSE_SHA256 \
+  f8d2cee51d6647d7026324ffee8a6ebf82cf8ea7e7a3ed6ca82626cf67b5819f
+assert_historical_sha_pin 'bootstrap Compose file' \
+  "$bootstrap_source" EXPECTED_COMPOSE_SHA256 \
+  f8d2cee51d6647d7026324ffee8a6ebf82cf8ea7e7a3ed6ca82626cf67b5819f
+assert_historical_sha_pin 'bootstrap script' \
+  "$bootstrap_source" EXPECTED_BOOTSTRAP_SHA256 \
+  afa7c663abd06ec109bbb9172f2d5391fa856e3dfbff1a1f90da29a46265fa7f
+assert_historical_sha_pin 'probe script' \
+  "$bootstrap_source" EXPECTED_PROBE_SHA256 \
+  3019e4560946957e27f3fca033c754dda1cf9a66adebd61a46208d87b24e77ce
 
 grep -Fq "$expected_stage/scripts/provision-networks.sh" "$provision_source" || fail 'network wrapper does not use the fixed staged provisioner'
 grep -Fq "$expected_stage/compose.yaml" "$start_source" || fail 'PostgreSQL start wrapper does not use the fixed Compose file'
+grep -Fq "$expected_stage/compose.yaml" "$bootstrap_source" || fail 'bootstrap wrapper does not use the fixed Compose file'
 grep -Fq "$expected_stage/scripts/bootstrap-postgres.sh" "$bootstrap_source" || fail 'bootstrap wrapper does not use the fixed bootstrap script'
 grep -Fq "$expected_secret_dir" "$start_source" || fail 'PostgreSQL start wrapper does not pin the secret directory'
 grep -Fq "$expected_secret_dir" "$bootstrap_source" || fail 'bootstrap wrapper does not pin the secret directory'
@@ -143,11 +143,14 @@ new_fixture() {
   cleanup_fixture
   fixture=$(mktemp -d "$tmp_root/fixture.XXXXXX")
   local stage="$fixture/staged/2f69c126ab0098ed2d1323ed33d6bc2761df752f/data-plane"
+  local provision_fixture_sha compose_fixture_sha bootstrap_fixture_sha probe_fixture_sha
   mkdir -p "$stage/scripts" "$fixture/bin" "$fixture/secrets-v1"
   cp "$repo_root/deploy/vps/data-plane/scripts/provision-networks.sh" "$stage/scripts/provision-networks.sh"
   cp "$repo_root/deploy/vps/data-plane/compose.yaml" "$stage/compose.yaml"
   chmod 0555 "$stage/scripts/provision-networks.sh"
   chmod 0444 "$stage/compose.yaml"
+  provision_fixture_sha=$(/usr/bin/sha256sum "$stage/scripts/provision-networks.sh" | /usr/bin/awk '{print $1}')
+  compose_fixture_sha=$(/usr/bin/sha256sum "$stage/compose.yaml" | /usr/bin/awk '{print $1}')
 
   cat >"$stage/scripts/bootstrap-postgres.sh" <<'CHILD'
 #!/bin/bash
@@ -161,7 +164,6 @@ CHILD
 printf 'STANDALONE_PROBE_CHILD_EXECUTED\n'
 CHILD
   chmod 0555 "$stage/scripts/bootstrap-postgres.sh" "$stage/scripts/probe-postgres.sh"
-  local bootstrap_fixture_sha probe_fixture_sha
   bootstrap_fixture_sha=$(/usr/bin/sha256sum "$stage/scripts/bootstrap-postgres.sh" | /usr/bin/awk '{print $1}')
   probe_fixture_sha=$(/usr/bin/sha256sum "$stage/scripts/probe-postgres.sh" | /usr/bin/awk '{print $1}')
 
@@ -187,6 +189,7 @@ CHILD
   done
   chmod 0700 "$fixture/secrets-v1"
 
+  # These fixtures characterize the consumed 2f69 stage; current Compose has its own contract test.
   cat >"$fixture/compose.json" <<'JSON'
 {
   "name": "eventsales-prod",
@@ -357,6 +360,7 @@ SLEEP
   sed \
     -e "s|/root/eventsales-prod|$fixture|g" \
     -e "s|'/root'|'$fixture'|g" \
+    -e "s|dc22844432d1591bd31abfb7b62595afa373ac13a113dd2a7553633e02813348|$provision_fixture_sha|g" \
     -e "s|/usr/sbin:/usr/bin:/sbin:/bin|$fixture/bin:/usr/sbin:/usr/bin:/sbin:/bin|g" \
     -e 's|postgres_bootstrap_password 0 70 440 64|postgres_bootstrap_password 0 0 440 64|g' \
     -e 's| 0 65532 440| 0 0 440|g' \
@@ -371,6 +375,7 @@ SLEEP
   sed \
     -e "s|/root/eventsales-prod|$fixture|g" \
     -e "s|'/root'|'$fixture'|g" \
+    -e "s|f8d2cee51d6647d7026324ffee8a6ebf82cf8ea7e7a3ed6ca82626cf67b5819f|$compose_fixture_sha|g" \
     -e "s|/usr/sbin:/usr/bin:/sbin:/bin|$fixture/bin:/usr/sbin:/usr/bin:/sbin:/bin|g" \
     -e 's|postgres_bootstrap_password 0 70 440 64|postgres_bootstrap_password 0 0 440 64|g' \
     -e 's| 0 65532 440| 0 0 440|g' \
@@ -386,6 +391,7 @@ SLEEP
     -e "s|/root/eventsales-prod|$fixture|g" \
     -e "s|'/root'|'$fixture'|g" \
     -e "s|/usr/sbin:/usr/bin:/sbin:/bin|$fixture/bin:/usr/sbin:/usr/bin:/sbin:/bin|g" \
+    -e "s|f8d2cee51d6647d7026324ffee8a6ebf82cf8ea7e7a3ed6ca82626cf67b5819f|$compose_fixture_sha|g" \
     -e "s|afa7c663abd06ec109bbb9172f2d5391fa856e3dfbff1a1f90da29a46265fa7f|$bootstrap_fixture_sha|g" \
     -e "s|3019e4560946957e27f3fca033c754dda1cf9a66adebd61a46208d87b24e77ce|$probe_fixture_sha|g" \
     -e 's|postgres_bootstrap_password 0 70 440 64|postgres_bootstrap_password 0 0 440 64|g' \
