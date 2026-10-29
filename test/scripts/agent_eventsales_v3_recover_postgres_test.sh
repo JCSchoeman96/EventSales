@@ -26,6 +26,8 @@ tmp_root=$(mktemp -d "${TMPDIR:-/tmp}/eventsales-v3-recovery.XXXXXX")
 fixture="$tmp_root/fixture"
 root_fixture="$fixture/root"
 fixture_bin="$fixture/bin"
+hostile_python_dir="$fixture/hostile-python"
+hostile_python_sentinel="$fixture/hostile-json-imported"
 run_fixture="$fixture/run"
 secret_fixture="$root_fixture/eventsales-prod/secrets-v1"
 stage_fixture="$root_fixture/eventsales-prod/staged/c9ce0f9239123a6e58f66fde0b5a1e60238bb107/data-plane"
@@ -47,6 +49,14 @@ edge_network_id=$(printf '5%.0s' {1..64})
 cleanup() { chmod -R u+w "$tmp_root" 2>/dev/null || true; rm -rf -- "$tmp_root"; }
 trap cleanup EXIT
 mkdir -p "$fixture_bin"
+mkdir -p "$hostile_python_dir"
+cat >"$hostile_python_dir/json.py" <<PYTHON
+with open("$hostile_python_sentinel", "w", encoding="utf-8") as sentinel:
+    sentinel.write("hostile json module imported")
+
+def loads(_value):
+    raise RuntimeError("attacker controlled JSON parser")
+PYTHON
 
 write_state() {
   cat >"$state_file" <<STATE
@@ -228,6 +238,7 @@ case "$command" in
       networks='{"eventsales-prod_eventsales_data":{}}'
       ports='{}'
       [[ "$(get PG_MOUNTS)" == bad ]] && mounts='[]'
+      [[ "$(get PG_MOUNTS)" == malformed_json ]] && mounts='[not-json'
       [[ "$(get PG_MOUNTS)" == wrong_volume ]] && mounts='[{"Type":"volume","Name":"other_volume","Destination":"/var/lib/postgresql"},{"Type":"bind","Source":"FIXTURE_SECRET_SOURCE/postgres_bootstrap_password","Destination":"/run/secrets/postgres_bootstrap_password","RW":false}]'
       [[ "$(get PG_MOUNTS)" == wrong_destination ]] && mounts='[{"Type":"volume","Name":"eventsales-prod_postgres_data","Destination":"/wrong"},{"Type":"bind","Source":"FIXTURE_SECRET_SOURCE/postgres_bootstrap_password","Destination":"/run/secrets/postgres_bootstrap_password","RW":false}]'
       [[ "$(get PG_MOUNTS)" == extra ]] && mounts='[{"Type":"volume","Name":"eventsales-prod_postgres_data","Destination":"/var/lib/postgresql"},{"Type":"bind","Source":"FIXTURE_SECRET_SOURCE/postgres_bootstrap_password","Destination":"/run/secrets/postgres_bootstrap_password","RW":false},{"Type":"bind","Source":"/other","Destination":"/other","RW":false}]'
@@ -402,7 +413,8 @@ render_test_wrapper() {
 reset_case() { make_filesystem; write_state; render_test_wrapper; }
 
 run_wrapper() {
-  env TEST_EUID="$fixture_uid" PATH="$fixture_bin:/usr/bin:/bin" \
+  local pythonpath=${1:-}
+  env TEST_EUID="$fixture_uid" PATH="$fixture_bin:/usr/bin:/bin" PYTHONPATH="$pythonpath" \
     DOCKER_HOST='tcp://attacker.invalid:2375' DOCKER_CONTEXT='caller-context' \
     DOCKER_CONFIG='/caller/docker-config' COMPOSE_PROJECT_NAME='caller-project' \
     COMPOSE_FILE='/caller/compose.yaml' EVENTSALES_SECRET_DIR='/caller/secrets' \
@@ -637,6 +649,24 @@ expect_stop 'D0 ID format mismatch' D0_CONTRACT_MISMATCH
 
 # A successful fake recovery proves the exact mutation boundary and safe output.
 reset_case
+set_state PG_MOUNTS malformed_json
+set +e; run_wrapper; malformed_status=$?; set -e
+((malformed_status != 0)) || fail 'malformed attachment data unexpectedly passed validation'
+[[ "$(cat "$err")" == 'STOP=FAILED_CONTAINER_CONTRACT_MISMATCH' ]] || {
+  cat "$err" >&2
+  fail 'malformed attachment data did not produce deterministic safe output'
+}
+assert_no_mutations 'malformed attachment data'
+pass 'malformed attachment JSON fails closed without interpreter diagnostics'
+
+reset_case
+set +e; run_wrapper "$hostile_python_dir"; hostile_python_status=$?; set -e
+[[ ! -e "$hostile_python_sentinel" ]] || fail 'caller-controlled PYTHONPATH imported attacker json.py'
+((hostile_python_status == 0)) || { cat "$err" >&2; fail 'valid fake recovery failed under hostile PYTHONPATH'; }
+/usr/bin/grep -Fxq 'POSTGRES_RECOVERY=HEALTHY' "$out" || fail 'hostile PYTHONPATH recovery omitted its success result'
+pass 'attachment validation ignores hostile Python module and still recovers'
+
+reset_case
 run_wrapper || { cat "$err" >&2; cat "$docker_log" >&2; fail 'valid fake recovery did not succeed'; }
 [[ "$(call_count 'rm ')" -eq 1 ]] || fail 'failed container was not removed exactly once'
 [[ "$(call_count 'compose ')" -eq 1 ]] || fail 'Compose was not invoked exactly once'
@@ -661,27 +691,34 @@ pass 'success path uses captured ID, exact Compose override, and safe output'
 
 post_failure_case() {
   local label=$1 expected=$2 state_key=$3 value=$4 stop_expected=$5 compose_expected=${6:-1} \
-    extra_key=${7:-none} extra_value=${8:-} terminal_state=${9:-RECOVERY_FAILED_CONTAINED} stop_calls
+    extra_key=${7:-none} extra_value=${8:-} terminal_state=${9:-RECOVERY_FAILED_CONTAINED} stop_calls d0_before d0_after
   reset_case
   set_state COMPOSE_CREATES yes
   if [[ "$state_key" == PG_* ]]; then state_key="NEW_${state_key#PG_}"; fi
   [[ "$state_key" == none ]] || set_state "$state_key" "$value"
   [[ "$extra_key" == none ]] || set_state "$extra_key" "$extra_value"
+  d0_before=$(/usr/bin/grep '^D0_' "$state_file")
   set +e; run_wrapper; status=$?; set -e
   ((status != 0)) || { cat "$state_file" >&2; cat "$docker_log" >&2; fail "$label unexpectedly succeeded"; }
   /usr/bin/grep -Fxq "STOP=$expected" "$err" || { cat "$err" >&2; fail "$label stopped for the wrong reason"; }
   /usr/bin/grep -Fxq "RECOVERY_STATE=$terminal_state" "$err" || fail "$label did not report its terminal state"
   [[ "$(call_count 'compose ')" -eq "$compose_expected" ]] || fail "$label used an unexpected number of Compose calls"
+  [[ "$(call_count 'rm ')" -eq 1 ]] || fail "$label did not remove the failed container exactly once"
+  /usr/bin/grep -Fq "CALL|rm $base_pg_id" "$docker_log" || fail "$label did not remove the captured failed ID"
   stop_calls=$(call_count 'stop ')
   [[ "$stop_calls" -eq "$stop_expected" ]] || fail "$label used $stop_calls containment stops"
   if ((stop_expected == 1)); then /usr/bin/grep -Fq "CALL|stop --time 10 $new_pg_id" "$docker_log" || fail "$label stopped the wrong ID"; fi
   [[ -d "$root_fixture/eventsales-prod/.v3-postgres-recovery-consumed" ]] || fail "$label cleared or lost the consumed marker"
   [[ "$(call_count "rm $new_pg_id")" -eq 0 ]] || fail "$label removed the recreated container"
   ! /usr/bin/grep -Eq '^CALL\|(volume (rm|create|prune)|network (create|rm|connect|disconnect)|system (prune|prune))' "$docker_log" || fail "$label mutated storage or networks"
+  if [[ "$state_key" == COMPOSE_CREATES && "$value" == no ]]; then
+    d0_after=$(printf '%s\n' "$(/usr/bin/grep '^D0_' "$state_file")")
+    [[ "$d0_before" == "$d0_after" ]] || fail "$label changed D0 fixture state"
+  fi
   pass "$label"
 }
 
-post_failure_case 'Compose failure without new object' COMPOSE_FAILED_NO_RECREATED_CONTAINER COMPOSE_CREATES no 0
+post_failure_case 'Compose success without recreated PostgreSQL' RECREATED_CONTAINER_MISSING COMPOSE_CREATES no 0 1
 post_failure_case 'failed Compose without a recreated object is contained' COMPOSE_FAILED_NO_RECREATED_CONTAINER COMPOSE_CREATES no 0 1 COMPOSE_FAIL yes
 post_failure_case 'Compose failure with running recreated object' COMPOSE_UP_FAILED COMPOSE_FAIL yes 1
 post_failure_case 'invalid recreated ID remains uncontained without guessing' COMPOSE_RESULT_INVENTORY_AMBIGUOUS NEW_ID invalid 0 1 none '' RECOVERY_FAILED_UNCONTAINED

@@ -192,7 +192,9 @@ valid_id() { [[ "$1" =~ ^[0-9a-f]{64}$ ]]; }
 
 validate_attachments() {
   local mounts=$1 networks=$2 ports=$3
-  printf '%s\n%s\n%s\n' "$mounts" "$networks" "$ports" | python3 -c '
+  printf '%s\n%s\n%s\n' "$mounts" "$networks" "$ports" | \
+    env -i PATH="$SAFE_PATH" LC_ALL=C EVENTSALES_SECRET_DIR="$SECRET_DIR" \
+      /usr/bin/python3 -I -c '
 import json
 import os
 import sys
@@ -213,7 +215,7 @@ if len(mounts) != 2 or set(networks) != {network}:
 if ports not in (None, {}):
     if not isinstance(ports, dict) or any(value not in (None, []) for value in ports.values()):
         raise SystemExit(1)
-' "$VOLUME_NAME" "$DATA_NETWORK"
+' "$VOLUME_NAME" "$DATA_NETWORK" 2>/dev/null
 }
 
 read_production_inventory() {
@@ -417,7 +419,10 @@ compose_status=0
 compose_up >/dev/null 2>&1 || compose_status=$?
 capture_status=0
 capture_recreated_id || capture_status=$?
-if ((capture_status == 2)); then post_stop COMPOSE_FAILED_NO_RECREATED_CONTAINER; fi
+if ((capture_status == 2)); then
+  if ((compose_status == 0)); then post_stop RECREATED_CONTAINER_MISSING; fi
+  post_stop COMPOSE_FAILED_NO_RECREATED_CONTAINER
+fi
 ((capture_status == 0)) || uncontained COMPOSE_RESULT_INVENTORY_AMBIGUOUS
 [[ "$NEW_POSTGRES_ID" != "$FAILED_POSTGRES_CONTAINER_ID" ]] || uncontained RECREATED_CONTAINER_ID_REUSED
 if ((compose_status != 0)); then contain_post_compose_failure COMPOSE_UP_FAILED; fi
