@@ -33,6 +33,8 @@ RUNTIME_CONFIG="$ROOT/config/runtime.exs"
 SECRET_GENERATOR="$ROOT/deploy/vps/data-plane/scripts/generate-secrets.sh"
 RUNTIME_RENDERER="$ROOT/deploy/vps/data-plane/scripts/render-runtime-config.sh"
 POSTGRES_BOOTSTRAP="$ROOT/deploy/vps/data-plane/scripts/bootstrap-postgres.sh"
+RECOVERY_WRAPPER="$ROOT/deploy/vps/operator/agent-eventsales-v3-recover-postgres"
+RECOVERY_SUDOERS="$ROOT/deploy/vps/operator/agent-eventsales-v3-recover-postgres.sudoers"
 DEPLOY_PROBE_SCRIPTS=(
   "$ROOT/deploy/vps/data-plane/scripts/probe-postgres.sh"
   "$ROOT/deploy/vps/data-plane/scripts/probe-pgbouncer.sh"
@@ -54,9 +56,25 @@ for source_file in \
   "$SECRET_GENERATOR" \
   "$RUNTIME_RENDERER" \
   "$POSTGRES_BOOTSTRAP" \
+  "$RECOVERY_WRAPPER" \
+  "$RECOVERY_SUDOERS" \
   "${DEPLOY_PROBE_SCRIPTS[@]}"; do
   [[ -f "$source_file" && -r "$source_file" ]] || fail SOURCE_FILE_MISSING
 done
+
+[[ -x "$RECOVERY_WRAPPER" && ! -L "$RECOVERY_WRAPPER" ]] || fail RECOVERY_WRAPPER_TYPE
+bash -n "$RECOVERY_WRAPPER" || fail RECOVERY_WRAPPER_SYNTAX
+expected_recovery_rule='agentops ALL=(root) NOPASSWD: /usr/local/sbin/agent-eventsales-v3-recover-postgres ""'
+[[ "$(cat -- "$RECOVERY_SUDOERS")" == "$expected_recovery_rule" ]] || fail RECOVERY_SUDOERS_RULE
+[[ $(wc -l <"$RECOVERY_SUDOERS") -eq 1 ]] || fail RECOVERY_SUDOERS_SCOPE
+grep -Fqx 'readonly COMPOSE_SHA256='\''3f41703fd15decd8c6a174142f8eaa4e205383cad539ddaf0ae4cd7a944fb218'\''' "$RECOVERY_WRAPPER" || fail RECOVERY_COMPOSE_PIN
+grep -Fqx 'readonly OVERRIDE_SHA256='\''cc4bc2cee5847d9d24984ccc5521ef81868aeb77456e66b94df62c50685f2e14'\''' "$RECOVERY_WRAPPER" || fail RECOVERY_VOLUME_OVERRIDE_PIN
+grep -Fq 'up -d --no-deps postgres' "$RECOVERY_WRAPPER" || fail RECOVERY_SERVICE_SCOPE
+grep -Fq 'docker_fixed rm "$FAILED_POSTGRES_CONTAINER_ID"' "$RECOVERY_WRAPPER" || fail RECOVERY_REMOVE_BY_ID
+grep -Fq 'docker_fixed stop --time 10 "$NEW_POSTGRES_ID"' "$RECOVERY_WRAPPER" || fail RECOVERY_CONTAINMENT_BY_ID
+if grep -Eiq 'docker[[:space:]]+(volume[[:space:]]+rm|system[[:space:]]+prune)|compose[[:space:]]+down[[:space:]]+-v' "$RECOVERY_WRAPPER"; then
+  fail RECOVERY_STORAGE_MUTATION
+fi
 
 TMP_DIR="$(mktemp -d /tmp/vps-deploy-contract.XXXXXX 2>/dev/null)" || fail TEMP_DIR
 trap 'rm -rf -- "$TMP_DIR"' EXIT

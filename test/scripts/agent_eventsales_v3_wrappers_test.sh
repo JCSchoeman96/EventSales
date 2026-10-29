@@ -9,6 +9,8 @@ provision_source="$repo_root/deploy/vps/operator/agent-eventsales-v3-provision-n
 start_source="$repo_root/deploy/vps/operator/agent-eventsales-v3-start-postgres"
 bootstrap_source="$repo_root/deploy/vps/operator/agent-eventsales-v3-bootstrap-postgres"
 sudoers_source="$repo_root/deploy/vps/operator/agent-eventsales-v3.sudoers"
+recovery_source="$repo_root/deploy/vps/operator/agent-eventsales-v3-recover-postgres"
+recovery_sudoers_source="$repo_root/deploy/vps/operator/agent-eventsales-v3-recover-postgres.sudoers"
 expected_stage='/root/eventsales-prod/staged/2f69c126ab0098ed2d1323ed33d6bc2761df752f/data-plane'
 expected_secret_dir='/root/eventsales-prod/secrets-v1'
 secret_sentinel='V3_FIXTURE_SECRET_VALUE_MUST_NEVER_BE_PRINTED'
@@ -26,7 +28,7 @@ pass() {
   printf 'PASS: %s\n' "$1"
 }
 
-for source in "$provision_source" "$start_source" "$bootstrap_source" "$sudoers_source"; do
+for source in "$provision_source" "$start_source" "$bootstrap_source" "$sudoers_source" "$recovery_source" "$recovery_sudoers_source"; do
   [[ -f "$source" && ! -L "$source" ]] || fail 'required V3 wrapper or sudoers source is missing'
 done
 
@@ -731,5 +733,23 @@ awk '
   END { if (named && invoked) exit 0; exit 1 }
 ' "$repo_root/.github/workflows/ci.yml" || fail 'V3 wrapper regression suite is not in the existing vps_deploy_contract job'
 pass 'CI runs the V3 wrapper suite inside the existing deployment-contract job'
+
+grep -Fq 'if ((EUID != ROOT_UID)); then' "$recovery_source" || fail 'recovery wrapper is missing the actual root boundary'
+grep -Fq 'if (($# != 0)); then' "$recovery_source" || fail 'recovery wrapper does not reject all arguments'
+expected_recovery_sudoers='agentops ALL=(root) NOPASSWD: /usr/local/sbin/agent-eventsales-v3-recover-postgres ""'
+[[ "$(cat -- "$recovery_sudoers_source")" == "$expected_recovery_sudoers" ]] || fail 'recovery sudoers does not grant exactly the zero-argument wrapper'
+[[ $(wc -l <"$recovery_sudoers_source") -eq 1 ]] || fail 'recovery sudoers contains extra rules or lines'
+! grep -Eiq 'ALL[[:space:]]*$|/bin/(ba)?sh|docker|\*|install|cp|chmod|chown|mv|rm' "$recovery_sudoers_source" || fail 'recovery sudoers includes broader authority'
+/usr/sbin/visudo -cf "$recovery_sudoers_source" >/dev/null || fail 'local visudo rejected the recovery sudoers fragment'
+pass 'recovery sudoers grants only its exact zero-argument command'
+
+awk '
+  /^  vps_deploy_contract:/ { in_job = 1; next }
+  in_job && /^  [a-zA-Z0-9_-]+:/ { in_job = 0 }
+  in_job && /name: Verify EventSales V3 PostgreSQL recovery wrapper/ { named = 1 }
+  in_job && /bash test\/scripts\/agent_eventsales_v3_recover_postgres_test.sh/ { invoked = 1 }
+  END { if (named && invoked) exit 0; exit 1 }
+' "$repo_root/.github/workflows/ci.yml" || fail 'recovery suite is not in the existing vps_deploy_contract job'
+pass 'CI runs the recovery fake-Docker suite in the deployment-contract job'
 
 printf 'RESULT=PASS\nTESTS_PASSED=%s\n' "$passes"
