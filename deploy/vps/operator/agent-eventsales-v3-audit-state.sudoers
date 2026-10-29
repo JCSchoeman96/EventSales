@@ -1,0 +1,1 @@
+agentops ALL=(root) NOPASSWD: /usr/local/sbin/agent-eventsales-v3-audit-state ""
