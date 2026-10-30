@@ -10,6 +10,7 @@ sudoers_source="$repo_root/deploy/vps/operator/agent-eventsales-v5-stage-proof-b
 data_plane_source="$repo_root/deploy/vps/data-plane"
 source_commit='2e7b848c7d89c7c0a8e3b0f7f81cd9ef6c7a36e6'
 old_commit='c9ce0f9239123a6e58f66fde0b5a1e60238bb107'
+source_root_tree='2cc2e6a95e3a8bcf099eefdbfcd193b587b69555'
 source_tree='3f2c4f6c521212cb81ef092198b0485f8285201e'
 old_tree='bd818ee6d9ab617205d77fce8c8bfeeb90922aff'
 readonly -a expected_files=(
@@ -38,6 +39,10 @@ pass() { passes=$((passes + 1)); printf 'PASS: %s\n' "$1"; }
 [[ -f "$wrapper_source" && ! -L "$wrapper_source" ]] || fail 'V5 stage wrapper source is missing'
 [[ -f "$sudoers_source" && ! -L "$sudoers_source" ]] || fail 'V5 stage sudoers source is missing'
 [[ -d "$data_plane_source" && ! -L "$data_plane_source" ]] || fail 'data-plane source directory is missing'
+[[ "$(git -C "$repo_root" rev-parse "$source_commit^{tree}")" == "$source_root_tree" ]] \
+  || fail 'SOURCE_COMMIT root tree does not match its pinned identity'
+[[ "$(git -C "$repo_root" rev-parse "$source_commit:deploy/vps/data-plane")" == "$source_tree" ]] \
+  || fail 'SOURCE_COMMIT data-plane subtree does not match its pinned identity'
 
 tmp_root=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/eventsales-v5-stage.XXXXXX")
 fixture="$tmp_root/fixture"
@@ -58,6 +63,7 @@ fixture_bin="$fixture/bin"
 wrapper_fixture="$tmp_root/agent-eventsales-v5-stage-proof-bundle"
 operation_log="$fixture/operations.log"
 install_count_file="$fixture/install-count"
+chmod_count_file="$fixture/chmod-count"
 state_file="$fixture/state"
 out="$fixture/stdout"
 err="$fixture/stderr"
@@ -90,9 +96,33 @@ GETENT
 cat >"$fixture_bin/mkdir" <<MKDIR
 #!/usr/bin/env bash
 set -euo pipefail
-for item in "\$@"; do :; done
-printf 'MKDIR|%s\\n' "\${!#}" >>'$operation_log'
-exec /usr/bin/mkdir "\$@"
+target="\${!#}"
+printf 'MKDIR|%s\\n' "\$target" >>'$operation_log'
+/usr/bin/mkdir "\$@"
+if [[ "\$target" == '$v5_marker' ]]; then
+  race_mode=NONE
+  [[ ! -f '$state_file' ]] || race_mode=\$(/usr/bin/awk -F= '\$1 == "RACE_MODE" {print \$2; exit}' '$state_file')
+  case "\$race_mode" in
+    NONE|'') ;;
+    SYMLINK)
+      /usr/bin/rm -f -- '$candidate/scripts/probe-redis.sh'
+      [[ -p '$fixture/race-target.fifo' ]] || /usr/bin/mkfifo '$fixture/race-target.fifo'
+      /usr/bin/ln -s '$fixture/race-target.fifo' '$candidate/scripts/probe-redis.sh'
+      ;;
+    FIFO)
+      /usr/bin/rm -f -- '$candidate/scripts/probe-redis.sh'
+      /usr/bin/mkfifo '$candidate/scripts/probe-redis.sh'
+      ;;
+    CONTENT)
+      /usr/bin/printf 'post-validation content swap\\n' >'$candidate/scripts/probe-redis.sh'
+      ;;
+    GROWTH)
+      /usr/bin/truncate -s 16777216 '$candidate/compose.yaml'
+      ;;
+    *) exit 75 ;;
+  esac
+  printf 'RACE_APPLIED|%s\\n' "\$race_mode" >>'$operation_log'
+fi
 MKDIR
 
 cat >"$fixture_bin/install" <<INSTALL
@@ -103,6 +133,7 @@ count=0
 count=\$((count + 1))
 printf '%s\\n' "\$count" >'$install_count_file'
 printf 'INSTALL|%s\\n' "\${!#}" >>'$operation_log'
+printf 'INSTALL_SOURCE|%s\\n' "\${@: -2:1}" >>'$operation_log'
 fail_at=0
 [[ ! -f '$state_file' ]] || fail_at=\$(/usr/bin/awk -F= '\$1 == "FAIL_INSTALL_AT" {print \$2; exit}' '$state_file')
 if [[ "\$fail_at" == "\$count" ]]; then exit 73; fi
@@ -116,8 +147,22 @@ printf 'MV|%s\\n' "\${@: -2:1}" >>'$operation_log'
 exec /usr/bin/mv "\$@"
 MV
 
+cat >"$fixture_bin/chmod" <<CHMOD
+#!/usr/bin/env bash
+set -euo pipefail
+count=0
+[[ ! -f '$chmod_count_file' ]] || read -r count <'$chmod_count_file'
+count=\$((count + 1))
+printf '%s\\n' "\$count" >'$chmod_count_file'
+printf 'CHMOD|%s\\n' "\${!#}" >>'$operation_log'
+fail_at=0
+[[ ! -f '$state_file' ]] || fail_at=\$(/usr/bin/awk -F= '\$1 == "FAIL_CHMOD_AT" {print \$2; exit}' '$state_file')
+if [[ "\$fail_at" == "\$count" ]]; then exit 73; fi
+exec /usr/bin/chmod "\$@"
+CHMOD
+
 chmod 0755 "$fixture_bin/id" "$fixture_bin/getent" "$fixture_bin/mkdir" \
-  "$fixture_bin/install" "$fixture_bin/mv"
+  "$fixture_bin/install" "$fixture_bin/mv" "$fixture_bin/chmod"
 
 render_test_wrapper() {
   /usr/bin/sed \
@@ -158,7 +203,8 @@ reset_fixture() {
   chmod 0555 "$c9ce_commit" "$c9ce_data"
   : >"$operation_log"
   printf '0\n' >"$install_count_file"
-  printf 'FAIL_INSTALL_AT=0\n' >"$state_file"
+  printf '0\n' >"$chmod_count_file"
+  printf 'FAIL_INSTALL_AT=0\nFAIL_CHMOD_AT=0\nRACE_MODE=NONE\n' >"$state_file"
   render_test_wrapper
 }
 
@@ -168,6 +214,12 @@ run_wrapper() {
     BASH_ENV='/caller/hostile-bash-env' ENV='/caller/env' CDPATH='/caller/cdpath' \
     "$wrapper_fixture" "$@" >"$out" 2>"$err" || status=$?
   return "$status"
+}
+
+run_wrapper_bounded() {
+  /usr/bin/timeout 5s env TEST_EUID="$fixture_uid" PATH="$fixture_bin:/usr/bin:/bin" \
+    BASH_ENV='/caller/hostile-bash-env' ENV='/caller/env' CDPATH='/caller/cdpath' \
+    "$wrapper_fixture" >"$out" 2>"$err"
 }
 
 expect_preflight_block() {
@@ -226,7 +278,19 @@ assert_final_tree() {
   done
 }
 
+grep -Fqx "readonly SOURCE_TREE='$source_root_tree'" "$wrapper_source" || fail 'source root tree ID is not pinned'
+pass 'SOURCE_ROOT_TREE_PIN=PASS'
 grep -Fqx "readonly SOURCE_DATA_PLANE_TREE='$source_tree'" "$wrapper_source" || fail 'source subtree tree ID is not pinned'
+pass 'SOURCE_DATA_PLANE_TREE_PIN=PASS'
+grep -Fqx "readonly SOURCE_COMMIT='$source_commit'" "$wrapper_source" || fail 'source commit is not pinned'
+pass 'SOURCE_COMMIT_PIN=PASS'
+grep -Fq 'SOURCE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC' "$wrapper_source" \
+  || fail 'candidate source opens are not no-follow and nonblocking'
+grep -Fq 'os.open(name, SOURCE_FLAGS, dir_fd=source_directory_fds[directory])' "$wrapper_source" \
+  || fail 'candidate bytes are not read from a stable directory-relative file descriptor'
+grep -Fq 'MAX_FILE_BYTES = 1048576' "$wrapper_source" || fail 'candidate source reads are not size bounded'
+grep -Fq 'if not stat.S_ISREG(info.st_mode):' "$wrapper_source" || fail 'candidate special files are not rejected after open'
+pass 'STABLE_FD_HANDOFF=PASS; NOFOLLOW=PASS; NONBLOCKING_SPECIAL_FILE_REJECTION=PASS; READ_BOUND=PASS'
 grep -Fqx "readonly C9CE_DATA_PLANE_TREE='$old_tree'" "$wrapper_source" || fail 'c9ce subtree tree ID is not pinned'
 grep -Fqx "  '100755 43aad20cdf8da6169fa1972bf969c59b1ff1c758 scripts/probe-pgbouncer.sh'" "$wrapper_source" \
   || fail 'current PgBouncer probe blob is not pinned'
@@ -408,6 +472,8 @@ status=0; run_wrapper || status=$?
 for expected in \
   'V5_PROOF_BUNDLE_STAGE=STAGED' \
   "SOURCE_COMMIT=$source_commit" \
+  "SOURCE_TREE=$source_root_tree" \
+  "SOURCE_DATA_PLANE_TREE=$source_tree" \
   "TARGET=$target_data" \
   'TARGET_TREE_MATCH=YES' \
   'TARGET_METADATA=IMMUTABLE' \
@@ -419,6 +485,7 @@ for expected in \
   'V5_PROBES_EXECUTED=NO'; do
   grep -Fxq "$expected" "$out" || fail "successful wrapper output omitted $expected"
 done
+pass 'SUCCESS_OUTPUT_SOURCE_TREE=PASS'
 [[ -d "$v5_marker" && ! -L "$v5_marker" ]] || fail 'successful stage did not preserve the marker'
 [[ "$(stat -c '%u:%g:%a' -- "$v5_marker")" == "$fixture_uid:$fixture_gid:700" ]] || fail 'stage marker metadata is incorrect'
 assert_final_tree
@@ -442,20 +509,52 @@ grep -Fxq 'V5_PROOF_BUNDLE_STAGE=PREFLIGHT_BLOCKED' "$err" || fail 'second invoc
 [[ -d "$target_commit" && -d "$v5_marker" ]] || fail 'second invocation altered successful stage state'
 pass 'second invocation after success is rejected without retry'
 
+expect_post_validation_race() {
+  local race_mode=$1 status=0
+  reset_fixture
+  printf 'FAIL_INSTALL_AT=0\nRACE_MODE=%s\n' "$race_mode" >"$state_file"
+  run_wrapper_bounded || status=$?
+  ((status != 124)) || fail "POST_VALIDATION_${race_mode}_SWAP_BLOCKED_ON_MUTABLE_SOURCE"
+  ((status != 0)) || fail "POST_VALIDATION_${race_mode}_SWAP_WAS_ACCEPTED"
+  grep -Fxq "RACE_APPLIED|$race_mode" "$operation_log" || fail "$race_mode swap did not occur after marker creation"
+  grep -Fxq 'V5_PROOF_BUNDLE_STAGE=BLOCKED_AFTER_CONSUMPTION' "$err" \
+    || fail "$race_mode swap did not fail terminally after marker consumption"
+  [[ -d "$v5_marker" && ! -L "$v5_marker" ]] || fail "$race_mode swap removed the consumed marker"
+  [[ ! -e "$target_commit" && ! -L "$target_commit" ]] || fail "$race_mode swap published a final target"
+  if grep -Fq "INSTALL_SOURCE|$candidate/" "$operation_log"; then
+    fail "$race_mode swap caused root-side install to dereference the agentops candidate"
+  fi
+  if [[ "$race_mode" == GROWTH && -f "$temp_stage/data-plane/compose.yaml" ]]; then
+    local staged_bytes
+    staged_bytes=$(stat -c '%s' -- "$temp_stage/data-plane/compose.yaml")
+    ((staged_bytes <= 1048576)) || fail "growth swap caused an oversized privileged staging write"
+  fi
+}
+
+expect_post_validation_race SYMLINK
+pass 'POST_VALIDATION_SOURCE_SYMLINK_SWAP=SAFE_REJECTION'
+expect_post_validation_race FIFO
+pass 'POST_VALIDATION_SOURCE_FIFO_SWAP=SAFE_REJECTION'
+expect_post_validation_race CONTENT
+pass 'POST_VALIDATION_SOURCE_CONTENT_SWAP=SAFE_REJECTION'
+expect_post_validation_race GROWTH
+pass 'NO_UNBOUNDED_SOURCE_READ=PASS; growth swap does not create an oversized staged file'
+pass 'NO_FINAL_TARGET_ON_RACE=PASS; MARKER_REMAINS_CONSUMED_AFTER_POSTMARK_RACE=PASS'
+
 reset_fixture
-printf 'FAIL_INSTALL_AT=1\n' >"$state_file"
+printf 'FAIL_INSTALL_AT=0\nFAIL_CHMOD_AT=1\nRACE_MODE=NONE\n' >"$state_file"
 status=0; run_wrapper || status=$?
-((status != 0)) || fail 'injected post-marker install failure unexpectedly succeeded'
+((status != 0)) || fail 'injected post-marker chmod failure unexpectedly succeeded'
 grep -Fxq 'V5_PROOF_BUNDLE_STAGE=BLOCKED_AFTER_CONSUMPTION' "$err" || fail 'post-marker failure was not terminal'
 [[ -d "$v5_marker" && -d "$temp_stage" && ! -e "$target_commit" ]] \
   || fail 'post-marker failure did not preserve partial staging state'
-[[ "$(<"$install_count_file")" == 1 ]] || fail 'post-marker failure retried installation'
+[[ "$(<"$chmod_count_file")" == 1 ]] || fail 'post-marker failure retried staging'
 pass 'POSTMARK_FAILURE_IS_TERMINAL=PASS; partial state is preserved; no retry occurs'
 
 status=0; run_wrapper || status=$?
 ((status != 0)) || fail 'second invocation after post-marker failure was accepted'
 grep -Fxq 'V5_PROOF_BUNDLE_STAGE=PREFLIGHT_BLOCKED' "$err" || fail 'consumed authority was not rejected'
-[[ "$(<"$install_count_file")" == 1 && -d "$temp_stage" ]] || fail 'post-marker retry changed partial state'
+[[ "$(<"$chmod_count_file")" == 1 && -d "$temp_stage" ]] || fail 'post-marker retry changed partial state'
 pass 'POSTMARK_FAILURE_DOES_NOT_RETRY=PASS; consumed authority cannot recover automatically'
 
 if grep -Eiq '(^|[^[:alnum:]_])(docker|docker-compose|systemctl|service|psql|redis-cli|curl|wget|ssh|scp|rsync)([[:space:]]|$)' "$wrapper_source"; then

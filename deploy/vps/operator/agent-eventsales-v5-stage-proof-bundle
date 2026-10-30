@@ -8,12 +8,11 @@ readonly SAFE_PATH='/usr/sbin:/usr/bin:/sbin:/bin'
 readonly ROOT_UID='0'
 readonly ROOT_GID='0'
 readonly SOURCE_COMMIT='2e7b848c7d89c7c0a8e3b0f7f81cd9ef6c7a36e6'
-readonly SOURCE_TREE='947e04ea4bddbeb224685133b2580bca92fae7cd'
+readonly SOURCE_TREE='2cc2e6a95e3a8bcf099eefdbfcd193b587b69555'
 readonly SOURCE_DATA_PLANE_TREE='3f2c4f6c521212cb81ef092198b0485f8285201e'
 readonly C9CE_COMMIT='c9ce0f9239123a6e58f66fde0b5a1e60238bb107'
 readonly C9CE_DATA_PLANE_TREE='bd818ee6d9ab617205d77fce8c8bfeeb90922aff'
 readonly PROD_ROOT='/root/eventsales-prod'
-readonly CANDIDATE_HOME='/home/agentops'
 readonly CANDIDATE_PARENT='/home/agentops/.eventsales-v5-proof-bundle-2e7b848c7d89c7c0a8e3b0f7f81cd9ef6c7a36e6'
 readonly CANDIDATE_DIR="$CANDIDATE_PARENT/data-plane"
 readonly STAGED_ROOT="$PROD_ROOT/staged"
@@ -77,10 +76,10 @@ if ((EUID != ROOT_UID)); then preflight_blocked ROOT_REQUIRED; fi
 PATH=$SAFE_PATH
 LC_ALL=C
 export PATH LC_ALL
-unset CDPATH ENV BASH_ENV
+unset CDPATH ENV BASH_ENV PYTHONHOME PYTHONPATH PYTHONSTARTUP PYTHONINSPECT PYTHONUSERBASE
 cd / || preflight_blocked FIXED_WORKING_DIRECTORY_UNAVAILABLE
 
-required_tools=(chmod chown cut find git getent id install mkdir mv stat)
+required_tools=(chmod chown cut find git getent id mkdir mv python3 stat)
 for tool in "${required_tools[@]}"; do
   command -v "$tool" >/dev/null 2>&1 || preflight_blocked "REQUIRED_TOOL_MISSING_$tool"
 done
@@ -175,6 +174,202 @@ validate_tree() {
   done < <(find "$tree_root" -mindepth 1 -print0 2>/dev/null) || return 1
 }
 
+candidate_handoff() {
+  local action=$1 destination=${2:-}
+  python3 -I - "$action" "$CANDIDATE_DIR" "$destination" "$agent_uid" "$agent_gid" \
+    "$ROOT_UID" "$ROOT_GID" "${EXPECTED_DIRS[@]}" -- "${SOURCE_MANIFEST[@]}" <<'PY'
+import hashlib
+import os
+import stat
+import sys
+
+MAX_FILE_BYTES = 1048576
+DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+SOURCE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+
+
+def fail():
+    raise ValueError("candidate handoff rejected")
+
+
+def open_directory_at(parent_fd, name):
+    return os.open(name, DIRECTORY_FLAGS, dir_fd=parent_fd)
+
+
+def open_absolute_directory(path):
+    if not path.startswith("/"):
+        fail()
+    fd = os.open("/", DIRECTORY_FLAGS)
+    try:
+        for component in path.split("/")[1:]:
+            if not component or component in (".", ".."):
+                fail()
+            next_fd = open_directory_at(fd, component)
+            os.close(fd)
+            fd = next_fd
+        return fd
+    except Exception:
+        os.close(fd)
+        raise
+
+
+def check_directory(fd, uid, gid, mode, device=None):
+    info = os.fstat(fd)
+    if not stat.S_ISDIR(info.st_mode):
+        fail()
+    if (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)) != (uid, gid, mode):
+        fail()
+    if device is not None and info.st_dev != device:
+        fail()
+    return info
+
+
+def write_all(fd, data):
+    view = memoryview(data)
+    while view:
+        written = os.write(fd, view)
+        if written <= 0:
+            fail()
+        view = view[written:]
+
+
+def main():
+    args = sys.argv[1:]
+    if len(args) < 8:
+        fail()
+    action, candidate_path, destination, uid_text, gid_text, root_uid_text, root_gid_text = args[:7]
+    separator = args.index("--", 7)
+    expected_dirs = args[7:separator]
+    uid, gid = int(uid_text), int(gid_text)
+    root_uid, root_gid = int(root_uid_text), int(root_gid_text)
+    if action not in ("validate", "snapshot") or not expected_dirs:
+        fail()
+
+    manifest = []
+    files_by_directory = {"": set(), **{directory: set() for directory in expected_dirs}}
+    for entry in args[separator + 1:]:
+        mode_text, blob, relative_path = entry.split(" ", 2)
+        parts = relative_path.split("/")
+        if len(parts) == 1:
+            directory, name = "", parts[0]
+        elif len(parts) == 2 and parts[0] in expected_dirs:
+            directory, name = parts
+        else:
+            fail()
+        if mode_text not in ("100644", "100755") or len(blob) != 40:
+            fail()
+        if any(character not in "0123456789abcdef" for character in blob):
+            fail()
+        if not name or name in (".", "..") or name in files_by_directory[directory]:
+            fail()
+        files_by_directory[directory].add(name)
+        manifest.append((mode_text, blob, directory, name))
+    if not manifest or any(not files_by_directory[directory] for directory in expected_dirs):
+        fail()
+
+    candidate_name = os.path.basename(candidate_path)
+    candidate_parent_path = os.path.dirname(candidate_path)
+    parent_fd = open_absolute_directory(candidate_parent_path)
+    root_fd = -1
+    destination_fd = -1
+    try:
+        parent_info = check_directory(parent_fd, uid, gid, 0o700)
+        root_fd = open_directory_at(parent_fd, candidate_name)
+        root_info = check_directory(root_fd, uid, gid, 0o700, parent_info.st_dev)
+        expected_root_entries = files_by_directory[""] | set(expected_dirs)
+        if set(os.listdir(root_fd)) != expected_root_entries:
+            fail()
+
+        source_directory_fds = {"": root_fd}
+        for directory in expected_dirs:
+            directory_fd = open_directory_at(root_fd, directory)
+            check_directory(directory_fd, uid, gid, 0o700, root_info.st_dev)
+            expected_names = sorted(files_by_directory[directory])
+            if sorted(os.listdir(directory_fd)) != expected_names:
+                os.close(directory_fd)
+                fail()
+            source_directory_fds[directory] = directory_fd
+
+        destination_directory_fds = {}
+        if action == "snapshot":
+            destination_fd = open_absolute_directory(destination)
+            destination_info = check_directory(destination_fd, root_uid, root_gid, 0o700)
+            if set(os.listdir(destination_fd)) != set(expected_dirs):
+                fail()
+            destination_directory_fds[""] = destination_fd
+            for directory in expected_dirs:
+                directory_fd = open_directory_at(destination_fd, directory)
+                check_directory(directory_fd, root_uid, root_gid, 0o700, destination_info.st_dev)
+                if os.listdir(directory_fd):
+                    os.close(directory_fd)
+                    fail()
+                destination_directory_fds[directory] = directory_fd
+
+        for mode_text, expected_blob, directory, name in manifest:
+            source_fd = os.open(name, SOURCE_FLAGS, dir_fd=source_directory_fds[directory])
+            output_fd = -1
+            try:
+                info = os.fstat(source_fd)
+                if not stat.S_ISREG(info.st_mode):
+                    fail()
+                if (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode), info.st_nlink) != (uid, gid, 0o600, 1):
+                    fail()
+                if info.st_dev != root_info.st_dev or info.st_size > MAX_FILE_BYTES:
+                    fail()
+                if action == "snapshot":
+                    output_fd = os.open(
+                        name,
+                        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                        0o600,
+                        dir_fd=destination_directory_fds[directory],
+                    )
+                    os.fchown(output_fd, root_uid, root_gid)
+                    os.fchmod(output_fd, 0o600)
+
+                digest = hashlib.sha1()
+                digest.update(("blob %d\0" % info.st_size).encode("ascii"))
+                total = 0
+                while True:
+                    if total == MAX_FILE_BYTES:
+                        chunk = os.read(source_fd, 1)
+                        if chunk:
+                            fail()
+                        break
+                    chunk = os.read(source_fd, min(65536, MAX_FILE_BYTES - total))
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if output_fd >= 0:
+                        write_all(output_fd, chunk)
+                    digest.update(chunk)
+                if total != info.st_size or digest.hexdigest() != expected_blob:
+                    fail()
+            finally:
+                os.close(source_fd)
+                if output_fd >= 0:
+                    os.close(output_fd)
+
+        for directory, fd in source_directory_fds.items():
+            if directory:
+                os.close(fd)
+        for directory, fd in destination_directory_fds.items():
+            if directory:
+                os.close(fd)
+    finally:
+        if destination_fd >= 0:
+            os.close(destination_fd)
+        if root_fd >= 0:
+            os.close(root_fd)
+        os.close(parent_fd)
+
+
+try:
+    main()
+except Exception:
+    sys.exit(1)
+PY
+}
+
 require_root_directory() {
   local path=$1 mode_check=$2 metadata owner group mode mode_value
   path_has_symlink_component "$path" && return 1
@@ -199,11 +394,7 @@ preflight() {
   require_root_directory "$PROD_ROOT" protected || { PREFLIGHT_REASON=PRODUCTION_ROOT_INVALID; return 1; }
   require_root_directory "$STAGED_ROOT" protected || { PREFLIGHT_REASON=STAGED_ROOT_INVALID; return 1; }
 
-  path_has_symlink_component "$CANDIDATE_HOME" && { PREFLIGHT_REASON=CANDIDATE_HOME_SYMLINK; return 1; }
-  [[ -d "$CANDIDATE_HOME" && ! -L "$CANDIDATE_HOME" ]] || { PREFLIGHT_REASON=CANDIDATE_HOME_INVALID; return 1; }
-  directory_metadata_matches "$CANDIDATE_PARENT" "$agent_uid" "$agent_gid" 700 \
-    || { PREFLIGHT_REASON=CANDIDATE_PARENT_METADATA_INVALID; return 1; }
-  validate_tree "$CANDIDATE_DIR" SOURCE_MANIFEST "$agent_uid" "$agent_gid" 700 candidate \
+  candidate_handoff validate \
     || { PREFLIGHT_REASON=CANDIDATE_MANIFEST_INVALID; return 1; }
 
   require_root_directory "$C9CE_COMMIT_DIR" immutable \
@@ -241,12 +432,14 @@ for directory in "${EXPECTED_DIRS[@]}"; do
     || blocked_after_consumption "STAGE_DIRECTORY_OWNER_FAILED_$directory"
 done
 
+candidate_handoff snapshot "$TEMP_STAGE_DIR/data-plane" \
+  || blocked_after_consumption CANDIDATE_HANDOFF_FAILED
+
 for entry in "${SOURCE_MANIFEST[@]}"; do
   read -r git_mode expected_blob relative_path <<<"$entry"
   if [[ "$git_mode" == 100755 ]]; then file_mode=0555; else file_mode=0444; fi
-  install -o "$ROOT_UID" -g "$ROOT_GID" -m "$file_mode" -- \
-    "$CANDIDATE_DIR/$relative_path" "$TEMP_STAGE_DIR/data-plane/$relative_path" 2>/dev/null \
-    || blocked_after_consumption "STAGE_FILE_INSTALL_FAILED_$relative_path"
+  chmod "$file_mode" -- "$TEMP_STAGE_DIR/data-plane/$relative_path" 2>/dev/null \
+    || blocked_after_consumption "STAGE_FILE_MODE_FAILED_$relative_path"
 done
 
 for directory in "${EXPECTED_DIRS[@]}"; do
