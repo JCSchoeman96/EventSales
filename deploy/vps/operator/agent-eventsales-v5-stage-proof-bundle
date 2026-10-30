@@ -1,0 +1,486 @@
+#!/bin/bash -p
+set -euo pipefail
+set +x
+umask 077
+IFS=$' \t\n'
+
+readonly SAFE_PATH='/usr/sbin:/usr/bin:/sbin:/bin'
+readonly ROOT_UID='0'
+readonly ROOT_GID='0'
+readonly SOURCE_COMMIT='2e7b848c7d89c7c0a8e3b0f7f81cd9ef6c7a36e6'
+readonly SOURCE_TREE='2cc2e6a95e3a8bcf099eefdbfcd193b587b69555'
+readonly SOURCE_DATA_PLANE_TREE='3f2c4f6c521212cb81ef092198b0485f8285201e'
+readonly C9CE_COMMIT='c9ce0f9239123a6e58f66fde0b5a1e60238bb107'
+readonly C9CE_DATA_PLANE_TREE='bd818ee6d9ab617205d77fce8c8bfeeb90922aff'
+readonly PROD_ROOT='/root/eventsales-prod'
+readonly CANDIDATE_PARENT='/home/agentops/.eventsales-v5-proof-bundle-2e7b848c7d89c7c0a8e3b0f7f81cd9ef6c7a36e6'
+readonly CANDIDATE_DIR="$CANDIDATE_PARENT/data-plane"
+readonly STAGED_ROOT="$PROD_ROOT/staged"
+readonly C9CE_COMMIT_DIR="$STAGED_ROOT/$C9CE_COMMIT"
+readonly C9CE_DATA_PLANE_DIR="$C9CE_COMMIT_DIR/data-plane"
+readonly TARGET_COMMIT_DIR="$STAGED_ROOT/$SOURCE_COMMIT"
+readonly TARGET_DATA_PLANE_DIR="$TARGET_COMMIT_DIR/data-plane"
+readonly TEMP_STAGE_DIR="$STAGED_ROOT/.$SOURCE_COMMIT-v5-proof-bundle-stage.tmp"
+readonly V4_MARKER="$PROD_ROOT/.v4-pgbouncer-redis-start-consumed"
+readonly V5_STAGE_MARKER="$PROD_ROOT/.v5-proof-bundle-stage-consumed"
+readonly EXPECTED_DIRS=(pgbouncer-image scripts templates)
+readonly -a SOURCE_MANIFEST=(
+  '100644 e52999bdc33ab736a058645682b44b8ef8589ce6 compose.yaml'
+  '100644 6735e4f19509402cdc50f82e7871e94e21986aa3 README.md'
+  '100644 b4b93e24db46137044032d121ffb7193fc3e6bce pgbouncer-image/Dockerfile'
+  '100644 a5eaad56761a190dd1ee8545defa299fd58039b6 pgbouncer-image/eventsales_pgbouncer_healthcheck.rs'
+  '100644 0a841ad406cb511e563bd61d970f5d7e190102a9 pgbouncer-image/prove-image.sh'
+  '100755 4956e681ffcc49b95ec9448266781516faf2e13e scripts/bootstrap-postgres.sh'
+  '100755 ceee2677175c11653504126fb46b2631f7d223d0 scripts/generate-secrets.sh'
+  '100755 43aad20cdf8da6169fa1972bf969c59b1ff1c758 scripts/probe-pgbouncer.sh'
+  '100755 9ac960fe89b0275fcf4e5e4d48511e67a206c995 scripts/probe-postgres.sh'
+  '100755 f726bc7a7f56434ba019c155bd758c6cafb16d13 scripts/probe-redis.sh'
+  '100755 c953cf111a1ff9ad35c163ec0aa767e3ae9f7237 scripts/provision-networks.sh'
+  '100755 6f4290dc60aa782cfd3ee504f47f4c442ac6ce9d scripts/render-runtime-config.sh'
+  '100644 fe92ad5a74c8a7d395389d02e974e829c7a4edc8 templates/pgbouncer.ini.template'
+  '100644 5858353d8cc09c008e9d8d0848400b123666a39a templates/redis-users.acl.template'
+)
+# shellcheck disable=SC2034 # validate_tree resolves this manifest through a nameref
+readonly -a C9CE_MANIFEST=(
+  '100644 e52999bdc33ab736a058645682b44b8ef8589ce6 compose.yaml'
+  '100644 6735e4f19509402cdc50f82e7871e94e21986aa3 README.md'
+  '100644 b4b93e24db46137044032d121ffb7193fc3e6bce pgbouncer-image/Dockerfile'
+  '100644 a5eaad56761a190dd1ee8545defa299fd58039b6 pgbouncer-image/eventsales_pgbouncer_healthcheck.rs'
+  '100644 0a841ad406cb511e563bd61d970f5d7e190102a9 pgbouncer-image/prove-image.sh'
+  '100755 4956e681ffcc49b95ec9448266781516faf2e13e scripts/bootstrap-postgres.sh'
+  '100755 ceee2677175c11653504126fb46b2631f7d223d0 scripts/generate-secrets.sh'
+  '100755 8c1fa73a820a888fa2b08e3da946b2a3654d0dc4 scripts/probe-pgbouncer.sh'
+  '100755 9ac960fe89b0275fcf4e5e4d48511e67a206c995 scripts/probe-postgres.sh'
+  '100755 9ad4e133d070576b453052c2fbe67f5eeea4fedd scripts/probe-redis.sh'
+  '100755 c953cf111a1ff9ad35c163ec0aa767e3ae9f7237 scripts/provision-networks.sh'
+  '100755 6f4290dc60aa782cfd3ee504f47f4c442ac6ce9d scripts/render-runtime-config.sh'
+  '100644 fe92ad5a74c8a7d395389d02e974e829c7a4edc8 templates/pgbouncer.ini.template'
+  '100644 5858353d8cc09c008e9d8d0848400b123666a39a templates/redis-users.acl.template'
+)
+
+preflight_blocked() {
+  printf 'V5_PROOF_BUNDLE_STAGE=PREFLIGHT_BLOCKED\n' >&2
+  printf 'STOP=%s\n' "$1" >&2
+  exit 1
+}
+
+blocked_after_consumption() {
+  printf 'V5_PROOF_BUNDLE_STAGE=BLOCKED_AFTER_CONSUMPTION\n' >&2
+  printf 'STOP=%s\n' "$1" >&2
+  exit 1
+}
+
+if (($# != 0)); then preflight_blocked CALLER_ARGUMENTS_FORBIDDEN; fi
+if ((EUID != ROOT_UID)); then preflight_blocked ROOT_REQUIRED; fi
+
+PATH=$SAFE_PATH
+LC_ALL=C
+export PATH LC_ALL
+unset CDPATH ENV BASH_ENV PYTHONHOME PYTHONPATH PYTHONSTARTUP PYTHONINSPECT PYTHONUSERBASE
+cd / || preflight_blocked FIXED_WORKING_DIRECTORY_UNAVAILABLE
+
+required_tools=(chmod chown cut find git getent id mkdir mv python3 stat)
+for tool in "${required_tools[@]}"; do
+  command -v "$tool" >/dev/null 2>&1 || preflight_blocked "REQUIRED_TOOL_MISSING_$tool"
+done
+
+agent_uid=$(id -u agentops 2>/dev/null) || preflight_blocked AGENTOPS_USER_MISSING
+agent_group_entry=$(getent group agentops 2>/dev/null) || preflight_blocked AGENTOPS_GROUP_MISSING
+IFS=: read -r agent_group_name _ agent_gid _ <<<"$agent_group_entry"
+[[ "$agent_uid" =~ ^[0-9]+$ && "$agent_group_name" == agentops && "$agent_gid" =~ ^[0-9]+$ ]] \
+  || preflight_blocked AGENTOPS_IDENTITY_INVALID
+
+path_has_symlink_component() {
+  local path=$1 current='' component
+  local -a components=()
+  IFS=/ read -r -a components <<<"${path#/}"
+  for component in "${components[@]}"; do
+    [[ -n "$component" ]] || continue
+    current+="/$component"
+    [[ ! -L "$current" ]] || return 0
+  done
+  return 1
+}
+
+directory_metadata_matches() {
+  local path=$1 uid=$2 gid=$3 expected_mode=$4 metadata
+  [[ ! -L "$path" && -d "$path" ]] || return 1
+  metadata=$(stat -c '%u:%g:%a' -- "$path" 2>/dev/null) || return 1
+  [[ "$metadata" == "$uid:$gid:$expected_mode" ]]
+}
+
+file_metadata_matches() {
+  local path=$1 uid=$2 gid=$3 expected_mode=$4 metadata
+  [[ ! -L "$path" && -f "$path" ]] || return 1
+  metadata=$(stat -c '%u:%g:%a:%h' -- "$path" 2>/dev/null) || return 1
+  [[ "$metadata" == "$uid:$gid:$expected_mode:1" ]]
+}
+
+validate_tree() {
+  local tree_root=$1 manifest_name=$2 owner_uid=$3 owner_gid=$4 directory_mode=$5 file_mode=$6
+  local -n manifest_ref=$manifest_name
+  local entry git_mode expected_blob relative_path path actual_blob expected_file_mode root_device entry_device
+  local found_path
+
+  path_has_symlink_component "$tree_root" && return 1
+  directory_metadata_matches "$tree_root" "$owner_uid" "$owner_gid" "$directory_mode" || return 1
+  root_device=$(stat -c '%d' -- "$tree_root" 2>/dev/null) || return 1
+
+  for relative_path in "${EXPECTED_DIRS[@]}"; do
+    path="$tree_root/$relative_path"
+    path_has_symlink_component "$path" && return 1
+    directory_metadata_matches "$path" "$owner_uid" "$owner_gid" "$directory_mode" || return 1
+    entry_device=$(stat -c '%d' -- "$path" 2>/dev/null) || return 1
+    [[ "$entry_device" == "$root_device" ]] || return 1
+  done
+
+  for entry in "${manifest_ref[@]}"; do
+    read -r git_mode expected_blob relative_path <<<"$entry"
+    [[ "$git_mode" == 100644 || "$git_mode" == 100755 ]] || return 1
+    [[ "$expected_blob" =~ ^[0-9a-f]{40}$ ]] || return 1
+    path="$tree_root/$relative_path"
+    path_has_symlink_component "$path" && return 1
+    if [[ "$file_mode" == candidate ]]; then
+      expected_file_mode=600
+    elif [[ "$git_mode" == 100755 ]]; then
+      expected_file_mode=555
+    else
+      expected_file_mode=444
+    fi
+    file_metadata_matches "$path" "$owner_uid" "$owner_gid" "$expected_file_mode" || return 1
+    entry_device=$(stat -c '%d' -- "$path" 2>/dev/null) || return 1
+    [[ "$entry_device" == "$root_device" ]] || return 1
+    actual_blob=$(git hash-object --no-filters -- "$path" 2>/dev/null) || return 1
+    [[ "$actual_blob" == "$expected_blob" ]] || return 1
+  done
+
+  while IFS= read -r -d '' found_path; do
+    [[ "$found_path" == "$tree_root/"* ]] || return 1
+    relative_path=${found_path#"$tree_root"/}
+    if [[ -L "$found_path" ]]; then return 1; fi
+    if [[ -d "$found_path" ]]; then
+      case "$relative_path" in
+        pgbouncer-image|scripts|templates) ;;
+        *) return 1 ;;
+      esac
+    elif [[ -f "$found_path" ]]; then
+      case "$relative_path" in
+        compose.yaml|README.md|pgbouncer-image/Dockerfile|pgbouncer-image/eventsales_pgbouncer_healthcheck.rs|pgbouncer-image/prove-image.sh|scripts/bootstrap-postgres.sh|scripts/generate-secrets.sh|scripts/probe-pgbouncer.sh|scripts/probe-postgres.sh|scripts/probe-redis.sh|scripts/provision-networks.sh|scripts/render-runtime-config.sh|templates/pgbouncer.ini.template|templates/redis-users.acl.template) ;;
+        *) return 1 ;;
+      esac
+    else
+      return 1
+    fi
+  done < <(find "$tree_root" -mindepth 1 -print0 2>/dev/null) || return 1
+}
+
+candidate_handoff() {
+  local action=$1 destination=${2:-}
+  python3 -I - "$action" "$CANDIDATE_DIR" "$destination" "$agent_uid" "$agent_gid" \
+    "$ROOT_UID" "$ROOT_GID" "${EXPECTED_DIRS[@]}" -- "${SOURCE_MANIFEST[@]}" <<'PY'
+import hashlib
+import os
+import stat
+import sys
+
+MAX_FILE_BYTES = 1048576
+DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+SOURCE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+
+
+def fail():
+    raise ValueError("candidate handoff rejected")
+
+
+def open_directory_at(parent_fd, name):
+    return os.open(name, DIRECTORY_FLAGS, dir_fd=parent_fd)
+
+
+def open_absolute_directory(path):
+    if not path.startswith("/"):
+        fail()
+    fd = os.open("/", DIRECTORY_FLAGS)
+    try:
+        for component in path.split("/")[1:]:
+            if not component or component in (".", ".."):
+                fail()
+            next_fd = open_directory_at(fd, component)
+            os.close(fd)
+            fd = next_fd
+        return fd
+    except Exception:
+        os.close(fd)
+        raise
+
+
+def check_directory(fd, uid, gid, mode, device=None):
+    info = os.fstat(fd)
+    if not stat.S_ISDIR(info.st_mode):
+        fail()
+    if (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)) != (uid, gid, mode):
+        fail()
+    if device is not None and info.st_dev != device:
+        fail()
+    return info
+
+
+def write_all(fd, data):
+    view = memoryview(data)
+    while view:
+        written = os.write(fd, view)
+        if written <= 0:
+            fail()
+        view = view[written:]
+
+
+def main():
+    args = sys.argv[1:]
+    if len(args) < 8:
+        fail()
+    action, candidate_path, destination, uid_text, gid_text, root_uid_text, root_gid_text = args[:7]
+    separator = args.index("--", 7)
+    expected_dirs = args[7:separator]
+    uid, gid = int(uid_text), int(gid_text)
+    root_uid, root_gid = int(root_uid_text), int(root_gid_text)
+    if action not in ("validate", "snapshot") or not expected_dirs:
+        fail()
+
+    manifest = []
+    files_by_directory = {"": set(), **{directory: set() for directory in expected_dirs}}
+    for entry in args[separator + 1:]:
+        mode_text, blob, relative_path = entry.split(" ", 2)
+        parts = relative_path.split("/")
+        if len(parts) == 1:
+            directory, name = "", parts[0]
+        elif len(parts) == 2 and parts[0] in expected_dirs:
+            directory, name = parts
+        else:
+            fail()
+        if mode_text not in ("100644", "100755") or len(blob) != 40:
+            fail()
+        if any(character not in "0123456789abcdef" for character in blob):
+            fail()
+        if not name or name in (".", "..") or name in files_by_directory[directory]:
+            fail()
+        files_by_directory[directory].add(name)
+        manifest.append((mode_text, blob, directory, name))
+    if not manifest or any(not files_by_directory[directory] for directory in expected_dirs):
+        fail()
+
+    candidate_name = os.path.basename(candidate_path)
+    candidate_parent_path = os.path.dirname(candidate_path)
+    parent_fd = open_absolute_directory(candidate_parent_path)
+    root_fd = -1
+    destination_fd = -1
+    try:
+        parent_info = check_directory(parent_fd, uid, gid, 0o700)
+        root_fd = open_directory_at(parent_fd, candidate_name)
+        root_info = check_directory(root_fd, uid, gid, 0o700, parent_info.st_dev)
+        expected_root_entries = files_by_directory[""] | set(expected_dirs)
+        if set(os.listdir(root_fd)) != expected_root_entries:
+            fail()
+
+        source_directory_fds = {"": root_fd}
+        for directory in expected_dirs:
+            directory_fd = open_directory_at(root_fd, directory)
+            check_directory(directory_fd, uid, gid, 0o700, root_info.st_dev)
+            expected_names = sorted(files_by_directory[directory])
+            if sorted(os.listdir(directory_fd)) != expected_names:
+                os.close(directory_fd)
+                fail()
+            source_directory_fds[directory] = directory_fd
+
+        destination_directory_fds = {}
+        if action == "snapshot":
+            destination_fd = open_absolute_directory(destination)
+            destination_info = check_directory(destination_fd, root_uid, root_gid, 0o700)
+            if set(os.listdir(destination_fd)) != set(expected_dirs):
+                fail()
+            destination_directory_fds[""] = destination_fd
+            for directory in expected_dirs:
+                directory_fd = open_directory_at(destination_fd, directory)
+                check_directory(directory_fd, root_uid, root_gid, 0o700, destination_info.st_dev)
+                if os.listdir(directory_fd):
+                    os.close(directory_fd)
+                    fail()
+                destination_directory_fds[directory] = directory_fd
+
+        for mode_text, expected_blob, directory, name in manifest:
+            source_fd = os.open(name, SOURCE_FLAGS, dir_fd=source_directory_fds[directory])
+            output_fd = -1
+            try:
+                info = os.fstat(source_fd)
+                if not stat.S_ISREG(info.st_mode):
+                    fail()
+                if (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode), info.st_nlink) != (uid, gid, 0o600, 1):
+                    fail()
+                if info.st_dev != root_info.st_dev or info.st_size > MAX_FILE_BYTES:
+                    fail()
+                if action == "snapshot":
+                    output_fd = os.open(
+                        name,
+                        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                        0o600,
+                        dir_fd=destination_directory_fds[directory],
+                    )
+                    os.fchown(output_fd, root_uid, root_gid)
+                    os.fchmod(output_fd, 0o600)
+
+                digest = hashlib.sha1()
+                digest.update(("blob %d\0" % info.st_size).encode("ascii"))
+                total = 0
+                while True:
+                    if total == MAX_FILE_BYTES:
+                        chunk = os.read(source_fd, 1)
+                        if chunk:
+                            fail()
+                        break
+                    chunk = os.read(source_fd, min(65536, MAX_FILE_BYTES - total))
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if output_fd >= 0:
+                        write_all(output_fd, chunk)
+                    digest.update(chunk)
+                if total != info.st_size or digest.hexdigest() != expected_blob:
+                    fail()
+            finally:
+                os.close(source_fd)
+                if output_fd >= 0:
+                    os.close(output_fd)
+
+        for directory, fd in source_directory_fds.items():
+            if directory:
+                os.close(fd)
+        for directory, fd in destination_directory_fds.items():
+            if directory:
+                os.close(fd)
+    finally:
+        if destination_fd >= 0:
+            os.close(destination_fd)
+        if root_fd >= 0:
+            os.close(root_fd)
+        os.close(parent_fd)
+
+
+try:
+    main()
+except Exception:
+    sys.exit(1)
+PY
+}
+
+require_root_directory() {
+  local path=$1 mode_check=$2 metadata owner group mode mode_value
+  path_has_symlink_component "$path" && return 1
+  [[ -d "$path" && ! -L "$path" ]] || return 1
+  metadata=$(stat -c '%u:%g:%a' -- "$path" 2>/dev/null) || return 1
+  IFS=: read -r owner group mode <<<"$metadata"
+  [[ "$owner" == "$ROOT_UID" && "$group" == "$ROOT_GID" ]] || return 1
+  if [[ "$mode_check" == protected ]]; then
+    mode_value=$((8#$mode))
+    (( (mode_value & 0022) == 0 )) || return 1
+  fi
+}
+
+require_marker() {
+  local path=$1
+  path_has_symlink_component "$path" && return 1
+  directory_metadata_matches "$path" "$ROOT_UID" "$ROOT_GID" 700
+}
+
+preflight() {
+  require_root_directory /root protected || { PREFLIGHT_REASON=ROOT_DIRECTORY_INVALID; return 1; }
+  require_root_directory "$PROD_ROOT" protected || { PREFLIGHT_REASON=PRODUCTION_ROOT_INVALID; return 1; }
+  require_root_directory "$STAGED_ROOT" protected || { PREFLIGHT_REASON=STAGED_ROOT_INVALID; return 1; }
+
+  candidate_handoff validate \
+    || { PREFLIGHT_REASON=CANDIDATE_MANIFEST_INVALID; return 1; }
+
+  require_root_directory "$C9CE_COMMIT_DIR" immutable \
+    || { PREFLIGHT_REASON=C9CE_COMMIT_DIRECTORY_INVALID; return 1; }
+  directory_metadata_matches "$C9CE_COMMIT_DIR" "$ROOT_UID" "$ROOT_GID" 555 \
+    || { PREFLIGHT_REASON=C9CE_COMMIT_METADATA_INVALID; return 1; }
+  validate_tree "$C9CE_DATA_PLANE_DIR" C9CE_MANIFEST "$ROOT_UID" "$ROOT_GID" 555 immutable \
+    || { PREFLIGHT_REASON=C9CE_STAGE_DRIFT; return 1; }
+
+  require_marker "$V4_MARKER" || { PREFLIGHT_REASON=V4_MARKER_INVALID; return 1; }
+  [[ ! -e "$V5_STAGE_MARKER" && ! -L "$V5_STAGE_MARKER" ]] \
+    || { PREFLIGHT_REASON=V5_STAGE_MARKER_ALREADY_CONSUMED; return 1; }
+  [[ ! -e "$TARGET_COMMIT_DIR" && ! -L "$TARGET_COMMIT_DIR" ]] \
+    || { PREFLIGHT_REASON=TARGET_PATH_ALREADY_EXISTS; return 1; }
+  [[ ! -e "$TEMP_STAGE_DIR" && ! -L "$TEMP_STAGE_DIR" ]] \
+    || { PREFLIGHT_REASON=TEMP_STAGE_PATH_ALREADY_EXISTS; return 1; }
+  return 0
+}
+
+preflight || preflight_blocked "$PREFLIGHT_REASON"
+preflight || preflight_blocked "SECOND_REVALIDATION_$PREFLIGHT_REASON"
+
+mkdir -m 0700 -- "$V5_STAGE_MARKER" 2>/dev/null || preflight_blocked V5_MARKER_CREATE_FAILED
+directory_metadata_matches "$V5_STAGE_MARKER" "$ROOT_UID" "$ROOT_GID" 700 \
+  || blocked_after_consumption V5_MARKER_METADATA_INVALID
+
+mkdir -m 0700 -- "$TEMP_STAGE_DIR" 2>/dev/null || blocked_after_consumption TEMP_STAGE_CREATE_FAILED
+chown "$ROOT_UID:$ROOT_GID" "$TEMP_STAGE_DIR" 2>/dev/null || blocked_after_consumption TEMP_STAGE_OWNER_FAILED
+mkdir -m 0700 -- "$TEMP_STAGE_DIR/data-plane" 2>/dev/null || blocked_after_consumption DATA_PLANE_STAGE_CREATE_FAILED
+chown "$ROOT_UID:$ROOT_GID" "$TEMP_STAGE_DIR/data-plane" 2>/dev/null || blocked_after_consumption DATA_PLANE_STAGE_OWNER_FAILED
+for directory in "${EXPECTED_DIRS[@]}"; do
+  mkdir -m 0700 -- "$TEMP_STAGE_DIR/data-plane/$directory" 2>/dev/null \
+    || blocked_after_consumption "STAGE_DIRECTORY_CREATE_FAILED_$directory"
+  chown "$ROOT_UID:$ROOT_GID" "$TEMP_STAGE_DIR/data-plane/$directory" 2>/dev/null \
+    || blocked_after_consumption "STAGE_DIRECTORY_OWNER_FAILED_$directory"
+done
+
+candidate_handoff snapshot "$TEMP_STAGE_DIR/data-plane" \
+  || blocked_after_consumption CANDIDATE_HANDOFF_FAILED
+
+for entry in "${SOURCE_MANIFEST[@]}"; do
+  read -r git_mode expected_blob relative_path <<<"$entry"
+  if [[ "$git_mode" == 100755 ]]; then file_mode=0555; else file_mode=0444; fi
+  chmod "$file_mode" -- "$TEMP_STAGE_DIR/data-plane/$relative_path" 2>/dev/null \
+    || blocked_after_consumption "STAGE_FILE_MODE_FAILED_$relative_path"
+done
+
+for directory in "${EXPECTED_DIRS[@]}"; do
+  chmod 0555 -- "$TEMP_STAGE_DIR/data-plane/$directory" 2>/dev/null \
+    || blocked_after_consumption "STAGE_DIRECTORY_MODE_FAILED_$directory"
+done
+chmod 0555 -- "$TEMP_STAGE_DIR/data-plane" 2>/dev/null || blocked_after_consumption DATA_PLANE_STAGE_MODE_FAILED
+chmod 0555 -- "$TEMP_STAGE_DIR" 2>/dev/null || blocked_after_consumption TEMP_STAGE_MODE_FAILED
+
+validate_tree "$TEMP_STAGE_DIR/data-plane" SOURCE_MANIFEST "$ROOT_UID" "$ROOT_GID" 555 immutable \
+  || blocked_after_consumption TEMP_STAGE_MANIFEST_INVALID
+directory_metadata_matches "$TEMP_STAGE_DIR" "$ROOT_UID" "$ROOT_GID" 555 \
+  || blocked_after_consumption TEMP_STAGE_ROOT_METADATA_INVALID
+
+mv -T -n -- "$TEMP_STAGE_DIR" "$TARGET_COMMIT_DIR" 2>/dev/null \
+  || blocked_after_consumption ATOMIC_STAGE_RENAME_FAILED
+[[ ! -e "$TEMP_STAGE_DIR" && ! -L "$TEMP_STAGE_DIR" ]] \
+  || blocked_after_consumption ATOMIC_STAGE_RENAME_DID_NOT_MOVE
+
+directory_metadata_matches "$TARGET_COMMIT_DIR" "$ROOT_UID" "$ROOT_GID" 555 \
+  || blocked_after_consumption FINAL_COMMIT_DIRECTORY_METADATA_INVALID
+validate_tree "$TARGET_DATA_PLANE_DIR" SOURCE_MANIFEST "$ROOT_UID" "$ROOT_GID" 555 immutable \
+  || blocked_after_consumption FINAL_TARGET_MANIFEST_INVALID
+preflight_c9ce_status=0
+require_root_directory "$C9CE_COMMIT_DIR" immutable && \
+  directory_metadata_matches "$C9CE_COMMIT_DIR" "$ROOT_UID" "$ROOT_GID" 555 && \
+  validate_tree "$C9CE_DATA_PLANE_DIR" C9CE_MANIFEST "$ROOT_UID" "$ROOT_GID" 555 immutable \
+  || preflight_c9ce_status=1
+((preflight_c9ce_status == 0)) || blocked_after_consumption C9CE_POST_STAGE_REVALIDATION_FAILED
+
+printf 'V5_PROOF_BUNDLE_STAGE=STAGED\n'
+printf 'SOURCE_COMMIT=%s\n' "$SOURCE_COMMIT"
+printf 'SOURCE_TREE=%s\n' "$SOURCE_TREE"
+printf 'SOURCE_DATA_PLANE_TREE=%s\n' "$SOURCE_DATA_PLANE_TREE"
+printf 'C9CE_DATA_PLANE_TREE=%s\n' "$C9CE_DATA_PLANE_TREE"
+printf 'TARGET=%s\n' "$TARGET_DATA_PLANE_DIR"
+printf 'TARGET_TREE_MATCH=YES\n'
+printf 'TARGET_METADATA=IMMUTABLE\n'
+printf 'C9CE_STAGE_UNCHANGED=YES\n'
+printf 'V4_MARKER=VALID\n'
+printf 'V5_STAGE_MARKER=CONSUMED\n'
+printf 'DOCKER_USED=NO\n'
+printf 'SERVICES_MUTATED=NO\n'
+printf 'V5_PROBES_EXECUTED=NO\n'

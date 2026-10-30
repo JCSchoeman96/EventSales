@@ -310,6 +310,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Check VPS deployment contract
         shell: bash
@@ -338,3 +340,7 @@ jobs:
       - name: Verify immutable staged data-plane probe layout
         shell: bash
         run: bash test/scripts/data_plane_staged_probe_layout_test.sh
+
+      - name: Verify EventSales V5 proof-bundle staging authority
+        shell: bash
+        run: bash test/scripts/agent_eventsales_v5_stage_proof_bundle_test.sh
