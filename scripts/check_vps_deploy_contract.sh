@@ -37,6 +37,8 @@ RECOVERY_WRAPPER="$ROOT/deploy/vps/operator/agent-eventsales-v3-recover-postgres
 RECOVERY_SUDOERS="$ROOT/deploy/vps/operator/agent-eventsales-v3-recover-postgres.sudoers"
 BOOTSTRAP_V2_WRAPPER="$ROOT/deploy/vps/operator/agent-eventsales-v3-bootstrap-postgres-v2"
 BOOTSTRAP_V2_SUDOERS="$ROOT/deploy/vps/operator/agent-eventsales-v3-bootstrap-postgres-v2.sudoers"
+V4_WRAPPER="$ROOT/deploy/vps/operator/agent-eventsales-v4-start-data-plane"
+V4_SUDOERS="$ROOT/deploy/vps/operator/agent-eventsales-v4-start-data-plane.sudoers"
 DEPLOY_PROBE_SCRIPTS=(
   "$ROOT/deploy/vps/data-plane/scripts/probe-postgres.sh"
   "$ROOT/deploy/vps/data-plane/scripts/probe-pgbouncer.sh"
@@ -62,6 +64,8 @@ for source_file in \
   "$RECOVERY_SUDOERS" \
   "$BOOTSTRAP_V2_WRAPPER" \
   "$BOOTSTRAP_V2_SUDOERS" \
+  "$V4_WRAPPER" \
+  "$V4_SUDOERS" \
   "${DEPLOY_PROBE_SCRIPTS[@]}"; do
   [[ -f "$source_file" && -r "$source_file" ]] || fail SOURCE_FILE_MISSING
 done
@@ -90,6 +94,21 @@ grep -Fqx 'readonly EXPECTED_COMPOSE_SHA256='\''3f41703fd15decd8c6a174142f8eaa4e
 grep -Fqx 'readonly EXPECTED_BOOTSTRAP_SHA256='\''afa7c663abd06ec109bbb9172f2d5391fa856e3dfbff1a1f90da29a46265fa7f'\''' "$BOOTSTRAP_V2_WRAPPER" || fail BOOTSTRAP_V2_CHILD_PIN
 grep -Fqx 'readonly EXPECTED_PROBE_SHA256='\''3019e4560946957e27f3fca033c754dda1cf9a66adebd61a46208d87b24e77ce'\''' "$BOOTSTRAP_V2_WRAPPER" || fail BOOTSTRAP_V2_PROBE_PIN
 /usr/sbin/visudo -cf "$BOOTSTRAP_V2_SUDOERS" >/dev/null || fail BOOTSTRAP_V2_SUDOERS_SYNTAX
+
+[[ -x "$V4_WRAPPER" && ! -L "$V4_WRAPPER" ]] || fail V4_WRAPPER_TYPE
+bash -n "$V4_WRAPPER" || fail V4_WRAPPER_SYNTAX
+expected_v4_rule='agentops ALL=(root) NOPASSWD: /usr/local/sbin/agent-eventsales-v4-start-data-plane ""'
+[[ "$(cat -- "$V4_SUDOERS")" == "$expected_v4_rule" ]] || fail V4_SUDOERS_RULE
+[[ $(wc -l <"$V4_SUDOERS") -eq 1 ]] || fail V4_SUDOERS_SCOPE
+grep -Fqx 'readonly SOURCE_SHA='\''c9ce0f9239123a6e58f66fde0b5a1e60238bb107'\''' "$V4_WRAPPER" || fail V4_STAGE_PIN
+grep -Fqx 'readonly EXPECTED_COMPOSE_SHA256='\''3f41703fd15decd8c6a174142f8eaa4e205383cad539ddaf0ae4cd7a944fb218'\''' "$V4_WRAPPER" || fail V4_COMPOSE_PIN
+grep -Fqx 'readonly PGBOUNCER_IMAGE='\''ghcr.io/jcschoeman96/eventsales-pgbouncer@sha256:965b0223f1096666471e11595f4f6dc5d32dfacbc688418b8ae2385946c41e3b'\''' "$V4_WRAPPER" || fail V4_PGBOUNCER_IMAGE_PIN
+grep -Fqx 'readonly REDIS_IMAGE='\''dhi.io/redis:8.10.2-debian13@sha256:953ca2c2ab4ff7a93f8abac31339ba4d913ec0914861453ab4faa29d154115a0'\''' "$V4_WRAPPER" || fail V4_REDIS_IMAGE_PIN
+grep -Fq 'up -d --no-deps pgbouncer redis' "$V4_WRAPPER" || fail V4_SERVICE_SCOPE
+if grep -Eiq 'docker[[:space:]]+(stop|restart|rm|kill|pause|unpause|volume[[:space:]]+(rm|create|prune)|network[[:space:]]+(create|rm|connect|disconnect)|system[[:space:]]+prune)|compose[[:space:]]+down' "$V4_WRAPPER"; then
+  fail V4_FORBIDDEN_MUTATION
+fi
+/usr/sbin/visudo -cf "$V4_SUDOERS" >/dev/null || fail V4_SUDOERS_SYNTAX
 
 TMP_DIR="$(mktemp -d /tmp/vps-deploy-contract.XXXXXX 2>/dev/null)" || fail TEMP_DIR
 trap 'rm -rf -- "$TMP_DIR"' EXIT

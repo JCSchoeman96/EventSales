@@ -330,3 +330,7 @@ jobs:
       - name: Verify EventSales V3 PostgreSQL bootstrap-v2 wrapper
         shell: bash
         run: bash test/scripts/agent_eventsales_v3_bootstrap_postgres_v2_test.sh
+
+      - name: Verify EventSales V4 PgBouncer and Redis start authority
+        shell: bash
+        run: bash test/scripts/agent_eventsales_v4_start_data_plane_test.sh

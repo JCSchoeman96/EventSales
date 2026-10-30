@@ -1,0 +1,551 @@
+#!/bin/bash -p
+set -euo pipefail
+set +x
+umask 077
+IFS=$' \t\n'
+
+readonly SAFE_PATH='/usr/sbin:/usr/bin:/sbin:/bin'
+readonly ROOT_UID='0'
+readonly ROOT_GID='0'
+readonly DOCKER_SOCKET='unix:///var/run/docker.sock'
+readonly PROJECT='eventsales-prod'
+readonly APP_PROJECT='eventsales-app'
+readonly D0_PROJECT='eventsales-d0-proof'
+readonly POSTGRES_NAME='eventsales-prod-postgres-1'
+readonly PGBOUNCER_NAME='eventsales-prod-pgbouncer-1'
+readonly REDIS_NAME='eventsales-prod-redis-1'
+readonly POSTGRES_IMAGE='dhi.io/postgres:18.6-alpine3.24@sha256:d33bd884995daddfb515d0ce9aec23b74d20d72e03ca42b72c4abf617c76bb19'
+readonly PGBOUNCER_IMAGE='ghcr.io/jcschoeman96/eventsales-pgbouncer@sha256:965b0223f1096666471e11595f4f6dc5d32dfacbc688418b8ae2385946c41e3b'
+readonly REDIS_IMAGE='dhi.io/redis:8.10.2-debian13@sha256:953ca2c2ab4ff7a93f8abac31339ba4d913ec0914861453ab4faa29d154115a0'
+readonly SOURCE_SHA='c9ce0f9239123a6e58f66fde0b5a1e60238bb107'
+readonly PROD_ROOT='/root/eventsales-prod'
+readonly DATA_PLANE_DIR="/root/eventsales-prod/staged/$SOURCE_SHA/data-plane"
+readonly COMPOSE_PATH="$DATA_PLANE_DIR/compose.yaml"
+readonly EXPECTED_COMPOSE_SHA256='3f41703fd15decd8c6a174142f8eaa4e205383cad539ddaf0ae4cd7a944fb218'
+readonly SECRET_DIR='/root/eventsales-prod/secrets-v1'
+readonly RECOVERY_MARKER='/root/eventsales-prod/.v3-postgres-recovery-consumed'
+readonly BOOTSTRAP_MARKER='/root/eventsales-prod/.v3-postgres-bootstrap-v2-consumed'
+readonly V4_MARKER='/root/eventsales-prod/.v4-pgbouncer-redis-start-consumed'
+readonly DATA_NETWORK='eventsales-prod_eventsales_data'
+readonly EDGE_NETWORK='eventsales-prod_eventsales_edge'
+readonly VOLUME_NAME='eventsales-prod_postgres_data'
+readonly POSTGRES_COMMAND='["-c","max_connections=100","-c","shared_buffers=768MB","-c","effective_cache_size=2GB","-c","work_mem=8MB","-c","maintenance_work_mem=256MB"]'
+readonly INVENTORY_FORMAT='{{.ID}}|{{.Names}}'
+readonly BASIC_FORMAT='{{.Id}}|{{.Name}}|{{.State.Status}}|{{.State.Running}}|{{.State.Restarting}}'
+readonly CONTAINER_FORMAT='{{.Id}}|{{.Name}}|{{.State.Status}}|{{.State.Running}}|{{.State.Restarting}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}|{{.RestartCount}}|{{.State.OOMKilled}}|{{.Config.Image}}|{{.HostConfig.Memory}}|{{.HostConfig.NanoCpus}}|{{.Config.User}}|{{.HostConfig.ReadonlyRootfs}}|{{json .HostConfig.CapDrop}}|{{json .HostConfig.SecurityOpt}}|{{json .HostConfig.Tmpfs}}|{{json .Mounts}}|{{json .NetworkSettings.Networks}}|{{json .HostConfig.PortBindings}}|{{json .Config.Cmd}}'
+readonly NETWORK_FORMAT='{{.Id}}|{{.Name}}|{{.Driver}}|{{.Internal}}'
+readonly VOLUME_FORMAT='{{.Name}}|{{.Driver}}|{{.Scope}}|{{.Mountpoint}}'
+readonly HEALTH_TIMEOUT=120
+readonly HEALTH_INTERVAL=2
+
+preflight_stop() {
+  printf 'V4_STATE=V4_PREFLIGHT_BLOCKED\n' >&2
+  printf 'STOP=%s\n' "$1" >&2
+  exit 1
+}
+
+blocked() {
+  printf 'V4_STATE=BLOCKED_B4\n' >&2
+  printf 'STOP=%s\n' "$1" >&2
+  exit 1
+}
+
+if (($# != 0)); then preflight_stop CALLER_ARGUMENTS_FORBIDDEN; fi
+if ((EUID != ROOT_UID)); then preflight_stop ROOT_REQUIRED; fi
+
+PATH=$SAFE_PATH
+LC_ALL=C
+DOCKER_HOST=$DOCKER_SOCKET
+EVENTSALES_SECRET_DIR=$SECRET_DIR
+export PATH LC_ALL DOCKER_HOST EVENTSALES_SECRET_DIR
+unset CDPATH ENV BASH_ENV DOCKER_CONTEXT DOCKER_CONFIG COMPOSE_PROJECT_NAME COMPOSE_FILE \
+  COMPOSE_FILE_SEPARATOR COMPOSE_PROFILES COMPOSE_ENV_FILES DOCKER_TLS_VERIFY \
+  DOCKER_CERT_PATH DOCKER_API_VERSION DOCKER_DEFAULT_PLATFORM DOCKER_CLI_EXPERIMENTAL
+cd / || preflight_stop FIXED_WORKING_DIRECTORY_UNAVAILABLE
+
+valid_id() { [[ "$1" =~ ^[0-9a-f]{64}$ ]]; }
+
+require_directory() {
+  local path=$1 reason=$2 metadata owner group mode mode_value
+  [[ ! -L "$path" ]] || preflight_stop "${reason}_SYMLINK"
+  [[ -d "$path" ]] || preflight_stop "${reason}_MISSING"
+  metadata=$(stat -c '%u:%g:%a' -- "$path" 2>/dev/null) || preflight_stop "${reason}_STAT_FAILED"
+  IFS=: read -r owner group mode <<<"$metadata"
+  [[ "$owner" == "$ROOT_UID" && "$group" == "$ROOT_GID" ]] || preflight_stop "${reason}_OWNER_MISMATCH"
+  mode_value=$((8#$mode))
+  (( (mode_value & 0022) == 0 )) || preflight_stop "${reason}_WRITABLE"
+}
+
+require_immutable_directory() {
+  local path=$1 reason=$2 metadata owner group mode mode_value
+  [[ ! -L "$path" ]] || preflight_stop "${reason}_SYMLINK"
+  [[ -d "$path" ]] || preflight_stop "${reason}_MISSING"
+  metadata=$(stat -c '%u:%g:%a' -- "$path" 2>/dev/null) || preflight_stop "${reason}_STAT_FAILED"
+  IFS=: read -r owner group mode <<<"$metadata"
+  [[ "$owner" == "$ROOT_UID" && "$group" == "$ROOT_GID" ]] || preflight_stop "${reason}_OWNER_MISMATCH"
+  mode_value=$((8#$mode))
+  (( (mode_value & 0222) == 0 )) || preflight_stop "${reason}_WRITABLE"
+}
+
+require_exact_directory() {
+  local path=$1 reason=$2 expected=$3 metadata
+  [[ ! -L "$path" ]] || preflight_stop "${reason}_SYMLINK"
+  [[ -d "$path" ]] || preflight_stop "${reason}_INVALID"
+  metadata=$(stat -c '%u:%g:%a' -- "$path" 2>/dev/null) || preflight_stop "${reason}_METADATA_MISMATCH"
+  [[ "$metadata" == "$expected" ]] || preflight_stop "${reason}_METADATA_MISMATCH"
+}
+
+require_file() {
+  local path=$1 reason=$2 expected_digest=$3 metadata owner group mode mode_value digest
+  [[ ! -L "$path" ]] || preflight_stop "${reason}_SYMLINK"
+  [[ -f "$path" ]] || preflight_stop "${reason}_NOT_REGULAR"
+  metadata=$(stat -c '%u:%g:%a' -- "$path" 2>/dev/null) || preflight_stop "${reason}_STAT_FAILED"
+  IFS=: read -r owner group mode <<<"$metadata"
+  [[ "$owner" == "$ROOT_UID" && "$group" == "$ROOT_GID" ]] || preflight_stop "${reason}_OWNER_MISMATCH"
+  mode_value=$((8#$mode))
+  (( (mode_value & 0222) == 0 )) || preflight_stop "${reason}_WRITABLE"
+  digest=$(sha256sum -- "$path" 2>/dev/null | awk '{print $1}') || preflight_stop "${reason}_HASH_UNAVAILABLE"
+  [[ "$digest" == "$expected_digest" ]] || preflight_stop "${reason}_HASH_MISMATCH"
+}
+
+require_secret() {
+  local name=$1 expected_owner=$2 expected_group=$3 expected_mode=$4 expected_size=$5
+  local path="$SECRET_DIR/$name" metadata
+  [[ ! -L "$path" ]] || preflight_stop SECRET_FILE_SYMLINK
+  [[ -f "$path" ]] || preflight_stop SECRET_FILE_NOT_REGULAR
+  metadata=$(stat -c '%u:%g:%a:%s' -- "$path" 2>/dev/null) || preflight_stop SECRET_FILE_METADATA_MISMATCH
+  if [[ "$expected_size" == '*' ]]; then
+    [[ "$metadata" == "$expected_owner:$expected_group:$expected_mode:"* ]] || preflight_stop SECRET_FILE_METADATA_MISMATCH
+    [[ "${metadata##*:}" =~ ^[1-9][0-9]*$ ]] || preflight_stop SECRET_FILE_METADATA_MISMATCH
+  else
+    [[ "$metadata" == "$expected_owner:$expected_group:$expected_mode:$expected_size" ]] || preflight_stop SECRET_FILE_METADATA_MISMATCH
+  fi
+}
+
+require_marker() {
+  local path=$1 reason=$2
+  [[ ! -L "$path" && -d "$path" ]] || preflight_stop "${reason}_INVALID"
+  [[ "$(stat -c '%u:%g:%a' -- "$path" 2>/dev/null)" == "$ROOT_UID:$ROOT_GID:700" ]] \
+    || preflight_stop "${reason}_METADATA_MISMATCH"
+}
+
+require_directory /root IMMUTABLE_STAGE_DIRECTORY
+require_directory "$PROD_ROOT" PRODUCTION_ROOT
+require_directory "$PROD_ROOT/staged" C9CE_STAGE_DIRECTORY
+require_immutable_directory "$PROD_ROOT/staged/$SOURCE_SHA" C9CE_STAGE_DIRECTORY
+require_immutable_directory "$DATA_PLANE_DIR" C9CE_STAGE_DIRECTORY
+require_file "$COMPOSE_PATH" COMPOSE "$EXPECTED_COMPOSE_SHA256"
+
+require_marker "$RECOVERY_MARKER" RECOVERY_MARKER
+require_marker "$BOOTSTRAP_MARKER" BOOTSTRAP_MARKER
+[[ ! -e "$V4_MARKER" && ! -L "$V4_MARKER" ]] || preflight_stop V4_AUTHORITY_ALREADY_CONSUMED
+
+require_exact_directory "$SECRET_DIR" SECRET_DIRECTORY "$ROOT_UID:$ROOT_GID:700"
+require_secret eventsales_runtime_server_password 0 0 400 64
+require_secret eventsales_runtime_client_password 0 0 400 64
+require_secret redis_runtime_password 0 0 400 64
+require_secret redis_stats_password 0 0 400 64
+require_secret pgbouncer.ini 0 65532 440 '*'
+require_secret pgbouncer_users.txt 0 65532 440 '*'
+require_secret redis-users.acl 0 65532 440 '*'
+
+docker_fixed() {
+  local operation=${1-}
+  case "$operation" in
+    ps)
+      [[ $# -eq 7 && "$2" == -a && "$3" == --no-trunc && "$4" == --filter \
+        && "$6" == --format && "$7" == "$INVENTORY_FORMAT" ]] || preflight_stop DOCKER_READ_COMMAND_FORBIDDEN
+      case "$5" in
+        label=com.docker.compose.project="$PROJECT"|name="$PROJECT"|label=com.docker.compose.project="$APP_PROJECT"|name="$APP_PROJECT"|label=com.docker.compose.project="$D0_PROJECT"|name="$D0_PROJECT") ;;
+        *) preflight_stop DOCKER_READ_COMMAND_FORBIDDEN ;;
+      esac
+      ;;
+    inspect)
+      [[ $# -eq 4 && "$2" == --format && ( "$3" == "$BASIC_FORMAT" || "$3" == "$CONTAINER_FORMAT" ) ]] \
+        || preflight_stop DOCKER_READ_COMMAND_FORBIDDEN
+      valid_id "$4" || preflight_stop CONTAINER_ID_INVALID
+      ;;
+    network)
+      [[ $# -eq 5 && "$2" == inspect && "$3" == --format && "$4" == "$NETWORK_FORMAT" \
+        && ( "$5" == "$DATA_NETWORK" || "$5" == "$EDGE_NETWORK" ) ]] || preflight_stop DOCKER_READ_COMMAND_FORBIDDEN
+      ;;
+    volume)
+      [[ $# -eq 5 && "$2" == inspect && "$3" == --format && "$4" == "$VOLUME_FORMAT" \
+        && "$5" == "$VOLUME_NAME" ]] || preflight_stop DOCKER_READ_COMMAND_FORBIDDEN
+      ;;
+    *) preflight_stop DOCKER_OPERATION_FORBIDDEN ;;
+  esac
+  /usr/bin/env -i PATH="$SAFE_PATH" LC_ALL=C HOME=/root DOCKER_HOST="$DOCKER_SOCKET" \
+    EVENTSALES_SECRET_DIR="$SECRET_DIR" docker "$@"
+}
+
+compose_start() {
+  /usr/bin/env -i PATH="$SAFE_PATH" LC_ALL=C HOME=/root DOCKER_HOST="$DOCKER_SOCKET" \
+    EVENTSALES_SECRET_DIR="$SECRET_DIR" docker compose --project-name "$PROJECT" \
+      --env-file /dev/null -f "$COMPOSE_PATH" up -d --no-deps pgbouncer redis
+}
+
+sorted_rows() {
+  local rows=$1
+  [[ -n "$rows" ]] || { printf ''; return 0; }
+  printf '%s\n' "$rows" | LC_ALL=C sort
+}
+
+read_rows() {
+  local filter=$1 rows
+  rows=$(docker_fixed ps -a --no-trunc --filter "$filter" --format "$INVENTORY_FORMAT" 2>/dev/null) || return 1
+  ROWS=$(sorted_rows "$rows")
+}
+
+read_production_inventory() {
+  local project_rows name_rows
+  read_rows "label=com.docker.compose.project=$PROJECT" || return 1
+  project_rows=$ROWS
+  read_rows "name=$PROJECT" || return 1
+  name_rows=$ROWS
+  [[ "$project_rows" == "$name_rows" ]] || return 1
+  PRODUCTION_ROWS=$project_rows
+}
+
+read_app_absent() {
+  local project_rows name_rows
+  read_rows "label=com.docker.compose.project=$APP_PROJECT" || return 1
+  project_rows=$ROWS
+  read_rows "name=$APP_PROJECT" || return 1
+  name_rows=$ROWS
+  [[ "$project_rows" == "$name_rows" && -z "$project_rows" ]]
+}
+
+read_d0_inventory() {
+  local project_rows name_rows
+  read_rows "label=com.docker.compose.project=$D0_PROJECT" || return 1
+  project_rows=$ROWS
+  read_rows "name=$D0_PROJECT" || return 1
+  name_rows=$ROWS
+  [[ "$project_rows" == "$name_rows" && -n "$project_rows" ]] || return 1
+  D0_ROWS=$project_rows
+}
+
+network_identity() {
+  local name=$1 internal=$2 row id actual_name driver actual_internal
+  row=$(docker_fixed network inspect --format "$NETWORK_FORMAT" "$name" 2>/dev/null) || return 1
+  [[ "$row" != *$'\n'* ]] || return 1
+  IFS='|' read -r id actual_name driver actual_internal <<<"$row"
+  [[ "$id" =~ ^[0-9a-f]{64}$ && "$actual_name" == "$name" && "$driver" == bridge \
+    && "$actual_internal" == "$internal" ]] || return 1
+  printf '%s\n' "$id"
+}
+
+volume_identity() {
+  local row name driver scope mountpoint fingerprint
+  row=$(docker_fixed volume inspect --format "$VOLUME_FORMAT" "$VOLUME_NAME" 2>/dev/null) || return 1
+  [[ "$row" != *$'\n'* ]] || return 1
+  IFS='|' read -r name driver scope mountpoint <<<"$row"
+  [[ "$name" == "$VOLUME_NAME" && "$driver" == local && "$scope" == local \
+    && "$mountpoint" == /* && ! -L "$mountpoint" && -d "$mountpoint" ]] || return 1
+  fingerprint=$(stat -c '%d:%i' -- "$mountpoint" 2>/dev/null) || return 1
+  [[ "$fingerprint" =~ ^[0-9]+:[0-9]+$ ]] || return 1
+  printf '%s|%s|%s\n' "$name" "$mountpoint" "$fingerprint"
+}
+
+parse_container() {
+  local id=$1 row
+  row=$(docker_fixed inspect --format "$CONTAINER_FORMAT" "$id" 2>/dev/null) || return 1
+  [[ "$row" != *$'\n'* ]] || return 1
+  IFS='|' read -r C_ID C_NAME C_STATUS C_RUNNING C_RESTARTING C_HEALTH C_RESTARTS C_OOM \
+    C_IMAGE C_MEMORY C_NANO C_USER C_READONLY C_CAPDROP C_SECURITY C_TMPFS C_MOUNTS \
+    C_NETWORKS C_PORTS C_COMMAND <<<"$row"
+  [[ "$C_ID" == "$id" ]] || return 1
+  C_NAME=${C_NAME#/}
+}
+
+validate_attachments() {
+  local kind=$1 mounts=$2 networks=$3 ports=$4 capdrop=$5 security=$6 tmpfs=$7 command=$8
+  printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+    "$mounts" "$networks" "$ports" "$capdrop" "$security" "$tmpfs" "$command" | \
+    /usr/bin/env -i PATH="$SAFE_PATH" LC_ALL=C EVENTSALES_SECRET_DIR="$SECRET_DIR" \
+      /usr/bin/python3 -I -c '
+import json
+import os
+import sys
+
+try:
+    mounts, networks, ports, capdrop, security, tmpfs, command = [json.loads(line) for line in sys.stdin]
+except Exception:
+    raise SystemExit(1)
+
+kind, data_network, data_network_id, volume_name, volume_mountpoint = sys.argv[1:]
+secret_dir = os.environ["EVENTSALES_SECRET_DIR"]
+if not isinstance(mounts, list) or not isinstance(networks, dict):
+    raise SystemExit(1)
+if set(networks) != {data_network}:
+    raise SystemExit(1)
+network = networks.get(data_network)
+if not isinstance(network, dict) or network.get("NetworkID") != data_network_id:
+    raise SystemExit(1)
+if ports not in (None, {}):
+    if not isinstance(ports, dict) or any(value not in (None, []) for value in ports.values()):
+        raise SystemExit(1)
+
+def exact_bind(mount, source, destination):
+    return (isinstance(mount, dict) and mount.get("Type") == "bind"
+            and mount.get("Source") == source and mount.get("Destination") == destination
+            and mount.get("RW") is False)
+
+if kind == "postgres":
+    secret = os.path.join(secret_dir, "postgres_bootstrap_password")
+    volumes = [m for m in mounts if isinstance(m, dict) and m.get("Type") == "volume"]
+    binds = [m for m in mounts if isinstance(m, dict) and m.get("Type") == "bind"]
+    if len(mounts) != 2 or len(volumes) != 1 or len(binds) != 1:
+        raise SystemExit(1)
+    if (volumes[0].get("Name") != volume_name
+            or volumes[0].get("Source") != volume_mountpoint
+            or volumes[0].get("Destination") != "/var/lib/postgresql"):
+        raise SystemExit(1)
+    if not exact_bind(binds[0], secret, "/run/secrets/postgres_bootstrap_password"):
+        raise SystemExit(1)
+elif kind == "pgbouncer":
+    expected = [
+        (os.path.join(secret_dir, "pgbouncer.ini"), "/etc/pgbouncer/pgbouncer.ini"),
+        (os.path.join(secret_dir, "pgbouncer_users.txt"), "/run/secrets/pgbouncer_users.txt"),
+    ]
+    if len(mounts) != 2 or any(not any(exact_bind(m, *want) for m in mounts) for want in expected):
+        raise SystemExit(1)
+    if capdrop != ["ALL"] or security != ["no-new-privileges:true"]:
+        raise SystemExit(1)
+    if tmpfs != {"/tmp": "rw,noexec,nosuid,size=16m,mode=1777"}:
+        raise SystemExit(1)
+elif kind == "redis":
+    expected_source = os.path.join(secret_dir, "redis-users.acl")
+    if len(mounts) != 1 or not exact_bind(mounts[0], expected_source, "/run/secrets/redis-users.acl"):
+        raise SystemExit(1)
+    if capdrop != ["ALL"] or security != ["no-new-privileges:true"] or tmpfs != {}:
+        raise SystemExit(1)
+    expected_command = [
+        "redis-server", "/etc/redis/redis.conf", "--bind", "0.0.0.0", "--protected-mode", "no",
+        "--aclfile", "/run/secrets/redis-users.acl", "--maxmemory", "384mb",
+        "--maxmemory-policy", "noeviction", "--save", "", "--appendonly", "no",
+        "--dir", "/tmp", "--logfile", "",
+    ]
+    if command != expected_command:
+        raise SystemExit(1)
+else:
+    raise SystemExit(1)
+' "$kind" "$DATA_NETWORK" "$DATA_NETWORK_ID" "$VOLUME_NAME" "$VOLUME_MOUNTPOINT" 2>/dev/null
+}
+
+validate_postgres() {
+  local id=$1
+  parse_container "$id" || return 1
+  [[ "$C_NAME" == "$POSTGRES_NAME" && "$C_STATUS" == running && "$C_RUNNING" == true \
+    && "$C_RESTARTING" == false && "$C_HEALTH" == healthy && "$C_RESTARTS" == 0 \
+    && "$C_OOM" == false && "$C_IMAGE" == "$POSTGRES_IMAGE" \
+    && "$C_MEMORY" == 3221225472 && "$C_NANO" == 2000000000 \
+    && "$C_COMMAND" == "$POSTGRES_COMMAND" ]] || return 1
+  validate_attachments postgres "$C_MOUNTS" "$C_NETWORKS" "$C_PORTS" \
+    "$C_CAPDROP" "$C_SECURITY" "$C_TMPFS" "$C_COMMAND"
+}
+
+validate_service() {
+  local kind=$1 id=$2 expected_name image memory nano
+  case "$kind" in
+    pgbouncer) expected_name=$PGBOUNCER_NAME; image=$PGBOUNCER_IMAGE; memory=134217728; nano=500000000 ;;
+    redis) expected_name=$REDIS_NAME; image=$REDIS_IMAGE; memory=536870912; nano=500000000 ;;
+    *) return 1 ;;
+  esac
+  parse_container "$id" || return 1
+  [[ "$C_NAME" == "$expected_name" && "$C_STATUS" == running && "$C_RUNNING" == true \
+    && "$C_RESTARTING" == false && "$C_RESTARTS" == 0 && "$C_OOM" == false \
+    && "$C_IMAGE" == "$image" && "$C_MEMORY" == "$memory" && "$C_NANO" == "$nano" \
+    && "$C_USER" == 65532:65532 && "$C_READONLY" == true ]] || return 1
+  validate_attachments "$kind" "$C_MOUNTS" "$C_NETWORKS" "$C_PORTS" \
+    "$C_CAPDROP" "$C_SECURITY" "$C_TMPFS" "$C_COMMAND" || return 1
+  [[ "$C_HEALTH" == healthy || "$C_HEALTH" == starting || "$C_HEALTH" == unhealthy ]] || return 1
+  if [[ "$C_HEALTH" == unhealthy ]]; then V4_FAILURE_REASON="${kind^^}_HEALTH_UNHEALTHY"; return 1; fi
+}
+
+snapshot_d0() {
+  local row id name detail detail_id detail_name status running restarting
+  local -A seen=() seen_names=()
+  read_d0_inventory || return 1
+  mapfile -t D0_SNAPSHOT <<<"$D0_ROWS"
+  [[ ${#D0_SNAPSHOT[@]} -eq 3 ]] || return 1
+  D0_IDS=()
+  for row in "${D0_SNAPSHOT[@]}"; do
+    IFS='|' read -r id name <<<"$row"
+    valid_id "$id" || return 1
+    case "$name" in
+      eventsales-d0-proof-one|eventsales-d0-proof-two|eventsales-d0-proof-three) ;;
+      *) return 1 ;;
+    esac
+    [[ -z "${seen[$id]+x}" && -z "${seen_names[$name]+x}" ]] || return 1
+    seen[$id]=1
+    seen_names[$name]=1
+    detail=$(docker_fixed inspect --format "$BASIC_FORMAT" "$id" 2>/dev/null) || return 1
+    IFS='|' read -r detail_id detail_name status running restarting <<<"$detail"
+    [[ "$detail_id" == "$id" && "${detail_name#/}" == "$name" && "$status" == exited \
+      && "$running" == false && "$restarting" == false ]] || return 1
+    D0_IDS+=("$id")
+  done
+  [[ ${#seen_names[@]} -eq 3 ]]
+}
+
+revalidate_d0() {
+  local row id name detail detail_id detail_name status running restarting
+  read_d0_inventory || return 1
+  [[ "$D0_ROWS" == "$(printf '%s\n' "${D0_SNAPSHOT[@]}")" ]] || return 1
+  for row in "${D0_SNAPSHOT[@]}"; do
+    IFS='|' read -r id name <<<"$row"
+    detail=$(docker_fixed inspect --format "$BASIC_FORMAT" "$id" 2>/dev/null) || return 1
+    IFS='|' read -r detail_id detail_name status running restarting <<<"$detail"
+    [[ "$detail_id" == "$id" && "${detail_name#/}" == "$name" && "$status" == exited \
+      && "$running" == false && "$restarting" == false ]] || return 1
+  done
+}
+
+read_networks() {
+  DATA_NETWORK_ID=$(network_identity "$DATA_NETWORK" true) || return 1
+  EDGE_NETWORK_ID=$(network_identity "$EDGE_NETWORK" false) || return 1
+}
+
+revalidate_networks() {
+  [[ "$(network_identity "$DATA_NETWORK" true)" == "$DATA_NETWORK_ID" ]] || return 1
+  [[ "$(network_identity "$EDGE_NETWORK" false)" == "$EDGE_NETWORK_ID" ]] || return 1
+}
+
+read_secret_metadata() {
+  require_exact_directory "$SECRET_DIR" SECRET_DIRECTORY "$ROOT_UID:$ROOT_GID:700"
+  require_secret eventsales_runtime_server_password 0 0 400 64
+  require_secret eventsales_runtime_client_password 0 0 400 64
+  require_secret redis_runtime_password 0 0 400 64
+  require_secret redis_stats_password 0 0 400 64
+  require_secret pgbouncer.ini 0 65532 440 '*'
+  require_secret pgbouncer_users.txt 0 65532 440 '*'
+  require_secret redis-users.acl 0 65532 440 '*'
+}
+
+read_production_inventory || preflight_stop PRODUCTION_INVENTORY_MISMATCH
+[[ -n "$PRODUCTION_ROWS" ]] || preflight_stop POSTGRES_CONTAINER_MISSING
+mapfile -t initial_production <<<"$PRODUCTION_ROWS"
+[[ ${#initial_production[@]} -eq 1 ]] || preflight_stop UNEXPECTED_PRODUCTION_CONTAINER
+IFS='|' read -r POSTGRES_ID postgres_name <<<"${initial_production[0]}"
+valid_id "$POSTGRES_ID" || preflight_stop POSTGRES_CONTAINER_ID_INVALID
+[[ "$postgres_name" == "$POSTGRES_NAME" ]] || preflight_stop POSTGRES_CONTAINER_MISSING
+read_app_absent || preflight_stop APP_CONTAINER_PRESENT
+
+read_networks || preflight_stop NETWORK_IDENTITY_MISMATCH
+VOLUME_SNAPSHOT=$(volume_identity) || preflight_stop POSTGRES_VOLUME_IDENTITY_MISMATCH
+IFS='|' read -r VOLUME_CAPTURED_NAME VOLUME_MOUNTPOINT VOLUME_FINGERPRINT <<<"$VOLUME_SNAPSHOT"
+[[ "$VOLUME_CAPTURED_NAME" == "$VOLUME_NAME" && "$VOLUME_MOUNTPOINT" == /* \
+  && "$VOLUME_FINGERPRINT" =~ ^[0-9]+:[0-9]+$ ]] || preflight_stop POSTGRES_VOLUME_IDENTITY_MISMATCH
+validate_postgres "$POSTGRES_ID" || preflight_stop POSTGRES_CONTRACT_MISMATCH
+snapshot_d0 || preflight_stop D0_CONTRACT_MISMATCH
+[[ ! -e "$V4_MARKER" && ! -L "$V4_MARKER" ]] || preflight_stop V4_AUTHORITY_ALREADY_CONSUMED
+
+# Recheck the complete read-only boundary immediately before consuming V4.
+require_file "$COMPOSE_PATH" COMPOSE "$EXPECTED_COMPOSE_SHA256"
+read_secret_metadata
+revalidate_networks || preflight_stop NETWORK_CHANGED_BEFORE_MARKER
+[[ "$(volume_identity)" == "$VOLUME_SNAPSHOT" ]] || preflight_stop POSTGRES_VOLUME_CHANGED_BEFORE_MARKER
+read_production_inventory || preflight_stop PRODUCTION_INVENTORY_CHANGED_BEFORE_MARKER
+[[ "$PRODUCTION_ROWS" == "${initial_production[0]}" ]] || preflight_stop PRODUCTION_INVENTORY_CHANGED_BEFORE_MARKER
+validate_postgres "$POSTGRES_ID" || preflight_stop POSTGRES_CHANGED_BEFORE_MARKER
+read_app_absent || preflight_stop APP_CONTAINER_PRESENT
+revalidate_d0 || preflight_stop D0_CHANGED_BEFORE_MARKER
+[[ ! -e "$V4_MARKER" && ! -L "$V4_MARKER" ]] || preflight_stop V4_AUTHORITY_ALREADY_CONSUMED
+
+mkdir -m 0700 -- "$V4_MARKER" 2>/dev/null || preflight_stop V4_MARKER_CREATE_FAILED
+[[ ! -L "$V4_MARKER" && -d "$V4_MARKER" ]] || blocked V4_MARKER_INVALID_AFTER_CREATE
+[[ "$(stat -c '%u:%g:%a' -- "$V4_MARKER" 2>/dev/null)" == "$ROOT_UID:$ROOT_GID:700" ]] \
+  || blocked V4_MARKER_METADATA_MISMATCH
+
+compose_status=0
+compose_start >/dev/null 2>&1 || compose_status=$?
+if ((compose_status != 0)); then
+  read_production_inventory >/dev/null 2>&1 || true
+  read_app_absent >/dev/null 2>&1 || true
+  blocked V4_COMPOSE_START_FAILED
+fi
+
+capture_services() {
+  local row id name
+  read_production_inventory || return 1
+  [[ -n "$PRODUCTION_ROWS" ]] || return 1
+  mapfile -t current_rows <<<"$PRODUCTION_ROWS"
+  [[ ${#current_rows[@]} -eq 3 ]] || return 1
+  SERVICE_PG_ID=
+  SERVICE_PGBOUNCER_ID=
+  SERVICE_REDIS_ID=
+  local -A seen_names=() seen_ids=()
+  for row in "${current_rows[@]}"; do
+    IFS='|' read -r id name <<<"$row"
+    valid_id "$id" || return 1
+    [[ -z "${seen_ids[$id]+x}" && -z "${seen_names[$name]+x}" ]] || return 1
+    seen_ids[$id]=1
+    seen_names[$name]=1
+    case "$name" in
+      "$POSTGRES_NAME") SERVICE_PG_ID=$id ;;
+      "$PGBOUNCER_NAME") SERVICE_PGBOUNCER_ID=$id ;;
+      "$REDIS_NAME") SERVICE_REDIS_ID=$id ;;
+      *) return 1 ;;
+    esac
+  done
+  [[ "$SERVICE_PG_ID" == "$POSTGRES_ID" && -n "$SERVICE_PGBOUNCER_ID" \
+    && -n "$SERVICE_REDIS_ID" && "$SERVICE_PGBOUNCER_ID" != "$POSTGRES_ID" \
+    && "$SERVICE_REDIS_ID" != "$POSTGRES_ID" && "$SERVICE_REDIS_ID" != "$SERVICE_PGBOUNCER_ID" ]]
+}
+
+capture_services || blocked V4_SERVICE_INVENTORY_MISMATCH
+read_app_absent || blocked APP_CONTAINER_PRESENT
+
+SECONDS=0
+deadline=$((SECONDS + HEALTH_TIMEOUT))
+while :; do
+  validate_postgres "$POSTGRES_ID" || blocked POSTGRES_REVALIDATION_FAILED
+  V4_FAILURE_REASON=PGBOUNCER_CONTRACT_MISMATCH
+  validate_service pgbouncer "$SERVICE_PGBOUNCER_ID" || blocked "$V4_FAILURE_REASON"
+  pgbouncer_health=$C_HEALTH
+  V4_FAILURE_REASON=REDIS_CONTRACT_MISMATCH
+  validate_service redis "$SERVICE_REDIS_ID" || blocked "$V4_FAILURE_REASON"
+  redis_health=$C_HEALTH
+  if [[ "$pgbouncer_health" == healthy && "$redis_health" == healthy ]]; then break; fi
+  ((SECONDS < deadline)) || blocked V4_HEALTH_TIMEOUT
+  sleep "$HEALTH_INTERVAL"
+done
+
+# Final success checks use the same IDs and preserve every preflight snapshot.
+read_production_inventory || blocked FINAL_PRODUCTION_INVENTORY_MISMATCH
+expected_inventory=$(printf '%s\n' \
+  "$POSTGRES_ID|$POSTGRES_NAME" \
+  "$SERVICE_PGBOUNCER_ID|$PGBOUNCER_NAME" \
+  "$SERVICE_REDIS_ID|$REDIS_NAME" | LC_ALL=C sort)
+[[ "$PRODUCTION_ROWS" == "$expected_inventory" ]] || blocked FINAL_PRODUCTION_INVENTORY_MISMATCH
+read_app_absent || blocked APP_CONTAINER_PRESENT
+validate_postgres "$POSTGRES_ID" || blocked POSTGRES_REVALIDATION_FAILED
+V4_FAILURE_REASON=PGBOUNCER_CONTRACT_MISMATCH
+validate_service pgbouncer "$SERVICE_PGBOUNCER_ID" || blocked "$V4_FAILURE_REASON"
+[[ "$C_HEALTH" == healthy ]] || blocked V4_HEALTH_TIMEOUT
+V4_FAILURE_REASON=REDIS_CONTRACT_MISMATCH
+validate_service redis "$SERVICE_REDIS_ID" || blocked "$V4_FAILURE_REASON"
+[[ "$C_HEALTH" == healthy ]] || blocked V4_HEALTH_TIMEOUT
+revalidate_networks || blocked NETWORK_CHANGED
+[[ "$(volume_identity)" == "$VOLUME_SNAPSHOT" ]] || blocked POSTGRES_VOLUME_CHANGED
+revalidate_d0 || blocked D0_CHANGED
+
+printf 'DATA_PLANE=RUNNING\n'
+printf 'V4_STATE=DATA_PLANE_RUNNING\n'
+printf 'POSTGRES_STATUS=running\n'
+printf 'POSTGRES_HEALTH=healthy\n'
+printf 'POSTGRES_RESTART_COUNT=0\n'
+printf 'PGBOUNCER_STATUS=running\n'
+printf 'PGBOUNCER_HEALTH=healthy\n'
+printf 'PGBOUNCER_RESTART_COUNT=0\n'
+printf 'PGBOUNCER_IMAGE_MATCH=YES\n'
+printf 'REDIS_STATUS=running\n'
+printf 'REDIS_HEALTH=healthy\n'
+printf 'REDIS_RESTART_COUNT=0\n'
+printf 'REDIS_IMAGE_MATCH=YES\n'
+printf 'DATA_PLANE_NETWORK_ONLY=YES\n'
+printf 'DATA_SERVICE_HOST_PORTS=NONE\n'
+printf 'APP_STARTED=NO\n'
+printf 'D0_STATE=ARCHIVED_STOPPED\n'
