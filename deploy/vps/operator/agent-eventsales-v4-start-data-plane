@@ -374,10 +374,7 @@ snapshot_d0() {
   for row in "${D0_SNAPSHOT[@]}"; do
     IFS='|' read -r id name <<<"$row"
     valid_id "$id" || return 1
-    case "$name" in
-      eventsales-d0-proof-one|eventsales-d0-proof-two|eventsales-d0-proof-three) ;;
-      *) return 1 ;;
-    esac
+    [[ "$name" =~ ^eventsales-d0-proof-[A-Za-z0-9_.-]+$ ]] || return 1
     [[ -z "${seen[$id]+x}" && -z "${seen_names[$name]+x}" ]] || return 1
     seen[$id]=1
     seen_names[$name]=1

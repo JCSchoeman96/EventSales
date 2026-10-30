@@ -122,12 +122,14 @@ REDIS_NETWORKS=valid
 REDIS_PORTS={}
 REDIS_PORTBINDINGS_KEY=PRESENT
 REDIS_COMMAND=valid
-D0_ROWS=$d0_one|eventsales-d0-proof-one,$d0_two|eventsales-d0-proof-two,$d0_three|eventsales-d0-proof-three
-D0_PROJECT_ROWS=$d0_one|eventsales-d0-proof-one,$d0_two|eventsales-d0-proof-two,$d0_three|eventsales-d0-proof-three
-D0_NAME_ROWS=$d0_one|eventsales-d0-proof-one,$d0_two|eventsales-d0-proof-two,$d0_three|eventsales-d0-proof-three
+D0_ROWS=$d0_one|eventsales-d0-proof-postgres-1,$d0_two|eventsales-d0-proof-pgbouncer-1,$d0_three|eventsales-d0-proof-redis-1
+D0_PROJECT_ROWS=$d0_one|eventsales-d0-proof-postgres-1,$d0_two|eventsales-d0-proof-pgbouncer-1,$d0_three|eventsales-d0-proof-redis-1
+D0_NAME_ROWS=$d0_one|eventsales-d0-proof-postgres-1,$d0_two|eventsales-d0-proof-pgbouncer-1,$d0_three|eventsales-d0-proof-redis-1
 D0_STATUS=exited
 D0_RUNNING=false
 D0_RESTARTING=false
+D0_INSPECT_COUNT=0
+D0_DRIFT_BEFORE_MARKER=none
 DATA_NETWORK_DRIVER=bridge
 DATA_NETWORK_INTERNAL=true
 DATA_NETWORK_ID=$data_network_id
@@ -236,6 +238,18 @@ case "$command" in
         fi
       done
       [[ "$found" == yes ]] || exit 1
+      inspect_count=$(( $(get D0_INSPECT_COUNT) + 1 ))
+      setv D0_INSPECT_COUNT "$inspect_count"
+      if [[ "$inspect_count" -eq 3 ]]; then
+        case "$(get D0_DRIFT_BEFORE_MARKER)" in
+          identity)
+            rows="$(printf '6%.0s' {1..64})|eventsales-d0-proof-postgres-1,$(get D0_PROJECT_ROWS | cut -d, -f2-)"
+            setv D0_PROJECT_ROWS "$rows"
+            setv D0_NAME_ROWS "$rows"
+            setv D0_ROWS "$rows"
+            ;;
+        esac
+      fi
       exit 0
     fi
     if [[ "$format" == *'{{json .Config.Cmd}}'* ]]; then
@@ -353,7 +367,7 @@ case "$command" in
     esac
     case "$(get COMPOSE_D0_DRIFT)" in
       running) setv D0_RUNNING true ;;
-      identity) setv D0_PROJECT_ROWS "$(printf '6%.0s' {1..64})|eventsales-d0-proof-one,$(get D0_PROJECT_ROWS | cut -d, -f2-)"; setv D0_NAME_ROWS "$(get D0_PROJECT_ROWS)" ;;
+      identity) setv D0_PROJECT_ROWS "$(printf '6%.0s' {1..64})|eventsales-d0-proof-postgres-1,$(get D0_PROJECT_ROWS | cut -d, -f2-)"; setv D0_NAME_ROWS "$(get D0_PROJECT_ROWS)" ;;
       count) setv D0_PROJECT_ROWS "$(get D0_PROJECT_ROWS | cut -d, -f1-2)"; setv D0_NAME_ROWS "$(get D0_PROJECT_ROWS)" ;;
       *) ;;
     esac
@@ -486,6 +500,21 @@ expect_postconsume_stop() {
   pass "$label"
 }
 
+expect_data_plane_running() {
+  local label=$1 status=0
+  run_wrapper || status=$?
+  if ((status != 0)); then
+    if /usr/bin/grep -Fxq 'STOP=D0_CONTRACT_MISMATCH' "$err"; then
+      fail "$label was rejected with D0_CONTRACT_MISMATCH"
+    fi
+    cat "$out" "$err" >&2
+    fail "$label did not reach DATA_PLANE_RUNNING"
+  fi
+  /usr/bin/grep -Fxq 'V4_STATE=DATA_PLANE_RUNNING' "$out" || fail "$label did not report DATA_PLANE_RUNNING"
+  [[ -d "$marker_path" && ! -L "$marker_path" ]] || fail "$label did not consume the V4 marker"
+  pass "$label"
+}
+
 [[ -f "$wrapper_source" && ! -L "$wrapper_source" ]] || fail 'V4 wrapper source is missing'
 
 # The wrapper must reject caller arguments and non-root invocation before Docker access.
@@ -503,6 +532,17 @@ status=0; run_wrapper --non-root || status=$?
 /usr/bin/grep -Fxq 'STOP=ROOT_REQUIRED' "$err" || fail 'non-root invocation stopped for the wrong reason'
 assert_no_mutations 'non-root invocation'
 pass 'non-root invocation rejected before mutation'
+
+# Accepted D0 project-prefixed names include the production service-style names.
+reset_case
+expect_data_plane_running 'accepts production-style D0 service names'
+
+reset_case
+generic_d0_rows="$d0_one|eventsales-d0-proof-postgres-1,$d0_two|eventsales-d0-proof-pgbouncer-1,$d0_three|eventsales-d0-proof-custom-worker-7"
+set_state D0_PROJECT_ROWS "$generic_d0_rows"
+set_state D0_NAME_ROWS "$generic_d0_rows"
+set_state D0_ROWS "$generic_d0_rows"
+expect_data_plane_running 'accepts a generic project-prefixed D0 name'
 
 # Preflight authority and immutable-stage failures never consume the marker.
 for item in \
@@ -562,17 +602,23 @@ for meta_case in \
   expect_preflight_stop "$label" "$reason"
 done
 
-# Each D0 inventory must contain the same three full IDs and stopped states.
-for d0_case in count identity name-inventory unexpected-name; do
+# Each D0 inventory must contain three unique full IDs and names in the accepted namespace.
+for d0_case in count identity name-inventory invalid-namespace duplicate-id duplicate-name; do
   reset_case
   case "$d0_case" in
-    count) set_state D0_PROJECT_ROWS "$d0_one|eventsales-d0-proof-one,$d0_two|eventsales-d0-proof-two"; set_state D0_NAME_ROWS "$(get_state D0_PROJECT_ROWS)" ;;
-    identity) set_state D0_PROJECT_ROWS "$(printf '6%.0s' {1..64})|eventsales-d0-proof-one,$d0_two|eventsales-d0-proof-two,$d0_three|eventsales-d0-proof-three"; set_state D0_NAME_ROWS "$(get_state D0_PROJECT_ROWS)" ;;
+    count) set_state D0_PROJECT_ROWS "$d0_one|eventsales-d0-proof-postgres-1,$d0_two|eventsales-d0-proof-pgbouncer-1"; set_state D0_NAME_ROWS "$(get_state D0_PROJECT_ROWS)" ;;
+    identity) set_state D0_PROJECT_ROWS "$(printf '6%.0s' {1..64})|eventsales-d0-proof-postgres-1,$d0_two|eventsales-d0-proof-pgbouncer-1,$d0_three|eventsales-d0-proof-redis-1"; set_state D0_NAME_ROWS "$(get_state D0_PROJECT_ROWS)" ;;
     name-inventory) set_state D0_NAME_ROWS "$(get_state D0_NAME_ROWS),$(printf '7%.0s' {1..64})|eventsales-d0-proof-unlabeled" ;;
-    unexpected-name) set_state D0_PROJECT_ROWS "$d0_one|eventsales-d0-proof-one,$d0_two|eventsales-d0-proof-two,$d0_three|eventsales-d0-proof-unexpected"; set_state D0_NAME_ROWS "$(get_state D0_PROJECT_ROWS)"; set_state D0_ROWS "$(get_state D0_PROJECT_ROWS)" ;;
+    invalid-namespace) set_state D0_PROJECT_ROWS "$d0_one|eventsales-d0-proof-postgres-1,$d0_two|eventsales-d0-proof-pgbouncer-1,$d0_three|outside-d0-proof-namespace"; set_state D0_NAME_ROWS "$(get_state D0_PROJECT_ROWS)"; set_state D0_ROWS "$(get_state D0_PROJECT_ROWS)" ;;
+    duplicate-id) set_state D0_PROJECT_ROWS "$d0_one|eventsales-d0-proof-postgres-1,$d0_one|eventsales-d0-proof-pgbouncer-1,$d0_three|eventsales-d0-proof-redis-1"; set_state D0_NAME_ROWS "$(get_state D0_PROJECT_ROWS)"; set_state D0_ROWS "$(get_state D0_PROJECT_ROWS)" ;;
+    duplicate-name) set_state D0_PROJECT_ROWS "$d0_one|eventsales-d0-proof-postgres-1,$d0_two|eventsales-d0-proof-postgres-1,$d0_three|eventsales-d0-proof-redis-1"; set_state D0_NAME_ROWS "$(get_state D0_PROJECT_ROWS)"; set_state D0_ROWS "$(get_state D0_PROJECT_ROWS)" ;;
   esac
   expect_preflight_stop "D0 $d0_case drift" D0_CONTRACT_MISMATCH
 done
+
+reset_case
+set_state D0_DRIFT_BEFORE_MARKER identity
+expect_preflight_stop 'D0 inventory changed before marker' D0_CHANGED_BEFORE_MARKER
 
 # Marker conflicts and creation failure must remain pre-mutation.
 for marker_kind in directory file symlink; do
