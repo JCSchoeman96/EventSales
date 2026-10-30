@@ -1,0 +1,1 @@
+agentops ALL=(root) NOPASSWD: /usr/local/sbin/agent-eventsales-v4-start-data-plane ""
