@@ -32,7 +32,7 @@ readonly VOLUME_NAME='eventsales-prod_postgres_data'
 readonly POSTGRES_COMMAND='["-c","max_connections=100","-c","shared_buffers=768MB","-c","effective_cache_size=2GB","-c","work_mem=8MB","-c","maintenance_work_mem=256MB"]'
 readonly INVENTORY_FORMAT='{{.ID}}|{{.Names}}'
 readonly BASIC_FORMAT='{{.Id}}|{{.Name}}|{{.State.Status}}|{{.State.Running}}|{{.State.Restarting}}'
-readonly CONTAINER_FORMAT='{{.Id}}|{{.Name}}|{{.State.Status}}|{{.State.Running}}|{{.State.Restarting}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}|{{.RestartCount}}|{{.State.OOMKilled}}|{{.Config.Image}}|{{.HostConfig.Memory}}|{{.HostConfig.NanoCpus}}|{{.Config.User}}|{{.HostConfig.ReadonlyRootfs}}|{{json .HostConfig.CapDrop}}|{{json .HostConfig.SecurityOpt}}|{{json .HostConfig.Tmpfs}}|{{json .Mounts}}|{{json .NetworkSettings.Networks}}|{{json .HostConfig.PortBindings}}|{{json .Config.Cmd}}'
+readonly CONTAINER_FORMAT='{{.Id}}|{{.Name}}|{{.State.Status}}|{{.State.Running}}|{{.State.Restarting}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}|{{.RestartCount}}|{{.State.OOMKilled}}|{{.Config.Image}}|{{.HostConfig.Memory}}|{{.HostConfig.NanoCpus}}|{{.Config.User}}|{{.HostConfig.ReadonlyRootfs}}|{{with index .HostConfig "CapDrop"}}{{json .}}{{else}}[]{{end}}|{{with index .HostConfig "SecurityOpt"}}{{json .}}{{else}}[]{{end}}|{{with index .HostConfig "Tmpfs"}}{{json .}}{{else}}{}{{end}}|{{json .Mounts}}|{{json .NetworkSettings.Networks}}|{{with index .HostConfig "PortBindings"}}{{json .}}{{else}}{}{{end}}|{{json .Config.Cmd}}'
 readonly NETWORK_FORMAT='{{.Id}}|{{.Name}}|{{.Driver}}|{{.Internal}}'
 readonly VOLUME_FORMAT='{{.Name}}|{{.Driver}}|{{.Scope}}|{{.Mountpoint}}'
 readonly HEALTH_TIMEOUT=120

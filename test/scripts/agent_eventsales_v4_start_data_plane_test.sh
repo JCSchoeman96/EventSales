@@ -60,9 +60,13 @@ PG_NANO=2000000000
 PG_CAPDROP=[]
 PG_SECURITY=[]
 PG_TMPFS={}
+PG_CAPDROP_KEY=PRESENT
+PG_SECURITY_KEY=PRESENT
+PG_TMPFS_KEY=PRESENT
 PG_MOUNTS=valid
 PG_NETWORKS=valid
 PG_PORTS={}
+PG_PORTBINDINGS_KEY=PRESENT
 PG_COMMAND=valid
 PROJECT_ROWS=$pg_id|eventsales-prod-postgres-1
 NAME_ROWS=$pg_id|eventsales-prod-postgres-1
@@ -85,9 +89,13 @@ PGB_READONLY=true
 PGB_CAPDROP=["ALL"]
 PGB_SECURITY=["no-new-privileges:true"]
 PGB_TMPFS={"/tmp":"rw,noexec,nosuid,size=16m,mode=1777"}
+PGB_CAPDROP_KEY=PRESENT
+PGB_SECURITY_KEY=PRESENT
+PGB_TMPFS_KEY=PRESENT
 PGB_MOUNTS=valid
 PGB_NETWORKS=valid
 PGB_PORTS={}
+PGB_PORTBINDINGS_KEY=PRESENT
 PGB_COMMAND=[]
 REDIS_PRESENT=no
 REDIS_ID=$redis_id
@@ -106,9 +114,13 @@ REDIS_READONLY=true
 REDIS_CAPDROP=["ALL"]
 REDIS_SECURITY=["no-new-privileges:true"]
 REDIS_TMPFS={}
+REDIS_CAPDROP_KEY=PRESENT
+REDIS_SECURITY_KEY=PRESENT
+REDIS_TMPFS_KEY=PRESENT
 REDIS_MOUNTS=valid
 REDIS_NETWORKS=valid
 REDIS_PORTS={}
+REDIS_PORTBINDINGS_KEY=PRESENT
 REDIS_COMMAND=valid
 D0_ROWS=$d0_one|eventsales-d0-proof-one,$d0_two|eventsales-d0-proof-two,$d0_three|eventsales-d0-proof-three
 D0_PROJECT_ROWS=$d0_one|eventsales-d0-proof-one,$d0_two|eventsales-d0-proof-two,$d0_three|eventsales-d0-proof-three
@@ -233,6 +245,36 @@ case "$command" in
       elif [[ "$id" == "$(get REDIS_ID)" && "$(get REDIS_PRESENT)" == yes ]]; then prefix=REDIS
       fi
       [[ -n "$prefix" ]] || exit 1
+      capdrop=$(get "${prefix}_CAPDROP")
+      security=$(get "${prefix}_SECURITY")
+      tmpfs=$(get "${prefix}_TMPFS")
+      ports=$(get "${prefix}_PORTS")
+      for field in CapDrop SecurityOpt Tmpfs PortBindings; do
+        case "$field" in
+          CapDrop) suffix=CAPDROP ;;
+          SecurityOpt) suffix=SECURITY ;;
+          Tmpfs) suffix=TMPFS ;;
+          PortBindings) suffix=PORTBINDINGS ;;
+        esac
+        key_state=$(get "${prefix}_${suffix}_KEY")
+        [[ "$key_state" != ABSENT ]] || {
+          direct="{{json .HostConfig.$field}}"
+          if [[ "$format" == *"$direct"* ]]; then
+            printf 'TEMPLATE_ERROR|%s|%s|missing-key\n' "$prefix" "$field" >>"$log"
+            printf 'template parsing error: template: :1:374: executing "" at <.HostConfig.%s>: map has no entry for key "%s"\n' \
+              "$field" "$field" >&2
+            exit 1
+          fi
+          [[ "$format" == *"index .HostConfig \"$field\""* ]] || exit 87
+          case "$field" in
+            CapDrop) capdrop='[]' ;;
+            SecurityOpt) security='[]' ;;
+            Tmpfs|PortBindings) [[ "$field" != Tmpfs ]] || tmpfs='{}'; [[ "$field" != PortBindings ]] || ports='{}' ;;
+          esac
+        }
+      done
+      printf 'HOSTCONFIG|%s|CapDrop=%s|SecurityOpt=%s|Tmpfs=%s|PortBindings=%s\n' \
+        "$prefix" "$capdrop" "$security" "$tmpfs" "$ports" >>"$log"
       if [[ "$prefix" != PG ]]; then
         count=$(( $(get HEALTH_INSPECT_COUNT) + 1 ))
         setv HEALTH_INSPECT_COUNT "$count"
@@ -246,7 +288,6 @@ case "$command" in
       [[ "$prefix" != PG ]] || name=eventsales-prod-postgres-1
       mounts='[]'
       networks='{}'
-      ports=$(get "${prefix}_PORTS")
       case "$prefix:$(get "${prefix}_MOUNTS")" in
         PG:valid) mounts='[{"Type":"volume","Name":"eventsales-prod_postgres_data","Source":"FIXTURE_VOLUME_SOURCE","Destination":"/var/lib/postgresql"},{"Type":"bind","Source":"FIXTURE_SECRET_DIR/postgres_bootstrap_password","Destination":"/run/secrets/postgres_bootstrap_password","RW":false}]' ;;
         PGB:valid) mounts='[{"Type":"bind","Source":"FIXTURE_SECRET_DIR/pgbouncer.ini","Destination":"/etc/pgbouncer/pgbouncer.ini","RW":false},{"Type":"bind","Source":"FIXTURE_SECRET_DIR/pgbouncer_users.txt","Destination":"/run/secrets/pgbouncer_users.txt","RW":false}]' ;;
@@ -269,8 +310,8 @@ case "$command" in
         "$id" "$name" "$(get "${prefix}_STATUS")" "$(get "${prefix}_RUNNING")" "$(get "${prefix}_RESTARTING")" \
         "$(get "${prefix}_HEALTH")" "$(get "${prefix}_RESTARTS")" "$(get "${prefix}_OOM")" \
         "$(get "${prefix}_IMAGE")" "$(get "${prefix}_MEMORY")" "$(get "${prefix}_NANO")" \
-        "$(get "${prefix}_USER")" "$(get "${prefix}_READONLY")" "$(get "${prefix}_CAPDROP")" \
-        "$(get "${prefix}_SECURITY")" "$(get "${prefix}_TMPFS")" "$mounts" "$networks" "$ports" "$command_json" | \
+        "$(get "${prefix}_USER")" "$(get "${prefix}_READONLY")" "$capdrop" \
+        "$security" "$tmpfs" "$mounts" "$networks" "$ports" "$command_json" | \
         /usr/bin/sed -e 's|FIXTURE_SECRET_DIR|FIXTURE_SECRET_SOURCE|g'
     else exit 1
     fi
@@ -627,6 +668,46 @@ set_state PROJECT_ROWS ''
 set_state NAME_ROWS ''
 expect_preflight_stop 'PostgreSQL missing' POSTGRES_CONTAINER_MISSING
 
+# The Docker fixture reproduces Go-template's missing-map-key failure when a
+# wrapper directly dereferences an absent HostConfig field. PostgreSQL and
+# Redis legitimately have no Tmpfs key; PgBouncer must retain its exact map.
+reset_case
+set_state PG_TMPFS_KEY ABSENT
+set_state REDIS_TMPFS_KEY ABSENT
+set_state PGB_TMPFS_KEY PRESENT
+status=0; run_wrapper || status=$?
+if ((status != 0)); then
+  /usr/bin/grep -Fq 'TEMPLATE_ERROR|PG|Tmpfs|missing-key' "$docker_log" \
+    || fail 'fake Docker did not reproduce the missing PostgreSQL Tmpfs template error'
+  /usr/bin/grep -Fxq 'STOP=POSTGRES_CONTRACT_MISMATCH' "$err" \
+    || fail 'missing PostgreSQL Tmpfs key stopped for an unexpected reason'
+  fail 'missing HostConfig.Tmpfs key was not normalized; regression reproduced the Docker template failure'
+fi
+[[ -d "$marker_path" && ! -L "$marker_path" ]] || fail 'absent Tmpfs success did not complete V4 transition'
+/usr/bin/grep -Fq 'HOSTCONFIG|PG|CapDrop=[]|SecurityOpt=[]|Tmpfs={}|PortBindings={}' "$docker_log" \
+  || fail 'PostgreSQL absent HostConfig fields were not normalized safely'
+/usr/bin/grep -Fq 'HOSTCONFIG|REDIS|CapDrop=["ALL"]|SecurityOpt=["no-new-privileges:true"]|Tmpfs={}|PortBindings={}' "$docker_log" \
+  || fail 'Redis absent Tmpfs was not normalized to the no-Tmpfs representation'
+/usr/bin/grep -Fq 'HOSTCONFIG|PGB|CapDrop=["ALL"]|SecurityOpt=["no-new-privileges:true"]|Tmpfs={"/tmp":"rw,noexec,nosuid,size=16m,mode=1777"}|PortBindings={}' "$docker_log" \
+  || fail 'PgBouncer exact Tmpfs map was not preserved'
+pass 'optional HostConfig.Tmpfs keys normalize for PostgreSQL and Redis while PgBouncer retains its required map'
+
+reset_case
+set_state PG_CAPDROP_KEY ABSENT
+set_state PG_SECURITY_KEY ABSENT
+set_state PG_PORTBINDINGS_KEY ABSENT
+set_state PGB_PORTBINDINGS_KEY ABSENT
+set_state REDIS_PORTBINDINGS_KEY ABSENT
+status=0; run_wrapper || status=$?
+((status == 0)) || { cat "$out" "$err" "$docker_log" >&2; fail 'other optional HostConfig keys did not normalize safely'; }
+/usr/bin/grep -Fq 'HOSTCONFIG|PG|CapDrop=[]|SecurityOpt=[]|Tmpfs={}|PortBindings={}' "$docker_log" \
+  || fail 'absent PostgreSQL CapDrop, SecurityOpt or PortBindings were not normalized'
+/usr/bin/grep -Fq 'HOSTCONFIG|PGB|CapDrop=["ALL"]|SecurityOpt=["no-new-privileges:true"]|Tmpfs={"/tmp":"rw,noexec,nosuid,size=16m,mode=1777"}|PortBindings={}' "$docker_log" \
+  || fail 'absent PgBouncer PortBindings were not normalized'
+/usr/bin/grep -Fq 'HOSTCONFIG|REDIS|CapDrop=["ALL"]|SecurityOpt=["no-new-privileges:true"]|Tmpfs={}|PortBindings={}' "$docker_log" \
+  || fail 'absent Redis PortBindings were not normalized'
+pass 'other optional HostConfig map keys normalize without weakening service checks'
+
 # A complete fake Compose transition validates exact targets and sanitized environment.
 reset_case
 status=0; run_wrapper || status=$?
@@ -704,8 +785,11 @@ for service_case in \
   'CPU|PGB_NANO|999|PGBOUNCER_CONTRACT_MISMATCH' \
   'writable rootfs|PGB_READONLY|false|PGBOUNCER_CONTRACT_MISMATCH' \
   'capabilities|PGB_CAPDROP|[]|PGBOUNCER_CONTRACT_MISMATCH' \
+  'missing capabilities key|PGB_CAPDROP_KEY|ABSENT|PGBOUNCER_CONTRACT_MISMATCH' \
   'security options|PGB_SECURITY|[]|PGBOUNCER_CONTRACT_MISMATCH' \
+  'missing security options key|PGB_SECURITY_KEY|ABSENT|PGBOUNCER_CONTRACT_MISMATCH' \
   'tmpfs|PGB_TMPFS|{}|PGBOUNCER_CONTRACT_MISMATCH' \
+  'missing tmpfs key|PGB_TMPFS_KEY|ABSENT|PGBOUNCER_CONTRACT_MISMATCH' \
   'secret mounts|PGB_MOUNTS|wrong|PGBOUNCER_CONTRACT_MISMATCH' \
   'network|PGB_NETWORKS|edge|PGBOUNCER_CONTRACT_MISMATCH' \
   'network ID|PGB_NETWORKS|wrong-id|PGBOUNCER_CONTRACT_MISMATCH' \
@@ -728,7 +812,10 @@ for service_case in \
   'CPU|REDIS_NANO|999|REDIS_CONTRACT_MISMATCH' \
   'writable rootfs|REDIS_READONLY|false|REDIS_CONTRACT_MISMATCH' \
   'capabilities|REDIS_CAPDROP|[]|REDIS_CONTRACT_MISMATCH' \
+  'missing capabilities key|REDIS_CAPDROP_KEY|ABSENT|REDIS_CONTRACT_MISMATCH' \
   'security options|REDIS_SECURITY|[]|REDIS_CONTRACT_MISMATCH' \
+  'missing security options key|REDIS_SECURITY_KEY|ABSENT|REDIS_CONTRACT_MISMATCH' \
+  'wrong tmpfs|REDIS_TMPFS|{"/tmp":"rw"}|REDIS_CONTRACT_MISMATCH' \
   'ACL mount|REDIS_MOUNTS|wrong|REDIS_CONTRACT_MISMATCH' \
   'network|REDIS_NETWORKS|edge|REDIS_CONTRACT_MISMATCH' \
   'network ID|REDIS_NETWORKS|wrong-id|REDIS_CONTRACT_MISMATCH' \
