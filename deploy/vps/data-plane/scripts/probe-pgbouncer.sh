@@ -7,7 +7,6 @@ unset PGPASSWORD PGHOST PGHOSTADDR PGPORT PGUSER PGDATABASE PGSERVICE PGSERVICEF
 unset REDISCLI_AUTH COMPOSE_PROJECT_NAME COMPOSE_PROFILES
 
 readonly EXPECTED_PROJECT=eventsales-prod
-readonly EXPECTED_COMPOSE_FILE=deploy/vps/data-plane/compose.yaml
 readonly DATABASE_NAME=event_sales_prod
 readonly RUNTIME_ROLE=eventsales_runtime
 readonly MIGRATOR_ROLE=eventsales_migrator
@@ -18,9 +17,8 @@ readonly CLIENT_TIMEOUT=12s
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 DATA_PLANE_DIR=$(cd -- "$SCRIPT_DIR/.." && pwd -P)
-REPOSITORY_ROOT=$(cd -- "$DATA_PLANE_DIR/../../.." && pwd -P)
 COMPOSE_PROJECT=${COMPOSE_PROJECT:-$EXPECTED_PROJECT}
-COMPOSE_FILE=${COMPOSE_FILE:-$EXPECTED_COMPOSE_FILE}
+COMPOSE_FILE="$DATA_PLANE_DIR/compose.yaml"
 export COMPOSE_PROJECT COMPOSE_FILE
 
 secret_dir=
@@ -116,7 +114,7 @@ fi
 if [[ "$COMPOSE_PROJECT" != "$EXPECTED_PROJECT" ]]; then
   report_preflight_failure COMPOSE_PROJECT_INVALID
 fi
-if [[ "$COMPOSE_FILE" != "$EXPECTED_COMPOSE_FILE" ]]; then
+if [[ -L "$COMPOSE_FILE" || ! -f "$COMPOSE_FILE" ]]; then
   report_preflight_failure COMPOSE_FILE_INVALID
 fi
 
@@ -176,7 +174,6 @@ migrator_secret=$validated_secret_path
 validate_password_file eventsales_runtime_client_password
 runtime_client_secret=$validated_secret_path
 export EVENTSALES_SECRET_DIR="$secret_dir"
-cd -- "$REPOSITORY_ROOT"
 
 if [[ -L "$secret_dir/pgbouncer.ini" || ! -f "$secret_dir/pgbouncer.ini" ]]; then
   report_preflight_failure PGBOUNCER_CONFIG_FILE_UNAVAILABLE

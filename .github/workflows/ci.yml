@@ -334,3 +334,7 @@ jobs:
       - name: Verify EventSales V4 PgBouncer and Redis start authority
         shell: bash
         run: bash test/scripts/agent_eventsales_v4_start_data_plane_test.sh
+
+      - name: Verify immutable staged data-plane probe layout
+        shell: bash
+        run: bash test/scripts/data_plane_staged_probe_layout_test.sh
