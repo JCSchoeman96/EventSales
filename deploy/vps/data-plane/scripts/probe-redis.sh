@@ -7,7 +7,6 @@ unset PGPASSWORD PGHOST PGHOSTADDR PGPORT PGUSER PGDATABASE PGSERVICE PGSERVICEF
 unset REDISCLI_AUTH COMPOSE_PROJECT_NAME COMPOSE_PROFILES
 
 readonly EXPECTED_PROJECT=eventsales-prod
-readonly EXPECTED_COMPOSE_FILE=deploy/vps/data-plane/compose.yaml
 readonly DOCKER_TIMEOUT=20s
 readonly CLIENT_TIMEOUT=12s
 readonly RATE_LIMIT_TTL_MS=60000
@@ -17,9 +16,8 @@ readonly SCAN_MAX_ITERATIONS=16
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 DATA_PLANE_DIR=$(cd -- "$SCRIPT_DIR/.." && pwd -P)
-REPOSITORY_ROOT=$(cd -- "$DATA_PLANE_DIR/../../.." && pwd -P)
 COMPOSE_PROJECT=${COMPOSE_PROJECT:-$EXPECTED_PROJECT}
-COMPOSE_FILE=${COMPOSE_FILE:-$EXPECTED_COMPOSE_FILE}
+COMPOSE_FILE="$DATA_PLANE_DIR/compose.yaml"
 export COMPOSE_PROJECT COMPOSE_FILE
 
 secret_dir=
@@ -94,7 +92,7 @@ fi
 if [[ "$COMPOSE_PROJECT" != "$EXPECTED_PROJECT" ]]; then
   report_preflight_failure COMPOSE_PROJECT_INVALID
 fi
-if [[ "$COMPOSE_FILE" != "$EXPECTED_COMPOSE_FILE" ]]; then
+if [[ -L "$COMPOSE_FILE" || ! -f "$COMPOSE_FILE" ]]; then
   report_preflight_failure COMPOSE_FILE_INVALID
 fi
 
@@ -154,7 +152,6 @@ runtime_secret=$validated_secret_path
 validate_password_file redis_stats_password
 stats_secret=$validated_secret_path
 export EVENTSALES_SECRET_DIR="$secret_dir"
-cd -- "$REPOSITORY_ROOT"
 
 if [[ -L "$secret_dir/redis-users.acl" || ! -f "$secret_dir/redis-users.acl" ]]; then
   report_preflight_failure REDIS_ACL_FILE_UNAVAILABLE
