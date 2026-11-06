@@ -33,6 +33,8 @@ RUNTIME_CONFIG="$ROOT/config/runtime.exs"
 SECRET_GENERATOR="$ROOT/deploy/vps/data-plane/scripts/generate-secrets.sh"
 RUNTIME_RENDERER="$ROOT/deploy/vps/data-plane/scripts/render-runtime-config.sh"
 POSTGRES_BOOTSTRAP="$ROOT/deploy/vps/data-plane/scripts/bootstrap-postgres.sh"
+VPS_PRODUCTION_RUNBOOK="$ROOT/docs/deployment/vps-production.md"
+PRODUCTION_PLAN="$ROOT/docs/superpowers/plans/2026-10-20-d1-vps-production-implementation.md"
 RECOVERY_WRAPPER="$ROOT/deploy/vps/operator/agent-eventsales-v3-recover-postgres"
 RECOVERY_SUDOERS="$ROOT/deploy/vps/operator/agent-eventsales-v3-recover-postgres.sudoers"
 BOOTSTRAP_V2_WRAPPER="$ROOT/deploy/vps/operator/agent-eventsales-v3-bootstrap-postgres-v2"
@@ -60,6 +62,8 @@ for source_file in \
   "$SECRET_GENERATOR" \
   "$RUNTIME_RENDERER" \
   "$POSTGRES_BOOTSTRAP" \
+  "$VPS_PRODUCTION_RUNBOOK" \
+  "$PRODUCTION_PLAN" \
   "$RECOVERY_WRAPPER" \
   "$RECOVERY_SUDOERS" \
   "$BOOTSTRAP_V2_WRAPPER" \
@@ -70,6 +74,57 @@ for source_file in \
   [[ -f "$source_file" && -r "$source_file" ]] || fail SOURCE_FILE_MISSING
 done
 
+# Keep V3's PostgreSQL structural proof separate from V5 runtime proof authority.
+grep -Fqx "PROBE_SCRIPT=\"\$SCRIPT_DIR/probe-postgres.sh\"" "$POSTGRES_BOOTSTRAP" || fail V3_POSTGRES_PROBE_PATH
+grep -Fq "if EVENTSALES_SECRET_DIR=\"\$secret_dir\" \"\$PROBE_SCRIPT\" >\"\$probe_output_file\" 2>&1; then" "$POSTGRES_BOOTSTRAP" || fail V3_POSTGRES_PROBE_INVOKED
+grep -Fq "if ((probe_status != 0)) || ! grep -qx 'POSTGRES_PROBE=PASS' \"\$probe_output_file\"; then" "$POSTGRES_BOOTSTRAP" || fail V3_POSTGRES_PROBE_PASS_REQUIRED
+
+v3_runbook_section=$(awk '
+  /^### B3 \/ V3:/ { in_v3 = 1; next }
+  in_v3 && /^### B4 \/ V4:/ { exit }
+  in_v3 { print }
+' "$VPS_PRODUCTION_RUNBOOK")
+[[ -n "$v3_runbook_section" ]] || fail V3_RUNBOOK_SECTION
+grep -Fq "Before \`bootstrap-postgres.sh\` is invoked, that authorization MUST include its embedded \`probe-postgres.sh\` structural proof." <<<"$v3_runbook_section" || fail V3_RUNBOOK_AUTHORITY_BEFORE_BOOTSTRAP
+grep -Fq "The embedded probe grant, issued before bootstrap invocation, is logically consumed when \`PHASE_4_PROBE\` invokes \`probe-postgres.sh\`." <<<"$v3_runbook_section" || fail V3_RUNBOOK_PROBE_CONSUMPTION
+grep -Fq "require its exact \`POSTGRES_PROBE=PASS\` output before bootstrap may report \`POSTGRES_BOOTSTRAP_STATE=BOOTSTRAPPED\`." <<<"$v3_runbook_section" || fail V3_RUNBOOK_PROBE_PASS_REQUIRED
+
+v5_runbook_section=$(awk '
+  /^### C \/ V5: prove and accept the data plane$/ { in_v5 = 1; next }
+  in_v5 && /^### D \/ V6:/ { exit }
+  in_v5 { print }
+' "$VPS_PRODUCTION_RUNBOOK")
+[[ -n "$v5_runbook_section" ]] || fail V5_RUNBOOK_SECTION
+grep -Fq 'POSTGRESQL_STRUCTURAL_PROOF=ACCEPTED_FROM_V3' <<<"$v5_runbook_section" || fail V5_RUNBOOK_V3_POSTGRES_ACCEPTANCE
+grep -Fq "\`probe-postgres.sh\` MUST NOT be rerun in V5." <<<"$v5_runbook_section" || fail V5_RUNBOOK_POSTGRES_RERUN
+if grep -Fq "Use \`probe-postgres.sh\`, \`probe-pgbouncer.sh\`, and \`probe-redis.sh\`" <<<"$v5_runbook_section"; then
+  fail V5_RUNBOOK_POSTGRES_RERUN
+fi
+grep -Fq "Run a fresh \`probe-pgbouncer.sh\` followed by a fresh \`probe-redis.sh\`, in that order; these are the only probes run during V5." <<<"$v5_runbook_section" || fail V5_RUNBOOK_RUNTIME_PROBES
+grep -Fq "V5 authority is consumed immediately before the first \`probe-pgbouncer.sh\` invocation." <<<"$v5_runbook_section" || fail V5_RUNBOOK_AUTHORITY_CONSUMPTION
+
+plan_v3_section=$(awk '
+  /^## Gate V3/ { in_v3 = 1; next }
+  in_v3 && /^## Gate V4/ { exit }
+  in_v3 { print }
+' "$PRODUCTION_PLAN")
+[[ -n "$plan_v3_section" ]] || fail PLAN_V3_SECTION
+grep -Fq "Before \`bootstrap-postgres.sh\` is invoked, the explicit V3 authority must include its embedded \`probe-postgres.sh\` structural proof." <<<"$plan_v3_section" || fail PLAN_V3_AUTHORITY_BEFORE_BOOTSTRAP
+grep -Fq "That probe authority is logically consumed when \`PHASE_4_PROBE\` invokes \`probe-postgres.sh\`." <<<"$plan_v3_section" || fail PLAN_V3_PROBE_CONSUMPTION
+grep -Fq "Bootstrap requires exact \`POSTGRES_PROBE=PASS\` before it can report \`POSTGRES_BOOTSTRAP_STATE=BOOTSTRAPPED\`." <<<"$plan_v3_section" || fail PLAN_V3_PROBE_PASS_REQUIRED
+
+plan_v5_section=$(awk '
+  /^## Gate V5/ { in_v5 = 1; next }
+  in_v5 && /^## Gate V6/ { exit }
+  in_v5 { print }
+' "$PRODUCTION_PLAN")
+[[ -n "$plan_v5_section" ]] || fail PLAN_V5_SECTION
+grep -Fq 'Reuse the accepted V3 PostgreSQL structural-proof result.' <<<"$plan_v5_section" || fail PLAN_V5_POSTGRES_RERUN
+grep -Fq "Do not rerun \`probe-postgres.sh\` in V5." <<<"$plan_v5_section" || fail PLAN_V5_POSTGRES_RERUN
+[[ $(grep -Fc 'probe-postgres.sh' <<<"$plan_v5_section") -eq 1 ]] || fail PLAN_V5_POSTGRES_RERUN
+grep -Fq "Run a fresh \`probe-pgbouncer.sh\` followed by a fresh \`probe-redis.sh\`, in that order." <<<"$plan_v5_section" || fail PLAN_V5_RUNTIME_PROOFS
+grep -Fq "V5 authority is consumed immediately before the first \`probe-pgbouncer.sh\` invocation." <<<"$plan_v5_section" || fail PLAN_V5_AUTHORITY_CONSUMPTION
+
 [[ -x "$RECOVERY_WRAPPER" && ! -L "$RECOVERY_WRAPPER" ]] || fail RECOVERY_WRAPPER_TYPE
 bash -n "$RECOVERY_WRAPPER" || fail RECOVERY_WRAPPER_SYNTAX
 expected_recovery_rule='agentops ALL=(root) NOPASSWD: /usr/local/sbin/agent-eventsales-v3-recover-postgres ""'
@@ -78,8 +133,8 @@ expected_recovery_rule='agentops ALL=(root) NOPASSWD: /usr/local/sbin/agent-even
 grep -Fqx 'readonly COMPOSE_SHA256='\''3f41703fd15decd8c6a174142f8eaa4e205383cad539ddaf0ae4cd7a944fb218'\''' "$RECOVERY_WRAPPER" || fail RECOVERY_COMPOSE_PIN
 grep -Fqx 'readonly OVERRIDE_SHA256='\''cc4bc2cee5847d9d24984ccc5521ef81868aeb77456e66b94df62c50685f2e14'\''' "$RECOVERY_WRAPPER" || fail RECOVERY_VOLUME_OVERRIDE_PIN
 grep -Fq 'up -d --no-deps postgres' "$RECOVERY_WRAPPER" || fail RECOVERY_SERVICE_SCOPE
-grep -Fq 'docker_fixed rm "$FAILED_POSTGRES_CONTAINER_ID"' "$RECOVERY_WRAPPER" || fail RECOVERY_REMOVE_BY_ID
-grep -Fq 'docker_fixed stop --time 10 "$NEW_POSTGRES_ID"' "$RECOVERY_WRAPPER" || fail RECOVERY_CONTAINMENT_BY_ID
+grep -Fq "docker_fixed rm \"\$FAILED_POSTGRES_CONTAINER_ID\"" "$RECOVERY_WRAPPER" || fail RECOVERY_REMOVE_BY_ID
+grep -Fq "docker_fixed stop --time 10 \"\$NEW_POSTGRES_ID\"" "$RECOVERY_WRAPPER" || fail RECOVERY_CONTAINMENT_BY_ID
 if grep -Eiq 'docker[[:space:]]+(volume[[:space:]]+rm|system[[:space:]]+prune)|compose[[:space:]]+down[[:space:]]+-v' "$RECOVERY_WRAPPER"; then
   fail RECOVERY_STORAGE_MUTATION
 fi
@@ -135,17 +190,18 @@ secret_source_gate() {
   local expected
   local source_file
   local line
+  local -a source_lines
 
   for expected in \
-    '    file: ${EVENTSALES_SECRET_DIR:?EVENTSALES_SECRET_DIR_must_be_set}/postgres_bootstrap_password' \
-    '    file: ${EVENTSALES_SECRET_DIR:?EVENTSALES_SECRET_DIR_must_be_set}/pgbouncer.ini' \
-    '    file: ${EVENTSALES_SECRET_DIR:?EVENTSALES_SECRET_DIR_must_be_set}/pgbouncer_users.txt' \
-    '    file: ${EVENTSALES_SECRET_DIR:?EVENTSALES_SECRET_DIR_must_be_set}/redis-users.acl'; do
+    "    file: \${EVENTSALES_SECRET_DIR:?EVENTSALES_SECRET_DIR_must_be_set}/postgres_bootstrap_password" \
+    "    file: \${EVENTSALES_SECRET_DIR:?EVENTSALES_SECRET_DIR_must_be_set}/pgbouncer.ini" \
+    "    file: \${EVENTSALES_SECRET_DIR:?EVENTSALES_SECRET_DIR_must_be_set}/pgbouncer_users.txt" \
+    "    file: \${EVENTSALES_SECRET_DIR:?EVENTSALES_SECRET_DIR_must_be_set}/redis-users.acl"; do
     line_is_present "$DATA_COMPOSE" "$expected" || fail COMMITTED_SECRET_LITERAL
   done
 
   line_is_present "$APP_COMPOSE" \
-    '      - "${EVENTSALES_DEPLOY_ENV_FILE:?EVENTSALES_DEPLOY_ENV_FILE_must_be_set}"' \
+    "      - \"\${EVENTSALES_DEPLOY_ENV_FILE:?EVENTSALES_DEPLOY_ENV_FILE_must_be_set}\"" \
     || fail COMMITTED_SECRET_LITERAL
   if ! awk '
     $0 == "    env_file:" { sections++; in_env_file = 1; next }
@@ -157,13 +213,13 @@ secret_source_gate() {
   fi
 
   line_is_present "$APP_COMPOSE" \
-    '    image: "${EVENTSALES_IMAGE_REF:?EVENTSALES_IMAGE_REF_must_be_set}"' \
+    "    image: \"\${EVENTSALES_IMAGE_REF:?EVENTSALES_IMAGE_REF_must_be_set}\"" \
     || fail APP_IMAGE_REQUIRED
   line_is_present "$APP_COMPOSE" \
-    '      EVENTSALES_NODE_IP: "${EVENTSALES_NODE_IP:?EVENTSALES_NODE_IP_must_be_set}"' \
+    "      EVENTSALES_NODE_IP: \"\${EVENTSALES_NODE_IP:?EVENTSALES_NODE_IP_must_be_set}\"" \
     || fail APP_NODE_IDENTITY
   line_is_present "$APP_COMPOSE" \
-    '        ipv4_address: "${EVENTSALES_NODE_IP:?EVENTSALES_NODE_IP_must_be_set}"' \
+    "        ipv4_address: \"\${EVENTSALES_NODE_IP:?EVENTSALES_NODE_IP_must_be_set}\"" \
     || fail APP_NODE_IDENTITY
 
   line_is_present "$PGBOUNCER_TEMPLATE" \
@@ -182,7 +238,8 @@ secret_source_gate() {
       fail COMMITTED_SECRET_LITERAL
     fi
 
-    while IFS= read -r line || [[ -n "$line" ]]; do
+    mapfile -t source_lines < "$source_file"
+    for line in "${source_lines[@]}"; do
       lower_line="${line,,}"
       if [[ "$lower_line" =~ (password|passwd|pgpassword|pgpassfile|token|api[_-]?key|client[_-]?secret|secret|credential|private[_-]?key|secret_key_base|release_cookie)[[:space:]]*[:=][[:space:]]*([^[:space:]]+) ]]; then
         if [[ "$source_file" == "$PGBOUNCER_TEMPLATE" && \
@@ -191,7 +248,7 @@ secret_source_gate() {
         fi
         fail COMMITTED_SECRET_LITERAL
       fi
-    done < "$source_file"
+    done
   done
 
   if ! python3 - "$NETWORK_SCRIPT" "$RUNTIME_CONFIG" "$SECRET_GENERATOR" "$RUNTIME_RENDERER" "$POSTGRES_BOOTSTRAP" "${DEPLOY_PROBE_SCRIPTS[@]}" <<'PY'
@@ -639,13 +696,13 @@ python_check REDIS_CONTAINER "$TMP_DIR/data-plane.json"
 
 line_is_present "$NETWORK_SCRIPT" 'DATA_NETWORK=eventsales-prod_eventsales_data' || fail DATA_NETWORK_PROVISIONER
 line_is_present "$NETWORK_SCRIPT" 'EDGE_NETWORK=eventsales-prod_eventsales_edge' || fail DATA_NETWORK_PROVISIONER
-line_is_present "$NETWORK_SCRIPT" 'check_network "$DATA_NETWORK" true' || fail DATA_NETWORK_PROVISIONER
-line_is_present "$NETWORK_SCRIPT" 'check_network "$EDGE_NETWORK" false' || fail DATA_NETWORK_PROVISIONER
-line_is_present "$NETWORK_SCRIPT" 'provision_network "$DATA_NETWORK" true "$DATA_NETWORK_STATE"' || fail DATA_NETWORK_PROVISIONER
-line_is_present "$NETWORK_SCRIPT" 'provision_network "$EDGE_NETWORK" false "$EDGE_NETWORK_STATE"' || fail DATA_NETWORK_PROVISIONER
-line_is_present "$NETWORK_SCRIPT" '    if [[ "$expected_internal" == true ]]; then' || fail DATA_NETWORK_PROVISIONER
-line_is_present "$NETWORK_SCRIPT" '      docker network create --driver bridge --internal "$name" >/dev/null || {' || fail DATA_NETWORK_PROVISIONER
-line_is_present "$NETWORK_SCRIPT" '      docker network create --driver bridge "$name" >/dev/null || {' || fail DATA_NETWORK_PROVISIONER
+line_is_present "$NETWORK_SCRIPT" "check_network \"\$DATA_NETWORK\" true" || fail DATA_NETWORK_PROVISIONER
+line_is_present "$NETWORK_SCRIPT" "check_network \"\$EDGE_NETWORK\" false" || fail DATA_NETWORK_PROVISIONER
+line_is_present "$NETWORK_SCRIPT" "provision_network \"\$DATA_NETWORK\" true \"\$DATA_NETWORK_STATE\"" || fail DATA_NETWORK_PROVISIONER
+line_is_present "$NETWORK_SCRIPT" "provision_network \"\$EDGE_NETWORK\" false \"\$EDGE_NETWORK_STATE\"" || fail DATA_NETWORK_PROVISIONER
+line_is_present "$NETWORK_SCRIPT" "    if [[ \"\$expected_internal\" == true ]]; then" || fail DATA_NETWORK_PROVISIONER
+line_is_present "$NETWORK_SCRIPT" "      docker network create --driver bridge --internal \"\$name\" >/dev/null || {" || fail DATA_NETWORK_PROVISIONER
+line_is_present "$NETWORK_SCRIPT" "      docker network create --driver bridge \"\$name\" >/dev/null || {" || fail DATA_NETWORK_PROVISIONER
 actual_network_script_sha256=$(sha256sum "$NETWORK_SCRIPT" | awk '{print $1}') || fail DATA_NETWORK_PROVISIONER
 [[ "$actual_network_script_sha256" == "$NETWORK_SCRIPT_SHA256" ]] || fail DATA_NETWORK_PROVISIONER
 
@@ -711,4 +768,15 @@ check_redis_acl || fail REDIS_ACL
 python_check APP_BASE "$TMP_DIR/app-base.json"
 python_check APP_INGRESS "$TMP_DIR/app-ingress.json"
 
+printf 'V3_BOOTSTRAP_INVOKES_POSTGRES_PROBE=YES\n'
+printf 'V3_BOOTSTRAP_REQUIRES_POSTGRES_PROBE_PASS=YES\n'
+printf 'V3_RUNBOOK_AUTHORIZES_EMBEDDED_PROBE_BEFORE_BOOTSTRAP=YES\n'
+printf 'V3_RUNBOOK_PROBE_AUTHORITY_CONSUMED_IN_PHASE_4=YES\n'
+printf 'V5_RUNBOOK_EXECUTES_POSTGRES_PROBE=NO\n'
+printf 'V5_RUNBOOK_EXECUTES_PGBOUNCER_PROBE=YES\n'
+printf 'V5_RUNBOOK_EXECUTES_REDIS_PROBE=YES\n'
+printf 'V5_RUNBOOK_REFERENCES_ACCEPTED_V3_POSTGRES_PROOF=YES\n'
+printf 'V5_RUNBOOK_PROBE_ORDER=PGBOUNCER_THEN_REDIS\n'
+printf 'V5_AUTHORITY_CONSUMED_BEFORE_PGBOUNCER=YES\n'
+printf 'PLAN_V5_POSTGRES_RERUN=NO\n'
 printf 'VPS_DEPLOY_CONTRACT=PASS\n'

@@ -628,6 +628,8 @@ Guards:
 
 Allowed mutation: create only new `eventsales-prod` PostgreSQL/network/volume objects required by the authorized step and run one bootstrap.
 
+Before `bootstrap-postgres.sh` is invoked, the explicit V3 authority must include its embedded `probe-postgres.sh` structural proof. That probe authority is logically consumed when `PHASE_4_PROBE` invokes `probe-postgres.sh`. Bootstrap requires exact `POSTGRES_PROBE=PASS` before it can report `POSTGRES_BOOTSTRAP_STATE=BOOTSTRAPPED`.
+
 Side effects: new production volume/database/roles/default privileges.
 
 **Terminal failure:** no bootstrap rerun or DB repair until forensic review.
@@ -640,7 +642,7 @@ Allowed mutation: start new production services only after PostgreSQL bootstrap 
 
 ## Gate V5 — Production data-plane proof
 
-Run PostgreSQL/PgBouncer/Redis proofs once. Preserve failed probe objects; successful probes are removed only after explicit acceptance.
+Reuse the accepted V3 PostgreSQL structural-proof result. Do not rerun `probe-postgres.sh` in V5. Run a fresh `probe-pgbouncer.sh` followed by a fresh `probe-redis.sh`, in that order. V5 authority is consumed immediately before the first `probe-pgbouncer.sh` invocation. Preserve failed probe objects; successful probes are removed only after explicit acceptance.
 
 Success includes transaction pooling, prepared statements, runtime DML, runtime DDL denial, direct runtime-client auth denial, Redis prefix/command ACL, Redis maxmemory/policy/persistence, and D0/host Redis isolation.
 
