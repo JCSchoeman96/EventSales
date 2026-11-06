@@ -524,6 +524,26 @@ Avoid browser polling when PubSub or LiveView push is appropriate.
 
 ## Local configuration and secret safety
 
+Do not ask the user for local database passwords or DevCore-managed database
+variables. If `.devcore/project.conf` exists, DevCore manages all local DEV and
+TEST database credentials.
+
+Before requesting credentials:
+
+1. Read `.devcore/project.conf`.
+2. Read `.devcore/render-map.tsv`.
+3. Run `devcore-project doctor`.
+4. If local state is missing or stale, run `devcore-project activate`.
+5. Run database-dependent commands through DevCore:
+
+   ```bash
+   devcore-project run dev -- <command>
+   devcore-project run test -- <command>
+   ```
+
+Report a bootstrap or service failure only if these steps fail. Never request
+or print a database password value.
+
 Local secrets belong in ignored files:
 
 ```text
